@@ -7,7 +7,7 @@ HTTPS API (port 8443) that the Price Chat backend uses to add and remove member 
 
 1. **Make a VPS:** Ubuntu 24.04, smallest plan (1 vCPU / 1 GB is plenty), from Hetzner,
    DigitalOcean or Vultr, in the region you want. Set up SSH key login.
-2. **Run the installer** (as root). Add `--adblock` for the ad & tracker blocking resolver:
+2. **Run the installer** (as root). Add `--adblock` to turn on the ad & tracker blocklist:
    ```bash
    scp vpn-node/install.sh vpn-node/agent.py root@<server-ip>:/root/
    ssh root@<server-ip> bash /root/install.sh            # or: bash /root/install.sh --adblock
@@ -27,14 +27,19 @@ unattended security upgrades and an nftables firewall that allows only SSH, Wire
 agent (it replaces any existing ruleset and turns off ufw). The agent runs as the unprivileged
 `kiwi-vpn` user with only `CAP_NET_ADMIN`.
 Options via env: `PUBLIC_IP`, `SSH_PORT`, `WG_PORT`, `AGENT_PORT`, `POOL`, `POOL6` (`""` = off),
-`DNS`, `BLOCKLIST_URL`. `bash install.sh --print-config [--adblock]` prints every file it would
+`BLOCKLIST_URL`. `bash install.sh --print-config [--adblock]` prints every file it would
 write without changing anything (no root needed).
 
-## Ad & tracker blocking (`--adblock`)
+## DNS and ad & tracker blocking (`--adblock`)
 
-- `bash install.sh --adblock` installs `unbound` as a private recursive resolver listening
-  **only on 10.66.0.1:53** (the tunnel address; the firewall accepts port 53 only from the
-  VPN pool). Clients get `DNS = 10.66.0.1` and `/v1/status` reports `"adblock": true`.
+- Every node runs `unbound` as a private recursive resolver listening **only on
+  10.66.0.1:53** (the tunnel address; the firewall accepts port 53 only from the VPN pool),
+  with no logging. Clients always get `DNS = 10.66.0.1` (`/v1/status` `"dns": ["10.66.0.1"]`),
+  so their DNS goes through the tunnel to a resolver we control rather than a third party.
+- `bash install.sh --adblock` adds the blocklist and its daily timer and sets `"adblock": true`
+  in `/v1/status`. Re-running **without** `--adblock` (the default) removes the timer and
+  empties the list; the resolver keeps running. Because the DNS address never changes,
+  toggling takes effect for every existing device at once and configs never need re-creating.
 - Blocklist: the [StevenBlack unified hosts](https://github.com/StevenBlack/hosts) list
   (ads + malware/trackers), fetched over HTTPS and turned into
   `local-zone: "<domain>." always_nxdomain` (subdomains are blocked too).
@@ -45,24 +50,21 @@ write without changing anything (no root needed).
 - False positive? Put the domain (one per line) in `/etc/kiwi-vpn/adblock-allow.txt` and run
   `kiwi-vpn-blocklist-update`. Another list: set `BLOCKLIST_URL=` in `/etc/kiwi-vpn/adblock.env`
   (must be an `https://` hosts-format list).
-- **Off** is the default: re-run `bash install.sh` **without** `--adblock` and unbound is stopped
-  and its files removed; clients get public DNS (`1.1.1.1, 1.0.0.1`, privacy-friendly).
-- Toggling changes the DNS in **new** device configs only. Configs are generated once, so
-  devices created while ad blocking was on keep `DNS = 10.66.0.1`; after turning it off those
-  devices lose DNS until the member re-creates them (devices created while it was off keep
-  using public DNS, unfiltered, after it is turned on).
 
 ## Leak and abuse protection
 
 - **IPv6:** clients route `::/0` into the tunnel so IPv6 can never leak around it. The node
   never forwards IPv6 (`net.ipv6.conf.all.forwarding = 0`) and the firewall answers it right
   away with an ICMPv6 "no route", so apps fall back to IPv4 instead of hanging. For that
-  answer to reach a client, its config needs the matching ULA address too, e.g.
-  `Address = 10.66.0.5/32, fd66:66::5/128` (same offset in the pool: 10.66.1.2 → fd66:66::102);
-  the agent already adds that /128 to each peer. Without it the client's IPv6 is still
+  answer to reach a client, its config needs the matching ULA address too:
+  `Address = <v4>/32, <v6>/128`. `/v1/status` reports wg0's prefix as `"address6"`
+  (`"fd66:66::1/64"`, or `null` when `POOL6` is off) and the rule is `ipv6_for()` in `agent.py`:
+  `offset = int(peer IPv4) - int(POOL network address)`, `v6 = POOL6 network address + offset`
+  (10.66.0.5 → fd66:66::5, 10.66.1.2 → fd66:66::102, 10.66.255.254 → fd66:66::fffe).
+  The agent already adds that /128 to each peer. Without it the client's IPv6 is still
   dropped (black-holed) by WireGuard, just not answered.
 - **Client isolation:** peers cannot reach each other, nor SSH / the agent / anything else on
-  the node through the tunnel (only DNS when ad blocking is on, and ping).
+  the node through the tunnel (only DNS and ping).
 - **No outbound SMTP:** TCP 25 from the pool is rejected (spam abuse protection).
 - Private, CGNAT and link-local ranges (incl. the cloud metadata service 169.254.169.254) are
   unreachable from the pool. TCP MSS is clamped to the path MTU.
@@ -79,7 +81,7 @@ write without changing anything (no root needed).
   and peers, but it re-applies all settings: without `--adblock` it turns ad blocking off.)
 - **Health check:** `sudo kiwi-vpn-doctor` prints a checklist (services, `wg0` up and port,
   forwarding, firewall rules, agent `/v1/health`, TLS cert expiry, unbound + blocklist age
-  when ad blocking is on, disk, memory, clock, security updates, peer count and handshake
+  (blocklist when ad blocking is on), disk, memory, clock, security updates, peer count and handshake
   ages as counts). It prints no keys, tokens or client IPs, so it is safe to paste.
   Exit code 1 if anything failed.
 - **Uninstall:** `bash install.sh --uninstall` (leaves an SSH-only firewall), then delete the
@@ -93,7 +95,7 @@ write without changing anything (no root needed).
 What the node **keeps**: `/var/lib/kiwi-vpn/peers.json`, which is each device's WireGuard
 **public key and tunnel IP**. Nothing else. The kernel holds the last handshake time and
 byte counters in memory (WireGuard needs them to work). The backend reads them for the
-member's device list and monthly usage. With ad blocking on, unbound holds a short-lived
+member's device list and monthly usage. The DNS resolver (unbound) holds a short-lived
 in-memory DNS cache (not per client, never written to disk) and the blocklist file.
 
 What it **never records**: client IP addresses or endpoints, DNS queries or answers,
@@ -111,7 +113,7 @@ Client private keys never touch the server (or our database).
 ## Agent API (backend only)
 
 `GET /v1/health` (no auth), and with `Authorization: Bearer <token>`: `GET /v1/status`
-(includes `"adblock": true|false` and `"dns"`), `PUT /v1/peers/{key}`
+(includes `"dns"`, `"adblock": true|false` and `"address6"`), `PUT /v1/peers/{key}`
 `{"allowed_ip": "10.66.0.5/32"}`, `DELETE /v1/peers/{key}` (key is URL-safe base64).
 Config: `/etc/kiwi-vpn/agent.env`.
 
