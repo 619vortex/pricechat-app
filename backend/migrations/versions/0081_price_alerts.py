@@ -12,7 +12,7 @@ from alembic import op
 
 
 revision: str = '0081_price_alerts'
-down_revision: str | None = '0079_owner_alerts'  # re-chained to 0080_signal_ideas once that lands
+down_revision: str | None = '0080_signal_ideas'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

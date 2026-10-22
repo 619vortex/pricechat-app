@@ -32,6 +32,11 @@ class TsSettings(IdMixin, TimestampMixin, Base):
     # where chart / weekly replies go when someone asks for them in the main community chat: "anywhere" answers in that chat
     # (as before); "bot_chat" answers there with a short pointer and posts the chart in the signal group (Bot Chat) instead
     chart_routing: Mapped[str] = mapped_column(String(16), default="anywhere", server_default="anywhere", nullable=False)
+    # the daily brief in publish_chat (markets, the best /signal setup + chart, the track record): on/off, its UTC hour, and
+    # the UTC date it last went out (so a restart never posts it twice)
+    brief_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
+    brief_hour: Mapped[int] = mapped_column(Integer, default=8, server_default="8", nullable=False)
+    brief_sent_on: Mapped[str | None] = mapped_column(String(10))  # YYYY-MM-DD
 
 
 class TsSignal(IdMixin, TimestampMixin, Base):
@@ -278,3 +283,33 @@ class TsPriceAlert(IdMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     fired_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     fired_price: Mapped[float | None] = mapped_column(Float)
+
+
+class TsSignalIdea(IdMixin, TimestampMixin, Base):
+    """A plan /signal showed (a full setup or a WATCH idea), graded later on real candles: the track record. No user ids,
+    only where it was asked (group | private | brief). Analysis on request: never published as a signal, never traded."""
+
+    __tablename__ = "ts_signal_ideas"
+    __table_args__ = (Index("ix_ts_signal_ideas_status", "status"),
+                      Index("ix_ts_signal_ideas_dedupe", "coin", "timeframe", "side", "created_at"))
+
+    venue: Mapped[str] = mapped_column(String(16), nullable=False)  # hyperliquid | binance | bybit | okx | dex
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)  # perp | spot
+    coin: Mapped[str] = mapped_column(String(64), nullable=False)  # the venue's own symbol (to read its candles)
+    tag: Mapped[str] = mapped_column(String(64), nullable=False)  # the listing tag shown, e.g. $BTCUSD
+    timeframe: Mapped[str] = mapped_column(String(4), nullable=False)
+    side: Mapped[str] = mapped_column(String(5), nullable=False)  # LONG | SHORT
+    entry_lo: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_hi: Mapped[float] = mapped_column(Float, nullable=False)
+    stop: Mapped[float] = mapped_column(Float, nullable=False)
+    target: Mapped[float] = mapped_column(Float, nullable=False)
+    idea: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    family: Mapped[str] = mapped_column(String(12), nullable=False)  # pullback | breakout | range | momentum | full | other
+    full: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # passed every rule (else a WATCH idea)
+    score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    chat_type: Mapped[str] = mapped_column(String(8), nullable=False)  # group | private | brief
+    # OPEN (waiting for the entry) · FILLED · TARGET · STOP · EXPIRED · SKIPPED (no candles to grade it on, e.g. DEX)
+    status: Mapped[str] = mapped_column(String(8), default="OPEN", server_default="OPEN", nullable=False)
+    filled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    r: Mapped[float | None] = mapped_column(Float)  # result in R from the zone's mid: TARGET +reward, STOP -1, EXPIRED (filled) at the close
