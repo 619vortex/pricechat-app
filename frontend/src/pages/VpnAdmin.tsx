@@ -6,19 +6,22 @@ import { ApiErrorBanner, Badge, Card, Empty, Field, Loading, PageHeader, Stat, r
 /* Kiwi VPN (OWNER ONLY): who may use it (min Kiwi Rank, devices per member), and the WireGuard servers members connect to.
    Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
 
-export type VpnSettings = { enabled: boolean; min_rank: string; max_devices: number };
+export type VpnSettings = { enabled: boolean; min_rank: string; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
+/** A Kiwi Rank the minimum can be set to, in ladder order: `key` is what's saved, `name` what's shown. */
+export type VpnRank = { key: string; name: string };
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
-  agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number };
-export type VpnOverview = { settings: VpnSettings; ranks: string[]; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number } };
+  agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
+  adblock: boolean };
+export type VpnOverview = { settings: VpnSettings; ranks: VpnRank[]; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number } };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function SettingsCard({ s, ranks, onSaved }: { s: VpnSettings; ranks: string[]; onSaved: () => void }) {
+function SettingsCard({ s, ranks, onSaved }: { s: VpnSettings; ranks: VpnRank[]; onSaved: () => void }) {
   const [v, setV] = useState(s);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => setV(s), [s]);
-  const dirty = v.enabled !== s.enabled || v.min_rank !== s.min_rank || v.max_devices !== s.max_devices;
+  const dirty = v.enabled !== s.enabled || v.min_rank !== s.min_rank || v.max_devices !== s.max_devices || v.monthly_cap_gb !== s.monthly_cap_gb;
   async function save() {
     setBusy(true); setMsg(null);
     try {
@@ -43,12 +46,17 @@ function SettingsCard({ s, ranks, onSaved }: { s: VpnSettings; ranks: string[]; 
         <div className="row-fields">
           <Field label="Minimum Kiwi Rank" hint="Members below it see the locked page; devices of members who drop below are revoked.">
             <select className="input" aria-label="Minimum rank" value={v.min_rank} onChange={(e) => setV({ ...v, min_rank: e.target.value })}>
-              {(ranks.includes(v.min_rank) ? ranks : [v.min_rank, ...ranks]).map((r) => <option key={r} value={r}>{r}</option>)}
+              {(ranks.some((r) => r.key === v.min_rank) ? ranks : [{ key: v.min_rank, name: v.min_rank }, ...ranks])
+                .map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
             </select>
           </Field>
           <Field label="Devices per member" hint="1 to 10.">
             <input className="input" type="number" min={1} max={10} aria-label="Max devices" value={v.max_devices}
                    onChange={(e) => setV({ ...v, max_devices: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="Monthly data per member (GB)" hint="0 = unlimited. Over it, a member's devices pause until the 1st (UTC).">
+            <input className="input" type="number" min={0} max={100000} aria-label="Monthly cap GB" value={v.monthly_cap_gb ?? 0}
+                   onChange={(e) => setV({ ...v, monthly_cap_gb: Math.max(0, Math.min(100000, Math.floor(Number(e.target.value) || 0))) })} />
           </Field>
         </div>
         <div className="btn-group">
@@ -79,7 +87,7 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
   };
   return (
     <tr>
-      <td><b>{x.name}</b><br /><span className="muted small">{x.country_code.toUpperCase()} · {x.region}</span>
+      <td><b>{x.name}</b>{x.adblock && <> <Badge tone="good">ad blocking</Badge></>}<br /><span className="muted small">{x.country_code.toUpperCase()} · {x.region}</span>
         <br /><span className="muted small mono">{x.endpoint_host ? `${x.endpoint_host}:${x.listen_port ?? ""}` : x.agent_url}</span></td>
       <td><Badge tone={x.online ? "good" : "bad"}>{x.online ? "online" : "offline"}</Badge><br /><span className="muted small">seen {relativeTime(x.last_seen)}</span>
         {x.last_error && <><br /><span className="small" style={{ color: "var(--bad)" }}>{x.last_error}</span></>}</td>

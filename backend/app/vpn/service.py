@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 ENTITLEMENT = "kiwi_vpn"
 MAX_DEVICES_LIMIT = 10
-SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3}
+MAX_CAP_GB = 100000
+GB = 1024 ** 3  # the website shows sizes in powers of 1024
+SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0}
 
 
 class VpnError(ValueError):
@@ -63,7 +65,7 @@ def settings(db: Session) -> VpnSettings:
 
 
 def settings_out(s: VpnSettings) -> dict[str, Any]:
-    return {"enabled": s.enabled, "min_rank": s.min_rank, "max_devices": s.max_devices}
+    return {"enabled": s.enabled, "min_rank": s.min_rank, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb}
 
 
 def _ranks(db: Session) -> list[Rank]:
@@ -124,6 +126,11 @@ def update_settings(db: Session, changes: dict[str, Any]) -> dict[str, Any]:
         if not 1 <= n <= MAX_DEVICES_LIMIT:
             raise VpnError(f"Devices per member: 1 to {MAX_DEVICES_LIMIT}.", 400)
         s.max_devices = n
+    if changes.get("monthly_cap_gb") is not None:
+        cap = int(changes["monthly_cap_gb"])
+        if not 0 <= cap <= MAX_CAP_GB:
+            raise VpnError(f"Monthly data per member: 0 (unlimited) to {MAX_CAP_GB} GB.", 400)
+        s.monthly_cap_gb = cap  # the next sync pauses / resumes members to match
     if changes.get("enabled") is not None:
         s.enabled = bool(changes["enabled"])
     db.commit()
@@ -139,27 +146,87 @@ def _iso(dt: datetime | None) -> str | None:
 
 def device_out(d: VpnDevice) -> dict[str, Any]:
     return {"id": d.id, "name": d.name, "server_id": d.server_id, "ip": d.ip, "created_at": d.created_at.isoformat(),
-            "last_handshake": _iso(d.last_handshake), "rx_bytes": d.rx_bytes, "tx_bytes": d.tx_bytes}
+            "last_handshake": _iso(d.last_handshake), "rx_bytes": d.rx_bytes, "tx_bytes": d.tx_bytes,
+            "paused_until": _iso(d.paused_until)}
 
 
-def _device_counts(db: Session) -> dict[int, int]:
+def device_counts(db: Session) -> dict[int, int]:
     return dict(db.execute(select(VpnDevice.server_id, func.count()).group_by(VpnDevice.server_id)).all())  # type: ignore[arg-type]
+
+
+_device_counts = device_counts
 
 
 def _load(server: VpnServer, count: int) -> float:
     return round(min(1.0, count / server.capacity), 4) if server.capacity > 0 else 1.0
 
 
+def recommended_id(servers: list[VpnServer], counts: dict[int, int]) -> int | None:
+    """The best server for a new device: online and not full, the lowest load, ties -> the lowest id."""
+    ok = [v for v in servers if v.online and counts.get(v.id, 0) < v.capacity]
+    return min(ok, key=lambda v: (_load(v, counts.get(v.id, 0)), v.id)).id if ok else None
+
+
+def _month(now: datetime) -> str:
+    return now.strftime("%Y-%m")
+
+
+def next_month(now: datetime) -> datetime:
+    """00:00 UTC on the 1st of the month after `now`."""
+    return datetime(now.year + (now.month == 12), now.month % 12 + 1, 1, tzinfo=timezone.utc)
+
+
+def _aware(d: datetime | None) -> datetime | None:
+    return d.replace(tzinfo=timezone.utc) if d is not None and d.tzinfo is None else d
+
+
+def _paused(dev: VpnDevice, now: datetime) -> bool:
+    until = _aware(dev.paused_until)
+    return until is not None and until > now
+
+
+def member_usage(db: Session, member_id: int, now: datetime | None = None) -> int:
+    """Bytes (down + up) the member's devices used this UTC month."""
+    month = _month(now or utcnow())
+    return int(db.scalar(select(func.coalesce(func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes), 0))
+                         .where(VpnDevice.member_id == member_id, VpnDevice.usage_month == month)) or 0)
+
+
+def usage_out(db: Session, member: Member, s: VpnSettings, now: datetime | None = None) -> dict[str, Any]:
+    """This month's data for the member page: used / cap (0 = unlimited) and, over the cap, when it resumes."""
+    now = now or utcnow()
+    paused = [u for d in db.scalars(select(VpnDevice).where(VpnDevice.member_id == member.id))
+              if _paused(d, now) and (u := _aware(d.paused_until)) is not None]
+    return {"month": _month(now), "used_bytes": member_usage(db, member.id, now), "cap_bytes": s.monthly_cap_gb * GB,
+            "paused_until": _iso(max(paused)) if paused else None}
+
+
+def _dns(server: VpnServer) -> list[str]:
+    """The server's own resolver: the first DNS its agent reports (no logs; with `adblock` on it also blocks ads &
+    trackers), or Cloudflare if it reports none."""
+    dns = [str(d) for d in server.dns or []]
+    return dns[:1] or ["1.1.1.1"]
+
+
+def _v6_pool(value: str) -> str:
+    """The agent's IPv6 pool if it's a valid v6 interface, else "" (IPv4 only)."""
+    try:
+        return value if value and ipaddress.ip_interface(value).version == 6 else ""
+    except ValueError:
+        return ""
+
+
 def overview(db: Session, member: Member) -> dict[str, Any]:
     s = settings(db)
     ok, reason = eligibility(db, member)
     counts = _device_counts(db)
-    servers = db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id))
+    servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
+    best = recommended_id(servers, counts)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.member_id == member.id).order_by(VpnDevice.created_at, VpnDevice.id))
     out = {"enabled": s.enabled, "eligible": ok, "reason": reason, "required_rank": required_rank(db, s).name, "max_devices": s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
-                        "load": _load(v, counts.get(v.id, 0))} for v in servers],
-           "devices": [device_out(d) for d in devices]}
+                        "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best} for v in servers],
+           "devices": [device_out(d) for d in devices], "usage": usage_out(db, member, s)}
     db.commit()  # first call seeds the settings row
     return out
 
@@ -217,7 +284,12 @@ def create_device(db: Session, member: Member, name: str, server_id: int) -> tup
     ok, reason = eligibility(db, member)
     if not ok:
         raise VpnError(reason or "Kiwi VPN isn't available.", 403)
-    max_devices = settings(db).max_devices
+    s = settings(db)
+    max_devices = s.max_devices
+    if s.monthly_cap_gb > 0:
+        use = usage_out(db, member, s)
+        if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:
+            raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
     private_key, public_key = keys.generate_keypair()
     tried: set[str] = set()
     for _ in range(8):
@@ -242,8 +314,8 @@ def create_device(db: Session, member: Member, name: str, server_id: int) -> tup
         logger.warning("vpn: adding a peer on server %s failed: %s", server_id, e)
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503) from None
     db.commit()
-    config = keys.render_config(private_key, ip, list(server.dns or []) or ["1.1.1.1"], server.public_key, server.endpoint_host,
-                                server.listen_port)
+    config = keys.render_config(private_key, ip, _dns(server), server.public_key, server.endpoint_host,
+                                server.listen_port, keys.ipv6_for(server.address, ip, server.address6))
     return dev, config, keys.filename(server.name, dev.name)
 
 
@@ -274,6 +346,7 @@ def _apply_status(server: VpnServer, st: dict[str, Any], now: datetime) -> None:
     server.public_key, server.listen_port = st["public_key"], st["listen_port"]
     server.endpoint_host, server.address, server.dns = st["endpoint_host"], st["address"], st["dns"]
     server.online, server.last_seen, server.last_error = True, now, None
+    server.adblock, server.fail_streak, server.address6 = bool(st.get("adblock")), 0, _v6_pool(str(st.get("address6") or ""))
 
 
 def _check_pool(address: str) -> None:
@@ -387,9 +460,10 @@ def admin_overview(db: Session) -> dict[str, Any]:
                              .group_by(VpnDevice.server_id)).all())  # type: ignore[arg-type]
     servers = [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "endpoint_host": v.endpoint_host,
                 "listen_port": v.listen_port, "agent_url": v.agent_url, "capacity": v.capacity, "enabled": v.enabled, "online": v.online,
+                "adblock": v.adblock,
                 "last_seen": _iso(v.last_seen), "last_error": v.last_error, "devices": counts.get(v.id, 0), "active_24h": active.get(v.id, 0)}
                for v in db.scalars(select(VpnServer).order_by(VpnServer.name, VpnServer.id))]
-    out = {"settings": settings_out(s), "ranks": [r.key for r in _ranks(db)], "servers": servers,
+    out = {"settings": settings_out(s), "ranks": [{"key": r.key, "name": r.name} for r in _ranks(db)], "servers": servers,
            "totals": {"devices": sum(counts.values()),
                       "members": db.scalar(select(func.count(func.distinct(VpnDevice.member_id)))) or 0,
                       "active_24h": sum(active.values())}}
@@ -447,6 +521,15 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
                     continue
                 ours.add(dev.public_key)
                 peer = peers.get(dev.public_key)
+                if _paused(dev, now):  # over the monthly cap: its peer stays off the node until the month rolls over
+                    if peer is not None:
+                        _usage(dev, peer, month)
+                        try:
+                            agent.delete_peer(dev.public_key)
+                        except node.NodeError:
+                            out["errors"] += 1
+                    continue
+                dev.paused_until = None  # a pause that ran out (a new month): re-added below like any missing peer
                 if peer is None or peer["allowed_ip"] != f"{dev.ip}/32":
                     try:
                         agent.put_peer(dev.public_key, f"{dev.ip}/32")
@@ -465,12 +548,58 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
                     out["errors"] += 1
     except node.NodeError as e:
         server.online, server.last_error = False, str(e)[:500]
+        server.fail_streak = (server.fail_streak or 0) + 1
         out["error"] = str(e)
     db.commit()
     return out
 
 
+def enforce_caps(db: Session, now: datetime | None = None) -> dict[str, int]:
+    """The monthly data cap: a member at or over it has every device paused (peer removed at the node, the device kept)
+    until the 1st of next month; a member under it again (a new month, or the owner raised / removed the cap) resumes."""
+    now = now or utcnow()
+    cap = settings(db).monthly_cap_gb * GB
+    used = dict(db.execute(select(VpnDevice.member_id, func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes))
+                           .where(VpnDevice.usage_month == _month(now)).group_by(VpnDevice.member_id)).all())  # type: ignore[arg-type]
+    pause: list[VpnDevice] = []
+    resume: list[VpnDevice] = []
+    for dev in db.scalars(select(VpnDevice).order_by(VpnDevice.id)):
+        over = cap > 0 and int(used.get(dev.member_id) or 0) >= cap
+        if over and not _paused(dev, now):
+            dev.paused_until = next_month(now)
+            pause.append(dev)
+        elif not over and dev.paused_until is not None:
+            dev.paused_until = None
+            resume.append(dev)
+    db.commit()
+    errors = 0
+    for server_id in sorted({d.server_id for d in pause + resume}):  # best effort: the next sync finishes what fails here
+        server = db.get(VpnServer, server_id)
+        if server is None or not server.enabled or not server.online:
+            continue
+        try:
+            with node.client_for(server) as agent:
+                for dev in pause + resume:
+                    if dev.server_id != server_id:
+                        continue
+                    try:
+                        if dev in pause:
+                            agent.delete_peer(dev.public_key)
+                        else:
+                            agent.put_peer(dev.public_key, f"{dev.ip}/32")
+                            dev.rx_counter = dev.tx_counter = 0  # a fresh peer starts counting from zero
+                    except node.NodeError:
+                        errors += 1
+        except node.NodeError:
+            errors += 1
+    db.commit()
+    return {"paused": len(pause), "resumed": len(resume), "errors": errors}
+
+
 def sync_all(db: Session, now: datetime | None = None) -> dict[str, Any]:
+    now = now or utcnow()
     results = [sync_server(db, v, now) for v in list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.id)))]
+    caps = enforce_caps(db, now)
     return {"servers": len(results), "online": sum(r["online"] for r in results),
-            **{k: sum(r[k] for r in results) for k in ("updated", "readded", "removed", "revoked", "errors")}}
+            **{k: sum(r[k] for r in results) for k in ("updated", "readded", "removed", "revoked")},
+            "errors": sum(r["errors"] for r in results) + caps["errors"], "paused": caps["paused"], "resumed": caps["resumed"]}

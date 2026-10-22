@@ -687,7 +687,32 @@ function Community({ links, growth }: { links: HomeData["links"]; growth?: HomeD
         </ul>
       </div>
       <JoinCta signedIn={!!member} />
+      <VpnPerk />
     </section>
+  );
+}
+
+const VPN_POINTS: [string, string][] = [
+  ["No traffic logs", "We never record what you do or where you go."],
+  ["WireGuard speed", "The modern VPN protocol: fast, and easy on your battery."],
+  ["Free with Kiwi Rank", "No subscription. Rank up in the community and it's yours."],
+];
+
+/** A member perk, sold briefly next to the sign-up: Kiwi VPN's three selling points and a link to /vpn. */
+function VpnPerk() {
+  return (
+    <div className="site-wrap">
+      <aside className="site-vpnperk site-reveal" aria-labelledby="vpnperk-title">
+        <div className="site-vpnperk-head">
+          <p className="site-eyebrow">Member perk</p>
+          <h3 className="site-display" id="vpnperk-title"><span aria-hidden>🛡️ </span>Kiwi VPN</h3>
+        </div>
+        <ul className="site-vpnperk-points">
+          {VPN_POINTS.map(([title, line]) => <li key={title}><b>{title}</b><span>{line}</span></li>)}
+        </ul>
+        <a className="site-more site-link" href="/vpn">Get Kiwi VPN <span aria-hidden>→</span></a>
+      </aside>
+    </div>
   );
 }
 

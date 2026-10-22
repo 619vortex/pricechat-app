@@ -9,11 +9,14 @@ import "./vpn.css";
  * .conf download, then forgotten. Lost it → delete the device and add a new one.
  */
 
-export interface VpnServer { id: number; name: string; region: string; country_code: string; online: boolean; load: number }
+export interface VpnServer { id: number; name: string; region: string; country_code: string; online: boolean; load: number;
+  /** its resolver blocks ads & trackers */ adblock: boolean; /** the pick for a new device (online, least busy) */ recommended: boolean }
 export interface VpnDevice { id: number; name: string; server_id: number; ip: string; created_at: string; last_handshake: string | null;
-  rx_bytes: number; tx_bytes: number }
+  rx_bytes: number; tx_bytes: number; paused_until: string | null }
+/** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
+export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number; paused_until: string | null }
 export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; required_rank: string; max_devices: number;
-  servers: VpnServer[]; devices: VpnDevice[] }
+  servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage }
 export interface NewDevice { device: VpnDevice; config: string; filename: string }
 
 const FALLBACK: Record<number, string> = {
@@ -42,6 +45,17 @@ export function bytes(n: number): string {
   const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
   const v = n / 1024 ** i;
   return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
+}
+
+/** "1 Nov": the day a paused VPN switches back on (UTC: always the 1st of a month). */
+export function resumeDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/** The server a new device should use: the API's recommendation, else the least busy online one, else the first. */
+export function pickServer(servers: VpnServer[]): number {
+  return servers.find((x) => x.recommended && x.online)?.id
+    ?? [...servers].filter((x) => x.online).sort((a, b) => a.load - b.load || a.id - b.id)[0]?.id ?? servers[0]?.id ?? 0;
 }
 
 export function ago(iso: string | null, now = Date.now()): string {
@@ -111,16 +125,22 @@ function Unlocked({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const [created, setCreated] = useState<NewDevice | null>(null);
   const full = s.devices.length >= s.max_devices;
   const serverName = (id: number) => s.servers.find((x) => x.id === id);
+  const paused = s.usage?.paused_until ?? null;
   return (
     <div className="vpn-grid">
+      {paused && (
+        <p className="vpn-paused" role="status"><b>⏸ Paused for the rest of the month</b> You've used this month's {bytes(s.usage.cap_bytes)} of
+          Kiwi VPN data. Your devices are kept and switch back on by themselves on {resumeDay(paused)}.</p>
+      )}
       {created ? (
         <ConfigOnce created={created} server={serverName(created.device.server_id)} onDone={() => setCreated(null)} />
       ) : (
-        <AddDevice servers={s.servers} full={full} max={s.max_devices} count={s.devices.length}
+        <AddDevice servers={s.servers} full={full} max={s.max_devices} count={s.devices.length} paused={!!paused}
                    onCreated={(n) => { setCreated(n); void reload(); }} />
       )}
       <section className="vpn-card" aria-labelledby="vpn-devices">
         <h2 id="vpn-devices">Your devices <small>{s.devices.length} / {s.max_devices}</small></h2>
+        {s.usage && <UsageMeter u={s.usage} />}
         {s.devices.length === 0 ? <p className="site-muted">No devices yet. Add your phone or laptop above.</p> : (
           <ul className="vpn-devices">
             {s.devices.map((d) => <DeviceRow key={d.id} d={d} server={serverName(d.server_id)} reload={reload} />)}
@@ -133,7 +153,11 @@ function Unlocked({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
           {s.servers.map((x) => (
             <li key={x.id} className={x.online ? "" : "is-off"}>
               <span className="vpn-flag" aria-hidden>{flag(x.country_code)}</span>
-              <span className="vpn-sname"><b>{x.name}</b><small>{x.region}</small></span>
+              <span className="vpn-sname">
+                <b>{x.name}{x.recommended && <span className="vpn-tag">Recommended</span>}</b>
+                <small>{x.region}</small>
+                {x.adblock && <small className="vpn-adblock">🛡️ Blocks ads & trackers</small>}
+              </span>
               <span className={`vpn-dot${x.online ? " is-on" : ""}`} aria-label={x.online ? "Online" : "Offline"} title={x.online ? "Online" : "Offline"} />
               <LoadBar load={x.load} />
             </li>
@@ -154,10 +178,26 @@ function LoadBar({ load }: { load: number }) {
   );
 }
 
-function AddDevice({ servers, full, max, count, onCreated }: {
-  servers: VpnServer[]; full: boolean; max: number; count: number; onCreated: (n: NewDevice) => void;
+/** This month's data: "1.5 GB of 50 GB this month" with a bar when there's a cap, else the total and "no limit". */
+function UsageMeter({ u }: { u: VpnUsage }) {
+  const pct = u.cap_bytes > 0 ? Math.round(Math.min(1, u.used_bytes / u.cap_bytes) * 100) : 0;
+  return (
+    <div className="vpn-usage">
+      <span><b>{bytes(u.used_bytes)}</b> {u.cap_bytes > 0 ? <>of {bytes(u.cap_bytes)} this month</> : <>this month · no limit</>}</span>
+      {u.cap_bytes > 0 && (
+        <span className={`vpn-load${pct >= 90 ? " is-busy" : pct >= 70 ? " is-mid" : ""}`} role="meter" aria-label="Data used this month"
+              aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+          <i style={{ width: `${pct}%` }} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+function AddDevice({ servers, full, max, count, paused, onCreated }: {
+  servers: VpnServer[]; full: boolean; max: number; count: number; paused: boolean; onCreated: (n: NewDevice) => void;
 }) {
-  const pick = () => [...servers].filter((x) => x.online).sort((a, b) => a.load - b.load)[0]?.id ?? servers[0]?.id ?? 0;
+  const pick = () => pickServer(servers);
   const [name, setName] = useState("");
   const [server, setServer] = useState<number>(pick);
   const [busy, setBusy] = useState(false);
@@ -181,7 +221,8 @@ function AddDevice({ servers, full, max, count, onCreated }: {
   return (
     <section className="vpn-card vpn-add" aria-labelledby="vpn-add">
       <h2 id="vpn-add">Add a device</h2>
-      {full ? <p className="site-muted">You're using all {max} of your devices ({count} / {max}). Delete one below to add another.</p> : servers.length === 0 ? (
+      {paused ? <p className="site-muted">You can add devices again when your data resets on the 1st.</p>
+        : full ? <p className="site-muted">You're using all {max} of your devices ({count} / {max}). Delete one below to add another.</p> : servers.length === 0 ? (
         <p className="site-muted">No servers are available yet. Check back soon.</p>
       ) : (
         <form className="vpn-form" onSubmit={submit}>
@@ -193,9 +234,12 @@ function AddDevice({ servers, full, max, count, onCreated }: {
             <span>Server</span>
             <select className="site-input" value={server} onChange={(e) => setServer(Number(e.target.value))}>
               {servers.map((x) => (
-                <option key={x.id} value={x.id} disabled={!x.online}>{flag(x.country_code)} {x.name} · {x.region}{x.online ? "" : " (offline)"}</option>
+                <option key={x.id} value={x.id} disabled={!x.online}>
+                  {flag(x.country_code)} {x.name} · {x.region}{x.online ? "" : " (offline)"}{x.recommended ? " · Recommended" : ""}
+                </option>
               ))}
             </select>
+            {servers.find((x) => x.id === server)?.recommended && <small className="vpn-tag">Recommended</small>}
           </label>
           <button className="site-button" type="submit" disabled={busy || !clean || !server}>{busy ? "Creating…" : "Add device"}</button>
         </form>
@@ -276,6 +320,7 @@ function DeviceRow({ d, server, reload }: { d: VpnDevice; server?: VpnServer; re
       <span className="vpn-dmain">
         <b>{d.name}</b>
         <small>{server ? `${server.name} · ${server.region}` : "Server removed"} · {ago(d.last_handshake)} · {bytes(d.rx_bytes + d.tx_bytes)} this month</small>
+        {d.paused_until && <small className="vpn-dpaused">Paused until {resumeDay(d.paused_until)}: monthly data used up</small>}
         {err && <small className="site-error">{err}</small>}
       </span>
       {ask ? (
