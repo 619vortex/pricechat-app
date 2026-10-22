@@ -376,7 +376,17 @@ def edit_video(video_id: int, body: VideoEdit, db: DbSession) -> dict[str, Any]:
         s["hashtags"] = list(dict.fromkeys(t for t in (hashtags.clean(h) for h in body.hashtags) if t))[:10]
     v.script = s
     if body.slot_at is not None:
-        v.slot_at = datetime.fromisoformat(body.slot_at.replace("Z", "+00:00")) if body.slot_at else None
+        at = None
+        if body.slot_at:
+            try:
+                at = datetime.fromisoformat(body.slot_at.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(400, "slot_at must be an ISO date and time, e.g. 2026-10-22T18:00.") from None
+            if at.tzinfo is None:  # a wall-clock time means the brand's own time zone (Settings › General), like the posting times
+                from zoneinfo import ZoneInfo
+
+                at = at.replace(tzinfo=ZoneInfo(brands.strategy(brands.ensure_default(db))["timezone"]))
+        v.slot_at = at
     brands.log(db, v.brand_id, f"You edited “{v.topic}”.", video_id=v.id)
     db.commit()
     return video_out(v, detail=True)
@@ -906,6 +916,8 @@ def worker_result(job_id: int, db: DbSession, runtime: Runtime, video: UploadFil
         info = json.loads(meta)
     except ValueError:
         raise HTTPException(400, "meta must be JSON.") from None
+    if not isinstance(info, dict):
+        raise HTTPException(400, "meta must be a JSON object.")
     try:
         return queue.complete(db, runtime.settings, w, job_id, video.file, thumb.file if thumb else None, info)
     except queue.QueueError as exc:
