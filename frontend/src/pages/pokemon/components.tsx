@@ -37,6 +37,7 @@ export function SearchBox({ autoFocus = false }: { autoFocus?: boolean }) {
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
+  const moveFocus = (i: number) => box.current?.querySelectorAll<HTMLButtonElement>(".pm-search-results button")[i]?.focus();
   const go = (id: number) => {
     setOpen(false);
     nav(`/pokemon/cards/${id}`);
@@ -45,9 +46,21 @@ export function SearchBox({ autoFocus = false }: { autoFocus?: boolean }) {
     <div className="pm-search" ref={box}>
       <input type="search" value={q} autoFocus={autoFocus} placeholder='Search cards: "Charizard 1st edition PSA 10", "Japanese Lugia Neo"…'
              aria-label="Search Pokémon cards" onChange={(e) => setQ(e.target.value)} onFocus={() => res && setOpen(true)}
-             onKeyDown={(e) => { if (e.key === "Enter" && res?.results[0]) go(res.results[0].card.id); if (e.key === "Escape") setOpen(false); }} />
+             onKeyDown={(e) => {
+               if (e.key === "Enter" && res?.results[0]) go(res.results[0].card.id);
+               if (e.key === "Escape") setOpen(false);
+               if (e.key === "ArrowDown" && open) { e.preventDefault(); moveFocus(0); }
+             }} />
       {open && res && (
-        <ul className="pm-search-results" role="listbox" aria-label="Search results">
+        <ul className="pm-search-results" role="listbox" aria-label="Search results"
+            onKeyDown={(e) => {
+              // arrow keys walk the suggestions (Up from the first returns to the box), Escape closes them
+              const all = [...(box.current?.querySelectorAll<HTMLButtonElement>(".pm-search-results button") ?? [])];
+              const at = all.indexOf(document.activeElement as HTMLButtonElement);
+              if (e.key === "ArrowDown") { e.preventDefault(); moveFocus(Math.min(at + 1, all.length - 1)); }
+              if (e.key === "ArrowUp") { e.preventDefault(); if (at <= 0) box.current?.querySelector("input")?.focus(); else moveFocus(at - 1); }
+              if (e.key === "Escape") { box.current?.querySelector("input")?.focus(); setOpen(false); } // focus first: focusing the box reopens
+            }}>
           {res.results.length === 0 && <li className="pm-search-empty">No card matches “{q}”.</li>}
           {res.results.map((r) => (
             <li key={r.card.id} role="option" aria-selected={false}>

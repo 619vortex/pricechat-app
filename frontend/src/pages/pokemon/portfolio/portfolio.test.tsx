@@ -57,6 +57,16 @@ describe("Pokémon Portfolio", () => {
     expect(screen.getByText("Sign in to continue")).toBeTruthy();
   });
 
+  it("a portfolio that fails to load offers a retry instead of loading forever", async () => {
+    serve({ "/api/members/session": signedIn, "/api/members/portfolio/status": status });
+    await show(<PortfolioPage />, "/pokemon/portfolio");
+    expect(screen.queryByText("Loading your portfolio…")).toBeNull();
+    const retry = screen.getByRole("button", { name: "Try again" });
+    const before = calls.length;
+    await act(async () => { fireEvent.click(retry); await new Promise((r) => setTimeout(r, 0)); });
+    expect(calls.length).toBeGreaterThan(before);
+  });
+
   it("scans a card, never preselects a printing it isn't sure of, and saves it after confirmation", async () => {
     vi.stubGlobal("createImageBitmap", undefined); // the shrink step falls back to the original file
     vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:test", revokeObjectURL: () => undefined }));

@@ -39,7 +39,8 @@ export function PortfolioPage() {
   return (
     <PortfolioFrame crumbs={[["Markets", "/pokemon"], ["My Portfolio", null]]}>
       {err && <p className="pf-error" role="alert">{err}</p>}
-      {!data ? <p className="pf-muted">Loading your portfolio…</p> : data.summary.copies === 0 ? <Empty onAdded={load} /> : (
+      {!data ? (err ? <p><button type="button" className="pf-btn" onClick={() => { setErr(null); load(); }}>Try again</button></p>
+        : <p className="pf-muted">Loading your portfolio…</p>) : data.summary.copies === 0 ? <Empty onAdded={load} /> : (
         <>
           <Hero d={data} onOpen={setOpen} onAdded={load} />
           <HistoryChart d={data} />

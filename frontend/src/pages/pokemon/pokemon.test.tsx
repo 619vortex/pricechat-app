@@ -245,6 +245,17 @@ describe("market rankings (CoinGecko-style)", () => {
     await settle(260);
     expect(calls.some((c) => c.startsWith("GET /api/pokemon/cards?q=Charizard+1st+edition+PSA+10"))).toBe(true);
     expect(screen.getByRole("listbox").textContent).toContain("1999 Base Set · 4/102 · 1st Edition");
+    // keyboard: Down walks into the suggestions, Up returns to the box, Escape closes them
+    const input = screen.getByLabelText("Search Pokémon cards");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const option = within(screen.getByRole("listbox")).getByRole("button");
+    expect(document.activeElement).toBe(option);
+    fireEvent.keyDown(option, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(input);
   });
 });
 
