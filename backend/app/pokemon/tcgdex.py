@@ -121,6 +121,7 @@ async def import_vintage(db: Session, settings: Any, limit: int = 100, transport
         return sets[sid]
 
     async def take(tid: str, existing: list[PokemonCard]) -> None:
+        db.commit()  # what's done so far is saved before each TCGdex read: no write transaction (SQLite's only write lock) waits on it
         c = await api.card(tid)
         s = await set_of(c["set"]["id"])
         rel = _release(s)
@@ -179,6 +180,7 @@ async def import_vintage(db: Session, settings: Any, limit: int = 100, transport
                 out["skipped"].append({"card_id": k.id, "reason": f"no Pokédex number known for {k.pokemon_name}"})
                 continue
             hits = []
+            db.commit()
             for brief in await api.set_by_dex(ja_set, n):
                 c = await api.card(brief["id"], "ja")
                 if n in (c.get("dexId") or []) and (c.get("variants") or {}).get("holo"):
@@ -194,6 +196,7 @@ async def import_vintage(db: Session, settings: Any, limit: int = 100, transport
         for sid in PRIORITY_SETS:
             if out["tcgdex_cards"] >= limit:
                 break
+            db.commit()
             for brief in sorted(await api.set_holos(sid), key=lambda b: (_num(b.get("localId")) or 0)):
                 if out["tcgdex_cards"] >= limit:
                     break

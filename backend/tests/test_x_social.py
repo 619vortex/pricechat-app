@@ -167,7 +167,11 @@ def test_rules_watchlist_and_ingestion(x_client: TestClient, fake_x: FakeX) -> N
     fake_x.tweet("2001", "funding rates are getting extreme on BTC", kind="search")
     fake_x.tweet("2001", "watchlist only post about markets", kind="other")
 
-    run = x_client.post("/api/x/sync").json()
+    from tests.locks import http_calls_under_write_lock
+
+    with http_calls_under_write_lock() as held:  # each X read starts with what was stored so far saved
+        run = x_client.post("/api/x/sync").json()
+    assert held == []
     assert run["status"] == "success" and run["result"]["new_posts"] == 4
     assert {p["text"] for p in x_client.get("/api/x/posts", params={"source": "mention"}).json()} == {"@pricechat what do funding rates mean?"}
     own = x_client.get("/api/x/posts", params={"source": "own"}).json()

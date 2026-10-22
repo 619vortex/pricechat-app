@@ -140,6 +140,7 @@ class XIngestor:
         if self.report.requests >= MAX_REQUESTS:
             raise _RunLimit()
         self.report.requests += 1
+        self.db.commit()  # what's stored so far is saved first: no write transaction (SQLite's only write lock) waits on X
         return await fn()
 
     def _checkpoint_due(self) -> list[SocialPost]:
@@ -295,7 +296,7 @@ class XIngestor:
             if account is not None:
                 account.extra = extra
             self.state.rate_limits = {**(self.state.rate_limits or {}), **client.rate_limits}
-            self.db.flush()
+            self.db.commit()
 
         await self._embed_new()
         self.state.status = "connected"

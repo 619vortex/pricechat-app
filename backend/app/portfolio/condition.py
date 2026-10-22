@@ -109,6 +109,7 @@ async def estimate(db: Session, settings: Settings, member: Member, holding: Pok
     blocks.append({"type": "text", "text": PROMPT.format(card=label)})
     row = PokemonScan(member_id=member.id, at=utcnow(), kind="condition", image_sha256=key, status="error", credits=0, result={})
     db.add(row)
+    db.commit()  # counted towards the limits at once, and nothing written is held open during the (up to 90 s) review
     try:
         async with httpx.AsyncClient(timeout=90.0, transport=transport) as client:
             r = await client.post(API, headers={"x-api-key": resolve("anthropic_api_key", settings) or "", "anthropic-version": "2023-06-01",

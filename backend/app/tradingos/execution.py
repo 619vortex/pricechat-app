@@ -16,10 +16,11 @@ Safety rules enforced here:
 
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -655,6 +656,39 @@ def _mine(db: Session, member: Member, pos_id: int) -> tuple[TrAccount, TrPositi
     return acc, pos
 
 
+CLOSE_LEASE = "closing:"  # in close_reason while a close is under way (an open position has none): "closing:<unix time>"
+CLOSE_LEASE_SECONDS = 180  # a close cut off midway (a crash) frees the position after this long
+
+
+def closing(pos: TrPosition) -> bool:
+    return (pos.close_reason or "").startswith(CLOSE_LEASE)
+
+
+def _claim_close(db: Session, pos: TrPosition) -> str:
+    """Claim the position for one close (a close from Telegram and one from the website can't both run) with one atomic
+    UPDATE, committed at once: the exchange calls that follow never run inside a write transaction (on SQLite that would
+    hold the database's only write lock for every other writer)."""
+    now = int(time.time())
+    lease, stale = f"{CLOSE_LEASE}{now}", f"{CLOSE_LEASE}{now - CLOSE_LEASE_SECONDS}"
+    won = db.execute(update(TrPosition).where(
+        TrPosition.id == pos.id, TrPosition.status.in_(CLOSABLE), TrPosition.size > 0,
+        or_(TrPosition.close_reason.is_(None), ~TrPosition.close_reason.like(f"{CLOSE_LEASE}%"), TrPosition.close_reason < stale),
+    ).values(close_reason=lease).execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    if won != 1:
+        raise TradeError("This position is already being closed.")
+    db.refresh(pos)  # its size/status as of the claim (another close may have just finished)
+    return lease
+
+
+def _release_close(db: Session, pos: TrPosition, lease: str) -> None:
+    """Drop the claim (unless the close booked its own close reason)."""
+    db.execute(update(TrPosition).where(TrPosition.id == pos.id, TrPosition.close_reason == lease)
+               .values(close_reason=None).execution_options(synchronize_session=False))
+    db.commit()
+    db.refresh(pos)
+
+
 def _seq(db: Session, pos: TrPosition) -> int:
     return int(db.scalar(select(func.count()).select_from(TrOrder).where(TrOrder.position_id == pos.id)) or 0)
 
@@ -684,6 +718,19 @@ def close_position(db: Session, member: Member, pos_id: int, ex: Any = None, fra
     acc, pos = _mine(db, member, pos_id)
     if pos.status == "PROTECTION_FAILED" and fraction < 1:
         raise TradeError("This position has no confirmed stop-loss: close 100%.")
+    lease = _claim_close(db, pos)
+    try:
+        return _close(db, member, acc, pos, ex, fraction)
+    except BaseException:
+        db.rollback()  # what was booked is committed; anything half-done is not
+        raise
+    finally:
+        _release_close(db, pos, lease)
+
+
+def _close(db: Session, member: Member, acc: TrAccount, pos: TrPosition, ex: Any, fraction: float) -> TrPosition:
+    """close_position, once the position is claimed. Every exchange call runs outside a write transaction: each answer is
+    committed before the next call."""
     m = market.data().market(pos.coin)
     try:
         ex = ex or executor(db, acc, pos.coin, pos.mode)
@@ -712,6 +759,7 @@ def close_position(db: Session, member: Member, pos_id: int, ex: Any = None, fra
                 return pos
         raise TradeError(f"Close not filled ({res.error or res.status}). The position and its stop-loss are unchanged.")
     _settle(pos, res.avg_px or mark, "manual_close", res.filled)
+    db.commit()  # the fill is booked before the stop and targets are touched
     if pos.status == "CLOSED":
         left = _cancel(ex, pos, _resting(db, pos, "sl", "tp1", "tp2"))
         if left:
@@ -772,6 +820,7 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
     cl = xch.cloid_for(acc.id, pos.signal_id, "sl", pos.id, _seq(db, pos))
     sl = place("sl", pos.size, pos.stop, cl)
     _order(db, pos, "sl", not long, pos.size, pos.stop, True, sl, cl)
+    db.commit()  # each order is on record before the next exchange call (and no write lock is held during it)
     if sl.status == "RESTING":
         _cancel(ex, pos, old_sl)
     else:
@@ -782,7 +831,12 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
         if size <= 0:
             continue
         cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
+<<<<<<< HEAD
         _order(db, pos, kind, not long, size, px, True, place(kind, size, px, cl), cl)
+=======
+        _order(db, pos, kind, not long, size, px, True, ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "tp", cl), cl)
+        db.commit()
+>>>>>>> r11-perf
 
 
 def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | None = None, tp1: float | None = None,
@@ -792,6 +846,8 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
     acc, pos = _mine(db, member, pos_id)
     if pos.status != "OPEN":
         raise TradeError("This position has no confirmed stop-loss: close it instead.")
+    if closing(pos) and not dry_run:
+        raise TradeError("This position is being closed right now.")
     long = pos.side == "LONG"
     m = market.data().market(pos.coin)
     ex = ex or executor(db, acc, pos.coin, pos.mode)
@@ -839,6 +895,7 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
             cl = xch.cloid_for(acc.id, pos.signal_id, "sl", pos.id, _seq(db, pos))
             r = ex.trigger(pos.coin, not long, pos.size, stop, "sl", cl)
             _order(db, pos, "sl", not long, pos.size, stop, True, r, cl)
+            db.commit()  # on record before the next exchange call, which then runs without holding the write lock
             if r.status != "RESTING":
                 raise TradeError(f"Hyperliquid refused the new stop ({r.error or r.status}). Your previous stop-loss is unchanged.")
             _cancel(ex, pos, old)
@@ -853,6 +910,7 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
             cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
             r = ex.trigger(pos.coin, not long, size, val, "tp", cl)
             _order(db, pos, kind, not long, size, val, True, r, cl)
+            db.commit()
             if r.status != "RESTING":
                 raise TradeError(f"Hyperliquid refused the new {kind.upper()} ({r.error or r.status}). The previous one is unchanged.")
             _cancel(ex, pos, old)
@@ -1073,6 +1131,9 @@ def run_auto(db: Session, sig: TsSignal) -> list[int]:
     """Members with AUTO on (and not expired) enter a newly published signal within their preapproved limits."""
     out = []
     now = utcnow()
+    # the accounts that already have an intent or a position for this signal: two reads, not two per account
+    seen = set(db.scalars(select(TrIntent.account_id).where(TrIntent.signal_id == sig.id))) | \
+        set(db.scalars(select(TrPosition.account_id).where(TrPosition.signal_id == sig.id)))
     for acc in db.scalars(select(TrAccount).where(TrAccount.auto_enabled.is_(True), TrAccount.paused.is_(False))):
         if acc.auto_until and _aware(acc.auto_until) < now:
             acc.auto_enabled = False
@@ -1080,8 +1141,7 @@ def run_auto(db: Session, sig: TsSignal) -> list[int]:
         member = db.get(Member, acc.member_id)
         if member is None or (sig.strategy == "test" and acc.mode != "PAPER"):
             continue  # test signals never trade real or testnet money
-        if db.scalar(select(TrIntent.id).where(TrIntent.account_id == acc.id, TrIntent.signal_id == sig.id).limit(1)) or \
-                db.scalar(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.signal_id == sig.id)):
+        if acc.id in seen:
             continue  # each signal is considered once per account (entered, previewed, or skipped)
         if not wants(acc, sig):  # recorded, so a member with AUTO on always sees why a signal wasn't taken
             labels = {"1h": "1h signals only", "15m": "15m signals only", "both": "1h and 15m signals"}

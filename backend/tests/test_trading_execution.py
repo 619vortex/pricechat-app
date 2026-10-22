@@ -409,6 +409,106 @@ def test_a_close_the_exchange_does_not_fill_leaves_the_position_and_its_stop(db:
         execution.close_position(db, other, pos.id, ex)  # never someone else's
 
 
+class LockProbe(FakeExchange):
+    """TEST FIXTURE: before answering, each exchange call checks whether a write transaction is open on the database (on
+    SQLite that is the single write lock every other writer would wait for)."""
+
+    def __init__(self, *a: Any, **k: Any) -> None:
+        super().__init__(*a, **k)
+        self.locked: list[str] = []
+        self.calls: list[str] = []
+        self.during_market: Any = None
+
+    def _probe(self, what: str) -> None:
+        import sqlite3
+
+        from sqlalchemy.engine import make_url
+
+        from app.config.settings import get_settings
+
+        self.calls.append(what)
+        c = sqlite3.connect(make_url(get_settings().database_url).database, timeout=0)
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            c.rollback()
+        except sqlite3.OperationalError:
+            self.locked.append(what)
+        finally:
+            c.close()
+
+    def market(self, *a: Any, **k: Any) -> xch.Result:
+        self._probe("market")
+        if self.during_market:
+            hook, self.during_market = self.during_market, None
+            hook()
+        return super().market(*a, **k)
+
+    def trigger(self, *a: Any, **k: Any) -> xch.Result:
+        self._probe("trigger")
+        return super().trigger(*a, **k)
+
+    def cancel(self, *a: Any, **k: Any) -> None:
+        self._probe("cancel")
+        super().cancel(*a, **k)
+
+    def fills_since(self, *a: Any, **k: Any) -> list[dict[str, Any]]:
+        self._probe("fills")
+        return super().fills_since(*a, **k)
+
+
+def test_closing_holds_no_write_lock_during_exchange_calls_and_a_second_close_is_refused(db: Session, md: FakeMD) -> None:
+    from app.db.session import SessionLocal
+
+    m, acc, pos, _ = _testnet_position(db, md, "851")
+    ex = LockProbe(mark=md.series["SOL"][-1].c, equity=100_000, held={"SOL": pos.size})
+    second: list[str] = []
+
+    def close_again() -> None:  # Telegram's CLOSE arrives while the website's is waiting for Hyperliquid
+        with SessionLocal() as other:
+            member = other.get(type(m), m.id)
+            try:
+                execution.close_position(other, member, pos.id, ex)
+            except execution.TradeError as e:
+                second.append(str(e))
+
+    ex.during_market = close_again
+    n = len(ex.orders)
+    execution.close_position(db, m, pos.id, ex, 0.5)  # partial: the close, then the stop and targets are resized
+    assert second == ["This position is already being closed."] and ex.orders[n]["type"] == "market"
+    assert sum(o["type"] == "market" for o in ex.orders[n:]) == 1  # only one close reached the exchange
+    assert ex.locked == [] and {"market", "trigger", "cancel"} <= set(ex.calls)
+    assert pos.status == "OPEN" and pos.close_reason is None  # the claim is released
+    assert accounts.pos_out(pos)["close_reason"] is None
+    ex.locked.clear()
+    execution.adjust_protection(db, m, pos.id, stop=round(pos.stop + (pos.entry_px - pos.stop) / 2, 2), ex=ex)
+    assert ex.locked == []
+    execution.close_position(db, m, pos.id, ex)  # the rest: leftover orders cancelled, fills read
+    assert ex.locked == [] and pos.status == "CLOSED" and pos.close_reason == "manual_close"
+
+
+def test_a_failed_close_releases_its_claim(db: Session, md: FakeMD) -> None:
+    m, acc, pos, ex = _testnet_position(db, md, "861")
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("socket closed")
+
+    ex.cancel = boom  # type: ignore[method-assign]
+    ex.close_fails = True
+    with pytest.raises(execution.TradeError, match="unchanged"):
+        execution.close_position(db, m, pos.id, ex)
+    db.refresh(pos)
+    assert pos.close_reason is None and pos.status == "OPEN"
+    ex.close_fails = False
+    p = execution.close_position(db, m, pos.id, ex)  # not "already being closed"
+    assert p.status == "CLOSED"
+    pos2 = db.get(TrPosition, pos.id)
+    assert pos2 is not None and pos2.close_reason == "manual_close"
+    pos2.status, pos2.size, pos2.close_reason = "OPEN", 1.0, f"{execution.CLOSE_LEASE}{int(time.time()) - execution.CLOSE_LEASE_SECONDS - 5}"
+    db.commit()  # a claim left by a crash expires
+    ex.held["SOL"] = 1.0
+    assert execution.close_position(db, m, pos.id, ex).status == "CLOSED"
+
+
 def test_close_all_reports_each_result_and_partial_failures(db: Session, md: FakeMD) -> None:
     m, acc, pos, ex = _testnet_position(db, md, "841")
     sig2 = active_signal(db, md, "ETH")

@@ -409,14 +409,18 @@ def complete_x_reply_mission(db: Session, member: Member, replied_to: set[str], 
 # --- read model -------------------------------------------------------------------------------------------------
 
 
-def _xp_for(db: Session, mission: Mission) -> int:
+def _xp_for(db: Session, mission: Mission, rules: dict[str, XPRule] | None = None) -> int:
+    """`rules` (every XP rule by event type, read once) saves a query per mission in lists."""
+    def rule_of(event_type: str) -> XPRule | None:
+        return rules.get(event_type) if rules is not None else _rule(db, event_type)
+
     if mission.kind in X_ACTION_KINDS:
         return 0
     if mission.kind == "telegram_participation":  # first message of the day + the active day
-        return sum(r.xp for r in (_rule(db, "telegram.first_participation"), _rule(db, "telegram.active_day"))
+        return sum(r.xp for r in (rule_of("telegram.first_participation"), rule_of("telegram.active_day"))
                    if r is not None and r.enabled and r.availability == "available")
     if mission.kind in EVENT_RULE:
-        rule = _rule(db, EVENT_RULE[mission.kind])
+        rule = rule_of(EVENT_RULE[mission.kind])
         return rule.xp if rule else 0
     return mission.xp
 
@@ -481,17 +485,21 @@ def for_member(db: Session, member: Member, telegram_url: str | None = None, x_c
     linked = _linked(db, member)
     tg_today = _telegram_today(db, member) if "telegram" in linked else 0
     out = []
-    for m in db.scalars(select(Mission).where(Mission.status == "active")):
-        if m.starts_at and m.starts_at > now:
-            continue
+    missions = [m for m in db.scalars(select(Mission).where(Mission.status == "active")) if not (m.starts_at and m.starts_at > now)]
+    periods = {period_for(c, now) for c in ("daily", "weekly", "once")}
+    # the member's rows for these missions' current periods and every XP rule: read once, not once per mission
+    mine = {(mm.mission_id, mm.period): mm for mm in db.scalars(select(MemberMission).where(
+        MemberMission.member_id == member.id, MemberMission.period.in_(periods),
+        MemberMission.mission_id.in_([m.id for m in missions] or [0])))}
+    rules = {r.event_type: r for r in db.scalars(select(XPRule))}
+    for m in missions:
         period = period_for(m.cadence, now)
-        mm = db.scalar(select(MemberMission).where(MemberMission.member_id == member.id, MemberMission.mission_id == m.id,
-                                                   MemberMission.period == period))
+        mm = mine.get((m.id, period))
         if m.kind in LINK_PLATFORM and mm is not None and mm.status == "completed" and LINK_PLATFORM[m.kind] in linked:
             continue  # linked: nothing to show
         rule_ok = True
         if m.kind in EVENT_RULE:
-            rule = _rule(db, EVENT_RULE[m.kind])
+            rule = rules.get(EVENT_RULE[m.kind])
             rule_ok = bool(rule and rule.enabled and rule.availability == "available")
         if mm is not None and mm.status == "completed":
             status = "completed"
@@ -512,7 +520,7 @@ def for_member(db: Session, member: Member, telegram_url: str | None = None, x_c
                   else 3 if m.kind in LINK_PLATFORM else 4) if status not in ("completed", "unavailable") else (6 if status == "completed" else 5)
         out.append({
             "id": m.id, "key": m.key, "kind": m.kind, "cadence": m.cadence, "title": m.title, "description": m.description,
-            "platform": m.platform, "xp": _xp_for(db, m) if m.verification in ("verified", "verified_click") else 0,
+            "platform": m.platform, "xp": _xp_for(db, m, rules) if m.verification in ("verified", "verified_click") else 0,
             "verification": m.verification, "verification_label": VERIFICATION_LABEL[m.verification],
             "verification_method": m.verification_method, "status": status, "frequency": _frequency(m),
             "cta": _cta(m, status, telegram_url, x_can_act, x_write), "target": m.target or {}, "goal": m.goal, "earns_xp": m.kind not in X_ACTION_KINDS,

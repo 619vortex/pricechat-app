@@ -51,6 +51,9 @@ def build_engine(database_url: str, enforce_foreign_keys: bool = True, **kwargs:
             cursor.execute("PRAGMA busy_timeout=15000")
             if file_db:
                 cursor.execute("PRAGMA journal_mode=WAL")
+                # In WAL mode NORMAL is still corruption-safe (only a power cut can lose the last commits; an app crash
+                # loses nothing) and a commit no longer waits for an fsync while it holds the single write lock.
+                cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
 
     return engine

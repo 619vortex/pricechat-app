@@ -354,3 +354,27 @@ async def test_429_retry_after_is_respected_for_that_chat(fake_telegram: FakeTel
     await client.send_message(-100222, "another chat is not affected")
     await client.get_updates(None)
     assert len(fake_telegram.calls) == sent + 2
+
+
+async def test_the_long_poll_never_waits_inside_a_write_transaction(db: Session, fake_telegram: FakeTelegram,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """getUpdates can wait for up to the long-poll timeout: nothing written (the first run's state row, a command handler's
+    writes) may hold SQLite's single write lock meanwhile."""
+    from tests.locks import http_calls_under_write_lock
+
+    _source(db)
+    fake_telegram.message(-100111, "message number one")
+    ing = TelegramIngestor(db, _client(fake_telegram), TelegramRuntime())
+    real = ing._send_confirmations
+
+    async def handler_writes() -> None:  # an after-commit handler that leaves a flushed write behind
+        if not db.scalar(select(TelegramSource).where(TelegramSource.chat_id == -100999)):
+            db.add(TelegramSource(chat_id=-100999, display_name="Written by a handler", enabled=False))
+            db.flush()
+        await real()
+
+    monkeypatch.setattr(ing, "_send_confirmations", handler_writes)
+    with http_calls_under_write_lock() as held:
+        report = await ing.sync(long_poll_seconds=1, listen_seconds=1.2)
+    assert report.stored == 1 and held == []
+    assert db.scalar(select(TelegramSource).where(TelegramSource.chat_id == -100999)) is not None

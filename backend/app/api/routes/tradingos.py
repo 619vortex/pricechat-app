@@ -337,6 +337,7 @@ async def site_signal_chart(sid: int, db: DbSession) -> Response:
     s = db.get(TsSignal, sid)
     if s is None or s.published_at is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such signal.")
+    db.close()  # the signal is loaded: no connection is held while candles are fetched and drawn
     key = (sid, int(time.time() // 60))
     png = _charts.get(key)
     if png is None:

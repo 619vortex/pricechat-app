@@ -130,3 +130,11 @@ def test_trainer_cards_keep_their_name_and_pokemon_lose_only_prefixes() -> None:
     assert tcgdex._new_card(trainer, s).pokemon_name == "Rocket's Sneak Attack"  # type: ignore[union-attr]
     assert tcgdex._new_card({**card("base5-4", "Dark Charizard", "base5", 6), "category": "Pokemon"}, s).pokemon_name == "Charizard"  # type: ignore[union-attr]
     assert tcgdex.pokemon_name("Brock's Onix") == "Onix" and tcgdex.pokemon_name("Light Arcanine") == "Arcanine"
+
+
+def test_import_holds_no_write_lock_while_tcgdex_answers(db: Session, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from tests.locks import http_calls_under_write_lock
+
+    with http_calls_under_write_lock() as held:
+        out = asyncio.run(tcgdex.import_vintage(db, settings(tmp_path), limit=100, transport=tcgdex_api([])))
+    assert out["error"] is None and out["created"] == 1 and held == []

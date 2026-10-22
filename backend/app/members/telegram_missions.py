@@ -67,6 +67,7 @@ async def check_channel(db: Session, client: Any) -> dict[str, Any]:
 
     s = program(db)
     handle = channel_handle(db)
+    db.commit()  # (a first run creates the settings row): nothing written waits on Telegram below
     s.channel_checked_at, s.channel_error, s.channel_bot_can_verify = utcnow(), None, False
     if not handle:
         s.channel_error = "No announcement channel is set."

@@ -59,13 +59,14 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
 
 
 def queue(db: Session, status: str) -> list[dict[str, Any]]:
-    from app.market.service import _base, _rows
+    from app.market.service import _base, _rows, item_estimates
 
     rows = _rows(db, _base().where(MarketListing.status == status).order_by(MarketListing.id.desc()).limit(200))
     ph = _photos(db, [i.id for _, i, _ in rows])
+    est = item_estimates(db, [i for _, i, _ in rows])
     out = []
     for l, i, c in rows:
-        d = listing_out(db, l, i, c, photos=ph.get(i.id, []), seller=db.get(Member, l.seller_id))
+        d = listing_out(db, l, i, c, photos=ph.get(i.id, []), seller=db.get(Member, l.seller_id), est=est[i.id])
         d.update({"cert": i.cert_number, "ownership_evidence": l.ownership_evidence, "flags": l.flags, "review_note": l.review_note,
                   "item": {"id": i.id, "custody": i.custody_status, "vault_partner": i.vault_partner, "vault_inventory_id": i.vault_inventory_id,
                            "storage_location": i.storage_location, "verification": i.verification_status}})
