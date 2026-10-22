@@ -80,8 +80,8 @@ write without changing anything (no root needed).
   (A full `bash install.sh [--adblock]` re-run is also safe and also keeps keys, token, cert
   and peers, but it re-applies all settings: without `--adblock` it turns ad blocking off.)
 - **Health check:** `sudo kiwi-vpn-doctor` prints a checklist (services, `wg0` up and port,
-  forwarding, firewall rules, agent `/v1/health`, TLS cert expiry, unbound + blocklist age
-  (blocklist when ad blocking is on), disk, memory, clock, security updates, peer count and handshake
+  forwarding, firewall rules, agent `/v1/health`, TLS cert expiry, the unbound resolver and its no-logging settings
+  (blocklist age when ad blocking is on), disk, memory, clock, security updates, peer count and handshake
   ages as counts). It prints no keys, tokens or client IPs, so it is safe to paste.
   Exit code 1 if anything failed.
 - **Uninstall:** `bash install.sh --uninstall` (leaves an SSH-only firewall), then delete the
