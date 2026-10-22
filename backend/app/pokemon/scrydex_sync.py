@@ -55,13 +55,42 @@ def _same_name(a: str, b: str) -> bool:
 DAILY_GRADES = {("PSA", "10"), ("PSA", "9"), ("PSA", "8"), ("PSA", "7"), ("BGS", "10"), ("BGS", "9.5"), ("CGC", "10")}
 
 
-def _upsert(db: Session, card: PokemonCard, sid: str, variant: str, g: Grade, day: date, kind: str, price: dict[str, Any], now: datetime) -> bool:
+class _CardRows:
+    """One card's stored Scrydex valuations, read once: _upsert looks rows up here instead of one SELECT (and a flush) per
+    price point (a year of history is hundreds of points per card)."""
+
+    def __init__(self, db: Session, card_id: int) -> None:
+        self.by_day: dict[tuple[str, str, date], PokemonProviderValuation] = {}
+        self.current: dict[tuple[str, str], PokemonProviderValuation] = {}
+        for r in db.scalars(select(PokemonProviderValuation).where(PokemonProviderValuation.provider == PROVIDER,
+                                                                   PokemonProviderValuation.card_id == card_id)
+                            .order_by(PokemonProviderValuation.id)):
+            self.by_day[(r.grading_company, r.grade, r.day)] = r
+            if r.kind == "current":
+                self.current.setdefault((r.grading_company, r.grade), r)
+
+    def drop(self, r: PokemonProviderValuation) -> None:
+        self.by_day.pop((r.grading_company, r.grade, r.day), None)
+        if self.current.get((r.grading_company, r.grade)) is r:
+            del self.current[(r.grading_company, r.grade)]
+
+
+def _upsert(db: Session, card: PokemonCard, sid: str, variant: str, g: Grade, day: date, kind: str, price: dict[str, Any], now: datetime,
+            rows: _CardRows | None = None) -> bool:
     if kind == "current" and (g.company, g.grade) not in DAILY_GRADES:
-        row = db.scalar(select(PokemonProviderValuation).where(
-            PokemonProviderValuation.provider == PROVIDER, PokemonProviderValuation.card_id == card.id, PokemonProviderValuation.kind == "current",
-            PokemonProviderValuation.grading_company == g.company, PokemonProviderValuation.grade == g.grade).limit(1))
+        if rows is not None:
+            row = rows.current.get((g.company, g.grade))
+        else:
+            row = db.scalar(select(PokemonProviderValuation).where(
+                PokemonProviderValuation.provider == PROVIDER, PokemonProviderValuation.card_id == card.id, PokemonProviderValuation.kind == "current",
+                PokemonProviderValuation.grading_company == g.company, PokemonProviderValuation.grade == g.grade).limit(1))
         if row is not None:
+            if rows is not None:
+                rows.by_day.pop((row.grading_company, row.grade, row.day), None)
+                rows.by_day[(g.company, g.grade, day)] = row
             row.day = day
+    elif rows is not None:
+        row = rows.by_day.get((g.company, g.grade, day))
     else:
         row = db.scalar(select(PokemonProviderValuation).where(
             PokemonProviderValuation.provider == PROVIDER, PokemonProviderValuation.card_id == card.id,
@@ -72,12 +101,17 @@ def _upsert(db: Session, card: PokemonCard, sid: str, variant: str, g: Grade, da
     if new:
         row = PokemonProviderValuation(provider=PROVIDER, card_id=card.id, grading_company=g.company, grade=g.grade, day=day)
         db.add(row)
+        if rows is not None:
+            rows.by_day[(g.company, g.grade, day)] = row
+    if rows is not None and kind == "current":
+        rows.current.setdefault((g.company, g.grade), row)
     row.provider_card_id, row.provider_variant, row.kind, row.fetched_at = sid, variant, kind, now
     row.market_cents, row.low_cents = _cents(price.get("market")), _cents(price.get("low"))
     row.mid_cents, row.high_cents = _cents(price.get("mid")), _cents(price.get("high"))
     row.currency = str(price.get("currency") or "USD")[:3]
     row.trends = price.get("trends") if kind == "current" else None
-    db.flush()
+    if rows is None:
+        db.flush()
     return new
 
 
@@ -200,6 +234,7 @@ async def sync(db: Session, settings: Any, card_ids: list[int] | None = None, wi
                     entries.append(entry)
                     continue
                 summary["matched_variants"] += 1
+                stored = _CardRows(db, c.id)
                 c.external_ids = {**(c.external_ids or {}), "scrydex": sid, "scrydex_variant": v.get("name")}
                 prices: dict[str, Any] = {}
                 bad = inverted(v.get("prices") or [])
@@ -214,9 +249,10 @@ async def sync(db: Session, settings: Any, card_ids: list[int] | None = None, wi
                                 PokemonProviderValuation.provider == PROVIDER, PokemonProviderValuation.card_id == c.id, PokemonProviderValuation.kind == "current",
                                 PokemonProviderValuation.grading_company == g.company, PokemonProviderValuation.grade == g.grade,
                                 PokemonProviderValuation.day == now.date())):
+                            stored.drop(stale)
                             db.delete(stale)
                         continue
-                    if _upsert(db, c, sid, str(v.get("name")), g, now.date(), "current", pr, now):
+                    if _upsert(db, c, sid, str(v.get("name")), g, now.date(), "current", pr, now, stored):
                         summary["valuations_new"] += 1
                     summary["valuations"] += 1
                     prices[g.label] = {"market": pr.get("market"), "low": pr.get("low"), "mid": pr.get("mid"), "high": pr.get("high"),
@@ -259,7 +295,7 @@ async def sync(db: Session, settings: Any, card_ids: list[int] | None = None, wi
                                 g = _graded(pr)
                                 if g is None or (g.company, g.grade) != (company, grade):
                                     continue
-                                pts += int(_upsert(db, c, sid, str(v.get("name")), g, day, "history", pr, now))
+                                pts += int(_upsert(db, c, sid, str(v.get("name")), g, day, "history", pr, now, stored))
                     summary["history_points"] += pts
                     entry["history_points"] = pts
                 entries.append(entry)

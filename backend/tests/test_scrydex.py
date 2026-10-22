@@ -175,6 +175,23 @@ def test_history_requests_hold_no_write_lock(client: TestClient, db: Session, sc
     assert can_write and all(can_write)
 
 
+def test_sync_reads_each_cards_stored_valuations_once(client: TestClient, db: Session, scrydex: list[str]) -> None:
+    """Upserting a card's prices and history looks rows up in one read of that card's stored valuations, not one SELECT
+    (and a flush) per price point; a second sync updates the same rows instead of adding any."""
+    from tests.test_db_perf import statements
+
+    catalog.ensure_catalog(db)
+    ids = [_id(db, "Charizard", "1st Edition"), _id(db, "Blastoise", "1st Edition"), _id(db, "Lugia", "1st Edition", "Neo Genesis")]
+    with statements(db) as sql:
+        first = client.post("/api/pokemon/sources/scrydex/sync", json={"card_ids": ids, "history": True}).json()
+    reads = [q for q in sql if q.lstrip().startswith("SELECT") and "FROM pokemon_provider_valuations" in q]
+    assert first["summary"]["matched_variants"] == 3 and first["summary"]["valuations"] >= 5
+    assert len(reads) <= 3, len(reads)  # one per matched card (was 9 here: one per price point)
+    n = db.scalar(select(func.count(PokemonProviderValuation.id)))
+    again = client.post("/api/pokemon/sources/scrydex/sync", json={"card_ids": ids, "history": True}).json()
+    assert again["summary"]["valuations_new"] == 0 and db.scalar(select(func.count(PokemonProviderValuation.id))) == n
+
+
 def test_request_cap_and_auth_errors_are_reported(client: TestClient, db: Session, scrydex: list[str], monkeypatch) -> None:  # type: ignore[no-untyped-def]
     catalog.ensure_catalog(db)
     ids = [_id(db, "Charizard", "1st Edition"), _id(db, "Blastoise", "1st Edition"), _id(db, "Lugia", "1st Edition", "Neo Genesis")]
