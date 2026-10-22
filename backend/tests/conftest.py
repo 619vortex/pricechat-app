@@ -38,10 +38,13 @@ for _k in ("X_BEARER_TOKEN", "X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_A
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
+import sqlite3  # noqa: E402
+from contextlib import closing  # noqa: E402
+from typing import Any  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import event, text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 from app.db.base import Base  # noqa: E402
@@ -157,17 +160,34 @@ class FakeEmbedder(EmbeddingProvider):
         return vectors
 
 
+@event.listens_for(engine, "connect")
+def _no_fsync(dbapi_conn: Any, _record: Any) -> None:
+    # A throwaway test database never needs to survive a power cut: skip the fsync on every commit.
+    dbapi_conn.execute("PRAGMA synchronous=OFF")
+
+
+_TEMPLATE_DB = _TEST_DB.with_name("template.db")
+
+
+def _copy_sqlite(src: Path, dst: Path) -> None:
+    """Page-for-page copy through SQLite's backup API (works while the destination file is in use)."""
+    with closing(sqlite3.connect(src)) as s, closing(sqlite3.connect(dst)) as d:
+        s.backup(d)
+
+
 def reset_database() -> None:
-    # Drop every table directly (FKs off): metadata.drop_all can't order self-referencing tables.
+    """Give the test a freshly migrated, empty database.
+
+    Running all migrations takes ~1 s, so it happens once per session into a template file; every test then
+    gets an exact copy of that template, so nothing a previous test wrote (rows, tables, sequences) survives."""
     engine.dispose()
-    with engine.connect() as conn:
-        conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
-        names = [r[0] for r in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
-        for name in names:
-            conn.exec_driver_sql(f'DROP TABLE IF EXISTS "{name}"')
-        conn.commit()
+    if not _TEMPLATE_DB.exists():
+        _TEST_DB.unlink(missing_ok=True)
+        init_db()
+        engine.dispose()
+        _copy_sqlite(_TEST_DB, _TEMPLATE_DB)
+    _copy_sqlite(_TEMPLATE_DB, _TEST_DB)
     engine.dispose()
-    init_db()
 
 
 @pytest.fixture(autouse=True)

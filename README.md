@@ -241,6 +241,10 @@ npm run build     # type-check + production build
 
 Or run `scripts\test.ps1`. Backend tests use temporary databases and fake model providers, so they don't need Ollama.
 
+The full backend suite (~1300 tests) takes about 4 minutes. Migrations run once per session into a template SQLite
+file, and every test starts from an exact copy of it (`reset_database` in `backend/tests/conftest.py`). Don't move
+migrations or `create_all` back into a per-test fixture: that made the suite take ~30 minutes.
+
 ## Project layout
 
 ```text
