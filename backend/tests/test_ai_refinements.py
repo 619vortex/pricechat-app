@@ -98,3 +98,46 @@ async def test_gate_waiting_count_survives_failures_and_cancelled_waiters() -> N
         await a
     await b
     assert gate.waiting == 0 and gate.status()["background_task"] is None
+
+
+# --- Ollama provider -------------------------------------------------------------------------------
+
+
+async def test_ollama_credentials_in_the_url_never_reach_errors_or_the_dashboard() -> None:
+    import httpx
+    import pytest
+
+    from app.providers.ollama import OllamaProvider
+
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["auth"] = request.headers.get("authorization")
+        raise httpx.ConnectError("refused", request=request)
+
+    p = OllamaProvider(model="m", base_url="https://owner:s3cret@ollama.example.com:8443/", transport=httpx.MockTransport(handler))
+    assert p.endpoint == "https://ollama.example.com:8443"
+    with pytest.raises(ProviderUnavailableError) as err:
+        await p.chat([])
+    assert "s3cret" not in str(err.value) and "ollama.example.com" in str(err.value)
+    assert seen["auth"] and seen["auth"].startswith("Basic ")  # the credentials are still used for the request
+    health = await p.health()
+    assert "s3cret" not in (health.detail or "") and "s3cret" not in (health.endpoint or "")
+
+
+async def test_ollama_null_or_non_object_replies_are_provider_errors() -> None:
+    import httpx
+    import pytest
+
+    from app.providers.errors import ProviderResponseError
+    from app.providers.ollama import OllamaProvider
+
+    replies = iter([
+        httpx.Response(200, json={"model": "m", "message": {"role": "assistant", "content": None}}),
+        httpx.Response(200, json=["not", "an", "object"]),
+        httpx.Response(500, json=["boom"]),
+    ])
+    p = OllamaProvider(model="m", transport=httpx.MockTransport(lambda r: next(replies)))
+    for _ in range(3):
+        with pytest.raises(ProviderResponseError):  # never AttributeError -> a 500 / a crashed job
+            await p.chat([])
