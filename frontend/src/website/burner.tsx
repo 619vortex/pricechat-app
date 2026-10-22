@@ -61,6 +61,18 @@ export async function newBurner(): Promise<{ address: string; phrase: string }> 
   return { address: w.address, phrase: w.mnemonic.phrase };
 }
 
+/** how long a copied recovery phrase may stay on the clipboard */
+export const CLIPBOARD_CLEAR_MS = 60_000;
+
+/** Empties the clipboard if it still holds `secret` (or if it can't be read back). */
+export async function clearClipboard(secret: string): Promise<void> {
+  const cb = navigator.clipboard;
+  if (!cb) return;
+  let still = true;
+  try { still = (await cb.readText()) === secret; } catch { /* reading denied: clear it anyway */ }
+  if (still) await cb.writeText("").catch(() => undefined);
+}
+
 type Step = "loading" | "offline" | "none" | "password" | "have";
 
 /** Kiwi Passport › Burner wallet: create one in a click, its recovery phrase saved encrypted to the Passport and revealed
@@ -142,9 +154,20 @@ export function BurnerRow() {
   }
 
   const [copied, setCopied] = useState<"address" | "phrase" | null>(null);
+  const [clearing, setClearing] = useState(false);  // the phrase is on the clipboard and will be wiped
   const copy = (t: string, what: "address" | "phrase") => {
-    void navigator.clipboard?.writeText(t).then(() => { setCopied(what); window.setTimeout(() => setCopied(null), 2000); })
-      .catch(() => setErr("Couldn't copy: select the text and copy it yourself."));
+    void navigator.clipboard?.writeText(t).then(() => {
+      setCopied(what);
+      window.setTimeout(() => setCopied(null), 2000);
+      if (what === "phrase") {
+        setClearing(true);
+        // 60 s later, wipe the clipboard if it still holds the phrase. Reading it back may be denied: then wipe it anyway.
+        // Deliberately not cancelled on unmount: leaving the page must not leave the phrase behind.
+        window.setTimeout(() => {
+          void clearClipboard(t).finally(() => setClearing(false));
+        }, CLIPBOARD_CLEAR_MS);
+      }
+    }).catch(() => setErr("Couldn't copy: select the text and copy it yourself."));
   };
   if (step === "loading") return null;
   return (
@@ -191,6 +214,7 @@ export function BurnerRow() {
                 <button type="button" className="site-textbutton" onClick={() => copy(phrase, "phrase")}>{copied === "phrase" ? "Copied ✓" : "Copy phrase"}</button>
                 <button type="button" className="site-textbutton" onClick={hide}>Hide</button>
               </div>
+              {clearing && <p className="site-muted" role="status">Copied. The clipboard will be cleared in 60s.</p>}
             </>
           ) : (
             <form className="pp-burner-actions" onSubmit={(e) => { e.preventDefault(); void reveal(); }}>
