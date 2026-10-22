@@ -1,0 +1,79 @@
+/* Earn tabs + Earn › Arbitrage (Lunch Bot). Uses the Earn page's .tb tokens. */
+/* three big product tabs, above everything else on Earn */
+.earn-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(8px, 1.5vw, 16px); margin-top: 8px; }
+.earn-tabs a { display: flex; align-items: center; gap: clamp(8px, 1.4vw, 16px); min-height: 92px; padding: clamp(14px, 2vw, 22px) clamp(12px, 2vw, 24px);
+  border-radius: 22px; border: 2px solid var(--site-line); background: var(--tb-card, #0d100f); color: var(--site-text); text-decoration: none;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+.earn-tabs a:hover { transform: translateY(-2px); border-color: rgba(0, 229, 143, 0.5); }
+.earn-tabs a.is-on { border-color: var(--tb-green, #00e58f); background: linear-gradient(160deg, rgba(0, 229, 143, 0.18), rgba(155, 92, 255, 0.12)), #070908;
+  box-shadow: 0 0 0 1px rgba(0, 229, 143, 0.35), 0 18px 50px -20px rgba(0, 229, 143, 0.55); }
+.earn-tab-icon { font-size: clamp(30px, 4.5vw, 46px); line-height: 1; flex: none; }
+.earn-tab-text { display: grid; gap: 4px; min-width: 0; }
+.earn-tab-text b { font-family: var(--site-display); font-size: clamp(17px, 2.2vw, 26px); text-transform: uppercase; letter-spacing: 0.01em; line-height: 1; }
+.earn-tab-text small { color: var(--site-soft); font-size: clamp(11px, 1.2vw, 14px); }
+.earn-tabs a.is-on .earn-tab-text b { color: var(--tb-green, #00e58f); }
+@media (max-width: 640px) {
+  .earn-tabs a { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 12px 6px; }
+  .earn-tab-text small { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .earn-tabs a { transition: none; } .earn-tabs a:hover { transform: none; } }
+
+.arb-products { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.arb-product { display: flex; gap: 12px; align-items: center; padding: 14px 16px; border-radius: 18px; border: 1px solid var(--site-line); background: var(--tb-card); }
+.arb-product.is-on { box-shadow: var(--tb-glow); }
+.arb-product.is-soon { opacity: 0.5; }
+.arb-product h2 { margin: 0; font-size: 18px; }
+.arb-product p { margin: 2px 0 0; color: var(--site-soft); font-size: 13px; }
+.arb-icon { font-size: 30px; line-height: 1; }
+
+.arb-bot { display: grid; gap: 18px; }
+.arb-head { display: flex; gap: 16px; align-items: flex-start; }
+.arb-big { font-size: clamp(44px, 8vw, 64px); line-height: 1; }
+.arb-head h1 { font-family: var(--site-display); text-transform: uppercase; font-size: clamp(32px, 5vw, 52px); margin: 0 0 6px; line-height: 1; }
+.arb-head p { margin: 4px 0; color: var(--site-soft); }
+.arb-paper { color: var(--tb-purple); letter-spacing: 0.04em; }
+.arb-muted { color: var(--site-soft); font-size: 13px; }
+.arb-fine { color: var(--site-soft); font-size: 12px; margin-top: 10px; }
+
+.arb-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.arb-stat { padding: 14px 16px; border-radius: 16px; border: 1px solid var(--site-line); background: var(--tb-card); display: grid; gap: 4px; }
+.arb-stat span { color: var(--site-soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.arb-stat b { font-size: 22px; }
+.arb-stat small { color: var(--site-soft); }
+.arb-stat.is-good b, .arb-table .is-good { color: var(--tb-green); }
+.arb-stat.is-bad b, .arb-table .is-bad { color: #ff5c5c; }
+
+.arb-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; }
+.arb-card { padding: clamp(16px, 2.5vw, 24px); border-radius: 20px; border: 1px solid var(--site-line); background: var(--tb-card); min-width: 0; overflow-x: auto; }
+.arb-card h2 { margin: 0 0 10px; font-size: 18px; }
+.arb-card p { color: var(--site-soft); }
+.arb-menu { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.arb-verdict { color: var(--site-text) !important; }
+.arb-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.arb-table th { text-align: left; color: var(--site-soft); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--site-line); }
+.arb-table td { padding: 8px; border-bottom: 1px solid var(--site-line); white-space: nowrap; }
+.arb-table a { color: var(--site-text); font-weight: 700; }
+
+@media (max-width: 760px) {
+  .arb-cols { grid-template-columns: minmax(0, 1fr); }
+  .arb-head { flex-direction: column; gap: 6px; }
+}
+
+/* Funding Arb */
+.arb-legs { display: flex; flex-wrap: wrap; gap: 6px; white-space: normal !important; }
+.arb-legs span { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--site-line); font-size: 12px; white-space: nowrap; }
+.arb-legs small { color: var(--site-soft); }
+.arb-stat.is-bad small { color: #ff5c5c; }
+
+/* Lunch Bot strategies ("dishes") */
+.arb-dishes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.arb-dish { padding: 14px 16px; border-radius: 18px; border: 1px solid var(--site-line); background: var(--tb-card); }
+.arb-dish header { display: flex; gap: 10px; align-items: center; }
+.arb-dish header span { font-size: 28px; line-height: 1; }
+.arb-dish header div { display: grid; }
+.arb-dish header small { color: var(--site-soft); font-size: 12px; }
+.arb-dish p { margin: 10px 0 0; color: var(--site-soft); }
+.arb-dish .is-good { color: var(--tb-green); }
+.arb-dish .is-bad { color: #ff5c5c; }
+.arb-dish-title { margin: 12px 0 6px; font-size: 15px; }
+.arb-dish-chip { margin-right: 6px; }

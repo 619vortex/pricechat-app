@@ -1,0 +1,166 @@
+/* Kiwi Kitchen (kitchen.tsx): the chef Kiwi next to the butt Kiwi on Earn. Transform/opacity animations only (GPU-friendly
+   on phones); everything still under prefers-reduced-motion, where the scene alone shows the state. */
+/* the two Kiwis below the leaderboard: side by side on one floor, no labels (tap one to find out what it is) */
+.kk-row { display: flex; align-items: flex-end; justify-content: center; gap: clamp(16px, 6vw, 56px); padding: 18px 8px 10px; margin-top: 4px;
+  border-radius: 20px; background: radial-gradient(ellipse 60% 70% at 50% 100%, rgba(0, 229, 143, .08), transparent 70%); }
+.kk-row > * { flex: none; }
+.kk-row > .kb-egg { margin: 0; }
+.kk-row .kb-butt, .kk-row .kk-chef { transition: transform .15s ease; }
+.kk-row .kb-butt:hover, .kk-row .kk-chef:hover { transform: translateY(-3px); }
+.kk-row .kb-butt:active, .kk-row .kk-chef:active { transform: scale(.95); }
+.kk {
+  --kk-green: #00e58f; --kk-red: #ff5468; --kk-amber: #ffc93c; --kk-line: rgba(255, 255, 255, .09); --kk-soft: #a9b4ae; --kk-muted: #6f7b75;
+  display: flex; align-items: flex-end; min-width: 0; border-radius: 50%;
+}
+.kk.is-ready .kk-chef { filter: drop-shadow(0 0 16px rgba(0, 229, 143, .55)); }
+.kk.is-burnt .kk-chef { filter: drop-shadow(0 0 12px rgba(255, 84, 104, .35)); }
+.kk-skel { width: 150px; height: 120px; }
+.kk-chef { flex: none; border: 0; padding: 0; background: none; cursor: pointer; line-height: 0; border-radius: 14px; -webkit-tap-highlight-color: transparent; }
+.kk-chef:focus-visible { outline: 2px solid var(--kk-green); outline-offset: 3px; }
+.kk-tag { font: 800 11px/1 var(--site-sans, system-ui); letter-spacing: .08em; text-transform: uppercase; padding: 5px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, .06); color: var(--kk-soft); }
+.kk-tag.is-ready { background: rgba(0, 229, 143, .16); color: var(--kk-green); }
+.kk-tag.is-cooking { background: rgba(255, 201, 60, .14); color: var(--kk-amber); }
+.kk-tag.is-burnt { background: rgba(255, 84, 104, .14); color: var(--kk-red); }
+.kk-tf { font-size: 12px; color: var(--kk-muted); font-weight: 700; }
+.kk-mode { font: 800 10px/1 var(--site-sans, system-ui); letter-spacing: .1em; padding: 4px 6px; border-radius: 6px; border: 1px solid rgba(155, 92, 255, .5); color: #b896ff; }
+.kk-reason, .kk-dish { margin: 0; font-size: 13.5px; line-height: 1.4; color: var(--kk-soft); overflow-wrap: anywhere; }
+.kk-dish { color: var(--site-text, #eef3f0); }
+.kk-dish .is-up { color: var(--kk-green); } .kk-dish .is-down { color: var(--kk-red); }
+.kk-progress { display: grid; gap: 4px; font-size: 12px; color: var(--kk-soft); font-weight: 700; }
+.kk-progress i { display: block; height: 6px; border-radius: 99px; background: rgba(255, 255, 255, .08); position: relative; overflow: hidden; }
+.kk-progress i::after { content: ""; position: absolute; inset: 0; transform-origin: left; transform: scaleX(var(--p)); background: var(--kk-green); border-radius: inherit;
+  transition: transform .5s ease; }
+.kk.is-burnt .kk-progress i::after { background: var(--kk-red); }
+.kk-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.kk-tabs button { font: 700 11px/1 var(--site-sans, system-ui); padding: 6px 9px; border-radius: 999px; border: 1px solid var(--kk-line); background: none; color: var(--kk-soft); cursor: pointer; }
+.kk-tabs button[aria-selected="true"] { color: #071; background: var(--kk-green); border-color: var(--kk-green); }
+.kk-tabs button.is-ready:not([aria-selected="true"]) { border-color: rgba(0, 229, 143, .6); }
+
+/* the scene */
+.kk-svg { display: block; overflow: visible; }
+.kk-floor { fill: rgba(0, 0, 0, .45); }
+.kk-body { fill: #141614; stroke: rgba(0, 229, 143, .35); stroke-width: 1.5; }
+.kk-belly { fill: #f2f4f1; }
+.kk-feather, .kk-brow { stroke: #2a2d2b; stroke-width: 2; fill: none; stroke-linecap: round; }
+.kk-belly + .kk-feather { stroke: #d5d9d4; }
+.kk-legs, .kk-beak { stroke: #e8c37a; stroke-width: 3.5; fill: none; stroke-linecap: round; }
+.kk-wing { stroke: #141614; stroke-width: 9; fill: none; stroke-linecap: round; }
+.kk-eye-w { fill: #fff; } .kk-iris { fill: #00e58f; } .kk-pupil { fill: #0b0b0b; } .kk-glint { fill: #fff; }
+.kk-lid { fill: #141614; transform: scaleY(0); transform-origin: 50% 0; }
+.kk-hat { fill: #fff; stroke: #dfe4e0; stroke-width: 1; } .kk-hat-band { fill: #00e58f; }
+.kk-sweat { fill: #8fd3ff; opacity: 0; }
+.kk-p { display: none; }
+.kk-searching .kk-p-search, .kk-cooking .kk-p-cook, .kk-ready .kk-p-ready, .kk-burnt .kk-p-burnt { display: inline; }
+.kk-fridge { fill: #dfe7e3; } .kk-fridge-in { fill: #f7fbf9; } .kk-shelf { stroke: #c5d0cb; stroke-width: 2; }
+.kk-fridge-door { fill: #e9f0ec; stroke: #c9d3ce; stroke-width: 1.5; } .kk-handle { fill: #9aa7a1; }
+.kk-jar { fill: #ffc93c; } .kk-jar.g { fill: #00e58f; }
+.kk-glass { fill: rgba(140, 220, 255, .25); stroke: #e8c37a; stroke-width: 3; } .kk-glass-h { stroke: #e8c37a; stroke-width: 4; stroke-linecap: round; }
+.kk-q { fill: #00e58f; font: 900 22px var(--site-display, system-ui); }
+.kk-stove { fill: #2a2e2c; } .kk-pot { fill: #8b979f; stroke: #5d686e; stroke-width: 1.5; }
+.kk-steam { stroke: rgba(255, 255, 255, .55); stroke-width: 3; fill: none; stroke-linecap: round; }
+.kk-spoon-s { stroke: #c49a5b; stroke-width: 3; fill: none; stroke-linecap: round; } .kk-spoon-s.f { fill: #c49a5b; }
+.kk-board { fill: #c49a5b; } .kk-carrot { fill: #ff8c2b; } .kk-leaf { stroke: #00b36f; stroke-width: 2.5; stroke-linecap: round; }
+.kk-blade { fill: #dfe7ec; stroke: #9aa7a1; } .kk-hilt { fill: #222; } .kk-bits rect { fill: #ff8c2b; }
+.kk-bell-b { fill: #ffc93c; stroke: #c99a20; stroke-width: 1; } .kk-ding { stroke: #ffc93c; stroke-width: 2.5; stroke-linecap: round; }
+.kk-plate { fill: #f2f4f1; } .kk-food { fill: #00e58f; } .kk-cloche-c { fill: #cfd8dc; stroke: #9aa7a1; stroke-width: 1.5; }
+.kk-spark { fill: #ffc93c; }
+.kk-pan { fill: #1a1a1a; stroke: #444; } .kk-pan-h { stroke: #444; stroke-width: 5; stroke-linecap: round; } .kk-char ellipse { fill: #3b2a1a; }
+.kk-smoke circle { fill: rgba(150, 150, 150, .45); } .kk-bin { fill: #39413d; } .kk-bin-lid { stroke: #57605b; stroke-width: 4; stroke-linecap: round; }
+.kk-svg * { transform-box: fill-box; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .kk-kiwi { animation: kk-sway 3.2s ease-in-out infinite; transform-origin: 50% 100%; }
+  .kk-lid { animation: kk-blink 5s infinite; }
+  /* SEARCHING: the fridge door swings, the magnifier bobs, the head looks around */
+  .kk-searching .kk-door { animation: kk-door 4s ease-in-out infinite; transform-origin: 0% 50%; }
+  .kk-searching .kk-mag { animation: kk-bob 2.2s ease-in-out infinite; }
+  .kk-searching .kk-head { animation: kk-look 4s ease-in-out infinite; transform-origin: 30% 80%; }
+  .kk-searching .kk-arm-r { animation: kk-reach 4s ease-in-out infinite; transform-origin: 0% 50%; }
+  .kk-searching .kk-q { animation: kk-pop 2s ease-in-out infinite; }
+  /* COOKING: chop, chop; stir; steam rises */
+  .kk-cooking .kk-knife { animation: kk-chop .5s ease-in infinite; transform-origin: 80% 100%; }
+  .kk-cooking .kk-arm-l { animation: kk-chop-arm .5s ease-in infinite; transform-origin: 100% 50%; }
+  .kk-cooking .kk-spoon { animation: kk-stir 1.4s linear infinite; transform-origin: 10% 100%; }
+  .kk-cooking .kk-arm-r { animation: kk-stir-arm 1.4s ease-in-out infinite; transform-origin: 0% 50%; }
+  .kk-cooking .kk-steam { animation: kk-steam 1.8s ease-out infinite; }
+  .kk-cooking .kk-bits rect { animation: kk-hop .5s ease-out infinite; }
+  /* READY: ding ding, the cloche lifts, sparkles */
+  .kk-ready .kk-bell { animation: kk-ring .9s ease-in-out infinite; transform-origin: 50% 100%; }
+  .kk-ready .kk-ding { animation: kk-pop .9s ease-out infinite; }
+  .kk-ready .kk-arm-l { animation: kk-tap .9s ease-in-out infinite; transform-origin: 100% 50%; }
+  .kk-ready .kk-cloche { animation: kk-lift 2.4s ease-in-out infinite; }
+  .kk-ready .kk-spark { animation: kk-twinkle 1.2s ease-in-out infinite; transform-origin: center; }
+  .kk-ready .kk-kiwi { animation: kk-proud 1.6s ease-in-out infinite; }
+  /* BURNT: smoke, sweat, toss it in the bin */
+  .kk-burnt .kk-smoke circle { animation: kk-smoke 2s ease-out infinite; }
+  .kk-burnt .kk-smoke circle:nth-child(2) { animation-delay: .5s; } .kk-burnt .kk-smoke circle:nth-child(3) { animation-delay: 1s; }
+  .kk-burnt .kk-char { animation: kk-toss 3s ease-in infinite; }
+  .kk-burnt .kk-sweat { animation: kk-sweat 1.5s ease-in infinite; }
+  .kk-burnt .kk-head { animation: kk-shake .3s ease-in-out 6 alternate; }
+  .kk-burnt .kk-bin-lid { animation: kk-lid-flap 3s ease-in-out infinite; transform-origin: 0% 50%; }
+}
+@keyframes kk-sway { 50% { transform: rotate(-2deg) translateY(-1px); } }
+@keyframes kk-blink { 0%, 92%, 100% { transform: scaleY(0); } 95% { transform: scaleY(1); } }
+@keyframes kk-door { 0%, 15% { transform: scaleX(1); } 40%, 75% { transform: scaleX(-.35); } 100% { transform: scaleX(1); } }
+@keyframes kk-bob { 50% { transform: translate(-6px, 4px) rotate(-8deg); } }
+@keyframes kk-look { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-10deg); } 65% { transform: rotate(6deg); } }
+@keyframes kk-reach { 40%, 70% { transform: rotate(-30deg); } }
+@keyframes kk-pop { 0% { opacity: 0; transform: translateY(4px) scale(.8); } 30%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+@keyframes kk-chop { 0%, 100% { transform: rotate(-18deg); } 45% { transform: rotate(8deg); } }
+@keyframes kk-chop-arm { 0%, 100% { transform: rotate(-12deg); } 45% { transform: rotate(10deg); } }
+@keyframes kk-stir { to { transform: rotate(360deg); } }
+@keyframes kk-stir-arm { 50% { transform: rotate(14deg) translateY(2px); } }
+@keyframes kk-steam { 0% { opacity: 0; transform: translateY(8px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
+@keyframes kk-hop { 0% { transform: none; } 50% { transform: translateY(-4px); } }
+@keyframes kk-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-12deg); } 40% { transform: rotate(10deg); } 60% { transform: rotate(-6deg); } }
+@keyframes kk-tap { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-24deg) translateY(4px); } }
+@keyframes kk-lift { 0%, 20% { transform: none; } 45%, 85% { transform: translate(10px, -22px) rotate(14deg); } 100% { transform: none; } }
+@keyframes kk-twinkle { 0%, 100% { opacity: 0; transform: scale(.4); } 50% { opacity: 1; transform: scale(1.2); } }
+@keyframes kk-proud { 50% { transform: translateY(-3px) scale(1.02); } }
+@keyframes kk-smoke { 0% { opacity: .9; transform: translateY(6px) scale(.6); } 100% { opacity: 0; transform: translateY(-22px) scale(1.4); } }
+@keyframes kk-toss { 0%, 35% { transform: none; opacity: 1; } 60% { transform: translate(-60px, -40px) rotate(-200deg); opacity: 1; }
+  80% { transform: translate(-108px, -6px) rotate(-360deg) scale(.6); opacity: 1; } 81%, 100% { opacity: 0; transform: translate(-108px, -6px) scale(.6); } }
+@keyframes kk-sweat { 0% { opacity: 0; transform: none; } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(10px); } }
+@keyframes kk-shake { from { transform: rotate(-5deg); } to { transform: rotate(5deg); } }
+@keyframes kk-lid-flap { 0%, 55%, 100% { transform: none; } 70% { transform: rotate(-30deg); } }
+
+/* the analysis sheet */
+.kk-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: end center; background: rgba(0, 0, 0, .6); padding: 16px; }
+@media (min-width: 640px) { .kk-modal { place-items: center; } }
+.kk-sheet { width: min(100%, 560px); max-height: min(86vh, 760px); overflow-y: auto; border-radius: 20px; border: 1px solid rgba(255, 255, 255, .1);
+  background: #0c0f0e; padding: 18px; display: grid; gap: 12px; outline: none; }
+.kk-sheet h3 { margin: 0; font: 800 16px var(--site-display, system-ui); letter-spacing: .03em; text-transform: uppercase; }
+.kk-sheet h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #6f7b75; }
+.kk-sheet p { margin: 0; font-size: 14px; line-height: 1.5; color: #c9d2cd; overflow-wrap: anywhere; }
+.kk-sheet-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.kk-x { border: 0; background: none; color: inherit; font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.kk-why { padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .04); }
+.kk-note { color: #b896ff !important; font-size: 13px !important; }
+.kk-fine { font-size: 12.5px !important; color: #6f7b75 !important; }
+.kk-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.kk-checks li { padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .03); color: #a9b4ae; overflow-wrap: anywhere; }
+.kk-checks li b { color: #eef3f0; }
+.kk-checks li.is-pass .kk-ci { color: #00e58f; } .kk-checks li.is-fail .kk-ci { color: #ff5468; } .kk-checks li.is-pending .kk-ci { color: #ffc93c; }
+.kk-checks li.is-fail { box-shadow: inset 3px 0 0 #ff5468; } .kk-checks li.is-pass { box-shadow: inset 3px 0 0 #00e58f; } .kk-checks li.is-pending { box-shadow: inset 3px 0 0 #ffc93c; }
+.kk-ci { display: inline-block; width: 16px; font-weight: 900; }
+.kk-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.kk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 0; }
+.kk-grid div { padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .03); }
+.kk-grid dt { font-size: 11px; color: #6f7b75; text-transform: uppercase; letter-spacing: .06em; } .kk-grid dd { margin: 2px 0 0; font-weight: 800; font-variant-numeric: tabular-nums; }
+.kk-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; color: #a9b4ae; }
+.kk-events time { color: #6f7b75; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.kk-brain { justify-self: start; font-weight: 800; color: #00e58f; text-decoration: none; }
+@media (max-width: 480px) {
+  .kk-svg { width: 112px; height: 90px; }
+}
+
+/* Kiwi ML */
+.kk-ml { border-left: 3px solid #7c5cff; padding-left: 10px; }
+.kk-ml-p b { font-size: 1.35em; }
+
+/* AI Risk Team */
+.kk-rt { border-left: 3px solid #00e58f; padding-left: 10px; }
+.kk-rt.is-veto { border-left-color: #ff5468; }
+.kk-rt-memo { margin: 6px 0; font-style: italic; }
+.kk-rt-memo cite { display: block; font-style: normal; font-size: .8em; opacity: .7; margin-top: 2px; }

@@ -1,0 +1,4 @@
+# Price Chat AI worker (Brand Manager). Python 3.11+.
+httpx>=0.27
+pillow>=10.0
+imageio-ffmpeg>=0.5  # a static FFmpeg build; or install ffmpeg and it is used from PATH

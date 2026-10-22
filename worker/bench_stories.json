@@ -1,0 +1,1491 @@
+{
+ "generated": "2026-10-20",
+ "stock": {
+  "headline": "Nvidia shares sit 9% below their October 6 peak after a $96.2B quarter",
+  "subject": "NVIDIA Corporation (NASDAQ: NVDA)",
+  "category": "stocks",
+  "facts": [
+   {
+    "text": "NVDA closed at $217.09 on October 19, 2026, up 1.38% from the $214.13 close on October 16.",
+    "source": "Nasdaq historical quotes (NVDA)",
+    "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-05-01&limit=200&todate=2026-10-20",
+    "date": "2026-10-19"
+   },
+   {
+    "text": "The highest close in the May 1 - October 19, 2026 window was $239.24 on October 6, 2026; the October 19 close of $217.09 is 9.26% below it.",
+    "source": "Nasdaq historical quotes (NVDA) - computed from daily closes",
+    "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-05-01&limit=200&todate=2026-10-20",
+    "date": "2026-10-19"
+   },
+   {
+    "text": "From the May 1, 2026 close of $198.45 to the October 19 close of $217.09, NVDA gained 9.39%; the lowest close in that window was $190.01 on July 29, 2026.",
+    "source": "Nasdaq historical quotes (NVDA) - computed from daily closes",
+    "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-05-01&limit=200&todate=2026-10-20",
+    "date": "2026-10-19"
+   },
+   {
+    "text": "NVIDIA reported second-quarter fiscal 2027 revenue of $96.2 billion, up 106% from a year ago (quarter ended July 26, 2026).",
+    "source": "NVIDIA press release (Form 8-K exhibit, SEC EDGAR)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000073/q2fy27pr.htm",
+    "date": "2026-08-26"
+   },
+   {
+    "text": "Data Center revenue was $89.0 billion, up 117% from a year ago; GAAP gross margin was 75.0%.",
+    "source": "NVIDIA press release (Form 8-K exhibit, SEC EDGAR)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000073/q2fy27pr.htm",
+    "date": "2026-08-26"
+   },
+   {
+    "text": "NVIDIA's outlook for third-quarter fiscal 2027 revenue is $108.0 billion, plus or minus 2% (company guidance, not a result).",
+    "source": "NVIDIA press release (Form 8-K exhibit, SEC EDGAR)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000073/q2fy27pr.htm",
+    "date": "2026-08-26"
+   }
+  ],
+  "numbers": {
+   "price_usd": 217.09,
+   "change_pct_day": 1.38,
+   "peak_close_usd": 239.24,
+   "change_from_peak_pct": -9.26,
+   "change_period_pct": 9.39,
+   "q2_fy27_revenue_usd_bn": 96.2,
+   "q2_revenue_yoy_pct": 106,
+   "data_center_revenue_usd_bn": 89.0,
+   "gross_margin_gaap_pct": 75.0,
+   "q3_outlook_revenue_usd_bn": 108.0
+  },
+  "chart": {
+   "points": [
+    [
+     1777665600,
+     198.45
+    ],
+    [
+     1777924800,
+     198.48
+    ],
+    [
+     1778011200,
+     196.5
+    ],
+    [
+     1778097600,
+     207.83
+    ],
+    [
+     1778184000,
+     211.5
+    ],
+    [
+     1778270400,
+     215.2
+    ],
+    [
+     1778529600,
+     219.44
+    ],
+    [
+     1778616000,
+     220.78
+    ],
+    [
+     1778702400,
+     225.83
+    ],
+    [
+     1778788800,
+     235.74
+    ],
+    [
+     1778875200,
+     225.32
+    ],
+    [
+     1779134400,
+     222.32
+    ],
+    [
+     1779220800,
+     220.61
+    ],
+    [
+     1779307200,
+     223.47
+    ],
+    [
+     1779393600,
+     219.51
+    ],
+    [
+     1779480000,
+     215.33
+    ],
+    [
+     1779825600,
+     214.86
+    ],
+    [
+     1779912000,
+     212.6
+    ],
+    [
+     1779998400,
+     214.25
+    ],
+    [
+     1780084800,
+     211.14
+    ],
+    [
+     1780344000,
+     224.36
+    ],
+    [
+     1780430400,
+     222.82
+    ],
+    [
+     1780516800,
+     214.75
+    ],
+    [
+     1780603200,
+     218.66
+    ],
+    [
+     1780689600,
+     205.1
+    ],
+    [
+     1780948800,
+     208.64
+    ],
+    [
+     1781035200,
+     208.19
+    ],
+    [
+     1781121600,
+     200.42
+    ],
+    [
+     1781208000,
+     204.87
+    ],
+    [
+     1781294400,
+     205.19
+    ],
+    [
+     1781553600,
+     212.45
+    ],
+    [
+     1781640000,
+     207.41
+    ],
+    [
+     1781726400,
+     204.65
+    ],
+    [
+     1781812800,
+     210.69
+    ],
+    [
+     1782158400,
+     208.65
+    ],
+    [
+     1782244800,
+     200.04
+    ],
+    [
+     1782331200,
+     199.0
+    ],
+    [
+     1782417600,
+     195.74
+    ],
+    [
+     1782504000,
+     192.53
+    ],
+    [
+     1782763200,
+     194.97
+    ],
+    [
+     1782849600,
+     200.09
+    ],
+    [
+     1782936000,
+     197.58
+    ],
+    [
+     1783022400,
+     194.83
+    ],
+    [
+     1783368000,
+     195.55
+    ],
+    [
+     1783454400,
+     196.93
+    ],
+    [
+     1783540800,
+     204.12
+    ],
+    [
+     1783627200,
+     202.78
+    ],
+    [
+     1783713600,
+     210.96
+    ],
+    [
+     1783972800,
+     203.53
+    ],
+    [
+     1784059200,
+     211.8
+    ],
+    [
+     1784145600,
+     212.5
+    ],
+    [
+     1784232000,
+     207.4
+    ],
+    [
+     1784318400,
+     202.81
+    ],
+    [
+     1784577600,
+     203.28
+    ],
+    [
+     1784664000,
+     207.29
+    ],
+    [
+     1784750400,
+     212.06
+    ],
+    [
+     1784836800,
+     208.76
+    ],
+    [
+     1784923200,
+     206.84
+    ],
+    [
+     1785182400,
+     196.51
+    ],
+    [
+     1785268800,
+     197.01
+    ],
+    [
+     1785355200,
+     190.01
+    ],
+    [
+     1785441600,
+     195.04
+    ],
+    [
+     1785528000,
+     200.75
+    ],
+    [
+     1785787200,
+     206.64
+    ],
+    [
+     1785873600,
+     211.94
+    ],
+    [
+     1785960000,
+     219.22
+    ],
+    [
+     1786046400,
+     218.99
+    ],
+    [
+     1786132800,
+     223.96
+    ],
+    [
+     1786392000,
+     217.55
+    ],
+    [
+     1786478400,
+     217.5
+    ],
+    [
+     1786564800,
+     224.09
+    ],
+    [
+     1786651200,
+     225.3
+    ],
+    [
+     1786737600,
+     225.16
+    ],
+    [
+     1786996800,
+     225.01
+    ],
+    [
+     1787083200,
+     219.74
+    ],
+    [
+     1787169600,
+     217.56
+    ],
+    [
+     1787256000,
+     216.85
+    ],
+    [
+     1787342400,
+     214.72
+    ],
+    [
+     1787601600,
+     208.48
+    ],
+    [
+     1787688000,
+     213.05
+    ],
+    [
+     1787774400,
+     209.66
+    ],
+    [
+     1787860800,
+     227.98
+    ],
+    [
+     1787947200,
+     217.55
+    ],
+    [
+     1788206400,
+     220.78
+    ],
+    [
+     1788292800,
+     217.44
+    ],
+    [
+     1788379200,
+     224.41
+    ],
+    [
+     1788465600,
+     228.45
+    ],
+    [
+     1788552000,
+     230.36
+    ],
+    [
+     1788897600,
+     225.73
+    ],
+    [
+     1788984000,
+     223.67
+    ],
+    [
+     1789070400,
+     218.36
+    ],
+    [
+     1789156800,
+     218.29
+    ],
+    [
+     1789416000,
+     210.96
+    ],
+    [
+     1789502400,
+     212.17
+    ],
+    [
+     1789588800,
+     213.9
+    ],
+    [
+     1789675200,
+     219.34
+    ],
+    [
+     1789761600,
+     222.27
+    ],
+    [
+     1790020800,
+     227.38
+    ],
+    [
+     1790107200,
+     228.87
+    ],
+    [
+     1790193600,
+     225.51
+    ],
+    [
+     1790280000,
+     224.58
+    ],
+    [
+     1790366400,
+     225.07
+    ],
+    [
+     1790625600,
+     228.86
+    ],
+    [
+     1790712000,
+     227.21
+    ],
+    [
+     1790798400,
+     228.38
+    ],
+    [
+     1790884800,
+     230.86
+    ],
+    [
+     1790971200,
+     233.95
+    ],
+    [
+     1791230400,
+     238.9
+    ],
+    [
+     1791316800,
+     239.24
+    ],
+    [
+     1791403200,
+     237.47
+    ],
+    [
+     1791489600,
+     230.48
+    ],
+    [
+     1791576000,
+     229.28
+    ],
+    [
+     1791835200,
+     226.32
+    ],
+    [
+     1791921600,
+     228.52
+    ],
+    [
+     1792008000,
+     221.3
+    ],
+    [
+     1792094400,
+     217.23
+    ],
+    [
+     1792180800,
+     214.13
+    ],
+    [
+     1792440000,
+     217.09
+    ]
+   ],
+   "label": "NVDA daily close (USD) · Nasdaq",
+   "source_url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-05-01&limit=200&todate=2026-10-20",
+   "range": "2026-05-01 to 2026-10-19 (118 trading days)",
+   "note": "Stooq CSV returned a JavaScript bot-check page (not bypassed); data taken from Nasdaq's public historical-quotes JSON and cross-checked against Yahoo Finance chart API (last close 217.09 matches). Timestamps are 20:00 UTC (4pm ET close) of each trading day."
+  },
+  "sources": [
+   {
+    "name": "Nasdaq - NVDA historical quotes",
+    "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-05-01&limit=200&todate=2026-10-20"
+   },
+   {
+    "name": "NVIDIA Q2 FY2027 results press release (SEC EDGAR 8-K)",
+    "url": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000073/q2fy27pr.htm"
+   }
+  ],
+  "media": [
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/4/42/QCT_shows_Nvidia_Grace_Hopper_Arm_with_Nvidia_GPU_Server.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:QCT_shows_Nvidia_Grace_Hopper_Arm_with_Nvidia_GPU_Server.webm",
+    "title": "File:QCT shows Nvidia Grace Hopper Arm with Nvidia GPU Server.webm",
+    "creator": "Charbax",
+    "rights_holder": "Charbax",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "Charbax / Wikimedia Commons / CC BY 3.0",
+    "width": 3840,
+    "height": 2160,
+    "shows": "Trade-show (Computex 2023) walkthrough of QCT GPU servers built around NVIDIA's Grace Hopper superchip; handheld interview footage.",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/42/QCT_shows_Nvidia_Grace_Hopper_Arm_with_Nvidia_GPU_Server.webm/960px--QCT_shows_Nvidia_Grace_Hopper_Arm_with_Nvidia_GPU_Server.webm.jpg",
+    "duration_s": 378.9
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/2/28/Supermicro_Ampere_Server_and_Nvidia_Grace_Hopper_Super_Chip.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Supermicro_Ampere_Server_and_Nvidia_Grace_Hopper_Super_Chip.webm",
+    "title": "File:Supermicro Ampere Server and Nvidia Grace Hopper Super Chip.webm",
+    "creator": "Charbax",
+    "rights_holder": "Charbax",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "Charbax / Wikimedia Commons / CC BY 3.0",
+    "width": 3840,
+    "height": 2160,
+    "shows": "Computex 2023 booth video at Supermicro showing servers, including an NVIDIA Grace Hopper superchip board; handheld interview footage.",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/28/Supermicro_Ampere_Server_and_Nvidia_Grace_Hopper_Super_Chip.webm/960px--Supermicro_Ampere_Server_and_Nvidia_Grace_Hopper_Super_Chip.webm.jpg",
+    "duration_s": 200.28
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/9/92/B-Rolls_NVIDIA_GeForce_RTX_5090_FE_%28by_ZMASLO%29_5nj1qLazPlk.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:B-Rolls_NVIDIA_GeForce_RTX_5090_FE_(by_ZMASLO)_5nj1qLazPlk.webm",
+    "title": "File:B-Rolls NVIDIA GeForce RTX 5090 FE (by ZMASLO) 5nj1qLazPlk.webm",
+    "creator": "ZMASLO",
+    "rights_holder": "ZMASLO",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "ZMASLO / Wikimedia Commons / CC BY 3.0",
+    "width": 3840,
+    "height": 2160,
+    "shows": "Clean B-roll close-ups of the NVIDIA GeForce RTX 5090 Founders Edition graphics card (no narration).",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/92/B-Rolls_NVIDIA_GeForce_RTX_5090_FE_%28by_ZMASLO%29_5nj1qLazPlk.webm/960px--B-Rolls_NVIDIA_GeForce_RTX_5090_FE_%28by_ZMASLO%29_5nj1qLazPlk.webm.jpg",
+    "duration_s": 100.63
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/5/56/Nvidia_DGX_Station%2C_world%27s_most_powerful_desktop%2C_a_Supercomputer_at_the_office.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Nvidia_DGX_Station,_world%27s_most_powerful_desktop,_a_Supercomputer_at_the_office.webm",
+    "title": "File:Nvidia DGX Station, world's most powerful desktop, a Supercomputer at the office.webm",
+    "creator": "Charbax",
+    "rights_holder": "Charbax",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "Charbax / Wikimedia Commons / CC BY 3.0",
+    "width": 3840,
+    "height": 2160,
+    "shows": "Trade-show video of the NVIDIA DGX Station desktop AI supercomputer with an NVIDIA representative explaining it.",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/56/Nvidia_DGX_Station%2C_world%27s_most_powerful_desktop%2C_a_Supercomputer_at_the_office.webm/960px--Nvidia_DGX_Station%2C_world%27s_most_powerful_desktop%2C_a_Supercomputer_at_the_office.webm.jpg",
+    "duration_s": 920.94
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/d/d6/PM_Modi_is_such_an_incredible_student%2C_NVIDIA_CEO_Jensen_Huang.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:PM_Modi_is_such_an_incredible_student,_NVIDIA_CEO_Jensen_Huang.webm",
+    "title": "File:PM Modi is such an incredible student, NVIDIA CEO Jensen Huang.webm",
+    "creator": "Narendra Modi",
+    "rights_holder": "Narendra Modi",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "Narendra Modi / Wikimedia Commons / CC BY 3.0",
+    "width": 1920,
+    "height": 1080,
+    "shows": "NVIDIA CEO Jensen Huang speaking to press after a 2024 tech CEO roundtable with India's PM Modi (political context; use only the Huang shots).",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/d/d6/PM_Modi_is_such_an_incredible_student%2C_NVIDIA_CEO_Jensen_Huang.webm/960px--PM_Modi_is_such_an_incredible_student%2C_NVIDIA_CEO_Jensen_Huang.webm.jpg",
+    "duration_s": 103.79
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/0/0f/NVIDIA_Headquarters.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:NVIDIA_Headquarters.jpg",
+    "title": "File:NVIDIA Headquarters.jpg",
+    "creator": "Coolcaesar",
+    "rights_holder": "Coolcaesar",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Coolcaesar / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 4662,
+    "height": 2852,
+    "shows": "Exterior of NVIDIA's headquarters (Endeavor building) in Santa Clara, California, 2018.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0f/NVIDIA_Headquarters.jpg/960px-NVIDIA_Headquarters.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/8/84/Nvidia_sign.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Nvidia_sign.jpg",
+    "title": "File:Nvidia sign.jpg",
+    "creator": "Will Buckner",
+    "rights_holder": "Will Buckner",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "Will Buckner / Wikimedia Commons / CC BY 2.0",
+    "width": 3711,
+    "height": 3020,
+    "shows": "NVIDIA logo sign outside the Santa Clara headquarters campus on Scott Boulevard.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/84/Nvidia_sign.jpg/960px-Nvidia_sign.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/e/e2/Nvdia_Endeavor_Grand_Opening_entry.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Nvdia_Endeavor_Grand_Opening_entry.jpg",
+    "title": "File:Nvdia Endeavor Grand Opening entry.jpg",
+    "creator": "Daniel J. Prostak;",
+    "rights_holder": "Daniel J. Prostak;",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Daniel J. Prostak; / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 4608,
+    "height": 3456,
+    "shows": "Landscaped entrance to NVIDIA's Endeavor building at the Santa Clara headquarters, 2017.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e2/Nvdia_Endeavor_Grand_Opening_entry.jpg/960px-Nvdia_Endeavor_Grand_Opening_entry.jpg"
+   }
+  ]
+ },
+ "ai": {
+  "headline": "NASA's Astrobee robots are still flying solo inside the Space Station",
+  "subject": "NASA Astrobee free-flying robots (Honey, Queen, Bumble) aboard the ISS",
+  "category": "ai",
+  "facts": [
+   {
+    "text": "Astrobee is three free-flying robots named Honey, Queen and Bumble; each is a cube 12.5 inches wide.",
+    "source": "NASA - Astrobee",
+    "url": "https://www.nasa.gov/astrobee",
+    "date": "2026-10-08"
+   },
+   {
+    "text": "Honey and Bumble launched April 17, 2019 on Northrop Grumman CRS-11; Queen launched July 25, 2019 on SpaceX CRS-18.",
+    "source": "NASA - Astrobee",
+    "url": "https://www.nasa.gov/astrobee",
+    "date": "2026-10-08"
+   },
+   {
+    "text": "On April 7, 2022, Queen and Bumble operated independently in separate station modules for the first time.",
+    "source": "NASA - Astrobee",
+    "url": "https://www.nasa.gov/astrobee",
+    "date": "2026-10-08"
+   },
+   {
+    "text": "Arkisys, Inc. of Los Alamitos, California, was awarded a reimbursable Space Act Agreement in Sept. 2025 to sustain and maintain the robotic platform aboard the ISS.",
+    "source": "NASA - Astrobee",
+    "url": "https://www.nasa.gov/astrobee",
+    "date": "2025-09"
+   },
+   {
+    "text": "A NASA photo dated Oct. 13, 2026 shows a toaster-sized Astrobee 'autonomously maneuvering' inside the station's Kibo laboratory module.",
+    "source": "NASA Image and Video Library (iss075e0190291)",
+    "url": "https://images.nasa.gov/details/iss075e0190291",
+    "date": "2026-10-13"
+   },
+   {
+    "text": "On Feb. 4, 2025, an Astrobee fitted with gecko-like adhesive grippers demonstrated autonomous detection and capture of a 'capture cube', a technique that may be used to remove space debris and service satellites.",
+    "source": "NASA Image and Video Library (iss072e593606)",
+    "url": "https://images.nasa.gov/details/iss072e593606",
+    "date": "2025-02-04"
+   }
+  ],
+  "numbers": {
+   "robots": 3,
+   "cube_width_in": 12.5,
+   "first_launch_year": 2019
+  },
+  "sources": [
+   {
+    "name": "NASA - Astrobee",
+    "url": "https://www.nasa.gov/astrobee"
+   },
+   {
+    "name": "NASA Image and Video Library",
+    "url": "https://images.nasa.gov/search?q=astrobee"
+   }
+  ],
+  "media": [
+   {
+    "kind": "video",
+    "file_url": "https://images-assets.nasa.gov/video/ARC-20210810-AAV3354-ISAAC-Astrobee-NASAWeb-1080p/ARC-20210810-AAV3354-ISAAC-Astrobee-NASAWeb-1080p~orig.mp4",
+    "file_url_medium": "https://images-assets.nasa.gov/video/ARC-20210810-AAV3354-ISAAC-Astrobee-NASAWeb-1080p/ARC-20210810-AAV3354-ISAAC-Astrobee-NASAWeb-1080p~medium.mp4",
+    "page_url": "https://images.nasa.gov/details/ARC-20210810-AAV3354-ISAAC-Astrobee-NASAWeb-1080p",
+    "title": "Can Robots Take Care of Spacecraft? (ISAAC / Astrobee)",
+    "creator": "NASA/Ames Research Center",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Video: NASA/Ames Research Center",
+    "width": 1920,
+    "height": 1080,
+    "duration_s": 83,
+    "shows": "NASA Ames video of the ISAAC project demonstrating autonomous caretaking tech aboard the ISS using Astrobee robots.",
+    "exact_subject": true
+   },
+   {
+    "kind": "video",
+    "file_url": "https://images-assets.nasa.gov/video/ARC-20190417-AAV3189-AstrobeeLaunch-Shareable-NASAWeb/ARC-20190417-AAV3189-AstrobeeLaunch-Shareable-NASAWeb~orig.mp4",
+    "file_url_medium": "https://images-assets.nasa.gov/video/ARC-20190417-AAV3189-AstrobeeLaunch-Shareable-NASAWeb/ARC-20190417-AAV3189-AstrobeeLaunch-Shareable-NASAWeb~medium.mp4",
+    "page_url": "https://images.nasa.gov/details/ARC-20190417-AAV3189-AstrobeeLaunch-Shareable-NASAWeb",
+    "title": "NASA's New Flying Robots Will Be Busy Bees",
+    "creator": "NASA/Ames Research Center",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Video: NASA/Ames Research Center",
+    "width": 1280,
+    "height": 720,
+    "duration_s": 89,
+    "shows": "NASA Ames explainer about the Astrobee free-flyers built for the ISS (2019).",
+    "exact_subject": true
+   },
+   {
+    "kind": "video",
+    "file_url": "https://images-assets.nasa.gov/video/ARC-20190417-AAV3185-AstrobeeResource-BRoll-NASAWeb/ARC-20190417-AAV3185-AstrobeeResource-BRoll-NASAWeb~orig.mp4",
+    "file_url_medium": "https://images-assets.nasa.gov/video/ARC-20190417-AAV3185-AstrobeeResource-BRoll-NASAWeb/ARC-20190417-AAV3185-AstrobeeResource-BRoll-NASAWeb~medium.mp4",
+    "page_url": "https://images.nasa.gov/details/ARC-20190417-AAV3185-AstrobeeResource-BRoll-NASAWeb",
+    "title": "Astrobee Media Resource Reel (B-Roll)",
+    "creator": "NASA/Ames Research Center",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Video: NASA/Ames Research Center",
+    "width": 1280,
+    "height": 720,
+    "duration_s": 305,
+    "shows": "Unnarrated B-roll: team building Astrobee hardware at Ames, acoustic testing at JSC, astronaut installing the dock on the ISS - NOTE: also contains a computer ANIMATION segment of Astrobees on the station; skip that segment.",
+    "exact_subject": true
+   },
+   {
+    "kind": "video",
+    "file_url": "https://images-assets.nasa.gov/video/jsc2021m000145_Shannon_Walker_conducts_test_with_Astrobee/jsc2021m000145_Shannon_Walker_conducts_test_with_Astrobee~orig.mp4",
+    "file_url_medium": "https://images-assets.nasa.gov/video/jsc2021m000145_Shannon_Walker_conducts_test_with_Astrobee/jsc2021m000145_Shannon_Walker_conducts_test_with_Astrobee~medium.mp4",
+    "page_url": "https://images.nasa.gov/details/jsc2021m000145_Shannon_Walker_conducts_test_with_Astrobee",
+    "title": "Shannon Walker conducts test with Astrobee",
+    "creator": "NASA Johnson Space Center",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Video: NASA Johnson Space Center",
+    "width": 1280,
+    "height": 720,
+    "duration_s": 36,
+    "shows": "Astrobee performing its first autonomous homing test with the RFID Recon payload aboard the ISS, with astronaut Shannon Walker (2021).",
+    "exact_subject": true
+   },
+   {
+    "kind": "video",
+    "file_url": "https://images-assets.nasa.gov/video/HD-DL-4_2019_240_1354_22501_1243343/HD-DL-4_2019_240_1354_22501_1243343~orig.mp4",
+    "file_url_medium": "https://images-assets.nasa.gov/video/HD-DL-4_2019_240_1354_22501_1243343/HD-DL-4_2019_240_1354_22501_1243343~medium.mp4",
+    "page_url": "https://images.nasa.gov/details/HD-DL-4_2019_240_1354_22501_1243343",
+    "title": "Astrobee Free Flyer Localization & Mobility Ops Part 1",
+    "creator": "NASA Johnson Space Center",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Video: NASA Johnson Space Center",
+    "width": 1280,
+    "height": 720,
+    "duration_s": 2361,
+    "shows": "Raw ISS downlink (39 min) of astronaut Christina Koch running Astrobee localization and mobility operations; long, needs trimming.",
+    "exact_subject": true
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/2/2a/Astronaut_Chris_Cassidy_Meets_Astrobee.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Astronaut_Chris_Cassidy_Meets_Astrobee.webm",
+    "title": "File:Astronaut Chris Cassidy Meets Astrobee.webm",
+    "creator": "NASA Johnson",
+    "rights_holder": "NASA Johnson",
+    "license": "Public domain",
+    "license_url": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "attribution": "NASA Johnson via Wikimedia Commons (Public domain)",
+    "width": 1280,
+    "height": 720,
+    "shows": "NASA video of astronaut Chris Cassidy working with Astrobee robots aboard the ISS.",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2a/Astronaut_Chris_Cassidy_Meets_Astrobee.webm/960px--Astronaut_Chris_Cassidy_Meets_Astrobee.webm.jpg",
+    "duration_s": 69.54
+   },
+   {
+    "kind": "image",
+    "file_url": "https://images-assets.nasa.gov/image/iss075e0190291/iss075e0190291~orig.jpg",
+    "page_url": "https://images.nasa.gov/details/iss075e0190291",
+    "title": "An Astrobee autonomously maneuvers inside the ISS (Oct. 13, 2026)",
+    "creator": "NASA/Jessica Watkins",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Photo: NASA/Jessica Watkins",
+    "width": 8256,
+    "height": 5504,
+    "shows": "A single Astrobee robot flying inside the Kibo module of the ISS, photographed Oct. 13, 2026.",
+    "exact_subject": true
+   },
+   {
+    "kind": "image",
+    "file_url": "https://images-assets.nasa.gov/image/iss075e0190299/iss075e0190299~orig.jpg",
+    "page_url": "https://images.nasa.gov/details/iss075e0190299",
+    "title": "Astrobees attached to a docking station (Oct. 13, 2026)",
+    "creator": "NASA/Jessica Watkins",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Photo: NASA/Jessica Watkins",
+    "width": 8256,
+    "height": 5504,
+    "shows": "Two Astrobee robots attached to their docking station in the Kibo module, Oct. 13, 2026.",
+    "exact_subject": true
+   },
+   {
+    "kind": "image",
+    "file_url": "https://images-assets.nasa.gov/image/iss072e593606/iss072e593606~orig.jpg",
+    "page_url": "https://images.nasa.gov/details/iss072e593606",
+    "title": "Suni Williams monitors an Astrobee with gecko-like grippers",
+    "creator": "NASA",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Photo: NASA",
+    "width": 8256,
+    "height": 5504,
+    "shows": "Astronaut Suni Williams watching an Astrobee with tentacle-like gecko-adhesive arms grapple a capture cube, Feb. 4, 2025.",
+    "exact_subject": true
+   },
+   {
+    "kind": "image",
+    "file_url": "https://images-assets.nasa.gov/image/iss063e084529/iss063e084529~orig.jpg",
+    "page_url": "https://images.nasa.gov/details/iss063e084529",
+    "title": "Chris Cassidy poses with two Astrobees",
+    "creator": "NASA/Chris Cassidy",
+    "rights_holder": "NASA (U.S. Government work)",
+    "license": "Public domain (NASA)",
+    "license_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    "attribution": "Photo: NASA/Chris Cassidy",
+    "width": 5568,
+    "height": 3712,
+    "shows": "Astronaut Chris Cassidy with two Astrobee robots during navigation tests in Kibo, Sept. 4, 2020.",
+    "exact_subject": true
+   }
+  ]
+ },
+ "car": {
+  "headline": "1,001 HP and 407 km/h: the Bugatti Veyron 16.4 that rewrote the supercar rulebook",
+  "subject": "Bugatti Veyron 16.4 (incl. Grand Sport roadster)",
+  "category": "cars",
+  "facts": [
+   {
+    "text": "Bugatti lists the Veyron 16.4's power output as 736 kW (1 001 HP) at 6 000 rpm from a 7 993 cm3 engine, with max torque of 1 250 Nm.",
+    "source": "Bugatti official Veyron 16.4 page (archived copy, Wayback Machine)",
+    "url": "https://web.archive.org/web/20160304042051/https://www.bugatti.com/veyron/veyron-164/",
+    "date": "2016-03-04"
+   },
+   {
+    "text": "Bugatti lists the top speed as 407 km/h and acceleration 0-100 km/h in 2.5 sec, 0-200 km/h in 7.3 sec and 0-300 km/h in 16.7 sec.",
+    "source": "Bugatti official Veyron 16.4 page (archived copy, Wayback Machine)",
+    "url": "https://web.archive.org/web/20160304042051/https://www.bugatti.com/veyron/veyron-164/",
+    "date": "2016-03-04"
+   },
+   {
+    "text": "Base price of the Veyron 16.4 coupe and Grand Sport: EUR 1,225,000 (GBP 1,065,000; US$1,700,000).",
+    "source": "Wikipedia - Bugatti Veyron (citing Car and Driver, Nov 2005)",
+    "url": "https://en.wikipedia.org/wiki/Bugatti_Veyron",
+    "date": ""
+   },
+   {
+    "text": "The Grand Sport roadster was unveiled at the 2008 Pebble Beach Concours d'Elegance, with production starting in Q2 2009.",
+    "source": "Wikipedia - Bugatti Veyron (citing LeftLaneNews / Autoblog)",
+    "url": "https://en.wikipedia.org/wiki/Bugatti_Veyron",
+    "date": ""
+   },
+   {
+    "text": "The final Veyron, a Grand Sport Vitesse named 'La Finale', was number 450 and shown at the 2015 Geneva Motor Show.",
+    "source": "AutoGuide",
+    "url": "https://www.autoguide.com/auto-news/2015/03/this-is-the-last-bugatti-veyron.html",
+    "date": "2015-03-02"
+   }
+  ],
+  "numbers": {
+   "power_hp": 1001,
+   "power_kw": 736,
+   "torque_nm": 1250,
+   "top_speed_kmh": 407,
+   "zero_to_100_s": 2.5,
+   "zero_to_300_s": 16.7,
+   "base_price_eur": 1225000,
+   "total_built": 450
+  },
+  "sources": [
+   {
+    "name": "Bugatti - Veyron 16.4 (archived official page)",
+    "url": "https://web.archive.org/web/20160304042051/https://www.bugatti.com/veyron/veyron-164/"
+   },
+   {
+    "name": "Wikipedia - Bugatti Veyron",
+    "url": "https://en.wikipedia.org/wiki/Bugatti_Veyron"
+   },
+   {
+    "name": "AutoGuide - This is the last Bugatti Veyron",
+    "url": "https://www.autoguide.com/auto-news/2015/03/this-is-the-last-bugatti-veyron.html"
+   }
+  ],
+  "media": [
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/8/80/Paris_-_RM_Auctions_-_5_f%C3%A9vrier_2014_-_Bugatti_Veyron_16.4_Grand_Sport_-_2010.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Paris_-_RM_Auctions_-_5_f%C3%A9vrier_2014_-_Bugatti_Veyron_16.4_Grand_Sport_-_2010.webm",
+    "title": "File:Paris - RM Auctions - 5 février 2014 - Bugatti Veyron 16.4 Grand Sport - 2010.webm",
+    "creator": "Thesupermat",
+    "rights_holder": "Thesupermat",
+    "license": "CC BY-SA 3.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "attribution": "Thesupermat / Wikimedia Commons / CC BY-SA 3.0",
+    "width": 1920,
+    "height": 1080,
+    "shows": "Handheld walk-around of a red-and-polished-aluminium 2010 Veyron 16.4 Grand Sport on display at the RM Auctions Paris sale, Feb 2014 (static car, indoor).",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/80/Paris_-_RM_Auctions_-_5_f%C3%A9vrier_2014_-_Bugatti_Veyron_16.4_Grand_Sport_-_2010.webm/960px--Paris_-_RM_Auctions_-_5_f%C3%A9vrier_2014_-_Bugatti_Veyron_16.4_Grand_Sport_-_2010.webm.jpg",
+    "duration_s": 50.51
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/f/fa/Bugatti_Veyron.ogv",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Bugatti_Veyron.ogv",
+    "title": "File:Bugatti Veyron.ogv",
+    "creator": "Gzen92",
+    "rights_holder": "Gzen92",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Gzen92 / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 640,
+    "height": 480,
+    "shows": "Low-light, low-resolution (640x480) clip of a black Veyron on a display turntable at the Cite de l'Automobile museum in Mulhouse (static car).",
+    "exact_subject": true,
+    "mime": "application/ogg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fa/Bugatti_Veyron.ogv/500px--Bugatti_Veyron.ogv.jpg",
+    "duration_s": 83.12
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/c/c4/Bugatti_Veyron_16.4_Grand_Sport_%285491314333%29.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Bugatti_Veyron_16.4_Grand_Sport_(5491314333).jpg",
+    "title": "File:Bugatti Veyron 16.4 Grand Sport (5491314333).jpg",
+    "creator": "Autoviva",
+    "rights_holder": "Autoviva",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "Autoviva / Wikimedia Commons / CC BY 2.0",
+    "width": 4288,
+    "height": 2848,
+    "shows": "Veyron 16.4 Grand Sport on Bugatti's stand at the 2011 Geneva Motor Show.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c4/Bugatti_Veyron_16.4_Grand_Sport_%285491314333%29.jpg/960px-Bugatti_Veyron_16.4_Grand_Sport_%285491314333%29.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/6/62/Bugatti_Veyron_16.4_Grand_Sport.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Bugatti_Veyron_16.4_Grand_Sport.jpg",
+    "title": "File:Bugatti Veyron 16.4 Grand Sport.jpg",
+    "creator": "Alexandre Prevot",
+    "rights_holder": "Alexandre Prevot",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Alexandre Prevot / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 3500,
+    "height": 2333,
+    "shows": "Veyron 16.4 Grand Sport photographed in 2025 (Alexandre Prevot).",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/62/Bugatti_Veyron_16.4_Grand_Sport.jpg/960px-Bugatti_Veyron_16.4_Grand_Sport.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/4/4f/2008_Bugatti_Veyron_16.4.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:2008_Bugatti_Veyron_16.4.jpg",
+    "title": "File:2008 Bugatti Veyron 16.4.jpg",
+    "creator": "Vauxford",
+    "rights_holder": "Vauxford",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Vauxford / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 4934,
+    "height": 3293,
+    "shows": "2008 Veyron 16.4 coupe at Salon Prive, Blenheim Palace, 2019.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4f/2008_Bugatti_Veyron_16.4.jpg/960px-2008_Bugatti_Veyron_16.4.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/c/c9/Bugatti_Veyron_16.4_%E2%80%93_Frontansicht_%281%29%2C_5._April_2012%2C_D%C3%BCsseldorf.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Bugatti_Veyron_16.4_%E2%80%93_Frontansicht_(1),_5._April_2012,_D%C3%BCsseldorf.jpg",
+    "title": "File:Bugatti Veyron 16.4 – Frontansicht (1), 5. April 2012, Düsseldorf.jpg",
+    "creator": "M 93",
+    "rights_holder": "M 93",
+    "license": "CC BY-SA 3.0 de",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0/de/deed.en",
+    "attribution": "M 93 / Wikimedia Commons / CC BY-SA 3.0 de",
+    "width": 3261,
+    "height": 2086,
+    "shows": "Front view of a Veyron 16.4 Grand Sport outside Bentley Duesseldorf, 2012.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c9/Bugatti_Veyron_16.4_%E2%80%93_Frontansicht_%281%29%2C_5._April_2012%2C_D%C3%BCsseldorf.jpg/960px-Bugatti_Veyron_16.4_%E2%80%93_Frontansicht_%281%29%2C_5._April_2012%2C_D%C3%BCsseldorf.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/7/70/Bugatti_Veyron_16.4%2C_Automobilforum_unter_den_Linden%2C_2006_%2801%29.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Bugatti_Veyron_16.4,_Automobilforum_unter_den_Linden,_2006_(01).jpg",
+    "title": "File:Bugatti Veyron 16.4, Automobilforum unter den Linden, 2006 (01).jpg",
+    "creator": "Bahnfrend",
+    "rights_holder": "Bahnfrend",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Bahnfrend / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 3008,
+    "height": 2000,
+    "shows": "Veyron 16.4 coupe on display at the Automobilforum Unter den Linden, Berlin, 2006.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/70/Bugatti_Veyron_16.4%2C_Automobilforum_unter_den_Linden%2C_2006_%2801%29.jpg/960px-Bugatti_Veyron_16.4%2C_Automobilforum_unter_den_Linden%2C_2006_%2801%29.jpg"
+   }
+  ]
+ },
+ "dubai": {
+  "headline": "Dubai property hit a record AED 917 billion in 2025 - and 2026 project completions are up 52%",
+  "subject": "Dubai real estate market (Dubai Land Department market totals)",
+  "category": "real_estate",
+  "facts": [
+   {
+    "text": "Dubai's real estate market recorded over 270,000 transactions worth AED 917 billion in 2025, up 20% year on year.",
+    "source": "Dubai Media Office (Government of Dubai)",
+    "url": "https://www.mediaoffice.ae/en/news/2026/january/12-01/dubais-real-estate-market-records-new-historic-milestone",
+    "date": "2026-01-12"
+   },
+   {
+    "text": "Real estate investments in 2025 exceeded AED 680 billion across 258.6 thousand deals, up 29% in value and 20% in number.",
+    "source": "Dubai Media Office (Government of Dubai)",
+    "url": "https://www.mediaoffice.ae/en/news/2026/january/12-01/dubais-real-estate-market-records-new-historic-milestone",
+    "date": "2026-01-12"
+   },
+   {
+    "text": "Investors reached around 193.1 thousand in 2025, up 24%, including 129.6 thousand new investors.",
+    "source": "Dubai Media Office (Government of Dubai)",
+    "url": "https://www.mediaoffice.ae/en/news/2026/january/12-01/dubais-real-estate-market-records-new-historic-milestone",
+    "date": "2026-01-12"
+   },
+   {
+    "text": "The Dubai Real Estate Sector Strategy 2033 seeks to raise transaction volume by 70% to reach AED 1 trillion (a target, not a result).",
+    "source": "Dubai Media Office (Government of Dubai)",
+    "url": "https://www.mediaoffice.ae/en/news/2026/january/12-01/dubais-real-estate-market-records-new-historic-milestone",
+    "date": "2026-01-12"
+   },
+   {
+    "text": "Per DLD officials, around 104 real estate projects worth more than Dh100 billion were completed in H1 2026, value up 52% year on year, adding more than 24,000 new units (up 36%). (A related WAM/Khaleej headline cites 'over Dh111 billion'; the article's own figure is used.)",
+    "source": "Khaleej Times (DLD officials at Rise Summit 2026)",
+    "url": "https://www.khaleejtimes.com/business/property/dubai-real-estate-projects-dh100-billion-first-half-2026",
+    "date": "2026-10-14"
+   }
+  ],
+  "numbers": {
+   "transactions_aed_bn_2025": 917,
+   "transactions_count_2025": 270000,
+   "yoy_growth_pct_2025": 20,
+   "investments_aed_bn_2025": 680,
+   "investors_2025": 193100,
+   "h1_2026_projects_completed": 104,
+   "h1_2026_project_value_aed_bn": 100,
+   "h1_2026_new_units": 24000
+  },
+  "sources": [
+   {
+    "name": "Dubai Media Office - Dubai's real estate market records new historic milestone",
+    "url": "https://www.mediaoffice.ae/en/news/2026/january/12-01/dubais-real-estate-market-records-new-historic-milestone"
+   },
+   {
+    "name": "Khaleej Times - Dubai real estate projects surge 52% to Dh100 billion in H1 2026",
+    "url": "https://www.khaleejtimes.com/business/property/dubai-real-estate-projects-dh100-billion-first-half-2026"
+   }
+  ],
+  "media": [
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/0/08/Dubai%2C_UAE.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Dubai,_UAE.webm",
+    "title": "File:Dubai, UAE.webm",
+    "creator": "Google Earth",
+    "rights_holder": "Google Earth",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "Google Earth / Wikimedia Commons / CC BY 3.0",
+    "width": 3840,
+    "height": 2160,
+    "shows": "Google Earth Timelapse satellite sequence (1984 onward) of Dubai's coastline growing, including the Palm Jumeirah and new districts.",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/Dubai%2C_UAE.webm/960px--Dubai%2C_UAE.webm.jpg",
+    "duration_s": 37.12
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/9/97/Google_Earth_Timelapse-_Dubai%2C_UAE.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Google_Earth_Timelapse-_Dubai,_UAE.webm",
+    "title": "File:Google Earth Timelapse- Dubai, UAE.webm",
+    "creator": "Google Earth",
+    "rights_holder": "Google Earth",
+    "license": "CC BY 3.0",
+    "license_url": "https://creativecommons.org/licenses/by/3.0",
+    "attribution": "Google Earth / Wikimedia Commons / CC BY 3.0",
+    "width": 3840,
+    "height": 2160,
+    "shows": "Earlier (2016) Google Earth Timelapse satellite sequence of Dubai's expansion.",
+    "exact_subject": true,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/97/Google_Earth_Timelapse-_Dubai%2C_UAE.webm/960px--Google_Earth_Timelapse-_Dubai%2C_UAE.webm.jpg",
+    "duration_s": 12.32
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/e/e7/Dubai%27s_Rapid_Growth.ogv",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Dubai%27s_Rapid_Growth.ogv",
+    "title": "File:Dubai's Rapid Growth.ogv",
+    "creator": "NASA/Goddard Space Flight Center",
+    "rights_holder": "NASA/Goddard Space Flight Center",
+    "license": "Public domain",
+    "license_url": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "attribution": "NASA/Goddard Space Flight Center via Wikimedia Commons (Public domain)",
+    "width": 960,
+    "height": 540,
+    "shows": "NASA false-colour Landsat time-lapse, one frame per year 2000-2011, showing the Palm Jumeirah and surrounding districts being built.",
+    "exact_subject": true,
+    "mime": "application/ogg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e7/Dubai%27s_Rapid_Growth.ogv/960px--Dubai%27s_Rapid_Growth.ogv.jpg",
+    "duration_s": 12.07
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/8/89/Dubai_landing_2025.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Dubai_landing_2025.webm",
+    "title": "File:Dubai landing 2025.webm",
+    "creator": "Shyamal",
+    "rights_holder": "Shyamal",
+    "license": "CC0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "attribution": "Shyamal via Wikimedia Commons (CC0)",
+    "width": 1080,
+    "height": 1920,
+    "shows": "Vertical (9:16) window view from a plane landing in Dubai, Aug 2025, 2x speed, low-rise districts in haze.",
+    "exact_subject": false,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/89/Dubai_landing_2025.webm/960px--Dubai_landing_2025.webm.jpg",
+    "duration_s": 34.97
+   },
+   {
+    "kind": "video",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/7/70/Dubai_skyline_2013.webm",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Dubai_skyline_2013.webm",
+    "title": "File:Dubai skyline 2013.webm",
+    "creator": "Pradana Aumars",
+    "rights_holder": "Pradana Aumars",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Pradana Aumars / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 1920,
+    "height": 1080,
+    "shows": "Shaky phone clip from a car on a Dubai highway in 2013; mostly road barrier and hazy sky - weak, use only as filler.",
+    "exact_subject": false,
+    "mime": "video/webm",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/70/Dubai_skyline_2013.webm/960px--Dubai_skyline_2013.webm.jpg",
+    "duration_s": 14.31
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/e/e6/Dubai_Marina_Skyline.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Dubai_Marina_Skyline.jpg",
+    "title": "File:Dubai Marina Skyline.jpg",
+    "creator": "Norlando Pobre",
+    "rights_holder": "Norlando Pobre",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "Norlando Pobre / Wikimedia Commons / CC BY 2.0",
+    "width": 6000,
+    "height": 4000,
+    "shows": "Dubai Marina skyscrapers at dusk, 2020 (6000x4000).",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e6/Dubai_Marina_Skyline.jpg/960px-Dubai_Marina_Skyline.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/7/75/Burj_Khalifa_Dubai%2C_UAE_at_Sunset_001_by_Eric_Chamchoum.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Burj_Khalifa_Dubai,_UAE_at_Sunset_001_by_Eric_Chamchoum.jpg",
+    "title": "File:Burj Khalifa Dubai, UAE at Sunset 001 by Eric Chamchoum.jpg",
+    "creator": "ECWiki1",
+    "rights_holder": "ECWiki1",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0",
+    "attribution": "ECWiki1 / Wikimedia Commons / CC BY 4.0",
+    "width": 4032,
+    "height": 3024,
+    "shows": "Burj Khalifa at sunset, 2024.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/7/75/Burj_Khalifa_Dubai%2C_UAE_at_Sunset_001_by_Eric_Chamchoum.jpg/960px-Burj_Khalifa_Dubai%2C_UAE_at_Sunset_001_by_Eric_Chamchoum.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/e/e4/Dubai_skyline_unsplash.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Dubai_skyline_unsplash.jpg",
+    "title": "File:Dubai skyline unsplash.jpg",
+    "creator": "Robert Bock",
+    "rights_holder": "Robert Bock",
+    "license": "CC0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "attribution": "Robert Bock via Wikimedia Commons (CC0)",
+    "width": 5760,
+    "height": 3840,
+    "shows": "Downtown Dubai skyline with Burj Khalifa at night, 2016 (Unsplash, CC0).",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e4/Dubai_skyline_unsplash.jpg/960px-Dubai_skyline_unsplash.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/8/8e/Palm_Jumeirah%2CDubai_%2815048707596%29.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Palm_Jumeirah,Dubai_(15048707596).jpg",
+    "title": "File:Palm Jumeirah,Dubai (15048707596).jpg",
+    "creator": "Alec Wilson from Khon Kaen, Thailand",
+    "rights_holder": "Alec Wilson from Khon Kaen, Thailand",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+    "attribution": "Alec Wilson from Khon Kaen, Thailand / Wikimedia Commons / CC BY-SA 2.0",
+    "width": 2304,
+    "height": 1536,
+    "shows": "Aerial view of the Palm Jumeirah from an airliner window, 2014.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8e/Palm_Jumeirah%2CDubai_%2815048707596%29.jpg/960px-Palm_Jumeirah%2CDubai_%2815048707596%29.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/8/85/Downtown_Dubai_%2827494111631%29.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Downtown_Dubai_(27494111631).jpg",
+    "title": "File:Downtown Dubai (27494111631).jpg",
+    "creator": "Peter Chovanec",
+    "rights_holder": "Peter Chovanec",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "Peter Chovanec / Wikimedia Commons / CC BY 2.0",
+    "width": 3569,
+    "height": 2677,
+    "shows": "Downtown Dubai towers, 2016.",
+    "exact_subject": true,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/85/Downtown_Dubai_%2827494111631%29.jpg/960px-Downtown_Dubai_%2827494111631%29.jpg"
+   }
+  ],
+  "caveats": "No individual property price is used; all numbers are official market totals (Government of Dubai / DLD). Commons has little modern CC drone footage of Dubai; the strongest videos are satellite time-lapses (Google Earth, NASA)."
+ },
+ "mewtwo_extra": {
+  "note": "Supporting context photos only. NONE of these shows a Rocket's Mewtwo (Gym Challenge) card or a PSA 10 slab of it. Photos showing Pokemon card artwork or packaging include copyrighted artwork (Commons hosts them under de minimis / freedom-of-panorama reasoning) - use them small/background and never as the card in question.",
+  "media": [
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/d/d1/1909_T206_Honus_Wagner_Baseball_Card_with_PSA_grade_EX_5-MC.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:1909_T206_Honus_Wagner_Baseball_Card_with_PSA_grade_EX_5-MC.jpg",
+    "title": "File:1909 T206 Honus Wagner Baseball Card with PSA grade EX 5-MC.jpg",
+    "creator": "Uncredited baseball card artist",
+    "rights_holder": "Uncredited baseball card artist",
+    "license": "Public domain",
+    "license_url": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "attribution": "Uncredited baseball card artist via Wikimedia Commons (Public domain)",
+    "width": 448,
+    "height": 744,
+    "shows": "A 1909 T206 Honus Wagner baseball card in a PSA graded slab (grade EX 5-MC) - illustrates what a PSA slab and label look like; it is a baseball card, not Pokemon. Commons tags it public domain (1909 card); source photo appears to be an auction-house image - lower-confidence license.",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://upload.wikimedia.org/wikipedia/commons/d/d1/1909_T206_Honus_Wagner_Baseball_Card_with_PSA_grade_EX_5-MC.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/5/57/Pok%C3%A9mon_World_Championships_2014.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Pok%C3%A9mon_World_Championships_2014.jpg",
+    "title": "File:Pokémon World Championships 2014.jpg",
+    "creator": "David from Washington, DC",
+    "rights_holder": "David from Washington, DC",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "David from Washington, DC / Wikimedia Commons / CC BY 2.0",
+    "width": 4561,
+    "height": 3214,
+    "shows": "Hall of the 2014 Pokemon World Championships with many players (mostly video-game players on Nintendo DS).",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/57/Pok%C3%A9mon_World_Championships_2014.jpg/960px-Pok%C3%A9mon_World_Championships_2014.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/c/c3/Entrance_of_the_2022_London_Pok%C3%A9mon_World_Championships_-_August_2022.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Entrance_of_the_2022_London_Pok%C3%A9mon_World_Championships_-_August_2022.jpg",
+    "title": "File:Entrance of the 2022 London Pokémon World Championships - August 2022.jpg",
+    "creator": "Captain Galaxy",
+    "rights_holder": "Captain Galaxy",
+    "license": "CC BY 4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0",
+    "attribution": "Captain Galaxy / Wikimedia Commons / CC BY 4.0",
+    "width": 3456,
+    "height": 2304,
+    "shows": "Entrance and pop-up shop of the 2022 Pokemon World Championships in London.",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/c/c3/Entrance_of_the_2022_London_Pok%C3%A9mon_World_Championships_-_August_2022.jpg/960px-Entrance_of_the_2022_London_Pok%C3%A9mon_World_Championships_-_August_2022.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/5/5b/Line_to_buy_merchandise_at_Pokemon_World_Championships_%2854277323262%29.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Line_to_buy_merchandise_at_Pokemon_World_Championships_(54277323262).jpg",
+    "title": "File:Line to buy merchandise at Pokemon World Championships (54277323262).jpg",
+    "creator": "Daniel Ramirez from Honolulu, USA",
+    "rights_holder": "Daniel Ramirez from Honolulu, USA",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "Daniel Ramirez from Honolulu, USA / Wikimedia Commons / CC BY 2.0",
+    "width": 4032,
+    "height": 3024,
+    "shows": "Long queue of fans for merchandise at the 2024 Pokemon World Championships.",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5b/Line_to_buy_merchandise_at_Pokemon_World_Championships_%2854277323262%29.jpg/960px-Line_to_buy_merchandise_at_Pokemon_World_Championships_%2854277323262%29.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/3/31/Pyrkon_2022_Pokemon_Trading_Card_Game.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Pyrkon_2022_Pokemon_Trading_Card_Game.jpg",
+    "title": "File:Pyrkon 2022 Pokemon Trading Card Game.jpg",
+    "creator": "Klapi",
+    "rights_holder": "Klapi",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Klapi / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 2861,
+    "height": 2011,
+    "shows": "People playing the Pokemon Trading Card Game at tables at the Pyrkon 2022 convention in Poland.",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/31/Pyrkon_2022_Pokemon_Trading_Card_Game.jpg/960px-Pyrkon_2022_Pokemon_Trading_Card_Game.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/3/3e/POKEMON_card_battle.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:POKEMON_card_battle.jpg",
+    "title": "File:POKEMON card battle.jpg",
+    "creator": "MIKI Yoshihito",
+    "rights_holder": "MIKI Yoshihito",
+    "license": "CC BY 2.0",
+    "license_url": "https://creativecommons.org/licenses/by/2.0",
+    "attribution": "MIKI Yoshihito / Wikimedia Commons / CC BY 2.0",
+    "width": 4752,
+    "height": 3168,
+    "shows": "Children playing a Pokemon card game in Japan, 2009.",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/3e/POKEMON_card_battle.jpg/960px-POKEMON_card_battle.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/c/c1/Pokemon_collection.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Pokemon_collection.jpg",
+    "title": "File:Pokemon collection.jpg",
+    "creator": "Jarek Tuszyński",
+    "rights_holder": "Jarek Tuszyński",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "Jarek Tuszyński / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 640,
+    "height": 425,
+    "shows": "A personal Pokemon card collection laid out (modern cards, low resolution 640x425; card artwork visible).",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://upload.wikimedia.org/wikipedia/commons/c/c1/Pokemon_collection.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/9/9c/Pok%C3%A9mon_Trading_Card_Vending_machine.jpg",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Pok%C3%A9mon_Trading_Card_Vending_machine.jpg",
+    "title": "File:Pokémon Trading Card Vending machine.jpg",
+    "creator": "KKPCW（Kyu3）",
+    "rights_holder": "KKPCW（Kyu3）",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "attribution": "KKPCW（Kyu3） / Wikimedia Commons / CC BY-SA 4.0",
+    "width": 2780,
+    "height": 3882,
+    "shows": "A Pokemon card vending machine in a Don Quijote store in Nagoya, Japan (packaging visible).",
+    "exact_subject": false,
+    "mime": "image/jpeg",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9c/Pok%C3%A9mon_Trading_Card_Vending_machine.jpg/960px-Pok%C3%A9mon_Trading_Card_Vending_machine.jpg"
+   },
+   {
+    "kind": "image",
+    "file_url": "https://upload.wikimedia.org/wikipedia/commons/2/29/Pok%C3%A9mon_TCG_First_Edition_symbol.png",
+    "page_url": "https://commons.wikimedia.org/wiki/File:Pok%C3%A9mon_TCG_First_Edition_symbol.png",
+    "title": "File:Pokémon TCG First Edition symbol.png",
+    "creator": "Wizards of the Coast/Creatures Inc./Media Factory",
+    "rights_holder": "Wizards of the Coast/Creatures Inc./Media Factory",
+    "license": "Public domain",
+    "license_url": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "attribution": "Wizards of the Coast/Creatures Inc./Media Factory via Wikimedia Commons (Public domain)",
+    "width": 1198,
+    "height": 893,
+    "shows": "The 'Edition 1' symbol used on first-edition English Pokemon TCG cards (graphic, public domain as simple shape).",
+    "exact_subject": false,
+    "mime": "image/png",
+    "poster_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/29/Pok%C3%A9mon_TCG_First_Edition_symbol.png/960px-Pok%C3%A9mon_TCG_First_Edition_symbol.png"
+   }
+  ]
+ }
+}

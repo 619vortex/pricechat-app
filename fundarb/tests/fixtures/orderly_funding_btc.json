@@ -1,0 +1,13 @@
+{
+ "success": true,
+ "data": {
+  "symbol": "PERP_BTC_USDC",
+  "est_funding_rate": 6.961e-05,
+  "est_funding_rate_timestamp": 1792586490000,
+  "last_funding_rate": 3.372e-05,
+  "last_funding_rate_timestamp": 1792569600000,
+  "next_funding_time": 1792598400000,
+  "sum_unitary_funding": 27817.2
+ },
+ "timestamp": 1792586501084
+}

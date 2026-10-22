@@ -1,0 +1,81 @@
+/* Market terminal motion. Rules (same as website/motion.css): transform / opacity only, short, and every hidden
+   start state exists ONLY when the viewer allows motion. Reduced motion = everything static, nothing hidden. */
+
+/* --- always-on refinements (no motion) --- */
+.mx-h1 { background: linear-gradient(90deg, var(--text) 0%, var(--text) 60%, color-mix(in srgb, var(--neon) 70%, var(--text)) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.mx-box { background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, var(--neon) 8%) 0%, var(--surface) 38%); }
+.mx-kpi strong { font-variant-numeric: tabular-nums; }
+.mx-table tbody tr { position: relative; }
+.mx-table tbody tr td:first-child { box-shadow: inset 2px 0 0 transparent; transition: box-shadow 0.15s; }
+.mx-table tbody tr:hover td:first-child { box-shadow: inset 2px 0 0 var(--neon); }
+.mx-soundbtn { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  color: var(--muted); font-size: 15px; cursor: pointer; }
+.mx-soundbtn[aria-pressed="true"] { color: var(--neon); border-color: color-mix(in srgb, var(--neon) 45%, var(--line)); }
+.mx-soundbtn:focus-visible { outline: 2px solid var(--neon); outline-offset: 1px; }
+
+/* card preview on thumbnail hover (desktop pointers only) */
+.mx-thumbwrap { position: relative; display: inline-flex; flex: none; }
+.mx-preview { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .mx-thumbwrap:hover .mx-preview { display: block; position: absolute; z-index: 30; left: calc(100% + 10px); top: 50%; width: 180px; height: auto;
+    transform: translateY(-50%); border-radius: 9px; box-shadow: 0 18px 50px rgb(0 0 0 / 0.6), 0 0 0 1px var(--line); pointer-events: none; }
+}
+
+/* skeleton placeholders */
+.mx-skel { display: flex; flex-direction: column; gap: 10px; }
+.mx-skel-row { height: 46px; border-radius: 8px; background: var(--surface); }
+.mx-skel-box { height: 120px; border-radius: 14px; background: var(--surface); }
+.mx-skel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .mx-skel-grid { grid-template-columns: 1fr; } }
+
+/* card page: holo tilt */
+.mx-tilt { position: relative; display: block; width: 100%; max-width: 300px; border-radius: 12px; transform-style: preserve-3d; }
+.mx-tilt .mx-coin-img { display: block; }
+.mx-tilt-shine { position: absolute; inset: 0; border-radius: 12px; pointer-events: none; opacity: 0; mix-blend-mode: color-dodge;
+  background: radial-gradient(circle at var(--mx-x, 50%) var(--mx-y, 50%), rgb(255 255 255 / 0.55), rgb(57 255 136 / 0.18) 28%, transparent 60%),
+    linear-gradient(115deg, transparent 30%, rgb(124 196 255 / 0.25) 45%, rgb(255 122 144 / 0.22) 55%, transparent 70%); }
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes mx-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes mx-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes mx-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+  @keyframes mx-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: 0.55; } }
+  @keyframes mx-pop { 0% { transform: scale(1); } 40% { transform: scale(1.45) rotate(-12deg); } 100% { transform: scale(1); } }
+  @keyframes mx-shimmer { from { background-position: -400px 0; } to { background-position: 400px 0; } }
+  @keyframes mx-flash-up { from { background-color: rgb(22 199 132 / 0.22); } to { background-color: transparent; } }
+  @keyframes mx-flash-down { from { background-color: rgb(234 57 67 / 0.22); } to { background-color: transparent; } }
+
+  .mx-highlights > * { animation: mx-rise 0.45s cubic-bezier(.2, .7, .2, 1) both; }
+  .mx-highlights > *:nth-child(2) { animation-delay: 0.06s; }
+  .mx-highlights > *:nth-child(3) { animation-delay: 0.12s; }
+  .mx-anim-rows tr { animation: mx-rise 0.35s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(min(var(--i, 0), 24) * 18ms); }
+  .mx-spark .mx-spark-line { stroke-dasharray: 1; stroke-dashoffset: 0; animation: mx-draw 0.9s ease-out both; animation-delay: calc(min(var(--i, 0), 24) * 18ms + 0.1s); }
+  .mx-brand-dot, .mx-pulse-dot { animation: mx-pulse 2.4s ease-in-out infinite; }
+  .mx-star.is-popping { animation: mx-pop 0.35s ease-out; }
+  .mx-post { animation: mx-rise 0.35s ease-out both; }
+  .mx-chart-canvas { animation: mx-fade 0.4s ease-out both; }
+  .mx-tabs button, .mx-chip, .mx-pill, .mx-pulse-tabs button { transition: color 0.15s, background-color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+  .mx-table tbody tr td { transition: background-color 0.15s; }
+  .mx-flash-up td { animation: mx-flash-up 1.1s ease-out; }
+  .mx-flash-down td { animation: mx-flash-down 1.1s ease-out; }
+  .mx-skel-row, .mx-skel-box { background: linear-gradient(90deg, var(--surface) 0px, var(--surface-2) 120px, var(--surface) 240px) var(--surface);
+    background-size: 800px 100%; animation: mx-shimmer 1.3s linear infinite; }
+  .mx-tilt { transition: transform 0.25s ease-out; }
+  .mx-tilt:hover .mx-tilt-shine { opacity: 1; transition: opacity 0.2s; }
+  .mx-coin-price strong { display: inline-block; }
+}
+
+/* floating card preview (portal on <body>): fixed, above everything, never clipped */
+.mx-preview-layer { position: fixed; z-index: 1000; width: 190px; height: auto; border-radius: 10px; pointer-events: none;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 255 255 / 0.08); }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes mx-preview-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+  .mx-preview-layer { animation: mx-preview-in 0.14s ease-out both; transform-origin: left center; }
+}
+.mx-pulse-title { font-size: 13px; letter-spacing: -0.01em; }
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes mx-spark-fill { from { opacity: 0; } to { opacity: 1; } }
+  .mx-spark .mx-spark-area, .mx-spark .mx-spark-dot { animation: mx-spark-fill 0.6s ease-out both; animation-delay: calc(min(var(--i, 0), 24) * 18ms + 0.5s); }
+}

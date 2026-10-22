@@ -1,0 +1,22 @@
+{
+ "documentary": {
+  "bpm": 84,
+  "seconds": 68.071,
+  "offset": 0.0
+ },
+ "viral": {
+  "bpm": 124,
+  "seconds": 76.919,
+  "offset": 0.0
+ },
+ "playful": {
+  "bpm": 108,
+  "seconds": 70.611,
+  "offset": 0.0
+ },
+ "market": {
+  "bpm": 100,
+  "seconds": 76.3,
+  "offset": 0.0
+ }
+}

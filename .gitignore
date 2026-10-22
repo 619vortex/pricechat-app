@@ -1,0 +1,40 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.dpapi
+
+# python
+.venv/
+.venv-gpu/
+worker/models/
+worker/out/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local data
+data/*
+!data/.gitkeep
+*.db
+
+.vscode/
+.idea/
+
+# deployment safety (also excluded by frontend/.vercelignore and backend/.railwayignore)
+*.bak
+*.db-*
+secrets*.json
+
+# local copies and tool state
+backups/
+.vercel/
+.claude/
+worker/cache/
+*.log
+backend/realm/*.gz

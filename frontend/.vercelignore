@@ -1,0 +1,8 @@
+# Never upload local secrets or build leftovers (Vercel installs and builds itself)
+.env
+.env.*
+node_modules
+dist
+*.tsbuildinfo
+*.db
+*.dpapi

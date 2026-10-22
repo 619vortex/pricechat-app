@@ -1,0 +1,27 @@
+# Prefer prebuilt wheels: source builds can be blocked by Windows Application Control.
+--prefer-binary
+
+fastapi>=0.115
+uvicorn[standard]>=0.32
+websockets>=12  # Lunch Bot live feed (PumpPortal); also pulled in by uvicorn[standard]
+sqlalchemy>=2.0.36
+pydantic>=2.10
+pydantic-settings>=2.6
+httpx>=0.28
+alembic>=1.14
+numpy>=2.1
+tzdata>=2024.1
+# Encrypts stored secrets and members' X tokens in production (APP_ENCRYPTION_KEY); Windows dev uses DPAPI.
+cryptography>=44
+# Telegram account mode: official Telegram client API (MTProto). Pure Python.
+telethon>=1.45,<2
+
+# Pokémon Portfolio: photo uploads (multipart), image checks / thumbnails / metadata stripping, private S3-compatible bucket
+python-multipart>=0.0.20
+pillow>=11
+boto3>=1.35
+
+# testing
+pytest>=8.3
+pytest-asyncio>=0.24
+hyperliquid-python-sdk==0.24.0  # Trading OS: official Hyperliquid signing (orders through an approved API wallet)

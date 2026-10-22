@@ -1,0 +1,345 @@
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { JoinPage, LeaderboardPage, LegalPage } from "./community";
+import { ProfilePage } from "./passport";
+import { Website } from "./Website";
+import { RankKiwi } from "./RankKiwi";
+import { refreshSession } from "./members";
+
+const art = (treatment: string, placeholder: string | null = null, slot: string | null = null) => ({ treatment, overlay: null, placeholder, slot });
+const scout = { level: 4, key: "scout", name: "Scout Kiwi", min_xp: 400, description: "", art: art("none", "🎒", "back") };
+const home = {
+  sections: { latest: true, trending: true, whats_it_worth: true, price_board: true, originals: true, community: true, story: true },
+  latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
+  links: { telegram: "https://t.me/thepricechat", x: "https://x.com/pricechat", youtube: "https://www.youtube.com/@pricechat" }, site_url: null,
+};
+const passport = {
+  member: { id: "m1", username: "KiwiKing", display_name: "KiwiKing", username_chosen: true, joined_at: "2026-09-01T10:00:00+00:00", xp: 612,
+            bonus_xp: 0, leaderboard_opt_out: false, xp_suspended: false },
+  rank: { current: scout, next: { ...scout, level: 5, key: "warrior", name: "Warrior Kiwi", min_xp: 900 }, xp_to_next: 288, progress: 0.424 },
+  linked: [
+    { platform: "telegram", label: "Telegram", connected: true, username: "kiwiking", verified_at: "2026-09-02T10:00:00+00:00" },
+    { platform: "x", label: "X", connected: false, username: null, verified_at: null },
+    { platform: "google", label: "Google / YouTube", connected: false, username: null, verified_at: null },
+  ],
+  badges: [{ key: "early_kiwi", name: "Early Kiwi", description: "", awarded_at: "2026-09-01T10:00:00+00:00", awarded_by: "automatic" }],
+  entitlements: [],
+  recent: [
+    { id: 2, event_type: "identity.telegram_linked", xp: 20, category: "reputation", source: "telegram", reason: "Connected Telegram",
+      occurred_at: "2026-09-02T10:00:00+00:00", reversed: false, is_reversal: false },
+    { id: 3, event_type: "manual.award", xp: -10, category: "reputation", source: "admin", reason: "Reversed: duplicate",
+      occurred_at: "2026-09-03T10:00:00+00:00", reversed: false, is_reversal: true },
+  ],
+};
+
+let routes: Record<string, unknown> = {};
+const calls: string[] = [];
+
+function serve(r: Record<string, unknown>) {
+  routes = r;
+  calls.length = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    calls.push(`${init?.method ?? "GET"} ${input}`);
+    const path = input.split("?")[0];
+    const body = routes[path];
+    return body === undefined ? new Response(JSON.stringify({ detail: "nope" }), { status: 404 }) : new Response(JSON.stringify(body), { status: 200 });
+  }));
+}
+
+async function show(ui: React.ReactElement) {
+  const r = render(ui);
+  await act(async () => {
+    await new Promise((res) => setTimeout(res, 0));
+  });
+  await act(async () => {
+    await new Promise((res) => setTimeout(res, 0));
+  });
+  return r;
+}
+
+beforeEach(() => {
+  localStorage.clear();
+  refreshSession();
+  window.matchMedia = ((q: string) => ({ matches: q.includes("reduce"), media: q, addEventListener() {}, removeEventListener() {} })) as never;
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("header account link", () => {
+  it("shows LOGIN when signed out", async () => {
+    serve({ "/api/website/home": home, "/api/members/session": { signed_in: false, member: null } });
+    const { container } = await show(<Website />);
+    const login = container.querySelector<HTMLAnchorElement>(".site-login")!;
+    expect(login.textContent).toBe("Login");
+    expect(login.getAttribute("href")).toBe("/website/join");
+    expect(container.querySelector(".site-joincta .site-button")!.textContent).toBe("Join Price Chat");
+  });
+
+  it("shows the member's Kiwi, username and rank when signed in", async () => {
+    serve({ "/api/website/home": home, "/api/members/session": { signed_in: true, member: { id: "m1", username: "KiwiKing", xp: 612, rank: scout } } });
+    const { container } = await show(<Website />);
+    const chip = container.querySelector<HTMLAnchorElement>(".site-account-member")!;
+    expect(chip.getAttribute("href")).toBe("/passport");
+    expect(chip.textContent).toContain("KiwiKing");
+    expect(chip.textContent).toContain("Scout Kiwi");
+    expect(chip.querySelector("img")!.getAttribute("src")).toBe("/brand/kiwi.webp");
+    expect(container.querySelector(".site-login")).toBeNull();
+  });
+
+  it("puts the community call to action after the story, just before the footer", async () => {
+    serve({ "/api/website/home": home, "/api/members/session": { signed_in: false, member: null } });
+    const { container } = await show(<Website />);
+    const ids = [...container.querySelectorAll("main > section")].map((s) => s.id).filter(Boolean);
+    expect(ids.indexOf("community")).toBe(ids.length - 1);
+    expect(ids.indexOf("story")).toBeLessThan(ids.indexOf("community"));
+    const footer = container.querySelector("footer")!;
+    for (const label of ["About", "Contact", "Disclaimer", "Terms", "Privacy", "YouTube", "X", "Telegram"])
+      expect(within(footer).getAllByText(label).length).toBeGreaterThan(0);
+  });
+
+  it("tells the story forward: the approved copy, nothing accusatory, and the Kiwi building beside the headline", async () => {
+    serve({ "/api/website/home": home, "/api/members/session": { signed_in: false, member: null } });
+    const { container } = await show(<Website />);
+    const story = container.querySelector("#story")!.textContent!;
+    for (const line of [
+      "We spent years helping build and support the Crypto Banter community.",
+      "It was an important chapter for us. We met incredible people, built relationships around the world and learned what makes an online community genuinely special.",
+      "Over time, our paths and ideas about what we wanted to build next began to change.",
+      "Rather than looking backwards, we decided to take everything we had learned — the experience, relationships, creativity and community spirit — and build something of our own.",
+      "Something broader than one market.",
+      "A place for people who are curious about crypto, stocks, collectibles, property, cars and everything else that has a price.",
+    ]) expect(story).toContain(line);
+    for (const gone of ["taken for granted", "Commitments should mean something", "should have been there", "built on trust", "promises", "walk away"])
+      expect(story).not.toContain(gone);
+    // the "We chose to build something new." scene and its closing copy were removed from the site
+    for (const gone of ["We chose to build", "something new.", "Price Chat is the next chapter.", "The community comes first."])
+      expect(story).not.toContain(gone);
+    expect(container.querySelector(".site-build, .pd-stage, .kb-build")).toBeNull();
+    expect(container.querySelector(".site-horizon .kf")).not.toBeNull(); // the failed-flight Kiwi above stays
+  });
+});
+
+describe("join page", () => {
+  it("puts one-tap Telegram, X and Google first, showing only the ones that are set up", async () => {
+    serve({
+      "/api/members/session": { signed_in: false, member: null },
+      "/api/website/home": home,
+      "/api/members/auth/providers": {
+        google: { available: true, note: "", callback: "" }, x: { available: false, note: "not set up", callback: "" },
+        telegram: { available: true, note: "", bot: "pricechat_bot", mode: "deeplink" },
+      },
+      "/api/members/auth/telegram/start": { request: 7, link: "https://t.me/pricechat_bot?start=pc_abc", expires_at: "" },
+    });
+    const { container } = await show(<JoinPage />);
+    const buttons = [...container.querySelectorAll(".lg-social .site-provider")].map((b) => b.textContent!.trim());
+    expect(buttons).toEqual(["Continue with Telegram", "Continue with Google"]);  // X isn't set up: not shown at all
+    expect(screen.getByText(/never posts or messages for you/)).toBeTruthy();
+    expect(container.querySelector("input[type=email]")).toBeNull();  // email sign-in not set up: no dead end, no empty form
+    expect(container.querySelector(".lg-legacy-box")).toBeNull();
+  });
+
+  it("also signs up with an email code when that's set up: email, 6 digits (pasted), then a username", async () => {
+    serve({
+      "/api/members/session": { signed_in: false, member: null },
+      "/api/website/home": home,
+      "/api/members/auth/providers": {
+        google: { available: true, note: "", callback: "" }, x: { available: true, note: "", callback: "" },
+        telegram: { available: true, note: "", bot: "pricechat_bot", mode: "deeplink" }, email: { available: true, code_minutes: 10, note: "" },
+      },
+      "/api/members/auth/telegram/start": { request: 7, link: "https://t.me/pricechat_bot?start=pc_abc", expires_at: "" },
+      "/api/members/auth/email/start": { sent: true, resend_after: 60, expires_in: 600 },
+      "/api/members/auth/email/verify": { signed_in: true, created: true, needs_username: true, member: { username: "Kiwi123456" } },
+      "/api/members/username/check": { ok: true, problem: null },
+      "/api/members/me": { member: { username: "KiwiFan" } },
+    });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...location, assign, search: "", replace: vi.fn() });
+    const { container } = await show(<JoinPage />);
+    expect([...container.querySelectorAll(".lg-social .site-provider")].length).toBe(3);
+    expect(screen.getByText("or with your email")).toBeTruthy();
+    const email = container.querySelector<HTMLInputElement>("input[type=email]")!;
+    await act(async () => { fireEvent.change(email, { target: { value: "fan@example.com" } }); });
+    await act(async () => { fireEvent.click(screen.getByText("Continue with Email")); });
+    expect(calls).toContain("POST /api/members/auth/email/start");
+    expect(screen.getByText(/We sent a 6-digit code to fan@example.com/)).toBeTruthy();
+    expect(screen.getByText("Resend code in 60s")).toBeTruthy(); // cooldown
+    const first = container.querySelector<HTMLInputElement>(".lg-digit")!;
+    await act(async () => {
+      fireEvent.paste(first, { clipboardData: { getData: () => "123 456" } });
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    expect(calls).toContain("POST /api/members/auth/email/verify");
+    const name = await screen.findByLabelText("Username");
+    await act(async () => {
+      fireEvent.change(name, { target: { value: "KiwiFan" } });
+      await new Promise((res) => setTimeout(res, 400));
+    });
+    expect(screen.getByText("Available")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByText("Start earning XP")); });
+    expect(calls).toContain("PATCH /api/members/me");
+    expect(assign).toHaveBeenCalledWith("/passport?welcome=new");
+  });
+
+  it("Telegram opens in the tap itself (link prepared beforehand) and explains Start, then the bot's reply", async () => {
+    serve({
+      "/api/members/session": { signed_in: false, member: null },
+      "/api/website/home": home,
+      "/api/members/auth/providers": { google: { available: false, note: "", callback: "" }, x: { available: false, note: "", callback: "" },
+                                       telegram: { available: true, note: "", bot: "pricechat_bot", mode: "deeplink" } },
+      "/api/members/auth/telegram/start": { request: 7, link: "https://t.me/pricechat_bot?start=pc_abc", expires_at: "" },
+      "/api/members/auth/telegram/status/7": { status: "pending" },
+    });
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    await show(<JoinPage />);
+    expect(calls).toContain("POST /api/members/auth/telegram/start");  // prepared before the tap
+    await act(async () => screen.getByText("Continue with Telegram").click());
+    expect(open).toHaveBeenCalledWith("https://t.me/pricechat_bot?start=pc_abc", "_blank", "noopener");  // synchronously: not blocked on phones
+    const steps = screen.getByRole("status").textContent!;
+    expect(steps).toContain("Tap Start");
+    expect(steps).toContain("Done!");
+    expect(sessionStorage.getItem("pc-tg-signin")).toContain("pc_abc");  // survives coming back from the Telegram app / a reload
+    sessionStorage.clear();
+  });
+});
+
+describe("Kiwi Passport", () => {
+  it("shows rank, XP progress, linked accounts and every XP award with its reason", async () => {
+    serve({
+      "/api/members/session": { signed_in: true, member: { id: "m1", username: "KiwiKing", xp: 612, rank: scout } },
+      "/api/members/me": passport, "/api/website/home": home, "/api/members/rules": { rules: [] }, "/api/members/ranks": { ranks: [scout] },
+    });
+    const { container } = await show(<ProfilePage />);
+    expect(container.querySelector(".pp-user")!.textContent).toBe("KiwiKing");
+    expect(container.querySelector(".pp-to-next")!.textContent).toBe("288 XP to Warrior Kiwi");
+    expect(container.querySelector<HTMLElement>(".pp-bar-fill")!.style.getPropertyValue("--p")).toBe("0.424");  // a transform, not a width
+    expect(container.querySelector(".pp-bar-track")!.getAttribute("aria-valuenow")).toBe("42");
+    const linked = container.querySelector(".pp-accounts")!.textContent!;
+    expect(linked).toContain("@kiwiking");
+    expect(linked).toContain("Connected ✓");
+    expect([...container.querySelectorAll(".pp-accounts .pp-connect button")].map((b) => b.textContent)).toEqual(["Connect", "Connect"]); // X, Google
+    const xp = [...container.querySelectorAll(".site-xp-list li")].map((li) => li.textContent);
+    expect(xp[0]).toContain("+20 XP");
+    expect(xp[0]).toContain("Connected Telegram");
+    expect(xp[1]).toContain("-10 XP");
+    expect(container.querySelector(".pp-kiwi img")!.getAttribute("src")).toBe("/brand/kiwi.webp"); // the canonical Kiwi, never redrawn
+    expect(screen.getByText("Delete my Price Chat account")).toBeTruthy();
+  });
+});
+
+describe("invite links", () => {
+  it("remember the invite and say plainly what earns the welcome bonus", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home,
+            "/api/members/auth/providers": { google: { available: true }, x: { available: true }, telegram: { available: true, bot: "b", mode: "deeplink" } },
+            "/api/members/referrals/visit": { valid: true, welcome_xp: 10, signed_in: false } });
+    const { container } = await show(
+      <MemoryRouter initialEntries={["/website/join/kiwi941074"]}>
+        <Routes><Route path="/website/join/:code" element={<JoinPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(calls).toContain("POST /api/members/referrals/visit");
+    expect(container.querySelector(".lb-invited")!.textContent).toBe(
+      "🥝 A friend invited you. Create your Kiwi Passport and do one real thing in Price Chat to get a +10 XP welcome bonus.");
+  });
+});
+
+describe("leaderboard", () => {
+  const row = (position: number, username: string, value: number) => ({ position, username, value, rank_score: value, xp: value, legacy_points: 0, rank: scout });
+
+  it("shows usernames, ranks and XP, medals for the top 3, and switches period and board", async () => {
+    serve({
+      "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home,
+      "/api/members/leaderboard": { period: "all", metric: "score", note: "", me: null,
+                                    rows: [row(1, "KiwiKing", 561), row(2, "Second", 400), row(3, "Third", 300), row(4, "Fourth", 200)] },
+    });
+    const { container } = await show(<LeaderboardPage />);
+    const rows = [...container.querySelectorAll(".lb-list li")];
+    expect(rows[0].textContent).toContain("KiwiKing");
+    expect(rows[0].textContent).toContain("Scout Kiwi");
+    expect(rows[0].textContent).toContain("561 XP");
+    expect(rows.slice(0, 3).map((r) => r.querySelector(".lb-medal")!.textContent)).toEqual(["🥇", "🥈", "🥉"]);
+    expect(rows[3].querySelector(".site-board-pos")!.textContent).toBe("#4");
+    // the podium: 2nd · 1st · 3rd, each with their rank Kiwi, the winner on the tallest step
+    const pods = [...container.querySelectorAll(".lb-podium .lb-pod")];
+    expect(pods.map((p) => p.querySelector(".lb-pod-name")!.textContent)).toEqual(["Second", "KiwiKing", "Third"]);
+    expect(pods[1].className).toContain("lb-pod-1");
+    expect(pods[1].querySelector(".lb-pod-val")!.textContent).toBe("561 XP");
+    expect(pods.every((p) => p.querySelector(".rk-kiwi"))).toBe(true);
+    expect(calls).toContain("GET /api/members/leaderboard?period=all&metric=score&limit=100");
+    await act(async () => screen.getByRole("tab", { name: "This week" }).click());
+    await act(async () => screen.getByRole("tab", { name: "Referrals" }).click());
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    expect(calls).toContain("GET /api/members/leaderboard?period=week&metric=referrals&limit=100");
+  });
+
+  it("always shows the member's own place, from the server, even outside the top 100", async () => {
+    serve({
+      "/api/members/session": { signed_in: true, member: { id: "m", username: "me_kiwi", xp: 88, rank: scout } }, "/api/website/home": home,
+      "/api/members/leaderboard": { period: "all", metric: "score", note: "", rows: [row(1, "KiwiKing", 561)],
+                                    me: { username: "me_kiwi", rank: scout, position: 347, value: 88, hidden: false } },
+    });
+    const { container } = await show(<LeaderboardPage />);
+    const mine = container.querySelector(".lb-me-row li")!;
+    expect(mine.className).toContain("is-me");
+    expect(mine.textContent).toContain("#347");
+    expect(mine.textContent).toContain("me_kiwi You");
+    expect(mine.textContent).toContain("88 XP");
+  });
+
+  it("shows your referral numbers on the referrals board", async () => {
+    serve({
+      "/api/members/session": { signed_in: true, member: { id: "m", username: "me_kiwi", xp: 88, rank: scout } }, "/api/website/home": home,
+      "/api/members/leaderboard": { period: "all", metric: "referrals", note: "", rows: [row(1, "me_kiwi", 5)],
+                                    me: { username: "me_kiwi", rank: scout, position: 1, value: 5, hidden: false } },
+      "/api/members/me/referrals": { code: "kiwi123456", link: "http://127.0.0.1:5173/website/join/kiwi123456", joined: 7, qualified: 5,
+                                     xp_earned: 125, reward_xp: 25, welcome_xp: 10, enabled: true, qualifying: ["Connected Telegram"] },
+    });
+    const { container } = await show(<LeaderboardPage />);
+    await act(async () => screen.getByRole("tab", { name: "Referrals" }).click());
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    expect(container.querySelector(".lb-mine")!.textContent).toContain("Joined7Qualified5XP earned125");
+    expect(container.querySelector(".lb-list li")!.className).toContain("is-me"); // in the list: highlighted, not repeated
+    expect(container.querySelector(".lb-list li")!.textContent).toContain("5 referrals");
+    expect(container.querySelector(".lb-me-row")).toBeNull();
+  });
+});
+
+describe("legal pages", () => {
+  it("are marked as drafts and the privacy page explains how connected accounts are used", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const { container } = await show(<LegalPage kind="privacy" />);
+    expect(screen.getByRole("note").textContent).toContain("Draft");
+    expect(container.textContent).toContain("Connected accounts may be used to verify eligible Price Chat community activity");
+    cleanup();
+    for (const kind of ["terms", "disclaimer", "contact"] as const) {
+      await show(<LegalPage kind={kind} />);
+      expect(screen.getByRole("note").textContent).toContain("Draft");
+      cleanup();
+    }
+  });
+});
+
+describe("rank art", () => {
+  it("always renders the canonical Kiwi, dressed per rank around it (backdrop + gear), never redrawn", () => {
+    const { container, rerender } = render(<RankKiwi art={art("none", "⚔️", "hand") as never} rankKey="warrior" size={120} />);
+    expect(container.querySelector(".rk-kiwi")!.getAttribute("src")).toBe("/brand/kiwi.webp");
+    expect(container.querySelectorAll(".rk img")).toHaveLength(1);  // one Kiwi, the canonical one
+    expect(container.querySelector(".rkd-warrior .rkd-gear-back .rkd-sword")).not.toBeNull();  // sword on the back
+    expect(container.querySelector(".rkd-gear-front .rkd-band")).not.toBeNull();  // headband
+    expect(container.querySelector(".rk-slot")).toBeNull();  // no more emoji placeholders
+    rerender(<RankKiwi art={art("none", "👑", "head") as never} rankKey="royal" size={40} />);
+    expect(container.querySelector(".rk.is-small .rkd-crown")).not.toBeNull();  // gear stays readable at list size
+    expect(container.querySelector(".rkd-rays")).toBeNull();  // effects don't
+    rerender(<RankKiwi art={{ treatment: "none", overlay: "/brand/ranks/warrior.png", placeholder: "⚔️", slot: "hand" }} />);
+    expect(container.querySelector(".rk-overlay")!.getAttribute("src")).toBe("/brand/ranks/warrior.png");
+    rerender(<RankKiwi art={art("gold") as never} />);
+    expect(container.querySelector(".rk-gold .rk-kiwi")!.getAttribute("src")).toBe("/brand/kiwi.webp");
+  });
+});

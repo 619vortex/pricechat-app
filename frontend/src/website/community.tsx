@@ -1,0 +1,384 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { useParams } from "react-router-dom";
+import { SiteFooter, SiteHeader, useReveal, useStored } from "./Website";
+import { useHead } from "./useHead";
+import { site } from "./websiteData";
+import type { HomeData } from "./websiteLogic";
+import {
+  memberApi, useCanonicalOrigin, useSession,
+  type Providers, type Rank, type XPEvent,
+} from "./members";
+import { RankKiwi } from "./RankKiwi";
+import { InviteModal, useReferrals } from "./invite";
+import { LoginPanel } from "./emailLogin";
+import { ConnectButton, PIcon, TelegramButton } from "./socialButtons";
+
+export { ConnectButton, PIcon, TelegramButton };
+
+/** A website page with the standard header and footer. */
+export function SitePage({ title, description, path, children }: { title: string; description: string; path: string; children: ReactNode }) {
+  const home = useStored<HomeData>("/api/website/home");
+  useHead({ title: `${title} · Price Chat`, description, path, siteUrl: home?.site_url ?? null, image: site.shareImage });
+  const root = useReveal();
+  return (
+    <div className="site" ref={root}>
+      <SiteHeader home={home} base="/" solid />
+      <main className="site-page site-page-anim">
+        <div className="site-wrap">{children}</div>
+      </main>
+      <SiteFooter home={home} />
+    </div>
+  );
+}
+
+function param(name: string): string | null {
+  return typeof location === "undefined" ? null : new URLSearchParams(location.search).get(name);
+}
+
+export function when(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+export function JoinPage() {
+  useCanonicalOrigin();
+  const member = useSession();
+  const { code } = useParams();
+  const [providers, setProviders] = useState<Providers | null>(null);
+  const [invited, setInvited] = useState<{ welcome_xp: number } | null>(null);
+  const error = param("error");
+  useEffect(() => {
+    void memberApi<Providers>("/members/auth/providers").then(setProviders).catch(() => setProviders(null));
+  }, []);
+  useEffect(() => {
+    // an invite link (/website/join/<code>): the server remembers the code for when this browser creates a Passport
+    if (!code) return;
+    void memberApi<{ valid: boolean; welcome_xp?: number; signed_in?: boolean }>("/members/referrals/visit", {
+      method: "POST", body: JSON.stringify({ code }),
+    }).then((r) => r.valid && !r.signed_in && setInvited({ welcome_xp: r.welcome_xp ?? 0 })).catch(() => undefined);
+  }, [code]);
+  useEffect(() => {
+    if (member) location.replace("/passport");
+  }, [member]);
+  const emailOn = providers ? !!providers.email?.available : null;
+  return (
+    <SitePage title="Join Price Chat" description="Sign in with Telegram, X or Google. Earn XP. Level up." path="/join">
+      <section className="site-join-page site-reveal">
+        <div className="site-join-intro">
+          <RankKiwi art={{ treatment: "egg", overlay: null, placeholder: null, slot: null }} rankKey="egg" size={120} />
+          <h1 className="site-display site-h1">
+            <span>Join</span>
+            <span className="site-green">Price Chat.</span>
+          </h1>
+          <p className="site-join-lines">
+            <span>{signInWays(providers)}. No password.</span>
+            <span>Earn XP. Level up.</span>
+            <span>Connect your socials later for missions.</span>
+          </p>
+        </div>
+        <div className="site-join-box">
+          {invited && (
+            <p className="site-banner lb-invited" role="status">
+              🥝 A friend invited you.{invited.welcome_xp > 0 ? <> Create your Kiwi Passport and do one real thing in Price Chat to get a
+                <strong> +{invited.welcome_xp} XP</strong> welcome bonus.</> : null}
+            </p>
+          )}
+          {error && <p className="site-error" role="alert">{error}</p>}
+          <LoginPanel available={emailOn} onDone={({ created }) => location.assign(`/passport?welcome=${created ? "new" : "back"}`)} />
+
+
+        </div>
+      </section>
+    </SitePage>
+  );
+}
+
+/** "Telegram, X or Google": only the sign-in methods this server has switched on (email needs its mail provider). */
+export function signInWays(p: Providers | null): string {
+  const ways = p ? [p.telegram.available && "Telegram", p.x.available && "X", p.google.available && "Google", p.email?.available && "email"]
+    .filter((w): w is string => !!w) : [];
+  if (!ways.length) return "Telegram, X or Google";
+  return ways.length === 1 ? ways[0] : `${ways.slice(0, -1).join(", ")} or ${ways[ways.length - 1]}`;
+}
+
+export function XPRow({ e }: { e: XPEvent }) {
+  return (
+    <li className={e.reversed ? "is-reversed" : ""}>
+      <span className={`site-xp ${e.xp < 0 ? "is-neg" : ""}`}>
+        {e.xp > 0 ? "+" : ""}
+        {e.xp} XP
+      </span>
+      <span className="site-xp-reason">
+        {e.reason}
+        <span className="site-muted"> · {when(e.occurred_at)}{e.reversed ? " · reversed" : ""}</span>
+      </span>
+    </li>
+  );
+}
+
+// --- leaderboard ------------------------------------------------------------------------------------------------
+
+type Period = "week" | "all";
+type Metric = "score" | "referrals";
+interface Row {
+  position: number;
+  username: string;
+  value: number;
+  rank_score: number;
+  xp: number;
+  legacy_points: number;
+  rank: Rank;
+}
+/** The signed-in member's own place, computed by the server (also when outside the top 100). */
+interface MeRow {
+  username: string;
+  rank: Rank;
+  position: number | null;
+  value: number;
+  hidden: boolean;
+}
+interface Board {
+  rows: Row[];
+  note: string;
+  me: MeRow | null;
+}
+
+const MEDAL = ["🥇", "🥈", "🥉"];
+
+/** Position changes since this browser last saw this board (e.g. #17 to #14 shows "↑ 3"). Nothing on a first look. */
+function useStandingMoves(key: string, rows: { username: string; position: number }[] | null): Record<string, number> {
+  const [moves, setMoves] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!rows) return;
+    let before: Record<string, number> = {};
+    try {
+      before = JSON.parse(localStorage.getItem(key) ?? "{}");
+    } catch {
+      before = {};
+    }
+    const out: Record<string, number> = {};
+    for (const r of rows) if (before[r.username] && before[r.username] !== r.position) out[r.username] = before[r.username] - r.position;
+    setMoves(out);
+    try {
+      localStorage.setItem(key, JSON.stringify(Object.fromEntries(rows.map((r) => [r.username, r.position]))));
+    } catch {
+      /* fine */
+    }
+  }, [key, rows]);
+  return moves;
+}
+
+export function LeaderboardPage() {
+  const [period, setPeriod] = useState<Period>("all");
+  const [metric, setMetric] = useState<Metric>("score");
+  const [data, setData] = useState<Board | null>(null);
+  const [invite, setInvite] = useState(false);
+  const mine = useReferrals();
+  useEffect(() => {
+    setData(null);
+    void memberApi<Board>(`/members/leaderboard?period=${period}&metric=${metric}&limit=100`)
+      .then(setData).catch(() => setData({ rows: [], note: "", me: null }));
+  }, [period, metric]);
+  const unit = metric === "referrals" ? "referrals" : "XP";
+  const moves = useStandingMoves(`pc-lb:${period}:${metric}`, data?.rows ?? null);
+  const me = data?.me ?? null;
+  const meInList = !!me?.position && !!data?.rows.some((r) => r.position === me.position && r.username === me.username);
+  const tabs = <T extends string>(label: string, items: [T, string][], value: T, set: (v: T) => void) => (
+    <div className="site-filters lb-tabs" role="tablist" aria-label={label}>
+      {items.map(([k, text]) => (
+        <button key={k} role="tab" aria-selected={value === k} className="site-filter" onClick={() => set(k)}>{text}</button>
+      ))}
+    </div>
+  );
+  const row = (r: { position: number | null; username: string; rank: Rank; value: number }, isMe: boolean, key: string) => (
+    <li key={key} className={[r.position && r.position <= 3 ? `lb-top lb-top-${r.position}` : "", isMe ? "is-me" : "",
+                              moves[r.username] ? "lb-moved" : ""].filter(Boolean).join(" ") || undefined}>
+      <span className="site-board-pos">{r.position && r.position <= 3 ? <span className="lb-medal" aria-label={`#${r.position}`}>{MEDAL[r.position - 1]}</span>
+        : r.position ? `#${r.position}` : "–"}</span>
+      <RankKiwi art={r.rank.art} rankKey={r.rank.key} size={44} />
+      <span className="site-board-member">
+        <span className="site-board-user">
+          {r.username}{isMe ? <span className="lb-you"> You</span> : null}
+          {moves[r.username] ? (
+            <span className={`lb-move${moves[r.username] > 0 ? " is-up" : ""}`} aria-label={`${moves[r.username] > 0 ? "up" : "down"} ${Math.abs(moves[r.username])}`}>
+              {moves[r.username] > 0 ? "↑" : "↓"} {Math.abs(moves[r.username])}
+            </span>
+          ) : null}
+        </span>
+        <span className="site-muted">{r.rank.name}</span>
+      </span>
+      <span className="site-board-xp">{r.value.toLocaleString("en-GB")} {unit}</span>
+    </li>
+  );
+  return (
+    <SitePage title="Kiwi Leaderboard" description="Price Chat members by Kiwi XP and invites." path="/leaderboard">
+      <div className="site-archive-head">
+        <h1 className="site-display site-h1">🏆 Kiwi Leaderboard</h1>
+        {tabs("Period", [["all", "All time"], ["week", "This week"]], period, setPeriod)}
+      </div>
+      {tabs("Board", [["score", "XP"], ["referrals", "Referrals"]], metric, setMetric)}
+      {metric === "referrals" && mine && (
+        <div className="lb-mine">
+          <dl className="iv-stats" aria-label="Your referrals">
+            <div><dt>Joined</dt><dd>{mine.joined}</dd></div>
+            <div><dt>Qualified</dt><dd>{mine.qualified}</dd></div>
+            <div><dt>XP earned</dt><dd>{mine.xp_earned}</dd></div>
+          </dl>
+          {mine.enabled && <button type="button" className="pp-go pp-go-sm" onClick={() => setInvite(true)}>👥 Invite friends</button>}
+        </div>
+      )}
+      {data?.note && <p className="site-note lb-note">{data.note}</p>}
+      {data === null ? (
+        <p className="site-empty">Loading…</p>
+      ) : data.rows.length === 0 ? (
+        <p className="site-empty">
+          {metric === "referrals" ? "No qualified invites yet. Be the first." : <>Nobody here yet. <a className="site-link" href="/website/join">Join Price Chat</a> and be the first.</>}
+        </p>
+      ) : (
+        <>
+        {data.rows.length >= 3 && data.rows[2].position === 3 && (
+          <div className="lb-podium" role="group" aria-label="Top 3">
+            {[data.rows[1], data.rows[0], data.rows[2]].map((r) => {
+              const isMe = !!me && meInList && r.username === me.username;
+              return (
+                <div key={r.username} className={`lb-pod lb-pod-${r.position}${isMe ? " is-me" : ""}`}>
+                  <span className="lb-pod-kiwi"><RankKiwi art={r.rank.art} rankKey={r.rank.key} size={r.position === 1 ? 108 : 84} label={`${r.username}, ${r.rank.name}`} /></span>
+                  <strong className="lb-pod-name">{r.username}{isMe ? <span className="lb-you"> You</span> : null}</strong>
+                  <span className="lb-pod-val">{r.value.toLocaleString("en-GB")} {unit}</span>
+                  <span className="lb-pod-step" aria-hidden><span>{MEDAL[(r.position ?? 1) - 1]}</span></span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <ol className="site-board-list lb-list">
+          {data.rows.map((r) => row(r, !!me && meInList && r.username === me.username, r.username))}
+        </ol>
+        </>
+      )}
+      {me && !meInList && (
+        me.position ? (
+          <ol className="site-board-list lb-list lb-me-row" aria-label="Your position">{row(me, true, "me")}</ol>
+        ) : (
+          <p className="site-note lb-note">
+            {me.hidden ? "You're hidden from the leaderboard (Settings in your Kiwi Passport)."
+              : metric === "referrals" ? "You'll appear here once a friend you invited qualifies." : "Earn some XP to appear on this board."}
+          </p>
+        )
+      )}
+      <p className="site-note site-board-foot">
+        {metric === "referrals" ? "Counts friends who joined through an invite and then did something real in Price Chat."
+          : period === "all" ? "All time: your Kiwi Rank Score (Price Chat XP plus a capped share of historical Telegram reputation)."
+          : "This week: XP earned in the last 7 days."} Usernames only; members can hide themselves in their Kiwi Passport.
+      </p>
+      {invite && <InviteModal onClose={() => setInvite(false)} />}
+    </SitePage>
+  );
+}
+
+// --- legal (draft) ----------------------------------------------------------------------------------------------
+
+type LegalKind = "privacy" | "terms" | "disclaimer" | "contact";
+
+const LEGAL: Record<LegalKind, { title: string; description: string; sections: [string, string[]][] }> = {
+  privacy: {
+    title: "Privacy",
+    description: "How Price Chat handles member data, connected accounts and Kiwi XP.",
+    sections: [
+      ["What we keep", [
+        "Your Price Chat member id, username, join date and settings.",
+        "For each account you choose to connect (Google, X, Telegram): the platform's account id, your public username where the platform gives one, and when you connected it.",
+        "Your Kiwi XP history: every award or change, with its source and reason, and your badges.",
+      ]],
+      ["How connected accounts are used", [
+        "Connected accounts may be used to verify eligible Price Chat community activity and to calculate your Kiwi XP, rank and badges.",
+        "Only activity in Price Chat's own spaces counts: authorised Price Chat Telegram chats, and public posts that mention or reply to Price Chat on X. We never read unrelated chats.",
+        "Accounts are only linked when you sign in to them yourself. We never assume two accounts belong to the same person because their names look alike.",
+      ]],
+      ["What we never do", [
+        "We never ask for or see your social media passwords.",
+        "We don't keep access tokens from Google, X or Telegram after confirming who you are, and we don't post, like or message anything on your behalf.",
+        "We don't infer sensitive characteristics or build hidden behaviour profiles. XP is never given because an AI “thinks” something about you.",
+        "We don't know who watches our videos: YouTube doesn't tell channels that.",
+      ]],
+      ["Your controls", [
+        "See every connected account and every XP award in your Kiwi Passport.",
+        "Disconnect any connected account (keep at least one to sign in).",
+        "Hide yourself from the public leaderboard.",
+        "Delete your Price Chat account. This removes your account, connected accounts, XP history and badges. We keep only an audit note that an account was deleted, and a one-way fingerprint of each connected account so one-time rewards can't be claimed twice. Neither identifies you.",
+      ]],
+      ["Questions", ["Message us on Telegram or X (see Contact)."]],
+    ],
+  },
+  terms: {
+    title: "Terms",
+    description: "The rules of the Price Chat community and Kiwi XP.",
+    sections: [
+      ["Your account", ["One Price Chat account per person. Keep your connected accounts secure; you're responsible for activity on your account."]],
+      ["Kiwi XP, ranks and badges", [
+        "Kiwi XP, ranks and badges recognise genuine participation. They have no monetary value and can't be sold, transferred or exchanged.",
+        "Price Chat may change how XP is earned, adjust or reverse XP that was earned through spam, automation, fake accounts or other abuse, and pause XP on accounts under review.",
+        "Ranks can't be bought. Any future paid perks will be kept separate from community rank.",
+      ]],
+      ["Community conduct", ["Be respectful. No spam, scams, impersonation, harassment or automated activity. Accounts that break the rules may be suspended or closed."]],
+      ["Changes", ["We may update these terms as the community grows. Material changes will be announced."]],
+    ],
+  },
+  disclaimer: {
+    title: "Disclaimer",
+    description: "Price Chat content is for information and entertainment.",
+    sections: [
+      ["Not financial advice", [
+        "Everything on Price Chat (videos, posts, community discussions, the Price Board and any valuations) is for information and entertainment only. It is not financial, investment, legal or tax advice.",
+        "Markets are risky. Prices can fall as well as rise and you can lose money. Do your own research and consider speaking to a qualified professional before making financial decisions.",
+      ]],
+      ["Community content", ["Opinions shared by members are their own and are not endorsed by Price Chat."]],
+      ["Partners", ["If we ever feature partners or affiliate links, we'll say so clearly."]],
+    ],
+  },
+  contact: {
+    title: "Contact",
+    description: "How to reach Price Chat.",
+    sections: [
+      ["Talk to us", [
+        "The fastest way to reach the team is the Price Chat Telegram, or a message to @pricechat on X.",
+        "For privacy requests (for example, deleting your data), you can also delete your account yourself from your Kiwi Passport at any time.",
+      ]],
+    ],
+  },
+};
+
+export function LegalPage({ kind }: { kind: LegalKind }) {
+  const page = LEGAL[kind];
+  const home = useStored<HomeData>("/api/website/home");
+  return (
+    <SitePage title={page.title} description={page.description} path={`/${kind}`}>
+      <article className="site-legal site-reveal">
+        <p className="site-draft" role="note">
+          Draft: this page has not had final legal review yet.
+        </p>
+        <h1 className="site-display site-h1">{page.title}</h1>
+        {page.sections.map(([heading, paras]) => (
+          <section key={heading}>
+            <h2 className="site-legal-h">{heading}</h2>
+            {paras.map((t) => (
+              <p key={t} className="site-body">
+                {t}
+              </p>
+            ))}
+          </section>
+        ))}
+        {kind === "contact" && home && (
+          <ul className="site-legal-links">
+            {(["telegram", "x", "youtube"] as const).filter((n) => home.links[n]).map((n) => (
+              <li key={n}>
+                <a className="site-link" href={home.links[n]!} target="_blank" rel="noopener noreferrer">
+                  {n === "x" ? "X" : n === "telegram" ? "Telegram" : "YouTube"}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </article>
+    </SitePage>
+  );
+}

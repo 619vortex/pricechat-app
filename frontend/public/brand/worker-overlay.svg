@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 844" width="1000" height="844">
+  <!-- Construction-worker gear for the canonical Price Chat Kiwi (same 1000x844 canvas): a hi-vis vest and a hard hat. -->
+  <defs>
+    <clipPath id="vest">
+      <path d="M150 300 C 220 225, 330 190, 455 185 L 545 200 C 520 260, 470 300, 405 330 C 330 400, 285 480, 265 560 C 205 565, 150 555, 105 525 C 80 450, 95 360, 150 300 Z"/>
+    </clipPath>
+    <linearGradient id="vestFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffa21a"/><stop offset="1" stop-color="#ff6b00"/>
+    </linearGradient>
+    <linearGradient id="hat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe14d"/><stop offset="1" stop-color="#f5b800"/>
+    </linearGradient>
+  </defs>
+  <!-- vest -->
+  <g clip-path="url(#vest)">
+    <rect x="60" y="160" width="520" height="420" fill="url(#vestFill)"/>
+    <rect x="60" y="355" width="520" height="30" fill="#dfe6ea"/>
+    <rect x="60" y="440" width="520" height="30" fill="#dfe6ea"/>
+    <rect x="60" y="360" width="520" height="6" fill="#ffffff" opacity=".7"/>
+    <rect x="60" y="445" width="520" height="6" fill="#ffffff" opacity=".7"/>
+    <path d="M330 190 L 300 560" stroke="#c84f00" stroke-width="8" opacity=".55"/>
+  </g>
+  <path d="M150 300 C 220 225, 330 190, 455 185 L 545 200 C 520 260, 470 300, 405 330 C 330 400, 285 480, 265 560 C 205 565, 150 555, 105 525 C 80 450, 95 360, 150 300 Z"
+        fill="none" stroke="#7a3300" stroke-width="7" opacity=".55"/>
+  <!-- hard hat -->
+  <g transform="translate(0 16)">
+  <path d="M528 128 C 530 55, 600 22, 668 22 C 740 22, 795 62, 797 128 Z" fill="url(#hat)" stroke="#8a6500" stroke-width="7"/>
+  <path d="M660 24 C 652 60, 652 95, 657 128" stroke="#d99d00" stroke-width="16" fill="none" stroke-linecap="round"/>
+  <ellipse cx="664" cy="132" rx="178" ry="24" fill="#ffd21a" stroke="#8a6500" stroke-width="7"/>
+  <path d="M560 70 C 585 45, 615 35, 640 33" stroke="#fff6b8" stroke-width="10" fill="none" stroke-linecap="round" opacity=".8"/>
+  </g>
+</svg>

@@ -1,0 +1,211 @@
+/*
+ * Price Chat motion system. Every animation on the website lives here: tokens, keyframes and the reusable effects.
+ * Rules: animate transform / opacity only; hidden start states exist ONLY inside (prefers-reduced-motion: no-preference)
+ * so nothing can stay invisible; infinite motion is desktop-only and pauses offscreen; mobile gets less, never more.
+ */
+
+.site {
+  --m-fast: 160ms;
+  --m-base: 280ms;
+  --m-reveal: 520ms;
+  --m-slow: 900ms;
+  --m-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --m-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --m-rise: 20px;
+}
+
+/* --- keyframes ------------------------------------------------------------------------------------------- */
+@keyframes pc-rise { from { opacity: 0; transform: translateY(var(--m-rise)); } }
+@keyframes pc-rise-sm { from { opacity: 0; transform: translateY(10px); } }
+@keyframes pc-fade { from { opacity: 0; } }
+@keyframes pc-line { from { transform: scaleX(0); } }
+@keyframes pc-fill { from { transform: scaleX(0); } }
+@keyframes pc-breathe { 0%, 100% { transform: none; } 40%, 56% { transform: translateY(-1px) scale(1.006, 1.014); } }
+@keyframes pc-glow { 50% { opacity: 0.62; } }
+@keyframes pc-pulse-once { 40% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+@keyframes pc-draw { from { stroke-dashoffset: 24; } }
+@keyframes pc-xp { 0% { opacity: 0; transform: translateY(6px); } 15% { opacity: 1; transform: translateY(0); }
+                   75% { opacity: 1; transform: translateY(-6px); } 100% { opacity: 0; transform: translateY(-12px); } }
+@keyframes pc-halo { from { opacity: 0; transform: scale(0.6); } }
+@keyframes pc-out { to { opacity: 0; transform: scale(0.94); } }
+@keyframes pc-in { from { opacity: 0; transform: scale(0.92); } }
+@keyframes pc-dim { from { opacity: 0; } }
+@keyframes pc-page { from { opacity: 0; transform: translateY(6px); } }
+@keyframes pc-dawn { from { opacity: 0; transform: translateY(-50%) scaleX(0.7); } }
+@keyframes pc-spin { to { transform: rotate(360deg); } }
+@keyframes pc-skeleton { 50% { opacity: 0.55; } }
+@keyframes site-marquee { to { transform: translateX(-100%); } }
+
+/* --- the Price Line: one thin green line, the recurring signature ----------------------------------------- */
+.price-line { display: block; height: 1px; background: var(--site-green); transform-origin: left center; }
+.site-section-head { position: relative; }
+.site-section-head::after {
+  content: ""; position: absolute; left: 0; bottom: -1px; width: 56px; height: 1px; background: var(--site-green); transform-origin: left center;
+}
+
+/* --- price glow: the slow green light, used sparingly ------------------------------------------------------- */
+:where(.price-glow) { position: relative; } /* zero specificity: a component's own positioning wins */
+.price-glow::before {
+  content: ""; position: absolute; inset: -45% -60% -10%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(0, 229, 143, 0.18), rgba(0, 229, 143, 0.04) 60%, transparent);
+  transform: translate(calc(var(--px, 0) * 8px), calc(var(--py, 0) * 6px));
+}
+
+/* --- links: underline grows left to right, arrow nudges ------------------------------------------------------ */
+.site-more [aria-hidden], .pc-arrow, .site-join-arrow { display: inline-block; transition: transform var(--m-base) var(--m-out); }
+.site-more:hover [aria-hidden], .site-link:hover .pc-arrow { transform: translateX(3px); }
+
+/* --- buttons: tactile, never glowing ------------------------------------------------------------------------ */
+.site-button, .site-provider, .site-filter, .site-login, .site-textbutton {
+  transition: transform var(--m-fast) var(--m-out), filter var(--m-fast), background-color var(--m-fast), border-color var(--m-fast), color var(--m-fast);
+}
+.site-button:hover:not(:disabled), .site-provider:hover:not(:disabled):not(.is-disabled), .site-login:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.site-button:active:not(:disabled), .site-provider:active:not(:disabled), .site-filter:active, .site-login:active, .site-textbutton:active:not(:disabled) {
+  transform: translateY(0) scale(0.97); transition-duration: 80ms;
+}
+.site :focus-visible { outline: 2px solid var(--site-green); outline-offset: 3px; }
+
+/* --- header: transparent at the top, quiet glass once scrolled ------------------------------------------------ */
+.site-header { transition: background-color var(--m-base) var(--m-out), border-color var(--m-base), backdrop-filter var(--m-base); }
+.site-header.is-solid { background: rgba(5, 7, 6, 0.78); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); }
+
+/* --- content cards ------------------------------------------------------------------------------------------ */
+.site-thumb img, .site-thumb-empty { transition: transform 600ms var(--m-out); }
+a:hover .site-thumb img { transform: scale(1.03); }
+.site-play { transition: transform var(--m-base) var(--m-out), background-color var(--m-base), border-color var(--m-base); }
+.site-play svg { transition: fill var(--m-base); }
+a:hover .site-play { transform: scale(1.1); }
+.site-meta-type { transition: filter var(--m-base); }
+a:hover .site-meta-type { filter: brightness(1.3); }
+.site-card:active .site-thumb, .site-feature:active .site-thumb, .site-row:active .site-thumb, .pp-video-link:active img { transform: scale(0.985); transition: transform 80ms; }
+.is-loading .site-thumb-empty { animation: pc-skeleton 1.4s ease-in-out infinite; }
+
+/* --- missions ----------------------------------------------------------------------------------------------- */
+.pp-mission { transition: border-color var(--m-base), transform var(--m-fast) var(--m-out), opacity var(--m-base); }
+.pp-mission.is-available:hover, .pp-mission.is-in_progress:hover { border-color: rgba(0, 229, 143, 0.45); }
+.pp-mission:active { transform: scale(0.99); }
+.pp-check { width: 14px; height: 14px; vertical-align: -1px; margin-right: 6px; stroke: var(--site-green); stroke-width: 2.4; fill: none;
+  stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; stroke-dashoffset: 0; }
+.pp-mission.just-completed { border-color: rgba(0, 229, 143, 0.6); opacity: 1; }
+.pp-xp-gain { position: absolute; right: 16px; top: 12px; padding: 3px 9px; border-radius: 999px; background: var(--site-green); color: #04120b;
+  font-size: 12px; font-weight: 800; letter-spacing: 0.06em; pointer-events: none; opacity: 0; }
+.pp-mission, .site-passport { position: relative; }
+
+/* --- passport: progress bar is a price line that fills (transform, not width) --------------------------------- */
+.site-progress-bar span { width: 100%; transform-origin: left center; transform: scaleX(var(--p, 0)); transition: transform 700ms var(--m-out); }
+.pp-progress-near .site-progress-bar span { box-shadow: 0 0 10px rgba(0, 229, 143, 0.35); }
+
+/* --- rank ladder ------------------------------------------------------------------------------------------- */
+.site-ladder li { transition: opacity var(--m-base); }
+.site-ladder li.is-future { opacity: 0.42; }
+.site-ladder li.is-next { opacity: 1; }
+.site-ladder li.is-next .rk { filter: drop-shadow(0 0 calc(4px + var(--near, 0) * 10px) rgba(0, 229, 143, calc(0.25 + var(--near, 0) * 0.5))); }
+.site-ladder li.is-next span:nth-child(3) { color: var(--site-green); }
+
+/* --- feed: NEW, once --------------------------------------------------------------------------------------- */
+.pp-new { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 3px; background: var(--site-green); color: #04120b;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.14em; vertical-align: 1px; }
+
+/* --- leaderboard movement (quiet, not a trading screen) -------------------------------------------------------- */
+.lb-move { margin-left: 8px; font-size: 11px; font-weight: 700; color: var(--site-muted); letter-spacing: 0.04em; }
+.lb-move.is-up { color: var(--site-soft); }
+
+/* --- rank-up stage ------------------------------------------------------------------------------------------ */
+.pp-rankup-stage { position: relative; width: 180px; height: 180px; display: grid; place-items: center; }
+.pp-rankup-stage > * { grid-area: 1 / 1; }
+.pp-rankup-halo { width: 100%; height: 100%; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 229, 143, 0.32), rgba(0, 229, 143, 0.06) 70%, transparent); }
+.pp-rankup-old { opacity: 0; }
+
+/* ======================================================================================================= */
+/* Motion allowed: entrances, reveals, idle life                                                           */
+/* ======================================================================================================= */
+@media (prefers-reduced-motion: no-preference) {
+  /* page transition: fast, never blocking */
+  /* backwards, not both: once finished the page must not stay a containing block for fixed dialogs (rank-up) */
+  .site-page-anim { animation: pc-page 240ms var(--m-out) backwards; }
+
+  /* hero: Kiwi settles, then EVERYTHING / HAS / A PRICE. (about 1.2s in total) */
+  .site-hero-kiwi { animation: pc-rise 520ms var(--m-out) both; }
+  .site-hero-word { display: inline-block; animation: pc-rise 520ms var(--m-out) both; }
+  .site-hero-w1 { animation-delay: 180ms; }
+  .site-hero-w2 { animation-delay: 360ms; }
+  .site-hero-w3 { animation-delay: 520ms; }
+  .site-hero-support { animation: pc-fade 500ms ease 760ms both; }
+
+  /* idle life (desktop only below): breathing Kiwi, slow glow */
+  .pc-idle-kiwi { transform-origin: 50% 100%; animation: pc-breathe 5.6s ease-in-out 1.4s infinite; }
+  .price-glow::before { animation: pc-glow 8s ease-in-out 1.4s infinite; }
+  .pc-parallax { display: block; transform: translate(calc(var(--px, 0) * 3px), calc(var(--py, 0) * 2px)); transition: transform 600ms var(--m-out); }
+
+  /* scroll reveal: opacity + rise, staggered with --d */
+  .site-reveal-on .site-reveal:not(.is-in) { opacity: 0; transform: translateY(var(--m-rise)); }
+  .site-reveal-on .site-reveal { transition: opacity var(--m-reveal) var(--m-out) var(--d, 0ms), transform var(--m-reveal) var(--m-out) var(--d, 0ms); }
+  .site-reveal-on .site-section-head:not(.is-in)::after { transform: scaleX(0); }
+  .site-reveal-on .site-section-head::after { transition: transform var(--m-slow) var(--m-out) 200ms; }
+
+  /* story: dark scene, Kiwi, the line extends, light in the distance, then the words (about 2.2s) */
+  .site-reveal-on .site-story:not(.is-playing) .site-horizon-kiwi,
+  .site-reveal-on .site-story:not(.is-playing) .site-horizon-light,
+  .site-reveal-on .site-story:not(.is-playing) .site-story-line,
+  .site-reveal-on .site-story:not(.is-playing) .site-story-copy { opacity: 0; }
+  .site-reveal-on .site-story:not(.is-playing) .site-horizon-line { transform: scaleX(0); }
+  .site-story.is-playing .site-horizon-kiwi { animation: pc-fade 700ms ease 100ms both; }
+  .site-story.is-playing .site-horizon-line { animation: pc-line 1100ms var(--m-in-out) 350ms both; }
+  .site-story.is-playing .site-horizon-light { animation: pc-dawn 1400ms var(--m-out) 900ms both; }
+  .site-story.is-playing .site-story-line { animation: pc-rise 560ms var(--m-out) both; }
+  .site-story.is-playing .site-story-line:nth-child(1) { animation-delay: 1100ms; }
+  .site-story.is-playing .site-story-line:nth-child(2) { animation-delay: 1300ms; }
+  .site-story.is-playing .site-story-copy { animation: pc-rise 600ms var(--m-out) 1600ms both; }
+
+  /* passport: first load only (class added by JS) */
+  .pp-enter .site-passport-art { animation: pc-rise 520ms var(--m-out) both; }
+  .pp-enter .site-passport-name { animation: pc-rise 480ms var(--m-out) 140ms both; }
+  .pp-enter .site-passport-facts { animation: pc-rise 480ms var(--m-out) 260ms both; }
+  .pp-enter .site-progress-bar span { animation: pc-fill 900ms var(--m-out) 420ms both; }
+  .pp-enter .pp-next, .pp-enter .pp-rep { animation: pc-fade 500ms ease 600ms both; }
+
+  /* XP gain and mission completion */
+  .pp-xp-gain.is-shown { animation: pc-xp 1400ms var(--m-out) both; }
+  .pp-mission.just-completed .pp-check { animation: pc-draw 500ms var(--m-out) 150ms both; }
+  .pp-mission.just-completed { transition: border-color 2400ms ease; }
+
+  /* feed NEW: one pulse, then still */
+  .pp-new { animation: pc-pulse-once 900ms var(--m-out) 400ms 1 both; }
+
+  /* leaderboard rows that moved since your last look */
+  .lb-moved { animation: pc-rise-sm 500ms var(--m-out) both; }
+
+  /* rank-up: dim, halo, old Kiwi out, new Kiwi in, then the words (about 2s; Continue works at once) */
+  .pp-rankup { animation: pc-dim 300ms ease both; }
+  .pp-rankup-halo { animation: pc-halo 700ms var(--m-out) 200ms both; }
+  .pp-rankup-old { opacity: 1; animation: pc-out 400ms ease 450ms forwards; }
+  .pp-rankup-new { animation: pc-in 600ms var(--m-out) 750ms both; }
+  .pp-rankup-label { animation: pc-fade 400ms ease 1000ms both; }
+  .pp-rankup-title { animation: pc-rise 500ms var(--m-out) 1150ms both; }
+  .pp-rankup-extra { animation: pc-fade 400ms ease 1500ms both; }
+
+  .site-ticker-track.is-moving .site-ticker-row { animation: site-marquee 40s linear infinite; }
+  .site-ticker-track.is-moving:hover .site-ticker-row { animation-play-state: paused; }
+  .rk-mythic::before { animation: pc-spin 12s linear infinite; }
+
+  /* nothing animates while it can't be seen */
+  .is-offscreen, .is-offscreen *, .is-offscreen *::before { animation-play-state: paused !important; }
+}
+
+/* Phones and tablets: less motion, no idle loops, shorter rises */
+@media (max-width: 760px), (hover: none) {
+  .site { --m-rise: 12px; }
+  .pc-idle-kiwi, .price-glow::before { animation: none !important; }
+  .pc-parallax { transform: none !important; }
+}
+
+/* Reduced motion: everything static and fully visible */
+@media (prefers-reduced-motion: reduce) {
+  .site *, .site *::before, .site *::after { animation: none !important; transition: none !important; }
+}
+
+/* Idle motion only at rest at the top, where the header is transparent. Measured (headless Edge, 1440px scroll): two idle
+   loops at once under the glass header dropped desktop scrolling from 60 to 30fps. So: ONE idle loop on the whole site
+   (the hero Kiwi + its glow), paused as soon as the page scrolls; the Story light is static after its dawn entrance. */
+.pc-scrolled .pc-idle-kiwi, .pc-scrolled .price-glow::before { animation-play-state: paused !important; }

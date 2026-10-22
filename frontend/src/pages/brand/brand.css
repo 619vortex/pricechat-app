@@ -1,0 +1,279 @@
+/* Brand Manager: premium dark automation dashboard in the admin palette (green = running/action). */
+.bmx { --bm-glow: rgb(34 197 94 / 0.18); display: flex; flex-direction: column; gap: 16px; max-width: 1280px; }
+.bmx h1, .bmx h2, .bmx h3 { margin: 0; }
+.bmx h2 { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.bmx h3 { font-size: 14px; margin: 14px 0 6px; }
+.bmx-fine { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 6px 0 0; }
+
+.bmx-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.bmx-tabs a { padding: 8px 14px; border-radius: 8px; color: var(--muted); text-decoration: none; font-weight: 600; font-size: 14px; }
+.bmx-tabs a:hover { color: var(--text); background: var(--surface-2); }
+.bmx-tabs a.active { color: var(--text); background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.bmx-soon { margin-left: auto; font-size: 12px; color: var(--muted); }
+.bmx-soon em { font-style: normal; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; margin-left: 4px; }
+
+/* hero */
+.bmx-hero { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; overflow: hidden;
+  padding: 32px; border-radius: 18px; border: 1px solid var(--border);
+  background: radial-gradient(120% 140% at 0% 0%, rgb(34 197 94 / 0.14), transparent 55%), linear-gradient(180deg, #13171d, #0e1115); }
+.bmx-hero.is-blocked, .bmx-hero.is-error { background: radial-gradient(120% 140% at 0% 0%, rgb(240 68 56 / 0.12), transparent 55%), linear-gradient(180deg, #13171d, #0e1115); }
+.bmx-eyebrow { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+.bmx-hero h1 { font-size: clamp(28px, 4vw, 44px); font-weight: 900; letter-spacing: 0.01em; line-height: 1; }
+.bmx-sub { margin: 8px 0 0; color: var(--muted); font-size: 17px; }
+.bmx-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.bmx-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.bmx-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.bmx-pill.is-running i { background: var(--good); box-shadow: 0 0 0 4px rgb(34 197 94 / 0.2); animation: bmx-pulse 1.8s infinite; }
+.bmx-pill.is-blocked i, .bmx-pill.is-error i { background: var(--bad); }
+.bmx-pill.is-stopped i { background: var(--warn); }
+.bmx-pill.is-muted { color: var(--muted); font-weight: 500; }
+@keyframes bmx-pulse { 50% { box-shadow: 0 0 0 7px rgb(34 197 94 / 0.05); } }
+.bmx-go { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 280px; }
+.bmx-big { width: 210px; height: 210px; border-radius: 50%; border: 0; cursor: pointer; font: inherit; font-size: 24px; font-weight: 900; letter-spacing: 0.06em;
+  color: #04150a; background: radial-gradient(circle at 35% 30%, #4ade80, #16a34a 70%);
+  box-shadow: 0 0 0 10px rgb(34 197 94 / 0.12), 0 20px 60px rgb(34 197 94 / 0.25); transition: transform 0.15s, box-shadow 0.15s; }
+.bmx-big:hover:not(:disabled) { transform: scale(1.03); box-shadow: 0 0 0 14px rgb(34 197 94 / 0.14), 0 24px 70px rgb(34 197 94 / 0.32); }
+.bmx-big:disabled { opacity: 0.5; cursor: not-allowed; }
+.bmx-big.is-stop { color: #fff; background: radial-gradient(circle at 35% 30%, #f87171, #dc2626 70%); box-shadow: 0 0 0 10px rgb(240 68 56 / 0.12), 0 20px 60px rgb(240 68 56 / 0.2); }
+.bmx-consent { display: flex; gap: 8px; font-size: 12px; color: var(--muted); line-height: 1.4; cursor: pointer; }
+.bmx-consent input { margin-top: 2px; accent-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .bmx-pill.is-running i { animation: none; } .bmx-big { transition: none; } }
+
+.bmx-alert { padding: 12px 16px; border-radius: 10px; border: 1px solid rgb(240 68 56 / 0.45); background: rgb(240 68 56 / 0.08); }
+.bmx-alert ul, .bmx-note ul { margin: 6px 0 0; padding-left: 18px; }
+.bmx-alert p { margin: 4px 0 0; }
+.bmx-note { padding: 10px 14px; border-radius: 10px; border: 1px solid rgb(245 165 36 / 0.4); background: rgb(245 165 36 / 0.07); font-size: 13px; }
+.bmx-ok { padding: 10px 14px; border-radius: 10px; border: 1px solid rgb(34 197 94 / 0.45); background: rgb(34 197 94 / 0.08); }
+
+.bmx-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.bmx-tile { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); min-width: 0; }
+.bmx-tile span { font-size: 12px; color: var(--muted); }
+.bmx-tile b { font-size: 26px; font-variant-numeric: tabular-nums; }
+.bmx-tile small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bmx-cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; }
+.bmx-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; min-width: 0; }
+.bmx-danger { border-color: rgb(240 68 56 / 0.6); }
+.btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 700; }
+
+/* pipeline */
+.bmx-pipe { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.bmx-pipe-title { margin: 0 0 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bmx-pipe-title a, .bmx-vline a { color: var(--text); text-decoration: none; font-weight: 600; }
+.bmx-pipe ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.bmx-pipe li { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: 11px; color: var(--muted); background: var(--surface-2); }
+.bmx-pipe li i { width: 7px; height: 7px; border-radius: 50%; background: #3a424e; }
+.bmx-pipe li.is-done { color: var(--text); } .bmx-pipe li.is-done i { background: var(--good); }
+.bmx-pipe li.is-running i, .bmx-pipe li.is-retrying i { background: var(--info); animation: bmx-pulse 1.4s infinite; }
+.bmx-pipe li.is-failed { color: var(--bad); } .bmx-pipe li.is-failed i { background: var(--bad); }
+
+.bmx-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid var(--border); white-space: nowrap; }
+.bmx-badge.is-good { color: var(--good); border-color: rgb(34 197 94 / 0.4); }
+.bmx-badge.is-warn { color: var(--warn); border-color: rgb(245 165 36 / 0.4); }
+.bmx-badge.is-bad { color: var(--bad); border-color: rgb(240 68 56 / 0.4); }
+.bmx-badge.is-info { color: var(--info); border-color: rgb(59 158 255 / 0.4); }
+
+.bmx-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bmx-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bmx-list time { font-variant-numeric: tabular-nums; color: var(--muted); width: 52px; }
+.bmx-vline { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.bmx-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 420px; overflow: auto; }
+.bmx-events li { display: grid; grid-template-columns: 70px 1fr; gap: 8px; font-size: 13px; line-height: 1.4; }
+.bmx-events time { color: var(--muted); font-size: 12px; }
+.bmx-events .is-warn span { color: var(--warn); } .bmx-events .is-error span { color: var(--bad); }
+
+/* TikTok */
+.bmx-account { display: grid; grid-template-columns: 72px 1fr auto; gap: 16px; align-items: center; }
+.bmx-account img, .bmx-avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; background: var(--surface-2); display: block; }
+.bmx-numbers { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 0; color: var(--muted); }
+.bmx-numbers b { color: var(--text); font-variant-numeric: tabular-nums; }
+.bmx-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bmx-scopes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.bmx-scopes li { display: flex; gap: 8px; align-items: center; } .bmx-scopes i { width: 9px; height: 9px; border-radius: 50%; background: #3a424e; flex: none; }
+.bmx-scopes .is-on i { background: var(--good); } .bmx-scopes .is-off { color: var(--muted); }
+.bmx-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; line-height: 1.5; }
+.bmx-steps .is-done { color: var(--muted); text-decoration: line-through; text-decoration-color: rgb(34 197 94 / 0.6); }
+.bmx-fineprint { padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* studio */
+.bmx-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.bmx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bmx-chips button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.bmx-chips button.is-on { color: var(--text); background: var(--surface-2); border-color: #36404d; }
+.bmx-create { display: flex; gap: 8px; }
+.bmx select, .bmx input:not([type="checkbox"]):not([type="color"]), .bmx textarea { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; min-width: 0; }
+.bmx textarea { width: 100%; resize: vertical; }
+.bmx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.bmx-vtile { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; background: var(--surface); border: 1px solid var(--border); color: var(--text); text-decoration: none; transition: border-color 0.15s, transform 0.15s; }
+.bmx-vtile:hover { border-color: #36404d; transform: translateY(-2px); }
+.bmx-vthumb { aspect-ratio: 9 / 16; background: #07090b; display: grid; place-items: center; color: var(--muted); font-size: 13px; max-height: 300px; }
+.bmx-vthumb img { width: 100%; height: 100%; object-fit: cover; }
+.bmx-vbody { padding: 10px 12px 14px; display: grid; gap: 4px; justify-items: start; }
+.bmx-vbody h3 { margin: 4px 0 0; font-size: 14px; line-height: 1.3; }
+.bmx-vbody p { margin: 0; font-size: 12px; }
+.bmx-detail { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.bmx-player { position: sticky; top: 12px; }
+.bmx-player video, .bmx-noplayer { width: 100%; aspect-ratio: 9 / 16; border-radius: 14px; background: #000; border: 1px solid var(--border); display: grid; place-items: center; color: var(--muted); text-align: center; padding: 12px; }
+.bmx-info { display: grid; gap: 10px; min-width: 0; justify-items: start; }
+.bmx-info > * { max-width: 100%; }
+.bmx-info > .bmx-post, .bmx-info > .bmx-form, .bmx-info > .bmx-alert { justify-self: stretch; }
+.bmx-info h1 { font-size: 24px; }
+.bmx-info h2 { margin: 14px 0 0; }
+.bmx-tags { color: var(--info); margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.bmx-tag { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border, rgba(127, 127, 127, 0.3)); font-size: 13px; }
+.bmx-hook { margin: 6px 0 0; font-size: 17px; font-weight: 600; line-height: 1.4; }
+.bmx-hook .muted { display: block; font-size: 11px; font-weight: 400; text-transform: uppercase; }
+.bmx-script { margin: 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.5; }
+.bmx-script em { font-style: normal; font-size: 11px; color: var(--muted); text-transform: uppercase; margin-right: 6px; }
+.bmx-facts { margin: 0; padding-left: 18px; display: grid; gap: 4px; line-height: 1.5; font-size: 13px; }
+.bmx-stagelist { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; font-size: 12px; }
+.bmx-stagelist .is-done { color: var(--text); } .bmx-stagelist .is-failed { color: var(--bad); } .bmx-stagelist li { color: var(--muted); }
+.bmx-form { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.bmx-creative { justify-self: stretch; display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.bmx-creative h2, .bmx-creative h3 { margin: 4px 0 0; }
+.bmx-cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.bmx-cgrid label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.bmx-cgrid select, .bmx-scene-edit select, .bmx-scene-edit input { min-width: 0; }
+.bmx-scenes { margin: 0; padding-left: 20px; display: grid; gap: 10px; }
+.bmx-scene-text { margin: 0 0 4px; font-size: 13px; } .bmx-scene-text em { font-style: normal; font-size: 11px; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.bmx-scene-edit { display: grid; grid-template-columns: minmax(120px, 170px) 1fr auto; gap: 6px; }
+.bmx-checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; font-size: 13px; }
+.bmx-checks b { display: inline-block; width: 16px; } .bmx-checks .is-pass b { color: var(--good, #19e68c); }
+.bmx-checks .is-warn b { color: #f6c453; } .bmx-checks .is-fail b { color: var(--bad); }
+@media (max-width: 640px) { .bmx-scene-edit { grid-template-columns: 1fr; } }
+.bmx-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.bmx-post { display: grid; gap: 10px; padding: 16px; border-radius: 12px; border: 1px solid rgb(59 158 255 / 0.4); background: rgb(59 158 255 / 0.05); }
+.bmx-post label { display: grid; gap: 4px; font-size: 13px; }
+.bmx-post fieldset { border: 1px solid var(--border); border-radius: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
+.bmx-post fieldset label, .bmx-switch, .bmx-disclose label { display: flex; gap: 6px; align-items: center; }
+.bmx-post .is-off { color: var(--muted); }
+.bmx-disclose { display: grid; gap: 6px; padding-left: 8px; }
+.bmx-disclose small { color: var(--muted); }
+
+/* calendar, analytics, settings */
+.bmx-day { padding: 10px 0; border-top: 1px solid var(--border); }
+.bmx-day h3 { margin: 0 0 8px; }
+.bmx-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.bmx-table th, .bmx-table td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.bmx-table th { color: var(--muted); font-weight: 600; }
+.bmx-spark svg { width: 100%; height: 120px; }
+.bmx-spark path { fill: none; stroke: var(--accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.bmx-settings { display: grid; gap: 14px; }
+.bmx-rows { display: grid; gap: 10px; }
+.bmx-row { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 14px; align-items: start; }
+.bmx-row > span { font-size: 13px; font-weight: 600; padding-top: 7px; display: grid; gap: 2px; }
+.bmx-row small { font-weight: 400; color: var(--muted); font-size: 12px; }
+.bmx-row > div > input:not([type="checkbox"]), .bmx-row > div > select { width: 100%; max-width: 520px; }
+.bmx-checks { display: grid; gap: 6px; }
+.bmx-checks label { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.bmx-inline { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bmx-inline input[type="number"] { width: 80px; }
+.bmx-save { position: sticky; bottom: 0; display: flex; gap: 12px; align-items: center; padding: 12px 0; background: linear-gradient(transparent, var(--bg) 40%); }
+.bmx-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #3a424e; } .bmx-dot.is-on { background: var(--good); }
+.bmx-pre { white-space: pre-wrap; word-break: break-all; background: #07090b; padding: 10px; border-radius: 8px; font-family: var(--mono); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .bmx-hero { grid-template-columns: 1fr; text-align: left; }
+  .bmx-go { max-width: none; align-items: flex-start; }
+  .bmx-cols, .bmx-detail { grid-template-columns: 1fr; }
+  .bmx-player { position: static; max-width: 360px; }
+  .bmx-account { grid-template-columns: 56px 1fr; } .bmx-account .bmx-actions { grid-column: 1 / -1; }
+  .bmx-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* Content Studio v4: editor (timeline + inspector), media library, authenticity score */
+.bmx-editor { justify-self: stretch; display: grid; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; }
+.bmx-ed-top { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 14px; align-items: start; }
+.bmx-ed-preview { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 10px; }
+.bmx-ed-inspector { min-width: 0; }
+.bmx-insp { display: grid; gap: 10px; }
+.bmx-insp h3 { margin: 0; }
+.bmx-insp-row { display: flex; gap: 12px; align-items: flex-start; }
+.bmx-insp-meta p { margin: 0 0 4px; }
+.bmx-frame { position: relative; flex: none; overflow: hidden; background: #0b0b0c; border: 1px solid var(--border); border-radius: 6px; }
+.bmx-tracks { position: relative; display: grid; grid-template-columns: 84px 1fr; row-gap: 4px; user-select: none; }
+.bmx-track-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); align-self: center; }
+.bmx-ruler { position: relative; height: 18px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.bmx-ruler span { position: absolute; top: 0; font-size: 10px; color: var(--muted); transform: translateX(-2px); }
+.bmx-lane { position: relative; height: 54px; background: var(--surface-2); border-radius: 6px; cursor: pointer; overflow: hidden; }
+.bmx-lane.is-thin { height: 26px; }
+.bmx-clip, .bmx-ov { position: absolute; top: 2px; bottom: 2px; padding: 0; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.14); border-radius: 4px;
+  background: #1b2129; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; text-align: left; }
+.bmx-clip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.75; }
+.bmx-clip span { position: relative; padding: 2px 4px; text-shadow: 0 1px 2px #000; }
+.bmx-clip.is-exact { box-shadow: inset 0 -3px 0 #22c55e; }
+.bmx-clip.is-related { box-shadow: inset 0 -3px 0 #eab308; }
+.bmx-clip.is-generic { box-shadow: inset 0 -3px 0 #f04438; }
+.bmx-clip.is-sel, .bmx-ov.is-sel { outline: 2px solid var(--accent); z-index: 2; }
+.bmx-ov { background: #233042; padding: 0 6px; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.bmx-cap, .bmx-audio { position: absolute; top: 3px; bottom: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; padding: 3px 4px;
+  border-radius: 3px; background: rgb(255 255 255 / 0.08); color: var(--muted); }
+.bmx-audio { background: rgb(34 197 94 / 0.16); color: var(--text); }
+.bmx-audio.is-music { background: rgb(79 179 255 / 0.14); }
+.bmx-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; }
+.bmx-library { display: grid; gap: 10px; }
+.bmx-lib-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.bmx-lib-head h3 { margin: 0; }
+.bmx-lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.bmx-asset { display: grid; gap: 4px; align-content: start; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.bmx-asset.is-excluded, .bmx-asset.is-failed, .bmx-asset.is-skipped { opacity: 0.55; }
+.bmx-asset p { margin: 0; }
+.bmx-asset-title { font-weight: 600; font-size: 13px; }
+.bmx-asset-thumb { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 6px; background: #0b0b0c; display: grid; place-items: center; color: var(--muted); }
+.bmx-asset-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bmx-match, .bmx-used { position: absolute; left: 6px; top: 6px; font-style: normal; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; background: rgb(0 0 0 / 0.7); }
+.bmx-used { left: auto; right: 6px; color: var(--accent); }
+.bmx-match.is-exact { color: #22c55e; } .bmx-match.is-related { color: #eab308; } .bmx-match.is-generic, .bmx-match.is-unfit { color: #f04438; }
+.bmx-asset-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; margin-top: 4px; }
+.btn.btn-sm { padding: 4px 10px; font-size: 12px; }
+.bmx-auth { display: flex; gap: 14px; align-items: flex-start; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); }
+.bmx-auth-score { display: grid; justify-items: center; min-width: 74px; }
+.bmx-auth-score b { font-size: 34px; line-height: 1; }
+.bmx-auth-score span { font-size: 11px; color: var(--muted); }
+.bmx-auth-score em { font-style: normal; font-weight: 800; margin-top: 4px; padding: 1px 8px; border-radius: 999px; background: rgb(255 255 255 / 0.08); }
+.bmx-auth.is-A .bmx-auth-score em { color: #22c55e; } .bmx-auth.is-B .bmx-auth-score em { color: #84cc16; }
+.bmx-auth.is-C .bmx-auth-score em { color: #eab308; } .bmx-auth.is-D .bmx-auth-score em { color: #f04438; }
+.bmx-auth-body p { margin: 0 0 4px; }
+.bmx-auth-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; margin-top: 6px; }
+.bmx-auth-parts span { position: relative; font-size: 11px; color: var(--muted); padding-bottom: 5px; }
+.bmx-auth-parts i { position: absolute; left: 0; bottom: 0; height: 3px; border-radius: 2px; background: var(--accent); }
+.bmx-auth-flags { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: #eab308; }
+@media (max-width: 720px) {
+  .bmx-ed-top { grid-template-columns: 1fr; }
+  .bmx-ed-preview { max-width: 240px; }
+  .bmx-tracks { grid-template-columns: 64px 1fr; }
+}
+.bmx-progress { width: 100%; display: grid; gap: 6px; font-size: 13px; color: var(--text); text-align: left; }
+.bmx-progress-top { display: flex; justify-content: space-between; gap: 8px; }
+.bmx-progress-top b { font-variant-numeric: tabular-nums; }
+.bmx-progress-track { height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 25%, transparent); overflow: hidden; }
+.bmx-progress-fill { height: 100%; border-radius: inherit; background: var(--accent, #4ade80); transition: width 0.8s ease; }
+.bmx-progress.is-compact { font-size: 11px; gap: 4px; }
+.bmx-progress.is-compact .bmx-progress-track { height: 5px; }
+.bmx-noplayer .bmx-progress { max-width: 260px; }
+.bmx-dest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.bmx-dest button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+.bmx-dest button.is-on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 600; }
+.bmx-dest button:disabled { opacity: 0.5; cursor: default; }
+.bmx-creator { display: flex; align-items: center; gap: 10px; }
+.bmx-creator img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+.bmx-bio { margin: 2px 0; white-space: pre-line; }
+.bmx-ttlist { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 10px; }
+.bmx-ttlist li { display: flex; gap: 12px; align-items: flex-start; }
+.bmx-ttlist img, .bmx-ttcover { width: 54px; aspect-ratio: 9 / 16; border-radius: 6px; object-fit: cover; background: #07090b; flex: none; }
+.bmx-ttlist li > div { display: grid; gap: 2px; font-size: 13px; min-width: 0; }
+.bmx-ttlist b { overflow-wrap: anywhere; }
+
+/* Trends tab */
+.bmx-linkbtn { background: none; border: 0; padding: 0; color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+.bmx-linkbtn:hover { color: var(--accent); }
+.bmx-bars { width: 88px; height: 24px; display: block; }
+.bmx-bars rect { fill: var(--muted); opacity: 0.45; }
+.bmx-bars rect.is-today { fill: var(--accent); opacity: 1; }
+.bmx-trend-more td { background: var(--surface-2); }
+.bmx-trend-more .bmx-facts { margin: 4px 0; }
+@media (max-width: 640px) {
+  .bmx-trends th:nth-child(4), .bmx-trends td:nth-child(4), .bmx-trends th:nth-child(5), .bmx-trends td:nth-child(5) { display: none; }
+}

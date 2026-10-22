@@ -1,0 +1,15 @@
+# Never upload local secrets, databases or environments
+.env
+.env.*
+*.db
+*.db-*
+*.dpapi
+*.bak
+secrets*.json
+.venv/
+__pycache__/
+.pytest_cache/
+tests/
+
+# first-deploy snapshot bundle (restored once into the empty volume; never re-uploaded)
+prod-bootstrap/

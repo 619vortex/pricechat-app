@@ -1,0 +1,8 @@
+/* Signal notifications (Kiwi Brain and the trading terminal): self-contained styles. */
+.kbn { position: fixed; z-index: 80; right: 12px; bottom: 12px; display: grid; gap: 6px; width: min(360px, calc(100vw - 24px)); }
+.kbn-item { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(155, 92, 255, .45);
+  background: rgba(10, 12, 14, .96); color: #eef3f0; cursor: pointer; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); font: 13px/1.35 "Archivo Variable", system-ui, sans-serif; }
+.kbn-item.is-target_hit, .kbn-item.is-active { border-color: rgba(0, 229, 143, .55); } .kbn-item.is-stop_hit { border-color: rgba(255, 84, 104, .6); }
+.kbn-ic { font-size: 20px; } .kbn-txt { display: grid; gap: 2px; min-width: 0; } .kbn-txt small { color: #7b8680; font-size: 11px; }
+@media (prefers-reduced-motion: no-preference) { .kbn-item { animation: kbn-in .35s cubic-bezier(.2, 1.4, .4, 1) both; } }
+@keyframes kbn-in { from { transform: translateY(16px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }

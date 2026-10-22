@@ -1,0 +1,24 @@
+{
+ "success": true,
+ "data": {
+  "symbol": "PERP_BTC_USDC",
+  "display_symbol_name": "BTC",
+  "broker_id": null,
+  "status": "ACTIVE",
+  "index_price": 83525.8,
+  "mark_price": 83486.2,
+  "sum_unitary_funding": 27817.2,
+  "est_funding_rate": 6.961e-05,
+  "last_funding_rate": 3.372e-05,
+  "next_funding_time": 1792598400000,
+  "open_interest": 33.7335,
+  "is_pretge": false,
+  "24h_open": 81449.0,
+  "24h_close": 83504.8,
+  "24h_high": 83575.7,
+  "24h_low": 81197.0,
+  "24h_volume": 212.00442,
+  "24h_amount": 17535835.031233
+ },
+ "timestamp": 1792586501467
+}

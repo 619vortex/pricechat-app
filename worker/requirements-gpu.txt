@@ -1,0 +1,13 @@
+# The worker's GPU environment (worker/.venv-gpu): Short Market's video model and neural voice. Python 3.12.
+# Install PyTorch first, from its own index:  pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
+diffusers==0.41.0
+transformers>=4.57
+accelerate>=1.10
+ftfy>=6.3
+safetensors>=0.5
+sentencepiece>=0.2
+imageio>=2.37
+imageio-ffmpeg>=0.6
+pillow>=10.0
+numpy>=2.0
+kokoro-onnx>=0.4  # the Kokoro voice (onnxruntime, CPU is enough)

@@ -1,0 +1,119 @@
+/*
+ * Rank decoration around the canonical Kiwi (rankDeco.tsx). Layers: stage back (backdrop, rays, flames, egg glow) →
+ * the Kiwi figure (gear behind it, the Kiwi, holo sheen, gear in front) → stage front (egg shell, chick cup, sparks).
+ * Motion: transform / opacity only, all inside no-preference; small Kiwis (header, lists) stay still.
+ */
+.rk { isolation: isolate; }
+.rkd { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.rkd-back { z-index: 0; }
+.rkd-front { z-index: 3; }
+.rk-fig { position: relative; z-index: 1; display: block; width: 92%; aspect-ratio: 1000 / 844; isolation: isolate; }
+.rk-fig .rk-kiwi { position: relative; z-index: 1; display: block; width: 100%; height: 100%; margin: 0; }
+.rk-fig .rk-overlay { z-index: 2; }
+.rkd-gear-back { z-index: 0; }
+.rkd-gear-front { z-index: 3; }
+
+/* sizes per treatment (the Kiwi box inside the square) */
+.rk-egg .rk-fig { width: 46%; margin-top: 14%; }
+.rk-egg .rk-fig .rk-kiwi { width: 100%; opacity: 0.8; }
+.rk-chick .rk-fig { width: 62%; margin-top: 4%; }
+.rk-chick .rk-fig .rk-kiwi { width: 100%; margin-top: 0; }
+
+/* the animated Kiwi (play.tsx): gear rides along with the hop and the breath */
+.pk .pk-breath { position: relative; isolation: isolate; }
+.pk .pk-breath > .kr { z-index: 1; }
+.pk .pk-breath > .rkd-holo { z-index: 2; }
+.pk.is-flat .pk-breath { height: 100%; }
+.rk.pk.rk-chick .pk-figure { width: 62%; margin-top: 4%; }
+
+/* mythic: a rainbow sheen inside the Kiwi's own outline */
+.rkd-holo { position: absolute; inset: 0; z-index: 2; overflow: hidden; pointer-events: none; mix-blend-mode: screen; opacity: 0.55;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+.rkd-holo i { position: absolute; inset: 0 -100%; display: block;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 120, 220, 0.55) 32%, rgba(120, 200, 255, 0.6) 40%, rgba(120, 255, 190, 0.55) 48%,
+    rgba(255, 230, 120, 0.55) 56%, transparent 68%); transform: translateX(-30%); }
+
+/* legend / mythic aura: the Kiwi's outline, blurred and tinted, behind it */
+.rkd-aura { position: absolute; inset: -6%; z-index: 0; filter: blur(7px); pointer-events: none; }
+.rkd-aura span { position: absolute; inset: 0; display: block; background: #29ffb0;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+.rkd-aura-mythic span { background: linear-gradient(120deg, #ff9ae6, #9ad8ff 40%, #7dffc8 70%, #ffe066); }
+.is-small .rkd-aura { display: none; }
+
+/* the old stand-in rings are replaced by the stage; the mythic conic ring stays */
+.rk-aura::before { content: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .rk:not(.is-small) .rkd-disc { transform-origin: 50px 50px; animation: rkd-pulse 4.2s ease-in-out infinite; }
+  .rk:not(.is-small) .rkd-rays { transform-origin: 50px 50px; animation: pc-spin 40s linear infinite; }
+  .rk:not(.is-small) .rkd-aura { animation: rkd-aura 2.6s ease-in-out infinite; }
+  .rk:not(.is-small) .rkd-runes { transform-origin: 50px 50px; animation: pc-spin 24s linear infinite reverse; }
+  .rk:not(.is-small) .rkd-flame { transform-box: fill-box; transform-origin: 50% 100%; animation: rkd-flicker 1.3s ease-in-out infinite alternate; }
+  .rk:not(.is-small) .rkd-spark { animation: rkd-rise 3.6s ease-out infinite both; }
+  .rk:not(.is-small) .rkd-twinkle { transform-box: fill-box; transform-origin: center; animation: rkd-twinkle 3.2s ease-in-out infinite; }
+  .rk:not(.is-small) .rkd-sheen { animation: rkd-sheen 3.8s ease-in-out infinite; }
+  .rk:not(.is-small) .rkd-tail { transform-box: fill-box; transform-origin: 100% 40%; animation: rkd-sway 1.8s ease-in-out infinite alternate; }
+  .rk:not(.is-small) .rkd-tail-2 { animation-delay: -0.6s; }
+  .rk:not(.is-small) .rkd-cape { transform-origin: 440px 130px; animation: rkd-cape 3.4s ease-in-out infinite alternate; }
+  .rk:not(.is-small) .rkd-halo { animation: rkd-bob 2.8s ease-in-out infinite alternate; }
+  .rk:not(.is-small) .rkd-orbit { animation: rkd-glow 2.4s ease-in-out infinite alternate; }
+  .rk:not(.is-small) .rkd-crack { animation: rkd-glow 1.6s ease-in-out infinite alternate; }
+  .rk:not(.is-small) .rkd-egg-glow { transform-origin: 50px 60px; animation: rkd-pulse 2.2s ease-in-out infinite; }
+  .rk:not(.is-small) .rkd-cup { animation: rkd-cup 2.6s ease-in-out infinite; }
+  .rk.rk-egg:not(.pk):not(.is-small) { transform-origin: 50% 92%; animation: rkd-wobble 4.6s ease-in-out infinite; }
+  .rk:not(.is-small) .rkd-holo i { animation: rkd-holo 4.5s ease-in-out infinite; }
+
+  /* level up: the new rank's gear pops on, the stage blooms */
+  .site .lu-new .rkd-gear { animation: lu-equip 420ms cubic-bezier(0.3, 1.6, 0.5, 1) 1250ms both; }
+  .site .lu-new .rkd-stage.rkd-back { animation: lu-aura 700ms var(--m-out, ease-out) 1100ms both; }
+}
+
+@keyframes rkd-pulse { 50% { transform: scale(1.045); opacity: 0.8; } }
+@keyframes rkd-flicker { 0% { transform: scaleY(0.82) scaleX(1.05); opacity: 0.75; } 100% { transform: scaleY(1.12) scaleX(0.94); opacity: 1; } }
+@keyframes rkd-rise {
+  0% { transform: translateY(0) scale(0.3); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-40px) scale(1); opacity: 0; }
+}
+@keyframes rkd-twinkle { 0%, 55%, 100% { transform: scale(0) rotate(0deg); opacity: 0; } 70% { transform: scale(1) rotate(45deg); opacity: 1; } 85% { transform: scale(0.2) rotate(90deg); opacity: 0; } }
+@keyframes rkd-sheen { 0%, 45% { transform: translateX(0); } 75%, 100% { transform: translateX(420px); } }
+@keyframes rkd-sway { from { transform: rotate(-7deg); } to { transform: rotate(6deg); } }
+@keyframes rkd-cape { from { transform: rotate(-1.5deg) skewY(-1deg); } to { transform: rotate(1.5deg) skewY(1deg); } }
+@keyframes rkd-bob { from { transform: translateY(0); } to { transform: translateY(-22px); } }
+@keyframes rkd-glow { from { opacity: 0.45; } to { opacity: 1; } }
+@keyframes rkd-cup { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2px); } }
+@keyframes rkd-wobble { 0%, 68%, 100% { transform: rotate(0); } 72% { transform: rotate(-6deg); } 77% { transform: rotate(5deg); } 82% { transform: rotate(-3deg); } 87% { transform: rotate(2deg); } 92% { transform: rotate(0); } }
+@keyframes rkd-holo { 0% { transform: translateX(-30%); } 100% { transform: translateX(30%); } }
+@keyframes rkd-aura { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 0.95; transform: scale(1.05); } }
+
+/* public profile (passport.tsx PublicProfilePage): a passport card tinted by the member's rank */
+.site .pub-card { --tint: 0, 229, 143; position: relative; overflow: hidden; border-radius: 18px; border-color: rgba(var(--tint), 0.45);
+  background: radial-gradient(circle at 18% 30%, rgba(var(--tint), 0.16), transparent 55%), linear-gradient(135deg, rgba(var(--tint), 0.06), transparent 50%), var(--site-bg);
+  box-shadow: 0 30px 80px -40px rgba(var(--tint), 0.55); }
+.site .rkd-tint-chick { --tint: 255, 210, 110; } .site .rkd-tint-scout { --tint: 143, 209, 106; } .site .rkd-tint-warrior { --tint: 255, 122, 69; }
+.site .rkd-tint-knight { --tint: 127, 182, 255; } .site .rkd-tint-royal { --tint: 183, 140, 255; } .site .rkd-tint-golden { --tint: 255, 210, 77; }
+.site .rkd-tint-legend { --tint: 41, 255, 176; } .site .rkd-tint-mythic { --tint: 190, 170, 255; }
+.site .pub-card .site-passport-name { margin-bottom: 10px; }
+.site .pub-rank { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 22px; }
+.site .pub-rank span { font-size: 22px; font-weight: 800; color: rgb(var(--tint)); }
+.site .pub-rank small { color: var(--site-muted); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+.site .pub-facts { grid-template-columns: repeat(2, minmax(0, max-content)); column-gap: 40px; }
+.site .pub-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
+.site .pub-journey { margin-top: clamp(24px, 4vw, 40px); }
+.site .pub-steps { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding: 8px 2px 6px; scrollbar-width: none; }
+.site .pub-steps::-webkit-scrollbar { display: none; }
+.site .pub-steps li { flex: 1 0 64px; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 64px; text-align: center;
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--site-muted); }
+.site .pub-steps li.is-done { color: var(--site-soft); }
+.site .pub-steps li.is-current { color: var(--site-green); }
+.site .pub-steps li.is-future .rk { opacity: .5; filter: grayscale(.5); }
+.site .pub-cta { margin-top: clamp(28px, 5vw, 56px); padding: clamp(22px, 4vw, 40px); border: 1px solid var(--site-line); border-radius: 18px; text-align: center;
+  background: radial-gradient(circle at 50% 0%, rgba(0, 229, 143, .12), transparent 60%); }
+.site .pub-cta h2 { font-size: clamp(28px, 4vw, 44px); margin: 0 0 8px; }
+.site .pub-cta p { color: var(--site-soft); margin: 0 0 18px; }
+.site .pub-missing { display: grid; justify-items: start; gap: 16px; }
+@media (max-width: 640px) {
+  .site .pub-card { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+  .site .pub-card .site-passport-body { display: flex; flex-direction: column; align-items: center; }
+  .site .pub-rank, .site .pub-actions, .site .pub-card .site-badges { justify-content: center; }
+}
