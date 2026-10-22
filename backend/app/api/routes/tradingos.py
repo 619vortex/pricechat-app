@@ -15,7 +15,7 @@ from app.api.schemas import StrictInput
 from app.arbitrage import funding_alerts
 from app.models.tradingos import TsAudit, TsSignal
 from app.security import admin_auth
-from app.tradingos import bot, market, risk, signals
+from app.tradingos import autodelete, bot, market, risk, signals
 
 router = APIRouter(tags=["trading-os"])
 
@@ -51,7 +51,7 @@ def overview(db: DbSession) -> dict[str, Any]:
               for st in signals.STATUS_LABEL}
     return {"settings": {k: getattr(s, k) for k in ("scanner_enabled", "auto_publish", "paused", "publish_chat", "main_chat", "chart_routing", "brief_enabled", "brief_hour", "timeframe", "universe_size",
                                                      "min_volume_usd", "max_spread_bps", "max_open_signals", "min_rr", "strategies", "allowed_coins")},
-            "funding_alerts": funding_alerts.config(db),
+            "funding_alerts": funding_alerts.config(db), "autodelete": autodelete.config(db),
             "exchange": exchange, "counts": counts, "stats": signals.stats(db),
             "execution": "ENTER → private preview → confirm. PAPER by default; TESTNET with an approved API wallet; LIVE only for the "
                          "allowlist after the pre-live checks"}
@@ -238,6 +238,7 @@ class SettingsIn(StrictInput):
     risk_v2_mode: str | None = Field(None, pattern=r"^(advisory|enforce)$")  # Engine v2 portfolio checks: record only, or refuse entries
     funding_alerts_on: bool | None = None  # Earn › Funding Arb alerts to the publish chat (tradingos.funding_alerts)
     funding_alert_min_apr: float | None = Field(None, ge=1, le=1000)  # net spread APR %, after estimated fees
+    main_chat_autodelete_min: int | None = Field(None, ge=0, le=1440)  # delete the bot's main-chat messages after N minutes (0 = keep)
 
 
 @router.put("/tradingos/admin/settings")
@@ -250,6 +251,8 @@ def put_settings(payload: SettingsIn, request: Request, db: DbSession) -> dict[s
     fa = {"on": v.pop("funding_alerts_on", None), "min_net_apr": v.pop("funding_alert_min_apr", None)}
     if any(x is not None for x in fa.values()):
         s.strategies = {**s.strategies, "funding_alerts": {**funding_alerts.config(db), **{k: x for k, x in fa.items() if x is not None}}}
+    if "main_chat_autodelete_min" in v:
+        s.strategies = {**s.strategies, "autodelete": {"minutes": v.pop("main_chat_autodelete_min")}}
     if "risk_v2_mode" in v:
         s.strategies = {**s.strategies, "risk_v2": {**((s.strategies or {}).get("risk_v2") or {}), "mode": v.pop("risk_v2_mode")}}
     for k, val in v.items():

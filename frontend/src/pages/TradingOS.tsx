@@ -171,7 +171,8 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
                                intraday_live: !!s.strategies.intraday_live,
                                risk_v2_mode: (s.strategies.risk_v2 as { mode?: string } | undefined)?.mode === "enforce" ? "enforce" : "advisory",
                                funding_alerts_on: (s.strategies.funding_alerts as { on?: boolean } | undefined)?.on ?? true,
-                               funding_alert_min_apr: (s.strategies.funding_alerts as { min_net_apr?: number } | undefined)?.min_net_apr ?? 30 });
+                               funding_alert_min_apr: (s.strategies.funding_alerts as { min_net_apr?: number } | undefined)?.min_net_apr ?? 30,
+                               main_chat_autodelete_min: (s.strategies.autodelete as { minutes?: number } | undefined)?.minutes ?? 5 });
   const [err, setErr] = useState<unknown>(null);
   const [ok, setOk] = useState(false);
   const set = (k: string, val: unknown) => { setV({ ...v, [k]: val }); setOk(false); };
@@ -203,6 +204,8 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
         <div className="tba-grid">
           <label className="tba-field"><span>Signal group on Telegram</span><input value={v.publish_chat} onChange={(e) => set("publish_chat", e.target.value)} /></label>
           <label className="tba-field"><span>Main chat: also announce open / close (empty = off)</span><input value={v.main_chat ?? ""} placeholder="@thepricechat" onChange={(e) => set("main_chat", e.target.value)} /></label>
+          <label className="tba-field"><span>Delete the bot's messages in the main chat after (minutes, 0 = keep; never in Bot Chat)</span>
+            <input type="number" min={0} max={1440} value={v.main_chat_autodelete_min} onChange={(e) => set("main_chat_autodelete_min", Number(e.target.value))} /></label>
           {num("max_open_signals", "Most signals open at once")}
           {num("brief_hour", "Daily brief hour (UTC, 0-23)")}
           <label className="tba-field"><span>/chart asked in the main chat</span>

@@ -731,6 +731,19 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             lunch.record_error(exc)
             raise
 
+    async def autodelete(ctx: JobContext) -> dict[str, Any]:
+        """Main chat: delete the bot's own messages a few minutes after they were sent (never Bot Chat)."""
+        from app.telegram.service import make_client
+        from app.tradingos import autodelete as ad
+
+        if not s.telegram_configured:
+            raise JobSkipped("Telegram is not configured")
+        tg = make_client(s, runtime.telegram.transport)
+        try:
+            return await ad.run(ctx.db, tg, ctx.now)
+        finally:
+            await tg.aclose()
+
     async def funding_alerts(ctx: JobContext) -> dict[str, Any]:
         """Earn › Funding Arb: post wide cross-venue funding spreads (net of estimated fees) to the publish chat. Read-only."""
         from app.arbitrage import funding_alerts as fa
@@ -855,6 +868,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 s.bm_tick_seconds, brand_tick, initial_delay_seconds=75, timeout_seconds=170),
         JobSpec("tradingos.lunch_bot", "Earn › Arbitrage › Lunch Bot (paper)", "Every minute: reads pump.fun's newest launches and their bonding curves on Solana, paper-buys launches with early momentum and closes them at graduation, target, stop or timeout at real on-chain prices; every 10 runs measures the curve-to-pool price gap of recent graduations. Never signs or sends a transaction",
                 60, lunch_bot, initial_delay_seconds=90, timeout_seconds=55),
+        JobSpec("tradingos.autodelete", "Trading OS: main-chat tidy-up", "Every minute: deletes the bot's own messages in the main chat a few minutes after they were sent (Admin › Trading OS; 0 = off). Bot Chat and private chats are never touched",
+                60, autodelete, initial_delay_seconds=50, timeout_seconds=50),
         JobSpec("tradingos.funding_alerts", "Earn › Funding Arb alerts", "Every 10 min: when a coin's best cross-venue funding spread, net of estimated taker fees on both legs, clears the threshold (Admin › Trading OS), posts it to the publish chat; 12 h cooldown per coin unless the spread grows 50%+. Read-only, never trades",
                 600, funding_alerts, initial_delay_seconds=240, timeout_seconds=120),
         JobSpec("brand.trends", "Brand Manager trend scan", "Every 30 min: reads today's headlines from crypto and finance outlets (CoinDesk, Cointelegraph, Decrypt, The Block, CNBC, MarketWatch, FT, BBC Business) and CoinGecko's most-searched coins, and counts which words are new or rising against the past 7 days, for Content Studio's topics and scripts",

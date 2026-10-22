@@ -313,3 +313,14 @@ class TsSignalIdea(IdMixin, TimestampMixin, Base):
     filled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     r: Mapped[float | None] = mapped_column(Float)  # result in R from the zone's mid: TARGET +reward, STOP -1, EXPIRED (filled) at the close
+
+
+class TsAutoDelete(IdMixin, Base):
+    """A bot message in the main chat, deleted at delete_at (tradingos.autodelete)."""
+
+    __tablename__ = "ts_autodelete"
+    __table_args__ = (Index("ix_ts_autodelete_due", "delete_at"),)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    delete_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

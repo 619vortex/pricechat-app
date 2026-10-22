@@ -141,6 +141,9 @@ def create_app(
                     f"Telegram: {'configured' if runtime.telegram.configured else 'not configured'})",
                 )
 
+        from app.tradingos import autodelete
+
+        autodelete.install()  # notes the bot's main-chat messages for tradingos.autodelete
         # One scheduler for every background job; tests can turn it off.
         specs = build_jobs(runtime)
         off = app_settings.jobs_off(s.name for s in specs)

@@ -33,6 +33,18 @@ ALLOWED_UPDATES = ["message", "edited_message", "channel_post", "edited_channel_
                    "callback_query"]  # callback_query: the ENTER / REJECT / AUTO buttons on Trading OS signal cards
 
 
+SENT_HOOKS: list[Any] = []  # called with each sent message (e.g. tradingos.autodelete notes the main chat's ones); never raise
+
+
+def _sent(result: Any) -> Any:
+    for hook in SENT_HOOKS:
+        try:
+            hook(result)
+        except Exception:  # noqa: BLE001 - a hook must never break a send
+            logging.getLogger(__name__).exception("sent hook failed")
+    return result
+
+
 class TelegramBotClient:
     def __init__(
         self,
@@ -84,7 +96,7 @@ class TelegramBotClient:
             params["parse_mode"] = "HTML"
         if reply_to:
             params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
-        return await self._call("sendMessage", params)
+        return _sent(await self._call("sendMessage", params))
 
     async def send_photo(self, chat_id: int | str, png: bytes, caption: str, buttons: list[list[dict[str, str]]] | None = None,
                          reply_to: int | None = None, html: bool = False) -> dict[str, Any]:
@@ -106,7 +118,11 @@ class TelegramBotClient:
         body = response.json()
         if not body.get("ok"):
             raise TelegramRequestError(str(body.get("description") or "sendPhoto failed"))
-        return body["result"]
+        return _sent(body["result"])
+
+    async def delete_message(self, chat_id: int | str, message_id: int) -> None:
+        """Only the bot's own messages (tradingos.autodelete: the main chat's, after a few minutes)."""
+        await self._call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
 
     async def edit_caption(self, chat_id: int | str, message_id: int, caption: str, buttons: list[list[dict[str, str]]] | None = None) -> None:
         params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "caption": caption[:1024]}
