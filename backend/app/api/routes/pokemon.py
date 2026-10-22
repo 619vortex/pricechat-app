@@ -308,7 +308,7 @@ def compare(db: DbSession, series: list[str] = Query(min_length=1, max_length=4)
     specs = []
     for item in series:
         cid, _, label = item.partition(":")
-        if not cid.strip().isdigit():
+        if not (cid.strip().isascii() and cid.strip().isdigit() and len(cid.strip()) <= 12):  # "²" passes isdigit()
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Use series=<card id>:<grade>, e.g. 1:PSA 10")
         specs.append((_card(db, int(cid)), _grade(label or "PSA 10")))
     history.ensure_built(db)

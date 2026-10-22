@@ -32,6 +32,9 @@ def _err(exc: Exception) -> HTTPException:
     return _fail(exc)
 
 
+MAX_PRICE = 100_000_000  # USDT: bounds the browse filters (inf / 1e300 overflowed the cents conversion: a 500)
+
+
 def _usdt(v: float | None) -> int | None:
     return None if v is None else int(round(v * 100))
 
@@ -61,7 +64,7 @@ def market_home(db: DbSession, runtime: Runtime, pc_session: SessionToken = None
 def browse(db: DbSession, q: str = Query("", max_length=80), set_name: str | None = Query(None, max_length=80), year: int | None = None,
            language: str | None = Query(None, max_length=16), edition: str | None = Query(None, max_length=24), number: str | None = Query(None, max_length=12),
            company: Literal["PSA", "BGS", "CGC"] | None = None, grade: str | None = Query(None, max_length=8),
-           min_price: float | None = Query(None, ge=0), max_price: float | None = Query(None, ge=0), min_discount: float | None = Query(None, ge=0, le=100),
+           min_price: float | None = Query(None, ge=0, le=MAX_PRICE), max_price: float | None = Query(None, ge=0, le=MAX_PRICE), min_discount: float | None = Query(None, ge=0, le=100),
            vaulted: bool = False, kind: Literal["graded", "raw"] | None = None, status_: Literal["active", "sold"] = Query("active", alias="status"),
            sort: Literal["recent", "price_asc", "price_desc", "value", "discount", "sold"] = "recent", page: int = Query(1, ge=1, le=500),
            pc_session: SessionToken = None) -> dict[str, Any]:

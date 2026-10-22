@@ -423,7 +423,7 @@ class ReferralVisit(StrictInput):
 
 
 @router.post("/members/referrals/visit")
-def referral_visit(payload: ReferralVisit, response: Response, db: DbSession, runtime: Runtime,
+def referral_visit(payload: ReferralVisit, request: Request, response: Response, db: DbSession, runtime: Runtime,
                    pc_session: SessionToken = None) -> dict[str, Any]:
     """Someone opened an invite link: remember the code in this browser for when they create their Passport. Never XP."""
     code = referrals.normalise(payload.code)
@@ -432,7 +432,10 @@ def referral_visit(payload: ReferralVisit, response: Response, db: DbSession, ru
         return {"valid": False}
     me = _current(db, pc_session)
     if me is None:  # a signed-in member opening an invite changes nothing
-        referrals.record_visit(db, code)
+        from app.security import rate_limit
+
+        if rate_limit.retry_after("referral", request) is None:  # a script replaying the link isn't counted (like /api/r/ clicks)
+            referrals.record_visit(db, code)
         response.set_cookie(REF_COOKIE, code, max_age=30 * 86400, httponly=True, samesite="lax", secure=_secure(runtime.settings), path="/")
     return {"valid": True, "welcome_xp": referrals.stats(db, owner)["welcome_xp"], "signed_in": me is not None}
 
@@ -580,6 +583,16 @@ def _error_page(purpose: str, message: str, code: str = "error", platform: str =
                             status_code=303)
 
 
+SLOW_DOWN = "Too many sign-in attempts from here. Please wait a minute and try again."
+
+
+def _signin_flood(request: Request) -> bool:
+    """Over the "signin" rate limit? Each start stores a pending attempt, so they are limited per visitor."""
+    from app.security import rate_limit
+
+    return rate_limit.retry_after("signin", request) is not None
+
+
 def _purpose_of(db: Session, provider: str, state: str) -> str:
     """Which page to send an error back to (the attempt's purpose), without consuming the attempt."""
     if not state:
@@ -591,8 +604,10 @@ def _purpose_of(db: Session, provider: str, state: str) -> str:
 
 
 @router.get("/members/auth/google/start")
-def google_start(db: DbSession, runtime: Runtime, purpose: Literal["login", "link"] = "login",
+def google_start(request: Request, db: DbSession, runtime: Runtime, purpose: Literal["login", "link"] = "login",
                  pc_session: SessionToken = None, pc_auth: AuthToken = None) -> RedirectResponse:
+    if _signin_flood(request):
+        return _error_page(purpose, SLOW_DOWN, "rate_limited", "google")
     resp = RedirectResponse("about:blank", status_code=303)
     browser = _browser_binding(resp, runtime.settings, pc_auth)
     try:
@@ -622,6 +637,8 @@ async def google_callback(db: DbSession, runtime: Runtime, state: str = "", code
 def x_start(request: Request, db: DbSession, runtime: Runtime, purpose: Literal["login", "link"] = "login",
             pc_session: SessionToken = None, pc_auth: AuthToken = None) -> RedirectResponse:
     """Member sign-in with X (OAuth 2.0 + PKCE). Not the @pricechat brand connector."""
+    if _signin_flood(request):
+        return _error_page(purpose, SLOW_DOWN, "rate_limited", "x")
     resp = RedirectResponse("about:blank", status_code=303)
     browser = _browser_binding(resp, runtime.settings, pc_auth)
     try:
@@ -666,6 +683,8 @@ class TelegramStart(StrictInput):
 @router.post("/members/auth/telegram/start")
 def telegram_start(payload: TelegramStart, response: Response, request: Request, db: DbSession, runtime: Runtime,
                    pc_session: SessionToken = None, pc_auth: AuthToken = None) -> dict[str, Any]:
+    if _signin_flood(request):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, SLOW_DOWN)
     browser = _browser_binding(response, runtime.settings, pc_auth)
     try:
         out = auth.telegram_start(db, runtime.settings, payload.purpose, browser, _current(db, pc_session))
@@ -710,9 +729,11 @@ class TelegramWidget(StrictInput):
 
 
 @router.post("/members/auth/telegram/widget")
-def telegram_widget(payload: TelegramWidget, response: Response, db: DbSession, runtime: Runtime,
+def telegram_widget(payload: TelegramWidget, request: Request, response: Response, db: DbSession, runtime: Runtime,
                     pc_session: SessionToken = None, pc_auth: AuthToken = None, pc_ref: RefCode = None) -> dict[str, Any]:
     """Telegram Login Widget (public domain only). The signature is checked with the bot token."""
+    if _signin_flood(request):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, SLOW_DOWN)
     data = payload.model_dump(exclude={"purpose"}, exclude_none=True)
     try:
         identity = auth.telegram_widget_verify(runtime.settings, data)

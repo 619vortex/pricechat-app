@@ -221,6 +221,12 @@ def create_app(
 
     allowed_origins = {o.rstrip("/") for o in app_settings.cors_origins} | {app_settings.members_public_url.rstrip("/")}
 
+    from app.security.body_limit import BodyLimit
+
+    # public routes: bounded request bodies (413). Added before admin_guard so it sits INSIDE it: an over-limit body raises
+    # straight into the route's body read (through admin_guard's task group it would arrive as an ExceptionGroup -> a 400)
+    app.add_middleware(BodyLimit, video_mb=app_settings.bm_max_video_mb)
+
     @app.middleware("http")
     async def admin_guard(request: Request, call_next):  # type: ignore[no-untyped-def]
         """Every /api route is the owner's unless it's on the public list (admin_auth.PUBLIC_*): the website, the member
@@ -295,6 +301,16 @@ def create_app(
             return await request_validation_exception_handler(request, exc)
         except ValueError:  # the default 422 echoes each input: a NaN / Infinity in the body can't be, which made it a 500
             return JSONResponse(status_code=422, content={"detail": jsonable_encoder([{k: v for k, v in e.items() if k != "input"} for e in exc.errors()])})
+
+    from sqlalchemy.exc import DataError
+
+    @app.exception_handler(OverflowError)
+    @app.exception_handler(DataError)
+    async def out_of_range(request: Request, exc: Exception) -> JSONResponse:
+        # an id / number too big for the database column (e.g. /api/pokemon/cards/99999999999999999999): the caller's input,
+        # not a server fault. SQLite raises OverflowError while binding it, Postgres a DataError (numeric value out of range).
+        logger.warning("Out-of-range value on %s %s: %s", request.method, request.url.path, type(exc).__name__)
+        return JSONResponse(status_code=400, content={"detail": "A value in the request is out of range.", "code": "out_of_range"})
 
     @app.exception_handler(Exception)
     async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:

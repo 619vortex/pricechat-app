@@ -78,12 +78,17 @@ def sitemap_part(name: str, db: DbSession, runtime: Runtime) -> Response:
         users = db.scalars(select(Member.username).where(Member.public_profile.is_(True), Member.status == "active",
                                                          Member.username.is_not(None)).order_by(Member.id)).all()
         return _urlset(base, [f"u/{u}" for u in users])
-    if name.startswith("cards-") and name[6:].isdigit() and int(name[6:]) >= 1:
+    if name.startswith("cards-") and _num(name[6:]) and int(name[6:]) >= 1:
         k = int(name[6:]) - 1
         ids = db.scalars(select(PokemonCard.id).order_by(PokemonCard.id).offset(k * PART).limit(PART)).all()
         if ids:
             return _urlset(base, [f"pokemon/cards/{i}" for i in ids])
     raise HTTPException(status.HTTP_404_NOT_FOUND, "No such sitemap")
+
+
+def _num(s: str) -> bool:
+    """A plain id: ASCII digits only ("²".isdigit() is True and int() of it fails), small enough for the database."""
+    return s.isascii() and s.isdigit() and len(s) <= 12
 
 
 def _money(cents: int) -> str:
@@ -128,7 +133,7 @@ def link_preview(path: str, db: DbSession, runtime: Runtime) -> HTMLResponse:
     path = path.strip("/")
     parts = path.split("/")
     found: tuple[str, str, str | None] | None = None
-    if len(parts) == 3 and parts[:2] == ["pokemon", "cards"] and parts[2].isdigit():
+    if len(parts) == 3 and parts[:2] == ["pokemon", "cards"] and _num(parts[2]):
         found = _card(db, int(parts[2]))
     elif len(parts) == 2 and parts[0] == "u" or len(parts) == 3 and parts[:2] == ["website", "u"]:
         found = _profile(db, parts[-1][:32])

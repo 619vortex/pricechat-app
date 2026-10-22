@@ -350,6 +350,7 @@ def signed_media(video_id: int, expires: int, sig: str, name: str, request: Requ
     key = (v.video_key if name == "video.mp4" else v.thumb_key) if v else None
     if not key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
+    db.close()  # get_db closes only after the response is sent: don't hold a pooled connection while a video streams out
     return _stream(request, MediaStore(runtime.settings), key, "video/mp4" if name == "video.mp4" else "image/jpeg")
 
 
