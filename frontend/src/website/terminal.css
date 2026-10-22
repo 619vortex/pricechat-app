@@ -21,6 +21,7 @@
 .kt-mode { cursor: pointer; background: rgba(255, 255, 255, 0.08); color: var(--site-soft); }
 .kt-mode.is-testnet { background: rgba(110, 170, 255, 0.16); color: #8fbaff; }
 p.kt-mode { justify-self: start; margin: 0; cursor: default; }
+.kt-mode.is-live { cursor: default; background: rgba(255, 92, 92, 0.16); color: #ff8a8a; }  /* real money: never looks like practice */
 .kt-auto { background: rgba(0, 229, 143, 0.14); color: var(--tb-green); }
 .kt-paused { cursor: pointer; background: rgba(255, 201, 60, 0.14); color: var(--tt-amber); }
 .kt-gear { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--tt-line); background: transparent; color: var(--site-soft); font-size: 16px; cursor: pointer; }

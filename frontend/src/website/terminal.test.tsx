@@ -82,7 +82,8 @@ describe("Kiwi trading bot", () => {
   it("shows positions like an exchange: one row with the essentials, details on tap, CLOSE always there", async () => {
     await open({ [T]: term(), [S]: { items: [] } });
     const row = screen.getByLabelText("SOL LONG position");
-    expect(row.textContent).toMatch(/SOL.*LONG 3x.*\$300\.00.*145.*150.*\+\$10\.00.*\+10\.34%.*99\.5/);
+    expect(row.textContent).toMatch(/SOL.*LONG 3x.*\$300\.00.*145.*150.*\+\$10\.00.*\+10\.34% ROE.*99\.5/);
+    expect(screen.getByLabelText("Kiwi trading bot chat").textContent).toMatch(/LIVE · REAL MONEY/);  // a live account says so up top
     expect(row.textContent).not.toMatch(/Margin/);
     fireEvent.click(within(row).getByRole("button", { expanded: false }));
     expect(row.textContent).toMatch(/Margin\$96\.67/); expect(row.textContent).toMatch(/Contracts2 SOL/); expect(row.textContent).toMatch(/Funding\$0\.02/);
@@ -94,8 +95,9 @@ describe("Kiwi trading bot", () => {
   it("CLOSE asks first, then sends one reduce-only close", async () => {
     await open({ [T]: term(), [S]: { items: [] },
                  "POST /api/members/trading/positions/5/close": { ...account(), close: { status: "CLOSED", filled: 2, avg_px: 150, remaining: 0, note: null } } });
-    fireEvent.click(screen.getByRole("button", { name: "CLOSE" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close SOL LONG position" }));  // each row's CLOSE names its position for screen readers
     expect(calls.some((c) => c.key.includes("/close"))).toBe(false);
+    expect(screen.getByRole("dialog", { name: "Close position" }).textContent).toMatch(/LIVE · real money/);
     fireEvent.click(screen.getByRole("button", { name: /Confirm: close 100%/ }));
     await flush();
     expect(calls.find((c) => c.key === "POST /api/members/trading/positions/5/close")!.body).toEqual({ fraction: 1 });
@@ -122,7 +124,8 @@ describe("Kiwi trading bot", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "ENTER TRADE" })[0]);
     await flush();
     const dlg = screen.getByRole("dialog", { name: "Confirm trade" }).textContent!;
-    expect(dlg).toMatch(/SOL LONG/); expect(dlg).toMatch(/Position size\$100\.00/); expect(dlg).toMatch(/Leverage3x/); expect(dlg).toMatch(/Stop loss\$140/);
+    expect(dlg).toMatch(/SOL LONG/); expect(dlg).toMatch(/Position size\$100\.00 \(0\.69 SOL\)/); expect(dlg).toMatch(/Leverage3x/); expect(dlg).toMatch(/Stop loss\$140/);
+    expect(dlg).toMatch(/LIVE · REAL MONEY/); expect(dlg).toMatch(/Entry \(market\)≈ \$145/); expect(dlg).toMatch(/Margin used\$33\.30/);
     expect(dlg).toMatch(/Estimated maximum loss: \$4\.90, excluding possible slippage/);
     expect(calls.some((c) => c.key.endsWith("/confirm"))).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: /CONFIRM TRADE · REAL MONEY/ }));
@@ -325,6 +328,22 @@ describe("Connect Hyperliquid", () => {
     // longer runs: 30 / 90 / 180 days, or until the member turns it off
     const opts = [...within(dlg).getByLabelText("AUTO duration").querySelectorAll("option")].map((o) => o.textContent);
     expect(opts).toEqual(expect.arrayContaining(["30 days", "90 days", "180 days", "Until I turn it off"]));
+  });
+
+  it("turning AUTO on from ⚙ settings goes through the same real-money confirmation, never straight to the server", async () => {
+    await open({ [T]: term({ overview: { ...term().overview, auto: false }, account: account({ auto: { enabled: false, until: null } }) }), [S]: { items: [] },
+                 "PUT /api/members/trading/settings": account() });
+    fireEvent.click(screen.getByRole("button", { name: "Trading settings" }));
+    const set = screen.getByRole("dialog", { name: "Trading settings" });
+    fireEvent.change(within(set).getByLabelText("AUTO duration"), { target: { value: "4" } });
+    fireEvent.click(within(set).getByRole("button", { name: "Turn AUTO on…" }));
+    expect(calls.some((c) => c.key.startsWith("PUT"))).toBe(false);
+    const dlg = screen.getByRole("dialog", { name: "Turn AUTO on" });
+    expect(dlg.textContent).toMatch(/real-money trades/);
+    expect((within(dlg).getByLabelText("AUTO duration") as HTMLSelectElement).value).toBe("4");  // the chosen duration carries over
+    fireEvent.click(within(dlg).getByRole("button", { name: "TURN AUTO ON" }));
+    await flush();
+    expect(calls.find((c) => c.key === "PUT /api/members/trading/settings")!.body).toEqual({ auto_enabled: true, auto_hours: 4 });
   });
 });
 
