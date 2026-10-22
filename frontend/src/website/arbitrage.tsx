@@ -78,7 +78,7 @@ export interface Scoreboard { days: number; series: Partial<Record<LunchStrategy
 // the backend keeps measuring meanwhile.
 export const SHOW_GRADUATIONS = false;
 // The scoreboard's one-line gap summary (implausible >±50% candles already left out server-side); flip off to hide it too.
-export const SHOW_GAP_STAT = true;
+export const SHOW_GAP_STAT = false;  // off until the pool data is trusted (the detailed gap table is hidden for the same reason)
 const EXIT: Record<string, string> = { graduated: "Graduated", target: "Target", stop: "Stop", timeout: "Timeout", gone: "Gone" };
 const sol = (v: number | null | undefined, d = 3) => (v == null ? "—" : `${v >= 0 ? "" : "−"}${Math.abs(v).toFixed(d)} SOL`);
 const signed = (v: number | null | undefined, d = 3) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(d)}`);
