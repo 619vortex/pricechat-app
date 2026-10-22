@@ -46,7 +46,7 @@ export function SignalToasts({ onOpen }: { onOpen?: (e: Ev) => void }) {
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 30_000);
+    const id = window.setInterval(() => { if (!document.hidden) void load(); }, 30_000);
     return () => { live = false; window.clearInterval(id); };
   }, []);
   useEffect(() => {

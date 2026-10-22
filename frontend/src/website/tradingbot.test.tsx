@@ -128,6 +128,14 @@ describe("Earn: the trading bot funnel", () => {
     expect(screen.queryByRole("link", { name: /open hyperliquid/i })).toBeNull();
   });
 
+  it("the bot's track record says when Hyperliquid was read (it's cached for a few minutes)", async () => {
+    serve({ ...site, "GET /api/members/trading-bot": state(), "GET /api/members/trading-bot/track-record": { configured: true, bot: "cryptopricechatbot",
+      address: "0x1234567890abcdef1234567890abcdef12345678", as_of: "2026-10-22T08:05:00+00:00", pnl: { all: { pnl: 250.5, value: 1250.5, series: [0, 250.5] } } } });
+    await render$();
+    const card = screen.getByLabelText("Bot track record").textContent!;
+    expect(card).toMatch(/From Hyperliquid, as of \d/); expect(card).toMatch(/\+\$250\.50/); expect(card).toMatch(/Account \$1,251/);
+  });
+
   it("stays closed to the public until the owner opens it", async () => {
     serve({ ...site, "GET /api/members/trading-bot": { ...state(), open: false, preview: false } });
     await render$();

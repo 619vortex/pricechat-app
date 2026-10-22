@@ -108,7 +108,7 @@ function Report({ r }: { r: Replay }) {
         <div><dt>Strategy / version</dt><dd>{String(p.strategy_name)} · {String(p.version)}</dd></div>
         <div><dt>Entry reasoning</dt><dd>{String(p.signal_reason ?? "—")}</dd></div>
         <div><dt>Exit</dt><dd>{String(p.close_reason ?? r.signal.status)}</dd></div>
-        <div><dt>Net P&L</dt><dd className={Number(p.net) >= 0 ? "is-up" : "is-down"}>{p.net != null ? fmt.usd(Number(p.net), 4) : "no position of yours"}</dd></div>
+        <div><dt>Net P&L</dt><dd className={Number(p.net) >= 0 ? "is-up" : "is-down"}>{p.net != null ? fmt.pnl(Number(p.net), 4) : "no position of yours"}</dd></div>
         <div><dt>Fees</dt><dd>{p.fees != null ? fmt.usd(Number(p.fees), 4) : "—"}</dd></div>
         <div><dt>Funding</dt><dd>{p.funding != null ? fmt.usd(Number(p.funding), 4) : p.mode === "PAPER" ? "n/a (paper)" : "—"}</dd></div>
         <div><dt>Max adverse (MAE)</dt><dd className="is-down">{p.mae_pct != null ? `${fmt.pct(Number(p.mae_pct), 2)} · ${fmt.usd(Number(p.mae_usd), 4)}` : "—"}</dd></div>
@@ -134,7 +134,7 @@ export function TimeMachine({ start, onClear }: { start: number | null; onClear:
         <header className="kbp-ph"><h3>Signals & trades</h3></header>
         <ol>{items.map((x) => <li key={x.signal_id}><button aria-pressed={sel === x.signal_id} onClick={() => { setSel(x.signal_id); onClear(); }}>
           <b>#{String(x.number).padStart(3, "0")} {x.coin} {x.side}</b>{x.test && <small> manual</small>}
-          <span>{x.status} · {fmt.day(x.created_at)}{x.position ? ` · yours ${x.position.mode.toLowerCase()} ${fmt.usd(x.position.net)}` : ""}</span></button></li>)}</ol>
+          <span>{x.status} · {fmt.day(x.created_at)}{x.position ? ` · yours ${x.position.mode.toLowerCase()} ${fmt.pnl(x.position.net)}` : ""}</span></button></li>)}</ol>
         {!items.length && <p className="kb-empty">No published signals yet.</p>}
       </aside>
       <section className="kbp-panel kbtm-main">

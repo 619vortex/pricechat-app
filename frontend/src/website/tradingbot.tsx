@@ -113,7 +113,7 @@ export function TradingBotPage() {
   const [flash, setFlash] = useState<number | null>(null);
   const [party, setParty] = useState(false);  // balloons + fanfare when the bot gets connected
   const prev = useRef<BotState | null>(null);
-  const [record, setRecord] = useState<{ configured: boolean; bot?: string; address?: string; pnl?: Pnl | null } | null>(null);
+  const [record, setRecord] = useState<{ configured: boolean; bot?: string; address?: string; pnl?: Pnl | null; as_of?: string | null } | null>(null);
   useEffect(() => { void memberApi<NonNullable<typeof record>>("/members/trading-bot/track-record").then(setRecord).catch(() => undefined); }, []);
   const stepsRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -261,7 +261,7 @@ export function TradingBotPage() {
   const record_ = record?.configured && (
     <section className="tb-record" aria-label="Bot track record">
       <PnlCard title={`@${record.bot} track record`} pnl={record.pnl}
-               sub={<>Live from Hyperliquid · <a href={`https://app.hyperliquid.xyz/explorer/address/${record.address}`} target="_blank" rel="noopener noreferrer">verify on-chain ↗</a> · past results don't guarantee future ones</>} />
+               sub={<>From Hyperliquid{record.as_of ? `, as of ${new Date(record.as_of).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""} · <a href={`https://app.hyperliquid.xyz/explorer/address/${record.address}`} target="_blank" rel="noopener noreferrer">verify on-chain ↗</a> · past results don't guarantee future ones</>} />
     </section>
   );
   const waiting = false;  // (the old "waiting for a first trade" screen is now step 4: connect the trading API or use paper)

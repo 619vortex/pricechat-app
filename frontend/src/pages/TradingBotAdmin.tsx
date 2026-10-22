@@ -54,6 +54,8 @@ function SettingsForm({ initial, onSaved }: { initial: Settings; onSaved: () => 
   const set = <K extends keyof Settings>(k: K, val: Settings[K]) => { setV({ ...v, [k]: val }); setSaved(false); };
   async function save() {
     setErr(null);
+    if (v.public_enabled && !initial.public_enabled
+        && !window.confirm("Open the trading bot to the public? Every signed-in member will see Earn and can start onboarding. Read the launch checklist first.")) return;
     try {
       await request("/tradingbot/admin/settings", { method: "PUT", body: JSON.stringify({ ...v, telegram_group_id: v.telegram_group_id ?? "", bot_wallet: v.bot_wallet ?? "" }) });
       setSaved(true);

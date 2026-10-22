@@ -141,7 +141,11 @@ export function BurnerRow() {
     }
   }
 
-  const copy = (t: string) => { void navigator.clipboard?.writeText(t); };
+  const [copied, setCopied] = useState<"address" | "phrase" | null>(null);
+  const copy = (t: string, what: "address" | "phrase") => {
+    void navigator.clipboard?.writeText(t).then(() => { setCopied(what); window.setTimeout(() => setCopied(null), 2000); })
+      .catch(() => setErr("Couldn't copy: select the text and copy it yourself."));
+  };
   if (step === "loading") return null;
   return (
     <li id="account-burner" className="pp-burner">
@@ -151,7 +155,7 @@ export function BurnerRow() {
         {burner && <span className="site-muted"> {burner.address.slice(0, 6)}…{burner.address.slice(-4)}</span>}
       </span>
       {step === "none" && <button type="button" className="site-button pp-cta" onClick={() => { setErr(null); setStep("password"); }}>Create</button>}
-      {step === "have" && burner && <button type="button" className="site-textbutton" onClick={() => copy(burner.address)}>Copy address</button>}
+      {step === "have" && burner && <button type="button" className="site-textbutton" onClick={() => copy(burner.address, "address")}>{copied === "address" ? "Copied ✓" : "Copy address"}</button>}
 
       {step === "offline" && <p className="pp-account-extra site-muted">Burner wallets are switching on shortly.</p>}
       {step === "none" && (
@@ -184,7 +188,7 @@ export function BurnerRow() {
               <p className="site-muted">Write these 12 words down on paper, in order. Anyone with them controls the wallet. Never share them,
                 not even with Price Chat.</p>
               <div className="pp-burner-actions">
-                <button type="button" className="site-textbutton" onClick={() => copy(phrase)}>Copy phrase</button>
+                <button type="button" className="site-textbutton" onClick={() => copy(phrase, "phrase")}>{copied === "phrase" ? "Copied ✓" : "Copy phrase"}</button>
                 <button type="button" className="site-textbutton" onClick={hide}>Hide</button>
               </div>
             </>

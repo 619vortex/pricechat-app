@@ -85,7 +85,7 @@ export function PositionsPanel({ ps, onReplay }: { ps: Position[]; onReplay: (si
         <article key={p.id} className={`kbpos is-${p.side.toLowerCase()}${p.protected ? "" : " is-unprot"}`}>
           <div className="kbpos-h">
             <b>{p.coin} {p.side}</b><span className="kb-pill">{p.mode}</span>{p.test && <span className="kb-pill is-warn">MANUAL</span>}
-            <span className={`kbpos-pnl ${p.upnl == null ? "" : p.upnl >= 0 ? "is-up" : "is-down"}`}>{fmt.usd(p.upnl)} {p.upnl_pct != null && <small>{fmt.pct(p.upnl_pct)}</small>}</span>
+            <span className={`kbpos-pnl ${p.upnl == null ? "" : p.upnl >= 0 ? "is-up" : "is-down"}`}>{fmt.pnl(p.upnl)} {p.upnl_pct != null && <small title="Return on margin (ROE)">{fmt.pct(p.upnl_pct)} ROE</small>}</span>
           </div>
           <dl className="kb-dl is-dense">
             <div><dt>Entry</dt><dd>{fmt.px(p.entry_px)}</dd></div><div><dt>Mark</dt><dd>{fmt.px(p.mark)}</dd></div>
@@ -209,7 +209,7 @@ export function useEvents(): { evs: Ev[]; more: boolean; loadMore: () => void; e
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 20_000);
+    const id = window.setInterval(() => { if (!document.hidden) void load(); }, 20_000);
     return () => { live = false; window.clearInterval(id); };
   }, []);
   const loadMore = async () => {

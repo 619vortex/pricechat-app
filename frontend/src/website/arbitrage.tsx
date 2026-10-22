@@ -34,8 +34,11 @@ function usePoll<T>(path: string, ms: number): [T | null, string | null] {
     const load = () => memberApi<T>(path).then((d) => { if (alive) { setData(d); setErr(null); } })
       .catch((e: unknown) => { if (alive) setErr(e instanceof Error ? e.message : "Couldn't load this right now."); });
     void load();
-    const t = window.setInterval(load, ms);
-    return () => { alive = false; window.clearInterval(t); };
+    // nobody looking: no polling; coming back refreshes at once
+    const t = window.setInterval(() => { if (!document.hidden) void load(); }, ms);
+    const vis = () => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { alive = false; window.clearInterval(t); document.removeEventListener("visibilitychange", vis); };
   }, [path, ms]);
   return [data, err];
 }
@@ -80,8 +83,9 @@ export const SHOW_GRADUATIONS = false;
 // The scoreboard's one-line gap summary (implausible >±50% candles already left out server-side); flip off to hide it too.
 export const SHOW_GAP_STAT = false;  // off until the pool data is trusted (the detailed gap table is hidden for the same reason)
 const EXIT: Record<string, string> = { graduated: "Graduated", target: "Target", stop: "Stop", timeout: "Timeout", gone: "Gone" };
-const sol = (v: number | null | undefined, d = 3) => (v == null ? "—" : `${v >= 0 ? "" : "−"}${Math.abs(v).toFixed(d)} SOL`);
 const signed = (v: number | null | undefined, d = 3) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(d)}`);
+/** a P&L in SOL: always signed, so a gain never reads like a balance */
+const pnlSol = (v: number | null | undefined) => (v == null ? "—" : `${signed(v)} SOL`);
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)}%`);
 const ago = (iso: string | null) => {
   if (!iso) return "not yet";
@@ -213,7 +217,7 @@ export function LunchBot({ d }: { d: Lunch }) {
       </header>
 
       <div className="arb-stats">
-        <Stat label="Paper P&L" value={sol(s.pnl_sol)} tone={s.pnl_sol > 0 ? "good" : s.pnl_sol < 0 ? "bad" : ""} />
+        <Stat label="Paper P&L" value={pnlSol(s.pnl_sol)} tone={s.pnl_sol > 0 ? "good" : s.pnl_sol < 0 ? "bad" : ""} />
         <Stat label="Trades closed" value={String(s.trades)} />
         <Stat label="Win rate" value={s.win_rate == null ? "—" : `${s.win_rate}%`} />
         <Stat label="Open now" value={`${s.open}`} sub={s.open ? `${signed(s.open_value_sol - s.open_cost_sol)} SOL unrealized` : undefined} />
@@ -229,7 +233,7 @@ export function LunchBot({ d }: { d: Lunch }) {
                 <header><span aria-hidden>{icon}</span><div><b>{name}</b><small>{what}</small></div></header>
                 {st ? (
                   <p>
-                    <b className={st.pnl_sol > 0 ? "is-good" : st.pnl_sol < 0 ? "is-bad" : ""}>{sol(st.pnl_sol)}</b>
+                    <b className={st.pnl_sol > 0 ? "is-good" : st.pnl_sol < 0 ? "is-bad" : ""}>{pnlSol(st.pnl_sol)}</b>
                     {" · "}{st.trades} closed{st.win_rate != null ? ` · ${st.win_rate}% wins` : ""} · {st.open} open
                   </p>
                 ) : <p className="arb-muted">Not started yet.</p>}
@@ -297,7 +301,7 @@ export function LunchBot({ d }: { d: Lunch }) {
           <h2>Recent lunches</h2>
           <Trades rows={d.closed} />
           {Object.keys(s.by_exit).length > 0 && (
-            <p className="arb-fine">Exits: {Object.entries(s.by_exit).map(([k, n]) => `${EXIT[k] ?? k} ${n}`).join(" · ")} · best {sol(s.best_sol)} · worst {sol(s.worst_sol)}</p>
+            <p className="arb-fine">Exits: {Object.entries(s.by_exit).map(([k, n]) => `${EXIT[k] ?? k} ${n}`).join(" · ")} · best {pnlSol(s.best_sol)} · worst {pnlSol(s.worst_sol)}</p>
           )}
         </section>
       )}
@@ -322,7 +326,7 @@ export function LunchScoreboard({ sb, by }: { sb: Scoreboard; by?: Lunch["by_str
           return (
             <article key={k} className="arb-dish arb-scorecard" aria-label={`${name} scorecard`}>
               <header><span aria-hidden>{icon}</span><div><b>{name}</b><small>{what}</small></div></header>
-              <p className="arb-score-pnl"><b className={tone(st?.pnl_sol)}>{sol(st?.pnl_sol ?? null)}</b> <small className="arb-muted">all-time paper P&L</small></p>
+              <p className="arb-score-pnl"><b className={tone(st?.pnl_sol)}>{pnlSol(st?.pnl_sol ?? null)}</b> <small className="arb-muted">all-time paper P&L</small></p>
               <dl className="arb-score-kv">
                 <div><dt>Win rate</dt><dd>{st?.win_rate == null ? "—" : `${st.win_rate}%`}</dd></div>
                 <div><dt>Trades</dt><dd>{st ? st.trades : 0}</dd></div>
@@ -377,7 +381,7 @@ function Stat({ label, value, sub, tone = "" }: { label: string; value: string; 
 function Trades({ rows }: { rows: LunchTrade[] }) {
   return (
     <table className="arb-table">
-      <thead><tr><th>Token</th><th>In</th><th>Now / out</th><th>P&L</th></tr></thead>
+      <thead><tr><th>Token</th><th>In (SOL)</th><th>Now / out (SOL)</th><th>P&L</th></tr></thead>
       <tbody>{rows.map((t) => (
         <tr key={t.id}>
           <td>{t.strategy && <span className="arb-dish-chip" title={DISH[t.strategy][1]}>{DISH[t.strategy][0]}</span>}
