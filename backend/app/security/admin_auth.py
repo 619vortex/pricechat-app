@@ -168,7 +168,8 @@ PUBLIC_PREFIXES = ("/api/members/",
                    # Brand Manager: AI workers authenticate with their own token; TikTok fetches videos by signed URL
                    "/api/brand-manager/worker/", "/api/brand-manager/media/",
                    "/api/short-market/worker/",  # member APIs have their own member sign-in
-                   "/api/website/seo/")  # sitemaps and link previews: only what public pages already show
+                   "/api/website/seo/",  # sitemaps and link previews: only what public pages already show
+                   "/api/r/")  # tracked referral links: count a click, 302 on (stores no IP / user agent / member)
 PUBLIC_EXACT = {
     # the owner login itself (every other /api/admin/... route needs the login)
     ("GET", "/api/admin/session"),

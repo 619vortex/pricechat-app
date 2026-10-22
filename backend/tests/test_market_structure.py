@@ -235,7 +235,7 @@ def test_every_command_reply_links_the_bot_channel(db: Session, md: MD, vs: Fake
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/chart BTC 1h", group=True, reply_to=3))
     asyncio.run(bot.handle_command(db, tg, 1, 9, "/nonsense"))
     assert len(tg.sent) == 4
-    sign_up = "🎁 4% off Hyperliquid fees: https://app.hyperliquid.xyz/join/BANTER"
+    sign_up = "🎁 4% off Hyperliquid fees: https://api.pricechat.live/api/r/footer?src=tg"  # tracked: counts the click, 302s to the referral link
     for kind, _chat, text, *_ in tg.sent:  # the bot channel, then the Hyperliquid sign-up link below it (Earn settings)
         assert text.endswith(f"📢 Signals: @botpricechat\n{sign_up}"), (kind, text[-140:])
     assert tg.sent[2][0] == "photo" and len(tg.sent[2][2]) <= 1024
@@ -246,16 +246,17 @@ def test_signal_cards_and_announcements_carry_the_referral_link(db: Session) -> 
     from app.models.tradingos import TsSignal
     from app.tradingbot.service import settings as earn_settings
 
-    assert bot.with_referral(db, "card") == "card\n🎁 4% off Hyperliquid fees: https://app.hyperliquid.xyz/join/BANTER"
+    assert bot.with_referral(db, "card") == "card\n🎁 4% off Hyperliquid fees: https://api.pricechat.live/api/r/footer?src=tg"
+    assert bot.with_referral(db, "x", "card").endswith("https://api.pricechat.live/api/r/card?src=tg")
     sig = TsSignal(id=5, number=5, coin="ETH", side="SHORT", timeframe="15m", strategy="x", entry_lo=1, entry_hi=2, stop=3, target=0.5, lev_lo=1,
                    lev_hi=2, rr=1.5, status="ACTIVE", expires_at=utcnow())
-    rows = bot.buttons(sig, bot.referral_url(db))
-    assert [b["text"] for b in rows[0]] == ["ENTER", "REJECT", "AUTO"] and rows[1][0]["url"] == "https://app.hyperliquid.xyz/join/BANTER"
+    rows = bot.buttons(sig, bot.tracked_url(db, "card"))
+    assert [b["text"] for b in rows[0]] == ["ENTER", "REJECT", "AUTO"] and rows[1][0]["url"] == "https://api.pricechat.live/api/r/card?src=tg"
     sig.status = "CLOSED"
-    assert bot.buttons(sig, bot.referral_url(db)) == [rows[1]]  # a closed card keeps only the sign-up button
+    assert bot.buttons(sig, bot.tracked_url(db, "card")) == [rows[1]]  # a closed card keeps only the sign-up button
     earn_settings(db).referral_url = "https://app.hyperliquid.xyz/join/KIWI"  # changed in Earn settings: used everywhere
     db.commit()
-    assert bot.footer(db).endswith("4% off Hyperliquid fees: https://app.hyperliquid.xyz/join/KIWI")
+    assert bot.footer(db).endswith("4% off Hyperliquid fees: https://api.pricechat.live/api/r/footer?src=tg") and bot.referral_url(db).endswith("/KIWI")
     earn_settings(db).referral_url = ""
     db.commit()
     assert bot.with_referral(db, "card") == "card" and bot.footer(db) == bot.CHANNEL_FOOTER and bot.signup_block(db) == ""  # none set

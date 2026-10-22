@@ -130,3 +130,14 @@ class TbAffiliateSnapshot(IdMixin, TimestampMixin, Base):
 
     wallet: Mapped[str] = mapped_column(String(42), nullable=False)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class TbReferralClick(IdMixin, Base):
+    """One click on a tracked referral link (/api/r/{placement}): where it sat and a coarse source. No IP, user agent or member."""
+
+    __tablename__ = "tb_referral_clicks"
+    __table_args__ = (Index("ix_tb_referral_clicks_at", "at"),)
+
+    at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    placement: Mapped[str] = mapped_column(String(32), nullable=False)  # card / footer / start / help / site_<page> / other
+    source: Mapped[str] = mapped_column(String(64), nullable=False)  # telegram / web / a referer host / direct

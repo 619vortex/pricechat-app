@@ -22,6 +22,29 @@ type Report = {
   history: { points: { at: string; n_referrals: number; volume: number; rewarded_to_us: number; unclaimed: number }[]; volume_change: Record<string, { "24h"?: number; "7d"?: number }>; since: string | null };
 };
 
+type Win = { "24h": number; "7d": number; "30d": number };
+type Clicks = { placements: ({ placement: string } & Win)[]; totals: Win; sources_30d: Record<string, number> };
+const SPOT: Record<string, string> = { card: "Signal card", footer: "Reply footer", start: "/start", help: "/help", other: "Other" };
+const spot = (p: string) => SPOT[p] ?? (p.startsWith("site_") ? `Website · ${p.slice(5).replace(/_/g, "-")}` : p);
+
+/* Tracked referral-link clicks per placement (/api/r/{placement}): which spot sends people to Hyperliquid. No IP / user agent kept. */
+function ClicksCard() {
+  const c = useApi(() => request<Clicks>("/tradingbot/admin/referral-clicks"), 120_000);
+  const d = c.data;
+  return (
+    <Card title="Referral clicks by placement">
+      {c.failure ? <ApiErrorBanner error={c.failure} /> : null}
+      {!d ? (c.loading ? <Loading /> : null) : !d.placements.length ? <Empty>No tracked clicks yet.</Empty> : (
+        <div className="table-wrap"><table className="table">
+          <thead><tr><th>Placement</th><th>24h</th><th>7d</th><th>30d</th></tr></thead>
+          <tbody>{d.placements.map((r) => <tr key={r.placement}><td>{spot(r.placement)}</td><td>{r["24h"]}</td><td>{r["7d"]}</td><td>{r["30d"]}</td></tr>)}
+            <tr><td><b>All</b></td><td><b>{d.totals["24h"]}</b></td><td><b>{d.totals["7d"]}</b></td><td><b>{d.totals["30d"]}</b></td></tr></tbody></table></div>)}
+      {d && Object.keys(d.sources_30d).length > 0 && <p className="muted small">30d by source: {Object.entries(d.sources_30d).map(([k, v]) => `${k} ${v}`).join(" · ")}</p>}
+      <p className="muted small">Counted when someone opens a tracked link (bots and link previews skipped). A click isn't a sign-up: compare with new referred accounts.</p>
+    </Card>
+  );
+}
+
 const usd = (x: number | null | undefined, d = 2) => (x == null ? "—" : `$${x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const explorer = (a: string) => `https://app.hyperliquid.xyz/explorer/address/${a}`;
@@ -77,6 +100,7 @@ export function AffiliateAdminPage() {
           <Stat label="Balances of referred accounts" value={usd(d.totals.balances)} hint={`${d.totals.active} with open positions`} />
           <Stat label="Referral-link clicks" value={d.totals.ref_clicks_signed_in + d.totals.ref_clicks_anonymous} hint={`${d.totals.ref_clicks_signed_in} signed in · ${d.totals.ref_clicks_anonymous} anonymous`} />
         </div>
+        <ClicksCard />
         <div className="grid-2">
           <Card title="Referral wallet">
             <p className="small"><b>Code {d.master.code}</b> <Badge tone={d.master.stage === "ready" ? "good" : "warn"}>{d.master.stage}</Badge></p>

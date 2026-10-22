@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SitePage } from "./community";
 import { openLogin } from "./emailLogin";
 import { burst } from "./fx";
-import { memberApi, type RankArt } from "./members";
+import { memberApi, trackedRef, type RankArt } from "./members";
 import { reducedMotion } from "./motion";
 import type { Sound } from "./sound";
 import { SignalToasts } from "./brain/toasts";
@@ -367,7 +367,7 @@ export function TradingBotPage() {
             {s.rank?.ok && !s.flow?.hyperliquid && (
               <StepCard n={2} flash={flash === 2} title="Join Hyperliquid" state="todo">
                 <p className="tb-line">Sign up with our link · <b className="tb-ok">+25 XP</b></p>
-                <a className="tb-cta tb-launch" href={s.rules.referral_url} target="_blank" rel="noopener noreferrer sponsored"
+                <a className="tb-cta tb-launch" href={trackedRef(s.rules.referral_url, "trading_bot")} target="_blank" rel="noopener noreferrer sponsored"
                    onClick={(e) => { leaving(); const b = e.currentTarget; b.classList.remove("is-go"); void b.offsetWidth; b.classList.add("is-go");
                      if (!reducedMotion()) burst(b, 12, 70, true); void joinedHyperliquid(); }}>
                   Open Hyperliquid ↗
