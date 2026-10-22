@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.routing import ModelRouter
-from app.ai.structured import complete_structured, unit_score
+from app.ai.structured import StructuredOutputError, complete_structured, unit_score
 from app.community import provenance
 from app.community.formatting import format_messages, strip_citations, valid_ids
 from app.db.base import utcnow
@@ -110,7 +110,15 @@ async def extract_memories(
         known_text = "\n".join(f"- {m.title or m.content[:80]}" for m in known) or "(nothing yet)"
         user = f"Summary:\n{summary.body}\n\nAlready known:\n{known_text}\n\nSupporting messages:\n{text}"
 
-        out, result, route = await complete_structured(router, "community.memory_extraction", SYSTEM, user, _Insights)
+        try:
+            out, result, route = await complete_structured(router, "community.memory_extraction", SYSTEM, user, _Insights)
+        except StructuredOutputError as exc:
+            # Already retried once. Leaving it pending would make it the oldest summary again on every run,
+            # so one unparseable summary would block memory extraction for good.
+            logger.warning("Summary %s: no usable memory proposals (%s); moving on", summary.id, exc)
+            summary.memories_extracted_at = utcnow()
+            db.commit()
+            continue
         source = db.get(TelegramSource, summary.source_id) if summary.source_id else None
         allowed = set(included)
         for insight in out.insights[:6]:
