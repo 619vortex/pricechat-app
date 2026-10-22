@@ -846,6 +846,23 @@ a:hover .site-worth-subject { background-size: 100% 1.5px; }
 .site-joincta-text p { margin-top: 12px; color: var(--site-soft); font-size: 17px; }
 .site-joincta-text p span + span::before { content: " "; }
 .site-joincta-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.site-vpnperk {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: clamp(20px, 3vw, 48px);
+  align-items: center;
+  margin-top: clamp(32px, 4vw, 48px);
+  padding: clamp(20px, 3vw, 32px);
+  border: 1px solid rgba(0, 229, 143, 0.3);
+  border-radius: 20px;
+  background: linear-gradient(150deg, var(--site-green-dim), rgba(0, 229, 143, 0.02));
+}
+.site-vpnperk-head .site-eyebrow { margin-bottom: 6px; }
+.site-vpnperk h3 { font-size: clamp(26px, 3vw, 40px); line-height: 0.95; }
+.site-vpnperk-points { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.site-vpnperk-points li { display: flex; flex-direction: column; gap: 4px; }
+.site-vpnperk-points b { color: var(--site-green); font-size: 15px; }
+.site-vpnperk-points span { color: var(--site-soft); font-size: 14px; line-height: 1.4; }
 
 /* rank Kiwi: the canonical Kiwi + a fixed treatment per rank */
 .rk { position: relative; display: inline-grid; place-items: center; flex: none; }
@@ -990,6 +1007,7 @@ a:hover .site-worth-subject { background-size: 100% 1.5px; }
 @media (max-width: 960px) {
   .site-chapter { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .site-joincta { grid-template-columns: minmax(0, 1fr); }
+  .site-vpnperk, .site-vpnperk-points { grid-template-columns: minmax(0, 1fr); }
   .site-join-page { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .site-passport { grid-template-columns: minmax(0, 1fr); justify-items: start; }
   .site-passport-grid { grid-template-columns: minmax(0, 1fr); }
