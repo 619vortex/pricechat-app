@@ -85,7 +85,7 @@ def is_cached(key: Any, ttl: float = CACHE_TTL) -> bool:
     return _fresh(key, ttl)[0]
 
 
-_building: dict[Any, threading.Lock] = {}  # one build per key at a time
+_building: dict[Any, list[Any]] = {}  # key -> [lock, callers using it]: one build per key at a time
 _heavy = threading.Lock()  # whole-catalogue builds ("base" rows) never run side by side: each needs ~200-400 MB
 
 
@@ -105,29 +105,40 @@ def cached(key: Any, build: Any, ttl: float = CACHE_TTL) -> Any:
     if ok:
         return value
     with _lock:
-        lock = _building.setdefault(key, threading.Lock())
+        entry = _building.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            return _build(key, build, ttl)
+    finally:
+        with _lock:  # the last caller drops the lock: keys carry the minute / query, so they'd otherwise pile up forever
+            entry[1] -= 1
+            if not entry[1] and _building.get(key) is entry:
+                del _building[key]
+
+
+def _build(key: Any, build: Any, ttl: float) -> Any:
+    ok, value = _fresh(key, ttl)  # built by the caller we waited for
+    if ok:
+        return value
     heavy = isinstance(key, tuple) and bool(key) and key[0] == "base"
-    with lock:
-        ok, value = _fresh(key, ttl)  # built by the caller we waited for
-        if ok:
-            return value
-        with _lock:
-            gen = _generation
-            if heavy:
-                _cache.pop(key, None)  # the stale copy goes BEFORE the rebuild: never two whole catalogues in memory
-        now = _time.monotonic()
+    with _lock:
+        gen = _generation
         if heavy:
-            with _heavy:
-                release_memory()
-                value = build()
-            release_memory()  # the build's temporary objects (ORM cards, loaded rows) back to the OS
-        else:
+            _cache.pop(key, None)  # the stale copy goes BEFORE the rebuild: never two whole catalogues in memory
+    now = _time.monotonic()
+    if heavy:
+        with _heavy:
+            release_memory()
             value = build()
-        with _lock:
-            if gen == _generation:
-                if len(_cache) >= CACHE_MAX:
-                    _cache.pop(next(iter(_cache)))
-                _cache[key] = (gen, now, value)
+        release_memory()  # the build's temporary objects (ORM cards, loaded rows) back to the OS
+    else:
+        value = build()
+    with _lock:
+        if gen == _generation:
+            if len(_cache) >= CACHE_MAX:
+                _cache.pop(next(iter(_cache)))
+            _cache[key] = (gen, now, value)
     return value
 
 

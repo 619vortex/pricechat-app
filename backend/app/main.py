@@ -224,6 +224,9 @@ def create_app(
                 admin = await run_in_threadpool(_admin_ok, request.cookies.get(admin_auth.COOKIE))
                 if not admin and market_public.is_public_get(method, path):
                     # the public Pokémon Market tab: read-only, and cleaned of what visitors may not see
+                    refused = market_public.grade_refused(path, request.query_params)
+                    if refused:
+                        return JSONResponse(status_code=400, content={"detail": refused, "code": "grade_not_listed"})
                     response = await call_next(request)
                     if response.status_code != 200 or not response.headers.get("content-type", "").startswith("application/json"):
                         return response

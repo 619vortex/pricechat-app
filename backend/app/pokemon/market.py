@@ -305,10 +305,18 @@ def market(db: Session, g: Grade = DEFAULT_GRADE, era: str | None = "vintage", q
         with30 = [r for r in priced if r["change_30d"] is not None and "moves" not in (quality.get(r["card"]["id"]) or {}).get("failed", [])]
         card_ids = [r["card"]["id"] for r in scope]
         in_view = set(card_ids)  # sales are few: filtered here, not with a 50k-id IN clause
-        recent = [sale_out(s, s_card) for s, s_card in db.execute(
-            select(PokemonSale, PokemonCard).join(PokemonCard, PokemonCard.id == PokemonSale.card_id)
-            .where(PokemonSale.verified.is_(True), PokemonSale.excluded.is_(False))
-            .order_by(PokemonSale.sale_date.desc())).all() if s.card_id in in_view][:10]
+        recent = []  # newest first, read in small batches until 10 are in view (never every sale ever recorded)
+        result = db.execute(select(PokemonSale, PokemonCard).join(PokemonCard, PokemonCard.id == PokemonSale.card_id)
+                            .where(PokemonSale.verified.is_(True), PokemonSale.excluded.is_(False))
+                            .order_by(PokemonSale.sale_date.desc()).execution_options(yield_per=200))
+        try:
+            for s, s_card in result:
+                if s.card_id in in_view:
+                    recent.append(sale_out(s, s_card))
+                    if len(recent) == 10:
+                        break
+        finally:
+            result.close()
         by_id = {r["card"]["id"]: r for r in ranked}
         watched = sorted(((cid, n) for cid, n in _watchers(db, card_ids).items() if n > 0), key=lambda x: (-x[1], x[0]))[:5]
         capped = [r for r in ranked if r["market_cap"] is not None]

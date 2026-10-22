@@ -27,6 +27,29 @@ def is_public_get(method: str, path: str) -> bool:
     return method.upper() in ("GET", "HEAD") and any(p.match(path.rstrip("/")) for p in _PUBLIC_GET)
 
 
+# views computed over the whole ~50k-card catalogue at one grade (market.base_rows: seconds of CPU and ~200 MB per grade)
+_CATALOGUE_VIEWS = re.compile(r"^/api/pokemon/(market|movers|trending|sets|years)$")
+
+
+def grade_refused(path: str, params: Any) -> str | None:
+    """Why a visitor may not ask for this catalogue-wide view, or None. Visitors get the grades the website offers
+    (market.GRADE_LIST); any other valid grade would build a whole catalogue of its own, so a script walking through
+    every grade could keep the server busy for everyone. A few cards by id (the table's per-row grade switch) are cheap."""
+    from app.pokemon.grades import GradeError, parse_label
+    from app.pokemon.market import GRADE_LIST, SMALL_IDS
+
+    if not _CATALOGUE_VIEWS.match(path.rstrip("/")) or "grade" not in params:
+        return None
+    ids = [x for x in (params.get("ids") or "").split(",") if x.strip()]
+    if ids and len(ids) <= SMALL_IDS and not (params.get("q") or "").strip():
+        return None
+    try:
+        g = parse_label(params["grade"])
+    except GradeError:
+        return None  # the route answers 400 with the reason
+    return None if g in GRADE_LIST else f"The market lists these grades: {', '.join(x.label for x in GRADE_LIST)}"
+
+
 def sanitize(obj: Any, path: str = "") -> Any:
     """A copy of a public market response without what visitors may not see (see the module notes)."""
     if isinstance(obj, list):

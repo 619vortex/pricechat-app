@@ -69,11 +69,12 @@ def search_text(c: PokemonCard) -> str:
 
 
 def ensure_catalog(db: Session) -> int:
-    """Insert seed cards that aren't there yet (by identity). Existing rows are never overwritten."""
-    have = set(db.scalars(select(PokemonCard.identity_key)))
+    """Insert seed cards that aren't there yet (by identity). Existing rows are never overwritten.
+    Runs on most public market requests: it looks up only the seed's keys, never the whole ~50k-card catalogue."""
+    keys = [identity_key(s["set_name"], s["card_number"], s["language"], s["edition"], s["variant"], s["name"]) for s in SEED]
+    have = set(db.scalars(select(PokemonCard.identity_key).where(PokemonCard.identity_key.in_(keys))))
     added = 0
-    for spec in SEED:
-        key = identity_key(spec["set_name"], spec["card_number"], spec["language"], spec["edition"], spec["variant"], spec["name"])
+    for spec, key in zip(SEED, keys):
         if key in have:
             continue
         card = PokemonCard(identity_key=key, external_ids={}, **spec)
