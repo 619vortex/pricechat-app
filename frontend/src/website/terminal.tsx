@@ -738,6 +738,7 @@ interface Plan { entry: number; size: number; notional: number; leverage: number
 export function TradingTerminal({ conn, after }: { conn: Connection; after?: ReactNode }) {
   const [t, setT] = useState<Terminal | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);  // when the numbers on screen were last read
   const [sigs, setSigs] = useState<Sig[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -759,6 +760,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
   const load = useCallback(async () => {
     try {
       setT(await memberApi<Terminal>("/members/trading/terminal"));
+      setLoadedAt(Date.now());
       setLoadErr(null);
     } catch (e) { setLoadErr(errText(e)); }
   }, []);
@@ -935,7 +937,8 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
         )}
       </section>
 
-      {loadErr && <p className="site-error" role="alert">{loadErr}</p>}
+      {loadErr && <p className="site-error" role="alert">{loadErr}{loadedAt
+        ? ` Balances and positions below are from ${new Date(loadedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} and may be out of date.` : ""}</p>}
       {err && <p className="site-error" role="alert">{err}</p>}
       {note && <p className="tb-toast" role="status">{note}</p>}
 

@@ -156,6 +156,17 @@ describe("Kiwi trading bot", () => {
     expect(calls.some((c) => c.key.includes("/close"))).toBe(false);
   });
 
+  it("when a refresh fails, the numbers still on screen say how old they are", async () => {
+    let n = 0;
+    await open({ [T]: () => (n++ === 0 ? term() : new Response("down", { status: 502 })), [S]: { items: [] },
+                 "PUT /api/members/trading/settings": account({ auto: { enabled: false, until: null } }) });
+    fireEvent.click(screen.getByRole("switch", { name: /AUTO ON/ }));  // any action re-reads the terminal
+    await flush();
+    const alert = screen.getAllByRole("alert").find((e) => /may be out of date/.test(e.textContent ?? ""));
+    expect(alert?.textContent).toMatch(/Balances and positions below are from \d/);
+    expect(screen.getByLabelText("SOL LONG position")).toBeTruthy();  // still shown, never blanked
+  });
+
   it("finished signals say so: CLOSED with the real P&L, or EXPIRED", async () => {
     const hist = { id: 5, signal_id: 9, mode: "LIVE" as const, coin: "SOL", side: "LONG", entry_px: 145, exit_px: 155, size: 2, size_usd: 300, leverage: 3,
                    net_pnl: 19.4, fees: 0.3, funding: 0, duration_s: 3600, reason: "tp2", closed_at: "2026-10-15T12:00:00+00:00" };
