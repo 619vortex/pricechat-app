@@ -18,6 +18,8 @@ interface Mkt { coin: string; price: number; change_24h: number; funding_h: numb
 
 const TONE: Record<string, Tone> = { PENDING_REVIEW: "warn", WAITING: "info", ACTIVE: "good", TARGET_HIT: "good", STOP_HIT: "bad", CLOSED: "neutral", EXPIRED: "neutral", CANCELLED: "neutral" };
 const post = <T,>(path: string, body: unknown = {}) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
+/** signed dollars: "+$4.20" / "−$3.10" (never "$-3.10") */
+const sUsd = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toFixed(2)}`;
 const usdM = (n: number) => `$${(n / 1e6).toLocaleString(undefined, { maximumFractionDigits: 0 })}M`;
 
 export function TradingOSPage() {
@@ -48,9 +50,11 @@ export function TradingOSPage() {
 
 function Top({ o, reload }: { o: Overview; reload: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
   async function pause(paused: boolean) {
     setBusy(true);
-    try { await request("/tradingos/admin/settings", { method: "PUT", body: JSON.stringify({ paused }) }); reload(); } finally { setBusy(false); }
+    setErr(null);
+    try { await request("/tradingos/admin/settings", { method: "PUT", body: JSON.stringify({ paused }) }); reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   }
   return (
     <>
@@ -59,7 +63,7 @@ function Top({ o, reload }: { o: Overview; reload: () => void }) {
       <div className="stats">
         <Stat label="Waiting for your OK" value={o.counts.PENDING_REVIEW ?? 0} tone={(o.counts.PENDING_REVIEW ?? 0) ? "warn" : "neutral"} />
         <Stat label="Open now" value={(o.counts.WAITING ?? 0) + (o.counts.ACTIVE ?? 0)} />
-        <Stat label="Win rate" value={o.stats.win_rate == null ? "—" : `${o.stats.win_rate}%`} hint={`${o.stats.closed} finished · total ${o.stats.net_return}%`} />
+        <Stat label="Win rate" value={o.stats.win_rate == null ? "—" : `${o.stats.win_rate}%`} hint={`${o.stats.closed} finished · total ${o.stats.net_return > 0 ? "+" : ""}${o.stats.net_return}%`} />
       </div>
       <div className="btn-group">
         <button className={`btn ${o.settings.paused ? "btn-primary" : "btn-kill-sm"}`} disabled={busy} onClick={() => void pause(!o.settings.paused)}>
@@ -67,6 +71,7 @@ function Top({ o, reload }: { o: Overview; reload: () => void }) {
         </button>
         <span className="muted small">Results are without leverage, after estimated fees. Worst drop so far: {o.stats.max_drawdown}%.</span>
       </div>
+      {err ? <ApiErrorBanner error={err} /> : null}
     </>
   );
 }
@@ -107,9 +112,15 @@ function Signals({ onChange }: { onChange: () => void }) {
                 <td>{s.model_pnl_pct == null ? "—" : `${s.model_pnl_pct > 0 ? "+" : ""}${s.model_pnl_pct}%`}</td>
                 <td className="btn-group">
                   {(s.status === "PENDING_REVIEW" || (s.status === "WAITING" && !s.published_at)) &&
-                    <button className="btn btn-sm btn-primary" onClick={() => void act(() => post(`/tradingos/admin/signals/${s.id}/publish`), `#${s.number} published to Telegram.`)}>Publish</button>}
+                    <button className="btn btn-sm btn-primary" onClick={() => {
+                      if (window.confirm(`Publish #${s.number} ${s.coin} ${s.side} to the Telegram signal group? Members with AUTO on will enter it (real money for LIVE accounts).`))
+                        void act(() => post(`/tradingos/admin/signals/${s.id}/publish`), `#${s.number} published to Telegram.`);
+                    }}>Publish</button>}
                   {!["TARGET_HIT", "STOP_HIT", "CLOSED", "EXPIRED", "CANCELLED"].includes(s.status) &&
-                    <button className="btn btn-sm btn-ghost" onClick={() => void act(() => post(`/tradingos/admin/signals/${s.id}/cancel`), `#${s.number} cancelled.`)}>Cancel</button>}
+                    <button className="btn btn-sm btn-ghost" onClick={() => {
+                      if (window.confirm(`Cancel signal #${s.number} ${s.coin} ${s.side}? It stops being tracked; members' open positions keep their own stop-loss and take-profit.`))
+                        void act(() => post(`/tradingos/admin/signals/${s.id}/cancel`), `#${s.number} cancelled.`);
+                    }}>Cancel</button>}
                 </td>
               </tr>
             ))}
@@ -157,7 +168,7 @@ function Markets() {
       <table className="table">
         <thead><tr><th>Market</th><th>Price</th><th>24h</th><th>Funding/h</th><th>OI</th><th>24h volume</th><th>Spread</th><th>Max lev</th></tr></thead>
         <tbody>{m.data.items.map((x) => (
-          <tr key={x.coin}><td><b>{x.coin}</b></td><td>{x.price}</td><td style={{ color: x.change_24h >= 0 ? "#00e58f" : "#ff6b6b" }}>{x.change_24h}%</td>
+          <tr key={x.coin}><td><b>{x.coin}</b></td><td>{x.price}</td><td style={{ color: x.change_24h >= 0 ? "#00e58f" : "#ff6b6b" }}>{x.change_24h > 0 ? "+" : ""}{x.change_24h}%</td>
             <td>{(x.funding_h * 100).toFixed(4)}%</td><td>{usdM(x.oi_usd)}</td><td>{usdM(x.volume_24h)}</td>
             <td>{x.spread_bps == null ? "—" : `${x.spread_bps.toFixed(1)} bps`}</td><td>{x.max_leverage}x</td></tr>
         ))}</tbody>
@@ -178,6 +189,10 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
   const set = (k: string, val: unknown) => { setV({ ...v, [k]: val }); setOk(false); };
   async function save() {
     setErr(null);
+    // the two switches that let money move without the owner pressing anything: ask once when one is being turned on
+    const risky = [v.intraday_live && !s.strategies.intraday_live && "15-minute signals will trade REAL MONEY for members who opted in",
+                   v.auto_publish && !s.auto_publish && "new signals will be posted to Telegram (and entered by AUTO members) without your review"].filter(Boolean);
+    if (risky.length && !window.confirm(`Save these settings?\n\n• ${risky.join("\n• ")}`)) return;
     try {
       const { strategies: _s, ...body } = v;  // eslint-disable-line @typescript-eslint/no-unused-vars
       await request("/tradingos/admin/settings", { method: "PUT", body: JSON.stringify(body) });
@@ -247,6 +262,7 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
 
 function Audit() {
   const a = useApi(() => request<{ items: { at: string; actor: string; action: string; signal_id: number | null; details: Record<string, unknown> }[] }>("/tradingos/admin/audit"));
+  if (a.failure) return <ApiErrorBanner error={a.failure} />;
   if (!a.data) return <Loading />;
   return (
     <Card title="Audit log">
@@ -288,14 +304,16 @@ function Execution() {
         <Stat label="Open positions" value={d.health.positions_by_status.OPEN ?? 0} />
         <Stat label="LIVE accounts" value={d.health.live_accounts} tone={d.health.live_accounts ? "warn" : "neutral"} />
         {(["PAPER", "TESTNET", "LIVE"] as const).map((m) => (
-          <Stat key={m} label={`${m} results`} value={`${d.results[m].net >= 0 ? "+" : ""}$${d.results[m].net.toFixed(2)}`}
+          <Stat key={m} label={`${m} results`} value={sUsd(d.results[m].net)}
                 hint={`${d.results[m].trades} closed${d.results[m].win_rate != null ? ` · ${d.results[m].win_rate}% wins` : ""}`} />
         ))}
       </div>
       <Card title="LIVE allowlist">
         <p className="muted small">Kiwi Passport usernames allowed to authorize a mainnet API wallet and, after passing the pre-live checks, enable LIVE themselves.
           Everyone else stays in PAPER or TESTNET.</p>
-        <form className="btn-group" onSubmit={(ev) => { ev.preventDefault(); void act(() => request("/tradingos/admin/execution/allowlist", { method: "PUT", body: JSON.stringify({ live_allowlist: allow ?? d.live_allowlist }) })); }}>
+        <form className="btn-group" onSubmit={(ev) => { ev.preventDefault();
+          if (!window.confirm(`Save the LIVE allowlist as "${allow ?? d.live_allowlist}"? Listed members can enable real-money trading after passing the pre-live checks.`)) return;
+          void act(() => request("/tradingos/admin/execution/allowlist", { method: "PUT", body: JSON.stringify({ live_allowlist: allow ?? d.live_allowlist }) })); }}>
           <input className="input" placeholder="username" value={allow ?? d.live_allowlist} onChange={(ev) => setAllow(ev.target.value)} />
           <button className="btn btn-sm btn-primary">Save</button>
         </form>
@@ -326,7 +344,7 @@ function Execution() {
                 <td>{p.id}<div className="muted small">acct {p.account_id} · {relativeTime(p.opened_at)}</div></td><td>{p.mode}</td><td><b>{p.coin} {p.side}</b></td>
                 <td className="small">{p.size} @ {p.entry_px ?? "—"}</td><td className="small">{p.stop} · {p.tp1} · {p.tp2}</td>
                 <td><Badge tone={POS_TONE[p.status] ?? "neutral"}>{p.status}</Badge>{p.error && <div className="small" style={{ color: "#ffb4ad" }}>{p.error}</div>}</td>
-                <td>{p.realized_pnl >= 0 ? "+" : ""}${p.realized_pnl.toFixed(2)}</td>
+                <td>{sUsd(p.realized_pnl)}</td>
               </tr>
             ))}</tbody>
           </table>
