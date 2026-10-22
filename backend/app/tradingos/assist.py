@@ -472,7 +472,7 @@ def sanitize(text: str) -> str:
     """Plain text only: tags and control characters out, every link and @mention out, blank lines collapsed, capped."""
     t = text.replace("\r\n", "\n").replace("\r", "\n")
     t = _CTRL.sub("", t)
-    t = re.sub(r"<[^>\n]{0,300}>", "", t)
+    t = re.sub(r"</?[A-Za-z!][^>\n]{0,300}>", "", t)  # tags only: "a close < 78k ... above > 80k" is prose, not markup
     t = _URL.sub("[link removed]", t)
     t = re.sub(r"(?<!\w)@[A-Za-z]\w{3,}", "", t)
     t = re.sub(r"[ \t]+\n", "\n", t)

@@ -303,6 +303,9 @@ def test_sanitize_strips_markup_links_and_mentions() -> None:
     h = assist.answer_html(t, {"coin": "BTC", "side": "long"})
     assert "a &lt; b &amp; c" in h and h.endswith("<i>Not financial advice · Vortex 🌀</i>")
     assert len(assist.sanitize("x" * 5000)) == assist.MAX_ANSWER
+    prose = "Invalidation: a close < 78,000 (support); above > 80,100 it is fine."
+    assert assist.sanitize(prose) == prose  # comparisons are not tags (Vortex's validator lets them through)
+    assert assist.sanitize("<i>x</i> <!-- y --> <br/>z") == "x  z"
 
 
 # ---------------------------------------------------------------- the worker API's auth
