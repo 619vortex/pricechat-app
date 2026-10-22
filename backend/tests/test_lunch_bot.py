@@ -419,3 +419,13 @@ def test_one_ownership_query_for_any_number_of_candidates(db: Session) -> None:
     trade_selects = [s for s in seen if s.lstrip().upper().startswith("SELECT") and "arb_lunch_trades" in s]
     assert out["entered"] == 5 and len(trade_selects) == 2  # the open trades + ONE ownership query, not one per candidate
     assert db.scalar(select(ArbLunchDay)).entries == 5
+
+
+@pytest.mark.parametrize("answer", [httpx.Response(200, text="<html>Bad gateway</html>"), httpx.Response(200, json=["not", "an", "object"]),
+                                    httpx.Response(200, json={"result": {"value": [{"data": ["%%%not base64", "base64"]}]}})])
+def test_a_garbled_rpc_answer_leaves_that_chunk_unread_not_crashed(answer: httpx.Response) -> None:
+    async def read() -> dict[str, Any]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: answer)) as client:
+            return await lunch.curves(client, RPC, ["curve-a"])
+
+    assert asyncio.run(read()) == {}
