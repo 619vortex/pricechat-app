@@ -868,9 +868,13 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         from app.models.vpn import VpnServer
         from app.vpn import service as vpn
 
+        from app import alerts
+
         if not ctx.db.scalar(select(func.count()).select_from(VpnServer).where(VpnServer.enabled.is_(True))):
             raise JobSkipped("No Kiwi VPN servers yet (Admin › Kiwi VPN)")
-        return await asyncio.to_thread(vpn.sync_all, ctx.db, ctx.now)
+        out = await asyncio.to_thread(vpn.sync_all, ctx.db, ctx.now)
+        # the owner hears once when a server goes offline / comes back / passes 90% of its capacity
+        return {**out, **await alerts.check_vpn_servers(ctx.db, settings=s, transport=runtime.telegram.transport, now=ctx.now)}
 
     specs += [
         JobSpec("vpn.sync", "Kiwi VPN: server sync", "Every 5 min: reads each VPN server's agent (online, handshakes, this month's bytes), re-adds members' missing peers, removes peers nobody owns and revokes devices of members who no longer qualify (rank dropped, banned). No traffic logs",
