@@ -861,7 +861,20 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         return await asyncio.to_thread(retention.run, ctx.db, ctx.now)
 
+    async def vpn_sync(ctx: JobContext) -> dict[str, Any]:
+        """Kiwi VPN: each enabled server's agent status, usage, missing / unknown peers, revoked members (app/vpn/service.py)."""
+        import asyncio
+
+        from app.models.vpn import VpnServer
+        from app.vpn import service as vpn
+
+        if not ctx.db.scalar(select(func.count()).select_from(VpnServer).where(VpnServer.enabled.is_(True))):
+            raise JobSkipped("No Kiwi VPN servers yet (Admin › Kiwi VPN)")
+        return await asyncio.to_thread(vpn.sync_all, ctx.db, ctx.now)
+
     specs += [
+        JobSpec("vpn.sync", "Kiwi VPN: server sync", "Every 5 min: reads each VPN server's agent (online, handshakes, this month's bytes), re-adds members' missing peers, removes peers nobody owns and revokes devices of members who no longer qualify (rank dropped, banned). No traffic logs",
+                300, vpn_sync, initial_delay_seconds=100, timeout_seconds=240),
         JobSpec("system.alerts", "Owner alerts", "Every 10 min: tells the owner on Telegram (Settings › Background jobs › Owner alerts) when a Brand Manager TikTok account is expired or disconnected while AUTO is on; failing jobs are reported as they happen",
                 600, system_alerts, initial_delay_seconds=240, timeout_seconds=60),
         JobSpec("system.backup", "Nightly database backup", "Daily: a consistent copy of the whole database, integrity-checked, gzip-compressed into the private storage bucket (separate from the server's volume); the newest 14 are kept",
