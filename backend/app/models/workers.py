@@ -112,6 +112,7 @@ class WkSubmission(IdMixin, TimestampMixin, Base):
     engagement: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # qualifying group messages since joining
     engagement_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     still_member: Mapped[bool | None] = mapped_column()
+    member_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # last "still in the group?" check
 
 
 class WkCredit(IdMixin, TimestampMixin, Base):

@@ -18,6 +18,7 @@ from app.memory.records import MemoryRecord
 from app.memory.store import MemoryFilters
 from app.models.memory import Memory, MemoryEmbedding
 from app.providers.base import EmbeddingProvider, EmbeddingPurpose
+from app.providers.errors import ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,33 @@ def _normalise(vector: list[float]) -> np.ndarray:
     arr = np.asarray(vector, dtype=np.float32)
     norm = float(np.linalg.norm(arr))
     return arr / norm if norm > 0 else arr
+
+
+class QueryEmbeddingCache(EmbeddingProvider):
+    """Wraps the shared embedder for one request, so a query that several retrievers need (memory search and
+    community context in a chat turn) is embedded once. A failure is remembered too: one timeout, not one per caller."""
+
+    def __init__(self, inner: EmbeddingProvider) -> None:
+        super().__init__(model=inner.model)
+        self.name = inner.name
+        self.inner = inner
+        self._seen: dict[str, list[float] | Exception] = {}
+
+    async def embed(self, texts: list[str], purpose: EmbeddingPurpose = "document") -> list[list[float]]:
+        if purpose != "query" or len(texts) != 1:
+            return await self.inner.embed(texts, purpose)
+        if texts[0] not in self._seen:
+            try:
+                self._seen[texts[0]] = (await self.inner.embed(texts, purpose))[0]
+            except ProviderError as exc:
+                self._seen[texts[0]] = exc
+        hit = self._seen[texts[0]]
+        if isinstance(hit, Exception):
+            raise hit
+        return [hit]
+
+    async def aclose(self) -> None:
+        """The wrapped embedder is shared by the whole app: never closed from here."""
 
 
 @dataclass(frozen=True, slots=True)

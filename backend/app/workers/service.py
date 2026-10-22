@@ -262,8 +262,16 @@ def _attributed(db: Session, worker_id: int, tg_user_id: int, username: str | No
         return None
     row = WkSubmission(worker_id=worker_id, assignment_id=a.id, job_type=JOB_TELEGRAM_INVITES, username=username, tg_user_id=tg_user_id,
                        source=source, evidence=evidence)
-    db.add(row)
-    db.flush()
+    try:
+        with db.begin_nested():  # a form submission of the same @username can land between the check above and here
+            db.add(row)
+    except IntegrityError:
+        if not username or db.scalar(select(WkSubmission.id).where(WkSubmission.tg_user_id == tg_user_id)) is not None:
+            return None
+        row = WkSubmission(worker_id=worker_id, assignment_id=a.id, job_type=JOB_TELEGRAM_INVITES, username=None,
+                           tg_user_id=tg_user_id, source=source, evidence=evidence)
+        db.add(row)
+        db.flush()
     return row
 
 
@@ -406,11 +414,13 @@ async def verify(db: Session, bot: Any, limit: int = 200) -> dict[str, int]:
             out["rejected"] += 1
             continue
         if inside is not True or join is None:
-            ev["note"] = ("in the group, but the bot didn't see them join: a manager can review" if inside and join is None
+            unseen = bool(inside) and join is None  # can't become verifiable later: only a join the bot sees counts
+            ev["note"] = ("in the group, but the bot didn't see them join: can't be verified (closes after 7 days)" if unseen
                           else "not in the community yet")
             row.evidence = ev
-            if inside is False and now - _aware(row.created_at) > timedelta(days=7):  # type: ignore[operator]
-                row.status, row.reject_reason = "REJECTED", "didn't join within 7 days"
+            if (inside is False or unseen) and now - _aware(row.created_at) > timedelta(days=7):  # type: ignore[operator]
+                row.status, row.reject_reason = "REJECTED", ("in the group, but the bot never saw them join within 7 days, so the "
+                                                             "invite can't be verified" if unseen else "didn't join within 7 days")
                 out["rejected"] += 1
             else:
                 out["waiting"] += 1
@@ -426,9 +436,10 @@ async def verify(db: Session, bot: Any, limit: int = 200) -> dict[str, int]:
         out["verified"] += 1
     db.commit()
     out["engagement"] = refresh_engagement(db)
-    if bot is not None:  # still in the group? (verified in the last 14 days, a few per run)
+    if bot is not None:  # still in the group? (verified in the last 14 days, a few per run, least recently checked first)
         for row in db.scalars(select(WkSubmission).where(WkSubmission.status.in_(COUNTED), WkSubmission.verified_at >= now - timedelta(days=14))
-                              .order_by(WkSubmission.engagement_at.asc().nulls_first()).limit(40)).all():
+                              .order_by(WkSubmission.member_checked_at.asc().nulls_first(), WkSubmission.id).limit(40)).all():
+            row.member_checked_at = now
             try:
                 row.still_member = _in(await bot.get_chat_member(s.community_chat, row.tg_user_id))
             except Exception:  # noqa: BLE001
@@ -459,15 +470,22 @@ def qualifying(messages: list[tuple[datetime, str, str | None]]) -> int:
 def refresh_engagement(db: Session) -> int:
     cid = community_chat_id(db)
     rows = db.scalars(select(WkSubmission).where(WkSubmission.status.in_(COUNTED), WkSubmission.tg_user_id.is_not(None))).all()
-    for row in rows:
-        since = row.joined_at or row.verified_at
-        if not cid:
-            break  # the community group isn't known yet: count nothing rather than other chats
-        q = select(TelegramMessage.sent_at, TelegramMessage.text, TelegramMessage.media_type).where(
-            TelegramMessage.author_id == row.tg_user_id, TelegramMessage.author_is_bot.is_(False), TelegramMessage.sent_at >= since,
+    if not cid:
+        return len(rows)  # the community group isn't known yet: count nothing rather than other chats
+    now = utcnow()
+    for start in range(0, len(rows), 500):  # one query per 500 invited people, not one per person
+        chunk = rows[start : start + 500]
+        q = select(TelegramMessage.author_id, TelegramMessage.sent_at, TelegramMessage.text, TelegramMessage.media_type).where(
+            TelegramMessage.author_id.in_({r.tg_user_id for r in chunk}), TelegramMessage.author_is_bot.is_(False),
+            TelegramMessage.sent_at >= min(_aware(r.joined_at or r.verified_at) for r in chunk),  # type: ignore[type-var]
             TelegramMessage.chat_id == cid)
-        row.engagement = qualifying([tuple(r) for r in db.execute(q).all()])  # type: ignore[misc]
-        row.engagement_at = utcnow()
+        by_author: dict[int, list[tuple[datetime, str, str | None]]] = {}
+        for author, at, text, media in db.execute(q):
+            by_author.setdefault(author, []).append((_aware(at), text, media))  # type: ignore[arg-type]
+        for row in chunk:
+            since = _aware(row.joined_at or row.verified_at)
+            row.engagement = qualifying([m for m in by_author.get(row.tg_user_id, []) if m[0] >= since])  # type: ignore[operator, arg-type]
+            row.engagement_at = now
     db.commit()
     return len(rows)
 
