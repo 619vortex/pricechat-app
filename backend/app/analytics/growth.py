@@ -147,8 +147,9 @@ def _engagements(m: dict[str, Any]) -> int | None:
     return sum(int(v or 0) for v in vals)
 
 
-def _own_posts(db: Session) -> list[SocialPost]:
-    return list(db.scalars(select(SocialPost).where(SocialPost.platform == Platform.X, SocialPost.is_own.is_(True))))
+def _own_posts(db: Session, since: datetime | None = None) -> list[SocialPost]:
+    stmt = select(SocialPost).where(SocialPost.platform == Platform.X, SocialPost.is_own.is_(True))
+    return list(db.scalars(stmt if since is None else stmt.where(SocialPost.posted_at >= since)))
 
 
 def post_totals(posts: list[SocialPost], w: Window, prev: bool = False) -> dict[str, Any]:
@@ -253,11 +254,15 @@ def buckets(w: Window, first: datetime | None) -> tuple[list[datetime], timedelt
 
 
 def chart(db: Session, w: Window, posts: list[SocialPost], points: list[tuple[datetime, int]]) -> dict[str, Any]:
-    action_rows = list(db.execute(select(SocialActionLog.action, SocialActionLog.created_at).where(
-        SocialActionLog.platform == Platform.X, SocialActionLog.outcome == "executed")))
-    firsts = [t for t, _ in points] + [_aware(p.posted_at) for p in posts if p.posted_at] + [_aware(t) for _, t in action_rows]
-    first = min(firsts) if firsts else None
-    bks, step = buckets(w, first)
+    stmt = select(SocialActionLog.action, SocialActionLog.created_at).where(
+        SocialActionLog.platform == Platform.X, SocialActionLog.outcome == "executed")
+    if w.start is None:  # "all": the chart starts at the first thing on record
+        action_rows = list(db.execute(stmt))
+        firsts = [t for t, _ in points] + [_aware(p.posted_at) for p in posts if p.posted_at] + [_aware(t) for _, t in action_rows]
+        bks, step = buckets(w, min(firsts) if firsts else None)
+    else:  # a fixed period: only the actions inside the chart, not every one ever executed
+        bks, step = buckets(w, None)
+        action_rows = list(db.execute(stmt.where(SocialActionLog.created_at >= bks[0])))
     idx = lambda dt: next((i for i, b in enumerate(bks) if b <= dt < b + step), None)  # noqa: E731
 
     series: dict[str, list[Any]] = {k: [0] * len(bks) for k in ("posts", "replies", "likes", "reposts", "follows")}
@@ -473,7 +478,8 @@ def dashboard(db: Session, settings: Settings, period: str = "7d", now: datetime
     w = window(period, now)
     state = get_connector_state(db, Platform.X)
     points = follower_points(db, state.account_external_id)
-    posts = _own_posts(db)
+    # The posts the period and its comparison period need (all of them for "all"), not every own post ever read.
+    posts = _own_posts(db, w.prev_start if w.start is not None else None)
     cur, prev = post_totals(posts, w), post_totals(posts, w, prev=True)
     acts, acts_prev = _actions(db, w), _actions(db, w, prev=True)
     has_prev = w.prev_start is not None
@@ -489,7 +495,8 @@ def dashboard(db: Session, settings: Settings, period: str = "7d", now: datetime
         if usage and min(usage) <= lo:  # only if usage was already being tracked for the whole previous period
             spend_prev = cost_between(usage, lo, hi)
     # Post-based comparisons need collected history before the period started (we only hold what was read).
-    earliest_post = min((_aware(x.posted_at) for x in posts if x.posted_at), default=None)
+    earliest_post = _aware(db.scalar(select(func.min(SocialPost.posted_at)).where(SocialPost.platform == Platform.X,
+                                                                              SocialPost.is_own.is_(True))))
     posts_covered = has_prev and earliest_post is not None and earliest_post <= w.prev_start  # type: ignore[operator]
     p = (lambda v: v if posts_covered else None)  # noqa: E731
     pa = (lambda v: v if has_prev else None)  # noqa: E731  (Price Chat's own actions are fully recorded)

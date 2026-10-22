@@ -330,3 +330,31 @@ def test_dashboard_never_calls_x(x_client: TestClient, fake_x: FakeX) -> None:
         d = x_client.get("/api/analytics/growth", params={"period": period}).json()
         assert d["period"] == period and d["not_provided"] and "does not show the action caused it" in d["disclaimer"]
     assert fake_x.calls == [] and len(fake_x.writes) == writes
+
+
+def test_dashboard_loads_only_the_period_s_posts_and_actions(db: Session, agent_config, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    from sqlalchemy import event
+
+    connect_x_user(db)
+    for i in range(30):  # a year of history the 7d view doesn't need
+        _own(db, f"old{i}", 24 * (30 + 10 * i), {"likes": 1})
+        db.add(SocialActionLog(platform=Platform.X, action=SocialAction.LIKE, target_external_id=f"o{i}", target_account="x",
+                               outcome="executed", created_at=utcnow() - timedelta(days=30 + 10 * i)))
+    _own(db, "new", 5, {"likes": 3, "impressions": 30})
+    db.add(SocialActionLog(platform=Platform.X, action=SocialAction.LIKE, target_external_id="n", target_account="x",
+                           outcome="executed", created_at=utcnow() - timedelta(hours=2)))
+    db.commit()
+    loaded: list[int] = []
+    real = growth._own_posts
+    monkeypatch.setattr(growth, "_own_posts", lambda db_, since=None: loaded.append(len(r := real(db_, since))) or r)
+    action_sql: list[str] = []
+    spy = lambda *a: action_sql.append(a[2]) if "FROM social_actions" in a[2] and "executed" in str(a[3]) else None  # noqa: E731
+    event.listen(db.get_bind(), "before_cursor_execute", spy)
+    try:
+        d = growth.dashboard(db, get_settings(), "7d")
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", spy)
+    everything = growth.dashboard(db, get_settings(), "all")
+    assert loaded == [1, 31]  # 7d (+ its comparison week) reads one post; "all" still reads them all
+    assert sum(d["chart"]["likes"]) == 1 and sum(everything["chart"]["likes"]) == 31
+    assert action_sql and all("created_at >=" in q for q in action_sql)  # bounded in SQL for a fixed period
