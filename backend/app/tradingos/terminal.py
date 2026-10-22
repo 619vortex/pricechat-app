@@ -21,7 +21,9 @@ from app.models.tradingos import TsSignal, TsSignalAction
 from app.tradingos import exchange as xch
 from app.tradingos import execution, market
 
-SNAP_TTL = 3.0  # seconds between Hyperliquid account reads per account
+# seconds between Hyperliquid account reads per account. The Earn terminal polls every 7 s (TERMINAL_POLL_MS in terminal.tsx), so one
+# open tab costs one read per poll and a second tab or device shares it; the page shows the read's real age ("synced Xs ago").
+SNAP_TTL = 6.0
 STALE_AFTER = 30.0  # older than this, the numbers are flagged stale
 FETCH = xch.account_snapshot  # tests replace this with a fake exchange
 _snaps: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}

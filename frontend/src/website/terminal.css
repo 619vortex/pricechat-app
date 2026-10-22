@@ -87,6 +87,7 @@ p.kt-mode { justify-self: start; margin: 0; cursor: default; }
 .kt-balance-note { margin: 0 0 0 auto; font-size: 11.5px; color: #8fbaff; }
 .kt-balance.is-empty { justify-content: space-between; align-items: center; color: var(--site-soft); font-size: 14px; }
 .kt-warn { margin: 0; color: var(--tt-amber); font-size: 13px; }
+.kt-sync { margin: 0; color: var(--site-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .kt-none { margin: 0; padding: 4px 2px; color: var(--site-muted); font-size: 14px; }
 
 .kt-table { display: grid; border-top: 1px solid var(--tt-line); font-variant-numeric: tabular-nums; }
