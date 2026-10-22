@@ -56,9 +56,19 @@
 .vpn-steps a { color: var(--site-green); }
 .vpn-steps small { display: block; color: var(--site-muted); }
 
+.vpn-tag { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 999px; vertical-align: middle; font-size: 10.5px; font-weight: 800;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--site-green); background: var(--site-green-dim); border: 1px solid rgba(0, 229, 143, .35); }
+label .vpn-tag { justify-self: start; margin: 6px 0 0; }
+.vpn-sname .vpn-adblock { color: var(--site-green); }
+.vpn-dmain .vpn-dpaused { color: #f5c451; }
+.vpn-usage { display: grid; gap: 6px; font-size: 14px; color: var(--site-soft); }
+.vpn-usage b { color: var(--site-text); }
+.vpn-paused { margin: 0; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(245, 196, 81, .5); background: rgba(245, 196, 81, .1); color: var(--site-soft); }
+.vpn-paused b { color: #f5c451; display: block; margin-bottom: 2px; }
+
 @media (min-width: 760px) {
   .vpn-grid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; }
-  .vpn-add, .vpn-once { grid-column: 1 / -1; }
+  .vpn-add, .vpn-once, .vpn-paused { grid-column: 1 / -1; }
   .vpn-form { grid-template-columns: 1fr 1fr auto; align-items: end; }
   .vpn-once { grid-template-columns: 300px minmax(0, 1fr); }
   .vpn-once > h2, .vpn-once > .vpn-warn { grid-column: 1 / -1; }

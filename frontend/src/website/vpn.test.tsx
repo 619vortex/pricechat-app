@@ -1,18 +1,20 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VpnPage, ago, bytes, flag, type VpnDevice, type VpnState } from "./vpn";
+import { VpnPage, ago, bytes, flag, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
 
 /** TEST FIXTURES only: a fake Kiwi VPN API. No real config, keys or servers. */
 const HOME = { sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
                links: { telegram: null, x: null, youtube: null }, site_url: null };
 const SERVERS: VpnState["servers"] = [
-  { id: 1, name: "Auckland 1", region: "New Zealand", country_code: "nz", online: true, load: 0.2 },
-  { id: 2, name: "Frankfurt 1", region: "Germany", country_code: "DE", online: false, load: 0.9 },
+  { id: 1, name: "Auckland 1", region: "New Zealand", country_code: "nz", online: true, load: 0.2, adblock: false, recommended: true },
+  { id: 2, name: "Frankfurt 1", region: "Germany", country_code: "DE", online: false, load: 0.9, adblock: false, recommended: false },
 ];
 const DEVICE: VpnDevice = { id: 7, name: "My iPhone", server_id: 1, ip: "10.66.0.5", created_at: "2026-10-01T00:00:00Z",
-                 last_handshake: new Date(Date.now() - 5 * 60_000).toISOString(), rx_bytes: 1024 ** 3, tx_bytes: 512 * 1024 ** 2 };
+                 last_handshake: new Date(Date.now() - 5 * 60_000).toISOString(), rx_bytes: 1024 ** 3, tx_bytes: 512 * 1024 ** 2,
+                 paused_until: null };
+const USAGE: VpnState["usage"] = { month: "2026-10", used_bytes: 0, cap_bytes: 0, paused_until: null };
 const state = (over: Partial<VpnState> = {}): VpnState => ({
-  enabled: true, eligible: true, reason: null, required_rank: "Scout Kiwi", max_devices: 3, servers: SERVERS, devices: [], ...over,
+  enabled: true, eligible: true, reason: null, required_rank: "Scout Kiwi", max_devices: 3, servers: SERVERS, devices: [], usage: USAGE, ...over,
 });
 
 let calls: string[] = [];
@@ -162,6 +164,63 @@ describe("Kiwi VPN page", () => {
     expect(screen.getByText(/No devices yet/)).toBeTruthy();
   });
 
+  it("preselects the recommended server and tags it; shows ad-blocking servers", async () => {
+    const servers: VpnState["servers"] = [
+      { ...SERVERS[0], load: 0.1, recommended: false },
+      { ...SERVERS[1], online: true, load: 0.3, adblock: true, recommended: true },
+    ];
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ servers })],
+            "POST /api/members/vpn/devices": [503, { detail: "busy" }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    const rows = container.querySelectorAll(".vpn-servers li");
+    expect(rows[0].querySelector(".vpn-tag")).toBeNull();
+    expect(rows[1].querySelector(".vpn-tag")!.textContent).toBe("Recommended");
+    expect(rows[1].textContent).toContain("🛡️ Blocks ads & trackers");
+    expect(rows[0].textContent).not.toContain("Blocks ads");
+    expect((container.querySelector(".vpn-form select") as HTMLSelectElement).value).toBe("2");
+    expect(screen.getByRole("option", { name: /Frankfurt 1.*Recommended/ })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("e.g. My iPhone"), { target: { value: "Phone" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add device" }));
+    await settle();
+    expect(calls).toContain('POST /api/members/vpn/devices {"name":"Phone","server_id":2}');
+  });
+
+  it("shows this month's data against the cap", async () => {
+    serve({ "/api/website/home": [200, HOME],
+            "GET /api/members/vpn": [200, state({ devices: [DEVICE], usage: { ...USAGE, used_bytes: 15 * 1024 ** 3, cap_bytes: 50 * 1024 ** 3 } })] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-usage")!.textContent).toContain("15.0 GB of 50.0 GB this month");
+    expect(screen.getByRole("meter", { name: "Data used this month" }).getAttribute("aria-valuenow")).toBe("30");
+    expect(container.querySelector(".vpn-paused")).toBeNull();
+    expect(container.querySelector(".vpn-form")).toBeTruthy();
+  });
+
+  it("says unlimited when there's no cap", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ usage: { ...USAGE, used_bytes: 1536 * 1024 ** 2 } })] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-usage")!.textContent).toBe("1.5 GB this month · no limit");
+    expect(screen.queryByRole("meter", { name: "Data used this month" })).toBeNull();
+  });
+
+  it("shows a paused banner (and no form) once the monthly cap is used up", async () => {
+    const until = "2026-11-01T00:00:00+00:00";
+    serve({ "/api/website/home": [200, HOME],
+            "GET /api/members/vpn": [200, state({ devices: [{ ...DEVICE, paused_until: until }],
+                                                  usage: { ...USAGE, used_bytes: 51 * 1024 ** 3, cap_bytes: 50 * 1024 ** 3, paused_until: until } })] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    const banner = container.querySelector(".vpn-paused")!.textContent!;
+    expect(banner).toContain("Paused for the rest of the month");
+    expect(banner).toContain("50.0 GB");
+    expect(banner).toContain("1 Nov");
+    expect(container.querySelector(".vpn-form")).toBeNull();
+    expect(container.querySelector(".vpn-device")!.textContent).toContain("Paused until 1 Nov");
+    expect(screen.getByRole("meter", { name: "Data used this month" }).getAttribute("aria-valuenow")).toBe("100");
+  });
+
   it("hides the form at the device limit", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ max_devices: 1, devices: [DEVICE] })] });
     const { container } = render(<VpnPage />);
@@ -179,5 +238,16 @@ describe("helpers", () => {
     expect(bytes(1536 * 1024)).toBe("1.5 MB");
     expect(ago(null)).toBe("Never connected");
     expect(ago("2026-10-20T00:00:00Z", Date.parse("2026-10-22T00:00:00Z"))).toBe("2 days ago");
+    expect(resumeDay("2026-11-01T00:00:00+00:00")).toBe("1 Nov");
+  });
+
+  it("picks the recommended server, else the least busy online one", () => {
+    const s = (id: number, online: boolean, load: number, recommended = false) =>
+      ({ id, name: `s${id}`, region: "", country_code: "", online, load, adblock: false, recommended });
+    expect(pickServer([s(1, true, 0.1), s(2, true, 0.5, true)])).toBe(2);
+    expect(pickServer([s(1, true, 0.5), s(2, false, 0), s(3, true, 0.2)])).toBe(3);
+    expect(pickServer([s(4, true, 0.2), s(3, true, 0.2)])).toBe(3);  // a tie: the lowest id
+    expect(pickServer([s(5, false, 0)])).toBe(5);
+    expect(pickServer([])).toBe(0);
   });
 });
