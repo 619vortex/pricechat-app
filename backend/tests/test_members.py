@@ -463,7 +463,8 @@ def test_entitlements_follow_rank_and_manual_grants(mc: TestClient, db: Session)
     assert not any(ent.values())
     mc.post(f"/api/members-admin/members/{pid}/xp", json={"amount": 400, "reason": "Rank 4 for the test"})
     ent = {e["key"]: e["unlocked"] for e in me(mc)["entitlements"]}
-    assert ent == {"profile_cosmetic": True, "community_badge": False, "special_content": False, "vip_access": False}
+    assert ent == {"profile_cosmetic": True, "community_badge": False, "special_content": False, "vip_access": False,
+                   "kiwi_vpn": False}
     mc.post(f"/api/members-admin/members/{pid}/entitlements", json={"entitlement": "special_content", "reason": "Beta tester"})
     assert {e["key"]: e["unlocked"] for e in me(mc)["entitlements"]}["special_content"] is True
     mc.patch("/api/members-admin/entitlements/profile_cosmetic", json={"enabled": False})

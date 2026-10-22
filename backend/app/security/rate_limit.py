@@ -65,6 +65,7 @@ LIMITS = {
     "health": Bucket(burst=10, every=6, shared_burst=200, shared_every=0.1),  # 10/min per client after a burst of 10
     "referral": Bucket(burst=10, every=6, shared_burst=300, shared_every=0.2),  # over it: still redirected, click not counted
     "earn": Bucket(burst=30, every=1, shared_burst=600, shared_every=0.02),
+    "vpn_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),  # Kiwi VPN device creation, per member
 }
 
 
