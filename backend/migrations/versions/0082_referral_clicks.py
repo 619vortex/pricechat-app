@@ -12,7 +12,7 @@ from alembic import op
 
 
 revision: str = '0082_referral_clicks'
-down_revision: str | None = '0078'
+down_revision: str | None = '0081_price_alerts'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
