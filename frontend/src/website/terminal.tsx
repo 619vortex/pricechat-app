@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MemberApiError, memberApi, trackedRef } from "./members";
 import { reducedMotion } from "./motion";
+import { okToSaveLimits } from "./riskLimits";
 import { playSound } from "./sound";
 import { walletError } from "./wallet";
 import { site } from "./websiteData";
@@ -116,6 +117,8 @@ export interface Sig { id: number; number: number; coin: string; side: string; s
 export interface Connection { rankLevel: number | null; rankOk: boolean; minRank: number; wallet: string | null; referral: boolean; group: boolean;
   bot: boolean; botUsername: string; groupUrl: string }
 
+/** how often the terminal re-reads the server; the server shares one Hyperliquid read per account for 6 s (terminal.py SNAP_TTL) */
+export const TERMINAL_POLL_MS = 7000;
 const SLIPPAGE = 0.0008, TAKER_FEE = 0.00045;  // the server's own estimates (risk.py); the close's limit price allows 3× the slippage
 const usd = (n: number | null | undefined, sign = false) => n == null ? "—"
   : `${n < 0 ? "−" : sign && n > 0 ? "+" : ""}$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -174,6 +177,17 @@ function Modal({ label, onClose, children }: { label: string; onClose: () => voi
     </div>
   );
 }
+/** "Synced 12s ago": the real age of the exchange read (the server's age at load + time since), ticking every second. */
+function SyncedAgo({ sync, loadedAt }: { sync: Terminal["sync"]; loadedAt: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
+  if (sync.age_s == null || loadedAt == null) return null;
+  const age = Math.max(0, sync.age_s + (now - loadedAt) / 1000);
+  const ago = age < 90 ? `${Math.round(age)}s` : `${Math.round(age / 60)} min`;
+  const src = sync.source === "paper" ? "Prices" : "Synced with Hyperliquid";
+  return <p className={sync.stale ? "kt-warn" : "kt-sync"} aria-live="off">{src} {ago} ago{sync.stale ? ` · may be out of date${sync.error ? ` (${sync.error})` : ""}` : ""}</p>;
+}
+
 // ---------------------------------------------------------------- dialogs
 function CloseDialog({ p, onDone, onClose }: { p: Pos; onDone: (a: Account) => void; onClose: () => void }) {
   const [frac, setFrac] = useState<0.25 | 0.5 | 1>(1);
@@ -715,7 +729,10 @@ function SettingsDialog({ a, conn, busy, err, run, put, onClose, onAskAuto }: {
           <input type="number" inputMode="decimal" value={draft[k] as number} min={a.caps[k]?.[0]} max={a.caps[k]?.[1]}
                  onChange={(e) => setDraft({ ...draft, [k]: Number(e.target.value) })} /><small>{unit}</small></label>
       ))}
-      <button className="kt-btn" disabled={busy !== null} onClick={() => void put({ ...draft }, "Limits saved ✓")}>Save limits</button>
+      <button className="kt-btn" disabled={busy !== null} onClick={() => {
+        if (!okToSaveLimits(a.mode, a.limits, draft)) return;
+        void put({ ...draft }, "Limits saved ✓");
+      }}>Save limits</button>
       <h4>Connection</h4>
       {(["LIVE", "TESTNET"] as Network[]).filter((n) => a.agents[n].approved).map((n) => (
         <div key={n} className="td-row"><span>{n === "LIVE" ? "Trading authorization" : "Test wallet"} ✓ {a.agents[n].address?.slice(0, 8)}…</span>
@@ -769,7 +786,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
   }, []);
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => { if (document.visibilityState === "visible") void load(); }, 4000);
+    const id = window.setInterval(() => { if (document.visibilityState === "visible") void load(); }, TERMINAL_POLL_MS);
     return () => window.clearInterval(id);
   }, [load]);
   useEffect(() => {
@@ -980,7 +997,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
                   <button className="kt-btn is-go" onClick={() => setConnect(true)}>CONNECT HYPERLIQUID</button></>}</div>
           </>
         )}
-        {t?.sync.stale && <p className="kt-warn" role="status">Prices last synced {Math.round((t.sync.age_s ?? 0) / 60)} min ago{t.sync.error ? ` (${t.sync.error})` : ""}.</p>}
+        {t && <SyncedAgo sync={t.sync} loadedAt={loadedAt} />}
         {positions.length > 0 ? (
           <div className="kt-table" role="table" aria-label="Open positions">
             <div className="kt-row kt-thead" role="row">

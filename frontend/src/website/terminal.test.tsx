@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./sound", () => ({ playSound: () => undefined, warmSounds: () => undefined }));
 
-import { TradingTerminal, type Account, type Connection, type Pos, type Sig, type Terminal } from "./terminal";
+import { TERMINAL_POLL_MS, TradingTerminal, type Account, type Connection, type Pos, type Sig, type Terminal } from "./terminal";
 
 /** TEST FIXTURES only: a fake API answering by method + path (a function answers dynamically). */
 const calls: { key: string; body: unknown }[] = [];
@@ -155,6 +155,38 @@ describe("Kiwi trading bot", () => {
     await flush();
     expect(calls.find((c) => c.key === "PUT /api/members/trading/settings")!.body).toEqual({ auto_enabled: false });
     expect(calls.some((c) => c.key.includes("/close"))).toBe(false);
+  });
+
+  it("LIVE: raising leverage or max loss asks first; lowering them saves straight away", async () => {
+    await open({ [T]: term(), [S]: { items: [] }, "PUT /api/members/trading/settings": account() });
+    fireEvent.click(screen.getByRole("button", { name: "Trading settings" }));
+    const dlg = screen.getByRole("dialog", { name: "Trading settings" });
+    const field = (l: string) => within(dlg).getByText(l).parentElement!.querySelector("input")!;
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    fireEvent.change(field("Max leverage"), { target: { value: "5" } });
+    fireEvent.change(field("Max loss per trade"), { target: { value: "20" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save limits" }));
+    await flush();
+    expect(String((ask.mock.calls[0] as unknown[])[0])).toMatch(/real money[\s\S]*Max leverage 3x → 5x[\s\S]*Max loss per trade \$5\.00 → \$20\.00/);
+    expect(calls.some((c) => c.key.startsWith("PUT"))).toBe(false);  // declined: nothing saved
+    fireEvent.change(field("Max leverage"), { target: { value: "2" } });
+    fireEvent.change(field("Max loss per trade"), { target: { value: "4" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save limits" }));
+    await flush();
+    expect(ask).toHaveBeenCalledTimes(1);  // less risk: no question
+    expect(calls.find((c) => c.key === "PUT /api/members/trading/settings")!.body).toMatchObject({ max_leverage: 2, max_loss_per_trade_usd: 4 });
+  });
+
+  it("always says how fresh the exchange numbers are, and warns when they're stale", async () => {
+    await open({ [T]: term(), [S]: { items: [] } });
+    expect(screen.getByText(/^Synced with Hyperliquid \d+s ago$/)).toBeTruthy();  // age_s 2 at load, plus the time since
+    cleanup();
+    await open({ [T]: term({ sync: { source: "hyperliquid", at: "2026-10-15T10:00:00+00:00", age_s: 125, stale: true, error: "Hyperliquid mainnet couldn't be read (TimeoutError)." } }),
+                 [S]: { items: [] } });
+    const p = screen.getByText(/Synced with Hyperliquid 2 min ago · may be out of date/);
+    expect(p.className).toBe("kt-warn"); expect(p.textContent).toMatch(/TimeoutError/);
+    expect(TERMINAL_POLL_MS).toBe(7000);  // one Hyperliquid read per poll: the server shares a read for 6 s
   });
 
   it("when a refresh fails, the numbers still on screen say how old they are", async () => {

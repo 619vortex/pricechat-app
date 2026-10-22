@@ -9,7 +9,8 @@ interface ApiState<T> {
   setData: (data: T) => void;
 }
 
-/** Fetch on mount, optionally poll, and expose reload(). */
+/** Fetch on mount, optionally poll, and expose reload(). Polling pauses while the tab is hidden (nobody is looking) and
+ *  refreshes at once when it becomes visible again. reload() always fetches. */
 export function useApi<T>(fetcher: () => Promise<T>, pollMs?: number): ApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
@@ -31,8 +32,10 @@ export function useApi<T>(fetcher: () => Promise<T>, pollMs?: number): ApiState<
   useEffect(() => {
     void reload();
     if (!pollMs) return;
-    const id = window.setInterval(() => void reload(), pollMs);
-    return () => window.clearInterval(id);
+    const id = window.setInterval(() => { if (!document.hidden) void reload(); }, pollMs);
+    const vis = () => { if (!document.hidden) void reload(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", vis); };
   }, [reload, pollMs]);
 
   const error = failure ? (failure instanceof Error ? failure.message : String(failure)) : null;
