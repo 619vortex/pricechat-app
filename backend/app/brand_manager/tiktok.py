@@ -8,6 +8,7 @@
 - Nothing is reported as published unless TikTok's status endpoint says PUBLISH_COMPLETE.
 """
 
+import asyncio
 import hashlib
 import logging
 import secrets
@@ -174,12 +175,34 @@ async def finish(db: Session, settings: Settings, code: str, state: str, transpo
     return a
 
 
+_refreshing: dict[tuple[int, int], asyncio.Lock] = {}  # (event loop, brand) -> one token refresh at a time
+
+
+def _fresh(a: BmAccount, token: str | None) -> bool:
+    return bool(token and a.access_expires_at and a.access_expires_at > utcnow() + timedelta(minutes=5))
+
+
 async def access_token(db: Session, settings: Settings, a: BmAccount, transport: Any = None) -> str:
-    """A valid access token, refreshing it when it is about to expire. Marks the account expired/revoked if TikTok says so."""
+    """A valid access token, refreshing it when it is about to expire. Marks the account expired/revoked if TikTok says so.
+
+    TikTok may rotate the refresh token on every refresh, so two refreshes at once (the scheduler's tick and a dashboard
+    request) would make the second one fail with the old token and wrongly mark the account expired: refreshes run one at
+    a time per brand, and a refusal right after someone else's refresh uses that refresh's token instead."""
     store = secret_store(settings)
     token = store.get(_tok(a.brand_id, "access"))
-    if token and a.access_expires_at and a.access_expires_at > utcnow() + timedelta(minutes=5):
-        return token
+    if _fresh(a, token):
+        return token  # type: ignore[return-value]
+    lock = _refreshing.setdefault((id(asyncio.get_running_loop()), a.brand_id), asyncio.Lock())
+    async with lock:
+        db.refresh(a, ["access_expires_at", "status", "last_error"])  # it may have been refreshed while we waited
+        token = store.get(_tok(a.brand_id, "access"))
+        if _fresh(a, token):
+            return token  # type: ignore[return-value]
+        return await _refresh(db, settings, a, transport)
+
+
+async def _refresh(db: Session, settings: Settings, a: BmAccount, transport: Any) -> str:
+    store = secret_store(settings)
     refresh = store.get(_tok(a.brand_id, "refresh"))
     if not refresh:
         a.status, a.last_error = "disconnected", "Not connected to TikTok."
@@ -191,6 +214,11 @@ async def access_token(db: Session, settings: Settings, a: BmAccount, transport:
             "grant_type": "refresh_token", "refresh_token": refresh}, transport)
     except TikTokError as exc:
         if exc.code != "unreachable":
+            if store.get(_tok(a.brand_id, "refresh")) != refresh:  # another process refreshed (and rotated) it meanwhile
+                db.refresh(a, ["access_expires_at", "status", "last_error"])
+                token = store.get(_tok(a.brand_id, "access"))
+                if _fresh(a, token):
+                    return token  # type: ignore[return-value]
             a.status, a.last_error = "expired", f"TikTok sign-in expired or was revoked ({exc}). Reconnect TikTok."
             db.commit()
         raise
@@ -298,14 +326,24 @@ async def diagnostics(settings: Settings, transport: Any = None) -> dict[str, An
 # --- API calls ------------------------------------------------------------------------------------------------------------
 
 
+# The request never left (nothing reached TikTok): always safe to try again
+NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+UNCERTAIN = "uncertain"  # a post request TikTok may or may not have taken: never re-sent automatically
+
+
 async def _api(db: Session, settings: Settings, a: BmAccount, method: str, path: str, transport: Any = None, *,
-               params: dict[str, str] | None = None, json: dict[str, Any] | None = None) -> dict[str, Any]:
+               params: dict[str, str] | None = None, json: dict[str, Any] | None = None, posts: bool = False) -> dict[str, Any]:
+    """`posts`: this call creates a post. When TikTok's answer is lost (timeout after sending, dropped connection, a 5xx)
+    it may already have taken the video, so the error's code is "uncertain" instead of "unreachable" (retried)."""
     token = await access_token(db, settings, a, transport)
     try:
         async with httpx.AsyncClient(timeout=30.0, transport=transport) as c:
             r = await c.request(method, f"{settings.tiktok_api_base}{path}", params=params, json=json,
                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"})
     except httpx.HTTPError as exc:
+        if posts and not isinstance(exc, NOT_SENT):
+            raise TikTokError(f"TikTok's answer was lost ({type(exc).__name__}): the video may or may not have arrived. "
+                              "Check TikTok before sending it again.", UNCERTAIN) from None
         raise TikTokError(f"TikTok didn't answer ({type(exc).__name__}).", "unreachable") from None
     try:
         body = r.json()
@@ -313,6 +351,11 @@ async def _api(db: Session, settings: Settings, a: BmAccount, method: str, path:
         body = {}
     err = body.get("error") or {}
     code = str(err.get("code") or ("ok" if r.status_code < 400 else r.status_code))
+    if r.status_code >= 500:  # a TikTok outage, not an error about this request
+        if posts:
+            raise TikTokError(f"TikTok had a server error ({r.status_code}) while taking the video: it may or may not have arrived. "
+                              "Check TikTok before sending it again.", UNCERTAIN)
+        raise TikTokError(f"TikTok had a server error ({r.status_code}).", "unreachable")
     if code != "ok":
         if code in ("access_token_invalid", "scope_not_authorized", "token_expired"):
             a.status = "expired" if code != "scope_not_authorized" else a.status
@@ -345,7 +388,13 @@ async def creator_info(db: Session, settings: Settings, a: BmAccount, transport:
 
 async def upload_to_inbox(db: Session, settings: Settings, a: BmAccount, video_url: str, transport: Any = None) -> str:
     data = await _api(db, settings, a, "POST", "/v2/post/publish/inbox/video/init/", transport,
-                      json={"source_info": {"source": "PULL_FROM_URL", "video_url": video_url}})
+                      json={"source_info": {"source": "PULL_FROM_URL", "video_url": video_url}}, posts=True)
+    return _publish_id(data)
+
+
+def _publish_id(data: dict[str, Any]) -> str:
+    if not data.get("publish_id"):  # TikTok said ok but gave no id: it may have taken the video, and we can't track it
+        raise TikTokError("TikTok accepted the request but returned no publish id. Check TikTok before sending it again.", UNCERTAIN)
     return str(data["publish_id"])
 
 
@@ -355,8 +404,8 @@ async def direct_post(db: Session, settings: Settings, a: BmAccount, video_url: 
                  "video_cover_timestamp_ms": 1000, "brand_content_toggle": bool(post.get("branded_content")),
                  "brand_organic_toggle": bool(post.get("your_brand")), "is_aigc": bool(post.get("is_aigc", True))}
     data = await _api(db, settings, a, "POST", "/v2/post/publish/video/init/", transport,
-                      json={"post_info": post_info, "source_info": {"source": "PULL_FROM_URL", "video_url": video_url}})
-    return str(data["publish_id"])
+                      json={"post_info": post_info, "source_info": {"source": "PULL_FROM_URL", "video_url": video_url}}, posts=True)
+    return _publish_id(data)
 
 
 async def publish_status(db: Session, settings: Settings, a: BmAccount, publish_id: str, transport: Any = None) -> dict[str, Any]:

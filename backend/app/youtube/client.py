@@ -34,6 +34,10 @@ class YouTubeAuthError(YouTubeError):
 class YouTubeQuotaError(YouTubeError):
     code = "youtube_quota"
 
+    def __init__(self, message: str, daily: bool = False) -> None:
+        super().__init__(message)
+        self.daily = daily  # the day's quota is used up (until midnight Pacific), not a short rate limit
+
 
 class YouTubeNotFound(YouTubeError):
     code = "youtube_not_found"
@@ -122,7 +126,8 @@ class YouTubeClient:
         reasons = {e.get("reason", "") for e in err.get("errors") or []}
         message = re.sub(r"key=[^&\s]+", "key=***", str(err.get("message") or response.reason_phrase or "error"))[:300]
         if reasons & {"quotaExceeded", "dailyLimitExceeded", "rateLimitExceeded", "userRateLimitExceeded"}:
-            raise YouTubeQuotaError(f"YouTube API quota or rate limit reached ({endpoint}): {message}")
+            raise YouTubeQuotaError(f"YouTube API quota or rate limit reached ({endpoint}): {message}",
+                                    daily=bool(reasons & {"quotaExceeded", "dailyLimitExceeded"}))
         if status == 401 or reasons & {"keyInvalid", "authError", "keyExpired"} or "API key not valid" in message:
             raise YouTubeAuthError(f"YouTube rejected the credentials ({status}): {message}")
         if status == 403:

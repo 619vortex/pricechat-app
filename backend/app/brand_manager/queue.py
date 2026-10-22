@@ -176,13 +176,16 @@ def claim(db: Session, settings: Any, w: BmWorker, info: dict[str, Any] | None, 
         w.info = {k: info[k] for k in list(info)[:20]}
     expire_leases(db, now)
     db.commit()
+    autos = {a.brand_id: a for a in db.scalars(select(BmAutomation))}
+    stopped = [b for b, a in autos.items() if a.emergency_stop]
+    # STOP AUTO leaves its planned jobs queued (they wait for START): scan past them, so a manual video made meanwhile
+    # (no slot, so sorted last) is still found behind a long stopped queue
     candidates = db.execute(select(BmJob, BmVideo).join(BmVideo, BmVideo.id == BmJob.video_id)
-                            .where(BmJob.status == "queued", (BmJob.run_after.is_(None)) | (BmJob.run_after <= now))
-                            .order_by(BmVideo.slot_at.is_(None), BmVideo.slot_at, BmJob.id).limit(20)).all()
+                            .where(BmJob.status == "queued", (BmJob.run_after.is_(None)) | (BmJob.run_after <= now),
+                                   BmVideo.brand_id.not_in(stopped))
+                            .order_by(BmVideo.slot_at.is_(None), BmVideo.slot_at, BmJob.id).limit(500)).all()
     for job, v in candidates:
-        a = db.scalar(select(BmAutomation).where(BmAutomation.brand_id == v.brand_id))
-        if a is not None and a.emergency_stop:
-            continue
+        a = autos.get(v.brand_id)
         if not (a is not None and a.running) and not (job.payload or {}).get("manual"):
             continue  # STOP AUTO: nothing new starts (a manual Regenerate still runs)
         lease = now + timedelta(seconds=settings.bm_lease_seconds)
@@ -296,6 +299,26 @@ def fail(db: Session, w: BmWorker, job_id: int, error: str, retryable: bool = Tr
     return {"ok": True, "status": job.status}
 
 
+MAX_THUMB_BYTES = 5 * 1024 * 1024
+
+
+def _num(value: Any) -> float:
+    """A number from the worker's report; anything else counts as 0 (and fails the check that needs it)."""
+    try:
+        out = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return out if out == out and abs(out) != float("inf") else 0.0
+
+
+def _is_thumb(f: Any) -> bool:
+    head = f.read(3)
+    f.seek(0, 2)
+    size = f.tell()
+    f.seek(0)
+    return head[:2] == b"\xff\xd8" and 0 < size <= MAX_THUMB_BYTES
+
+
 def complete(db: Session, settings: Any, w: BmWorker, job_id: int, video: Any, thumb: Any | None, meta: dict[str, Any]) -> dict[str, Any]:
     """The worker's finished video: streamed to object storage, checked (format, size, length, narration, checksum), then
     scheduled. `video` / `thumb` are file objects (FastAPI spools uploads to disk, so memory stays flat)."""
@@ -323,8 +346,8 @@ def complete(db: Session, settings: Any, w: BmWorker, job_id: int, video: Any, t
     video.seek(0)
     if meta.get("sha256") and meta["sha256"] != digest.hexdigest():
         problems.append("The upload was corrupted (checksum mismatch).")
-    dur = float(meta.get("duration") or 0)
-    if (int(meta.get("width") or 0), int(meta.get("height") or 0)) != (1080, 1920):
+    dur = _num(meta.get("duration"))
+    if (int(_num(meta.get("width"))), int(_num(meta.get("height")))) != (1080, 1920):
         problems.append(f"Wrong size {meta.get('width')}×{meta.get('height')} (needs 1080×1920).")
     if not (float(st["min_seconds"]) - 5 <= dur <= float(st["max_seconds"]) + 10):
         problems.append(f"Length {dur:.1f}s is outside {st['min_seconds']}-{st['max_seconds']}s.")
@@ -341,10 +364,18 @@ def complete(db: Session, settings: Any, w: BmWorker, job_id: int, video: Any, t
         return fail(db, w, job_id, "Quality check: " + "; ".join(problems), retryable=True)
     store = MediaStore(settings)
     base = f"{v.brand_id}/{v.id}-g{v.generation}"
+    if thumb is not None and not _is_thumb(thumb):
+        thumb = None  # not a JPEG, or too big: the video is still good, it just has no poster
     store.put_file(f"{base}.mp4", video, "video/mp4")
     if thumb is not None:
         store.put_file(f"{base}.jpg", thumb, "image/jpeg")
+    old = [k for k in (v.video_key, v.thumb_key) if k and k not in (f"{base}.mp4", f"{base}.jpg")]
     v.video_key, v.thumb_key = f"{base}.mp4", f"{base}.jpg" if thumb is not None else None
+    for key in old:  # the previous render's files (Regenerate / re-render): nothing points at them any more
+        try:
+            store.delete(key)
+        except Exception:  # noqa: BLE001 - an orphan file costs storage, not correctness
+            pass
     v.duration, v.size_bytes, v.checksum = dur, size, digest.hexdigest()
     v.render_info = {"worker": w.name, **{k: meta.get(k) for k in ("tts", "llm", "seconds", "renderer", "cost_usd", "creative", "storyboard",
                                                                      "segments", "checks", "warnings", "timings", "narration_match",

@@ -210,3 +210,26 @@ def test_short_market_is_private_except_for_workers_with_a_token() -> None:
     assert is_public("POST", "/api/short-market/worker/claim")  # workers carry their own token
     assert not is_public("GET", "/api/short-market/shorts") and not is_public("GET", "/api/short-market/shorts/1/media/video")
     assert not is_public("POST", "/api/short-market/shorts")
+
+
+def test_a_malformed_worker_report_is_refused_and_a_bad_thumbnail_dropped(sm: TestClient, db: Session) -> None:
+    w = _worker(sm)
+    mood = next(i for i in sm.get(f"{P}/ideas").json()["items"] if "mood" in i["topic"])
+    s = sm.post(f"{P}/shorts", json={"idea_id": mood["id"], "style": "clay", "seconds": 30}).json()
+    sm.post(f"{P}/worker/claim", json={"info": {}}, headers=w)
+    assert sm.post(f"{P}/worker/jobs/{s['id']}/script", json={"script": _script()}, headers=w).json()["ok"]
+    data, meta = _mp4(31.0)
+    video = {"video": ("v.mp4", io.BytesIO(data), "video/mp4")}
+    assert sm.post(f"{P}/worker/jobs/{s['id']}/result", headers=w, data={"meta": "[]"}, files=video).status_code == 400
+    odd = sm.post(f"{P}/worker/jobs/{s['id']}/result", headers=w, data={"meta": json.dumps({**meta, "duration": "thirty"})},
+                  files={"video": ("v.mp4", io.BytesIO(data), "video/mp4")})
+    assert odd.status_code == 200 and odd.json()["status"] == "queued"  # failed the final check, not a crash
+    db.query(SmShort).update({SmShort.run_after: None})
+    db.commit()
+    sm.post(f"{P}/worker/claim", json={}, headers=w)
+    assert sm.post(f"{P}/worker/jobs/{s['id']}/script", json={"script": _script()}, headers=w).json()["ok"]
+    done = sm.post(f"{P}/worker/jobs/{s['id']}/result", headers=w, data={"meta": json.dumps(meta)},
+                   files={"video": ("v.mp4", io.BytesIO(data), "video/mp4"), "thumb": ("t.jpg", io.BytesIO(b"GIF89a..."), "image/jpeg")})
+    assert done.json() == {"ok": True, "status": "ready"}
+    v = sm.get(f"{P}/shorts/{s['id']}").json()
+    assert v["has_video"] and not v["has_thumb"]

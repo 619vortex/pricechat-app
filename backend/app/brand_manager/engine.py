@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.orm import Session
 
 from app.brand_manager import brands, discovery, queue, tiktok
@@ -231,7 +231,16 @@ async def publish(db: Session, settings: Any, b: BmBrand, v: BmVideo, transport:
         raise tiktok.TikTokError("This video is already being sent to TikTok.", "already_sending")
     try:
         await _send(db, settings, st, acc, v, url, mode, transport)
-    except Exception:  # TikTok said no before taking it: back to where it was (a cancelled send stays SENDING, see tick)
+    except tiktok.TikTokError as exc:
+        if exc.code == tiktok.UNCERTAIN:  # TikTok may have it: sending again could post it twice, so the owner checks first
+            v.status, v.publish_status, v.error = "failed", None, str(exc)
+            queue.set_stage(v, "publish", "failed", str(exc))
+            brands.log(db, b.id, f"“{v.topic}”: {exc}", level="error", stage="publish", video_id=v.id)
+        else:  # TikTok said no before taking it: back to where it was
+            v.status, v.publish_status = prev, None
+        db.commit()
+        raise
+    except Exception:  # not TikTok's answer (a bug, a lost database): back to where it was; a cancelled send stays SENDING, see tick
         v.status, v.publish_status = prev, None
         db.commit()
         raise
@@ -313,8 +322,11 @@ async def tick(db: Session, settings: Any, transport: Any = None, now: datetime 
         # TikTok statuses are polled even when stopped: an upload already sent must reach its real end state
         if tiktok.account(db, b.id).status == "connected":
             deadline = time.monotonic() + POLL_SECONDS
+            # uploads still processing first (their outcome matters now), then the newest drafts: 10 drafts the owner hasn't
+            # posted yet must not keep a fresh upload from ever being checked
             for v in db.scalars(select(BmVideo).where(BmVideo.brand_id == b.id, BmVideo.status.in_(("publishing", "sent_to_drafts")),
-                                                      BmVideo.publish_id.is_not(None), BmVideo.updated_at >= now - timedelta(days=3))).all()[:10]:
+                                                      BmVideo.publish_id.is_not(None), BmVideo.updated_at >= now - timedelta(days=3))
+                                .order_by(case((BmVideo.status == "publishing", 0), else_=1), BmVideo.id.desc()).limit(10)).all():
                 if time.monotonic() > deadline:
                     break
                 try:
@@ -355,7 +367,7 @@ async def tick(db: Session, settings: Any, transport: Any = None, now: datetime 
                     await publish(db, settings, b, v, transport)
                     r["published"] += 1
                 except tiktok.TikTokError as exc:
-                    if exc.code in ("needs_approval", "already_sending"):
+                    if exc.code in ("needs_approval", "already_sending", tiktok.UNCERTAIN):  # the last: publish() recorded it
                         continue
                     v.error = str(exc)
                     queue.set_stage(v, "publish", "failed", str(exc))

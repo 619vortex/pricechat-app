@@ -524,6 +524,9 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             raise JobSkipped("YouTube is not connected (YouTube page)")
         if not get_connector_state(ctx.db, Platform.YOUTUBE).account_external_id:
             raise JobSkipped("Choose the Price Chat YouTube channel first")
+        paused = yt.quota_paused_until(ctx.db, ctx.now)
+        if paused is not None:  # YouTube refuses every call until its quota resets: wait instead of failing every run
+            raise JobSkipped(f"YouTube's daily API quota is used up; syncing resumes after {paused:%H:%M} UTC")
         return (await yt.sync(ctx.db, s, runtime.youtube)).as_dict()
 
     async def growth_snapshots(ctx: JobContext) -> dict[str, Any]:
@@ -863,7 +866,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         return await asyncio.to_thread(db_backup.run, s, url.database)
 
     async def system_alerts(ctx: JobContext) -> dict[str, Any]:
-        """Owner alerts that aren't a failed job: a Brand Manager TikTok sign-in lost while AUTO is on (app/alerts.py)."""
+        """Owner alerts that aren't a failed job: a Brand Manager TikTok sign-in lost / publishing stalled while AUTO is on (app/alerts.py)."""
         from app import alerts
 
         return await alerts.check_brand_accounts(ctx.db, settings=s, transport=runtime.telegram.transport, now=ctx.now)
@@ -894,7 +897,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
     specs += [
         JobSpec("vpn.sync", "Kiwi VPN: server sync", "Every 5 min: reads each VPN server's agent (online, handshakes, this month's bytes), re-adds members' missing peers, removes peers nobody owns and revokes devices of members who no longer qualify (rank dropped, banned). No traffic logs",
                 300, vpn_sync, initial_delay_seconds=100, timeout_seconds=240),
-        JobSpec("system.alerts", "Owner alerts", "Every 10 min: tells the owner on Telegram (Settings › Background jobs › Owner alerts) when a Brand Manager TikTok account is expired or disconnected while AUTO is on; failing jobs are reported as they happen",
+        JobSpec("system.alerts", "Owner alerts", "Every 10 min: tells the owner on Telegram (Settings › Background jobs › Owner alerts) when a Brand Manager TikTok account is expired or disconnected while AUTO is on, or Brand Manager stops publishing by itself (AUTO blocked or failing, videos past their posting time, failed sends); failing jobs are reported as they happen",
                 600, system_alerts, initial_delay_seconds=240, timeout_seconds=60),
         JobSpec("system.backup", "Nightly database backup", "Daily: a consistent copy of the whole database, integrity-checked, gzip-compressed into the private storage bucket (separate from the server's volume); the newest 14 are kept",
                 86400, system_backup, initial_delay_seconds=900, timeout_seconds=1800),
