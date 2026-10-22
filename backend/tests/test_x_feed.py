@@ -182,3 +182,19 @@ def test_unlinking_x_stops_read_and_earn(db: Session) -> None:
     assert x_feed.feed(db, mem)["items"]
     service.disconnect(db, mem, "x")
     assert x_feed.feed(db, mem)["needs_x"] is True and x_feed.read(db, mem, "1")["code"] == "connect_x"
+
+
+def test_reading_across_midnight_utc_still_counts(db: Session) -> None:
+    from app.members import xp as ledger
+
+    mem = x_member(db)
+    post(db, "1", "Pokémon cards are outperforming your portfolio. 😭")
+    x_feed.shown(db, mem, "1")
+    a = db.scalar(select(MemberAction).where(MemberAction.member_id == mem.id, MemberAction.kind == x_feed.SHOWN))
+    a.day, a.created_at = ledger.day_of(utcnow() - timedelta(days=1)), utcnow() - timedelta(seconds=x_feed.READ_SECONDS + 2)
+    db.commit()
+    assert x_feed.read(db, mem, "1")["code"] == "paid"
+    post(db, "2", "Another post about how prices moved this week")
+    x_feed.shown(db, mem, "2")
+    rewind(db, mem.id, "2", int(x_feed.START_WINDOW.total_seconds()) + 60)
+    assert x_feed.read(db, mem, "2")["code"] == "not_started"  # shown hours ago: open it again

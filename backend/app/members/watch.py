@@ -14,7 +14,7 @@ mission (its own XP), every other video is `website.content_view` (once per vide
 entry the homepage uses when a video is opened.
 """
 
-from datetime import timezone
+from datetime import timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -30,6 +30,7 @@ WATCH_KIND = "watch"
 PAID_KIND = "watch_paid"  # one per video that paid today: the position in today's combo
 VIDEOS = 4  # one featured + three recent
 COMBO_EXTRA = 5  # Watch combo: the day's 1st video pays its normal XP, the 2nd double, the 3rd and later double + 5
+START_WINDOW = timedelta(hours=6)  # how long pressing Watch stays valid for completing the video
 CLOCK_SLACK = 2  # seconds of network / player start-up tolerated between "pressed Watch" and the threshold
 
 
@@ -144,7 +145,8 @@ def videos(db: Session, member: Member) -> dict[str, Any]:
 
 def _started(db: Session, member: Member, item: ContentItem) -> MemberAction | None:
     return db.scalar(select(MemberAction).where(MemberAction.member_id == member.id, MemberAction.kind == WATCH_KIND,
-                                                MemberAction.target == _target(item), MemberAction.day == ledger.day_of(utcnow())))
+                                                MemberAction.target == _target(item), MemberAction.created_at >= utcnow() - START_WINDOW)
+                     .order_by(MemberAction.created_at.desc()).limit(1))  # not "today": a video playing across 00:00 UTC counts
 
 
 def start(db: Session, member: Member, external_id: str) -> dict[str, Any]:
