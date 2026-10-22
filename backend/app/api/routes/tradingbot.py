@@ -51,7 +51,9 @@ def _is_admin(db: Any, request: Request) -> bool:
 
 
 def _visitor(request: Request) -> str:
-    return hashlib.sha256(f"{request.client.host if request.client else ''}|{request.headers.get('user-agent', '')}".encode()).hexdigest()
+    from app.security.client_ip import client_key
+
+    return hashlib.sha256(f"{client_key(request)}|{request.headers.get('user-agent', '')}".encode()).hexdigest()
 
 
 def _open_or_admin(db: Any, request: Request) -> None:

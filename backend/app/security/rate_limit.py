@@ -3,8 +3,9 @@ boards, the public health check).
 
 In-memory token buckets, per client and one shared ("*") per rule: production is ONE Railway replica, so memory is the
 right place (nothing stored in the database; a restart simply forgets). With more replicas each would limit on its own.
-The client is admin_auth.client_key (first X-Forwarded-For hop as set by Vercel / Railway, else the socket peer). It can be
-spoofed by calling the backend directly, which is what the shared bucket per rule is for. At most MAX_KEYS clients are
+The client is admin_auth.client_key (app.security.client_ip: the visitor Vercel reports when the request carries the shared
+proxy secret, else the address Railway's edge saw; a caller can't pick its own key). The shared bucket per rule is the
+backstop against many real addresses. At most MAX_KEYS clients are
 remembered per rule; the least recently seen are forgotten first (a forgotten client just starts with a full bucket).
 """
 

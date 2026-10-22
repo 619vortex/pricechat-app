@@ -78,10 +78,12 @@ def _prune(q: deque[float], window: float, now: float) -> None:
 
 
 def client_key(request: Request) -> str:
-    """The visitor's address. Behind Vercel → Railway the first X-Forwarded-For hop is the visitor; it can be spoofed
-    when calling the backend directly, which is why there is also a global limit."""
-    fwd = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    return fwd or (request.client.host if request.client else "unknown")
+    """The visitor's rate-limit key (app.security.client_ip: Vercel's report of the visitor only with the shared secret,
+    else the address Railway's edge saw; never a caller-supplied X-Forwarded-For entry). The global limit stays as a
+    backstop against many real addresses."""
+    from app.security import client_ip
+
+    return client_ip.client_key(request)
 
 
 def retry_after(key: str, device: str | None = None) -> int | None:

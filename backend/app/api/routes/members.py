@@ -468,9 +468,10 @@ def providers(db: DbSession, runtime: Runtime) -> dict[str, Any]:
 
 
 def _client_ip(request: Request) -> str:
-    """The visitor's address: the first X-Forwarded-For hop (set by Vercel / Railway), else the socket peer."""
-    fwd = request.headers.get("x-forwarded-for", "")
-    return (fwd.split(",")[0].strip() if fwd else "") or (request.client.host if request.client else "unknown")
+    """The visitor's rate-limit address (app.security.client_ip; an IPv6 visitor counts as its /64)."""
+    from app.security import client_ip
+
+    return client_ip.client_key(request)
 
 
 class EmailStart(StrictInput):

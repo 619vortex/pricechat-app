@@ -122,6 +122,9 @@ def create_app(
 ) -> FastAPI:
     app_settings = app_settings or get_settings()
     configure_logging(app_settings.log_level)
+    from app.security import client_ip
+
+    client_ip.startup_check(app_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

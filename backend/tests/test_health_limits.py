@@ -84,7 +84,7 @@ def test_answer_is_shared_for_a_few_seconds(client: TestClient, monkeypatch: pyt
 
 
 def test_health_rate_limit_429_with_retry_after(client: TestClient) -> None:
-    codes = [client.get("/api/health/public", headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1"}).status_code for _ in range(12)]
+    codes = [client.get("/api/health/public", headers={"x-forwarded-for": "10.0.0.1, 1.2.3.4"}).status_code for _ in range(12)]
     assert codes[:10] == [200] * 10 and codes[10] == 429
     r = client.get("/api/health/public", headers={"x-forwarded-for": "1.2.3.4"})
     assert r.status_code == 429 and int(r.headers["retry-after"]) >= 1

@@ -299,6 +299,13 @@ class Settings(BaseSettings):
     # Key rotation: the old key(s), comma-separated, still accepted for decrypting; new values always use the key above.
     # While set, startup re-encrypts everything under the new key (app/security/rekey.py). Remove once that's done.
     app_encryption_key_previous: SecretStr | None = None
+    # Client addresses for rate limits (app/security/client_ip.py). PROXY_SHARED_SECRET: the same long random value in
+    # Railway and in Vercel's project env; Vercel's /api rewrite sends it as x-pc-edge, and only then is Vercel's report of
+    # the visitor believed. Unset: every caller is keyed on the address Railway's edge saw (right-most X-Forwarded-For).
+    # Comma-separate old,new while rotating. TRUSTED_PROXY_HOPS: how many right-most X-Forwarded-For entries our own
+    # proxies append (Railway's edge: 1).
+    proxy_shared_secret: SecretStr | None = None
+    trusted_proxy_hops: int = Field(1, ge=1, le=5)
 
     @property
     def is_production(self) -> bool:
