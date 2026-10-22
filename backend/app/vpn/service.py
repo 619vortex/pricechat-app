@@ -9,6 +9,7 @@ node, then committing; if the node call fails nothing is kept. Only the public k
 import base64
 import ipaddress
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -84,22 +85,46 @@ def _entitlement(db: Session) -> Entitlement | None:
     return db.scalar(select(Entitlement).where(Entitlement.key == ENTITLEMENT))
 
 
-def qualifies(db: Session, member: Member, s: VpnSettings | None = None) -> tuple[bool, str | None]:
+@dataclass
+class Rules:
+    """What qualifies() needs that is the same for every member: read once per server sync, not once per member."""
+
+    ent: Entitlement | None
+    all_ranks: list[Rank]
+    need: Rank
+    grants: dict[int, MemberEntitlement] | None = None  # member id -> the VPN grant, for the members being checked
+
+
+def rules(db: Session, s: VpnSettings | None = None, member_ids: list[int] | None = None) -> Rules:
+    s = s or settings(db)
+    ent, all_ranks = _entitlement(db), _ranks(db)
+    need = next((r for r in all_ranks if r.key == s.min_rank), all_ranks[-1])
+    grants = None
+    if member_ids is not None:
+        grants = {} if ent is None else {g.member_id: g for g in db.scalars(select(MemberEntitlement).where(
+            MemberEntitlement.entitlement_id == ent.id, MemberEntitlement.member_id.in_(member_ids)))}
+    return Rules(ent, all_ranks, need, grants)
+
+
+def qualifies(db: Session, member: Member, s: VpnSettings | None = None, r: Rules | None = None) -> tuple[bool, str | None]:
     """The member-level rule (rank / manual grant / not banned), regardless of whether the VPN is open."""
     s = s or settings(db)
     if member.status != "active":
         return False, "Your account can't use Kiwi VPN."
-    ent = _entitlement(db)
+    ent = r.ent if r is not None else _entitlement(db)
     if ent is not None and not ent.enabled:
         return False, "Kiwi VPN isn't available right now."
     if ent is not None:
         now = utcnow()
-        grant = db.scalar(select(MemberEntitlement).where(MemberEntitlement.member_id == member.id,
-                                                          MemberEntitlement.entitlement_id == ent.id))
+        if r is not None and r.grants is not None:
+            grant = r.grants.get(member.id)
+        else:
+            grant = db.scalar(select(MemberEntitlement).where(MemberEntitlement.member_id == member.id,
+                                                              MemberEntitlement.entitlement_id == ent.id))
         if grant is not None and (grant.expires_at is None or grant.expires_at > now):
             return True, None
-    need = required_rank(db, s)
-    if ledger.rank_for(db, member.rank_score).level >= need.level:
+    need = r.need if r is not None else required_rank(db, s)
+    if ledger.rank_for(db, member.rank_score, r.all_ranks if r is not None else None).level >= need.level:
         return True, None
     return False, f"Reach Kiwi Rank {need.name} to unlock Kiwi VPN."
 
@@ -504,10 +529,15 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             month = now.strftime("%Y-%m")
             ours: set[str] = set()
             members: dict[int, bool] = {}
-            for dev in list(db.scalars(select(VpnDevice).where(VpnDevice.server_id == server.id))):
+            devices = list(db.scalars(select(VpnDevice).where(VpnDevice.server_id == server.id)))
+            ids = sorted({d.member_id for d in devices})
+            # members, ranks, the entitlement and grants read once for the server, not ~15 queries per member
+            people = {m.id: m for m in db.scalars(select(Member).where(Member.id.in_(ids)))} if ids else {}
+            r = rules(db, s, ids)
+            for dev in devices:
                 if dev.member_id not in members:
-                    m = db.get(Member, dev.member_id)
-                    members[dev.member_id] = m is not None and qualifies(db, m, s)[0]
+                    m = people.get(dev.member_id)
+                    members[dev.member_id] = m is not None and qualifies(db, m, s, r)[0]
                 if not members[dev.member_id]:  # rank dropped / banned / grant expired: revoke
                     try:
                         agent.delete_peer(dev.public_key)

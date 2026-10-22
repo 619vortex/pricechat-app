@@ -336,6 +336,41 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
     assert s.online is False and s.last_error
 
 
+def test_sync_checks_members_without_a_query_per_member(db: Session, fake: FakeNode) -> None:
+    """Same decisions as qualifies() one by one (rank, manual grant, expired grant), but ranks / grants are read once a server."""
+    from sqlalchemy import event
+
+    server = add_server(db, fake)
+    open_vpn(db)
+    ranked = [member_at(db, "warrior", f"w{i}") for i in range(5)]
+    granted, expired = member_at(db, "warrior", "granted"), member_at(db, "warrior", "expired")
+    devices = {m.username: vpn.create_device(db, m, "d", server.id)[0].public_key for m in [*ranked, granted, expired]}
+    ent = db.scalar(select(Entitlement).where(Entitlement.key == vpn.ENTITLEMENT))
+    now = dt.datetime.now(dt.timezone.utc)
+    db.add_all([MemberEntitlement(member_id=granted.id, entitlement_id=ent.id), MemberEntitlement(member_id=expired.id, entitlement_id=ent.id,
+                                                                                                  expires_at=now - dt.timedelta(days=1))])
+    for m in (granted, expired):
+        ledger.adjust(db, m, -m.rank_score, actor="test", reason="reset", ref=f"down-{m.id}")  # below the VPN rank
+    db.commit()
+    expected = {m.username: vpn.qualifies(db, m)[0] for m in [*ranked, granted, expired]}
+    assert expected == {**{f"w{i}": True for i in range(5)}, "granted": True, "expired": False}
+    sql: list[str] = []
+    engine = db.get_bind()
+
+    def on(_c, _cur, statement, *_a):  # type: ignore[no-untyped-def]
+        sql.append(statement)
+
+    event.listen(engine, "before_cursor_execute", on)
+    try:
+        out = vpn.sync_all(db)
+    finally:
+        event.remove(engine, "before_cursor_execute", on)
+    assert out["revoked"] == 1 and set(fake.peers) == {k for n, k in devices.items() if expected[n]}
+    assert sum("FROM ranks" in q for q in sql) <= 3  # once a server (catalog check + the ranks); was ~4 per member
+    assert sum("FROM member_entitlements" in q for q in sql) == 1
+    assert sum("FROM members" in q for q in sql) <= 2
+
+
 def test_sync_job_is_registered() -> None:
     from app.config.settings import get_settings
     from app.jobs import build_jobs
