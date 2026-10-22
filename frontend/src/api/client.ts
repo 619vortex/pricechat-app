@@ -193,6 +193,12 @@ export async function request<T>(path: string, init: RequestInit = {}, timeoutMs
   throw new ApiError(kind, message, res.status);
 }
 
+export type OwnerAlerts = {
+  enabled: boolean;
+  telegram_chat: string;
+  recent: { key: string; last_sent_at: string | null; sent_count: number; open: boolean; text: string }[];
+};
+
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 const qs = (params: Record<string, string | number | undefined | null>) => {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "");
@@ -396,6 +402,10 @@ export const api = {
     request<Approval>(`/approvals/${id}/decision`, json("POST", { decision, note, ...(text !== undefined ? { text } : {}) }), 60_000),
 
   processing: () => request<Processing>("/system/processing"),
+  // owner alerts: a private Telegram message to the owner when a job keeps failing, the backup fails or TikTok signs out
+  ownerAlerts: () => request<OwnerAlerts>("/system/alerts"),
+  updateOwnerAlerts: (body: { enabled?: boolean; telegram_chat?: string }) => request<OwnerAlerts>("/system/alerts", json("PUT", body)),
+  testOwnerAlert: () => request<{ sent: boolean }>("/system/alerts/test", { method: "POST" }),
 
   // Telegram account mode (official client API). Codes and passwords go straight to Telegram; nothing is stored.
   telegramConnection: () => request<TelegramConnection>("/telegram/connection"),

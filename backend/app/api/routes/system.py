@@ -173,3 +173,48 @@ def _delete_qa_market(db: Any, store: Any, member_id: int) -> int:
         db.execute(stmt)
     db.flush()
     return gone
+
+
+# --- owner alerts: a private Telegram message when something important breaks (app/alerts.py) ---------------------------
+
+
+class OwnerAlertsIn(StrictInput):
+    enabled: bool | None = None
+    telegram_chat: str | None = Field(None, max_length=32, pattern=r"^(-?\d{4,20})?$")  # numeric Telegram user id; "" = log only
+
+
+@router.get("/system/alerts")
+def owner_alerts(db: DbSession) -> dict[str, Any]:
+    from app import alerts
+
+    out = alerts.settings_out(db)
+    db.commit()
+    return out
+
+
+@router.put("/system/alerts")
+def update_owner_alerts(payload: OwnerAlertsIn, db: DbSession) -> dict[str, Any]:
+    from app import alerts
+
+    row = alerts.settings_row(db)
+    if payload.enabled is not None:
+        row.enabled = payload.enabled
+    if payload.telegram_chat is not None:
+        row.telegram_chat = payload.telegram_chat.strip()
+    db.commit()
+    return alerts.settings_out(db)
+
+
+@router.post("/system/alerts/test")
+async def test_owner_alert(db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """Send one test message now (no cooldown) and say exactly why it failed if it did."""
+    from app import alerts
+
+    chat = alerts.owner_chat(db)
+    if chat is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Set your Telegram user id (and turn alerts on) first.")
+    try:
+        await alerts.send_text(runtime.settings, chat, "Price Chat: test alert. Owner alerts reach you here.", runtime.telegram.transport)
+    except Exception as exc:  # noqa: BLE001 - shown to the owner (e.g. "chat not found": press Start in the bot first)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Telegram didn't deliver it: {exc}") from exc
+    return {"sent": True}

@@ -800,7 +800,15 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             raise JobSkipped("No storage bucket configured (PORTFOLIO_BUCKET): the backup has nowhere off the volume to go")
         return await asyncio.to_thread(db_backup.run, s, url.database)
 
+    async def system_alerts(ctx: JobContext) -> dict[str, Any]:
+        """Owner alerts that aren't a failed job: a Brand Manager TikTok sign-in lost while AUTO is on (app/alerts.py)."""
+        from app import alerts
+
+        return await alerts.check_brand_accounts(ctx.db, settings=s, transport=runtime.telegram.transport, now=ctx.now)
+
     specs += [
+        JobSpec("system.alerts", "Owner alerts", "Every 10 min: tells the owner on Telegram (Settings › Background jobs › Owner alerts) when a Brand Manager TikTok account is expired or disconnected while AUTO is on; failing jobs are reported as they happen",
+                600, system_alerts, initial_delay_seconds=240, timeout_seconds=60),
         JobSpec("system.backup", "Nightly database backup", "Daily: a consistent copy of the whole database, integrity-checked, gzip-compressed into the private storage bucket (separate from the server's volume); the newest 14 are kept",
                 86400, system_backup, initial_delay_seconds=900, timeout_seconds=1800),
         JobSpec("pokemon.sales", "Pokémon verified sales (Scrydex sold listings)", "Weekly: completed sales of the Top 100 and nearby cards, each matched to the exact card + grade (~150 credits)",

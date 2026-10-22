@@ -38,6 +38,8 @@ class JobContext:
 
 
 JobFunc = Callable[[JobContext], Awaitable[dict[str, Any]]]
+# Called after each recorded success / failure: (spec, status, error, failures in a row before, after). Owner alerts (app/alerts.py).
+JobAlert = Callable[["JobSpec", str, str | None, int, int], Awaitable[Any]]
 
 
 @dataclass(slots=True)
@@ -64,8 +66,9 @@ class JobOutcome:
 
 class Scheduler:
     def __init__(self, session_factory: sessionmaker[Session], specs: list[JobSpec], tick_seconds: float = 5.0,
-                 disabled: set[str] | None = None) -> None:
+                 disabled: set[str] | None = None, alert: JobAlert | None = None) -> None:
         self.session_factory = session_factory
+        self.alert = alert
         # jobs that must never run in THIS process (SCHEDULER_DISABLED_JOBS), e.g. Telegram reading on a laptop while
         # production reads the same bot: neither on schedule, nor chained, nor by hand
         self.disabled = set(disabled or ())
@@ -190,10 +193,15 @@ class Scheduler:
                 logger.warning("Job %s failed: %s", name, error, exc_info=not _expected(exc))
 
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
-        await asyncio.to_thread(self._record, spec, status, result, error, duration_ms, trigger)
+        previous, failures = await asyncio.to_thread(self._record, spec, status, result, error, duration_ms, trigger)
+        if self.alert is not None and status in ("success", "failed"):
+            try:
+                await self.alert(spec, status, error, previous, failures)
+            except Exception:  # noqa: BLE001 - an alert must never break the scheduler
+                logger.warning("Owner alert for job %s failed", name, exc_info=True)
         return JobOutcome(name, status, result, error)
 
-    def _record(self, spec: JobSpec, status: str, result: dict[str, Any], error: str | None, duration_ms: float, trigger: str) -> None:
+    def _record(self, spec: JobSpec, status: str, result: dict[str, Any], error: str | None, duration_ms: float, trigger: str) -> tuple[int, int]:
         from app.services import usage
 
         usage.flush(self.session_factory)  # model-call / request tallies from this job (own short transaction)
@@ -217,6 +225,7 @@ class Scheduler:
                 row.consecutive_failures = 0
                 row.last_error = error if status == "skipped" else None
                 row.next_run_at = now + timedelta(seconds=spec.interval_seconds)
+            failures = row.consecutive_failures
             db.commit()
 
             activity = ActivityLogger(db)
@@ -236,6 +245,7 @@ class Scheduler:
                     line = None
                 if line:
                     activity.log(line[0], line[1], details={"job": spec.name, "duration_ms": duration_ms})
+            return previous_failures, failures
 
     # --- loop -------------------------------------------------------------------------
 

@@ -144,7 +144,15 @@ def create_app(
         # One scheduler for every background job; tests can turn it off.
         specs = build_jobs(runtime)
         off = app_settings.jobs_off(s.name for s in specs)
-        runtime.scheduler = Scheduler(SessionLocal, specs, disabled=off)
+        async def owner_alert(spec, status, error, previous, failures):  # type: ignore[no-untyped-def]
+            """A job failing 3 runs in a row (the backup: once) / working again → the owner's Telegram (app/alerts.py)."""
+            from app import alerts
+
+            with SessionLocal() as db:
+                await alerts.job_outcome(db, spec.name, spec.label, status, error, previous, failures,
+                                         settings=app_settings, transport=runtime.telegram.transport)
+
+        runtime.scheduler = Scheduler(SessionLocal, specs, disabled=off, alert=owner_alert)
         if off:
             logger.warning("Background jobs turned off on this server: %s", ", ".join(sorted(off)))
         if initialize_database:
