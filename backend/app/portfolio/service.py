@@ -217,7 +217,7 @@ def sync_giveaway(db: Session, member: Member, now: datetime | None = None) -> N
 def update_holding(db: Session, member: Member, holding_id: int, **changes: Any) -> PokemonHolding:
     h = _own_real(db, member, holding_id)
     now = utcnow()
-    before_value = (h.value_cents or 0) * h.quantity if h.value_cents is not None else None
+    before_each = h.value_cents
     revalue = False
     if "card_id" in changes and changes["card_id"] and changes["card_id"] != h.card_id:
         # Edit Identification: the same physical card, re-identified. Photos, quantity, purchase details and its history stay;
@@ -263,7 +263,9 @@ def update_holding(db: Session, member: Member, holding_id: int, **changes: Any)
         h.community_review = False
     if revalue:
         valuation.apply(h, valuation.Pricer(db, [h], now).value(h), now)
-        after_value = (h.value_cents or 0) * h.quantity if h.value_cents is not None else None
+        # both at the NEW quantity: a quantity change in the same edit was already recorded (at the old price) above
+        before_value = before_each * h.quantity if before_each is not None else None
+        after_value = h.value_cents * h.quantity if h.value_cents is not None else None
         # a regrade / condition change is a change of WHAT is held: recorded as a flow, never as a market move
         if before_value is not None or after_value is not None:
             db.add(PokemonHoldingEvent(portfolio_id=h.portfolio_id, holding_id=h.id, at=now, kind="identity" if "card_id" in changes else "grade",

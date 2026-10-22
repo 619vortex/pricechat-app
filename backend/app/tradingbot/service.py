@@ -21,7 +21,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, select, update
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -334,15 +334,21 @@ def new_nonce(db: Session, member: Member, address: str, domain: str) -> dict[st
     return {"message": msg, "nonce": n}
 
 
+def _spend(db: Session, n: TbNonce, now: datetime) -> bool:
+    """Use a nonce up, atomically: False when another request (a double click, a replay racing this one) spent it first.
+    Spent even if the signature turns out wrong: no retries on one nonce."""
+    spent = db.execute(update(TbNonce).where(TbNonce.id == n.id, TbNonce.used_at.is_(None)).values(used_at=now)).rowcount == 1
+    db.commit()
+    return spent
+
+
 def verify_wallet(db: Session, member: Member, nonce: str, signature: str, client: InfoClient | None) -> TbWallet:
     """Check the signature over the exact message we issued (single use, unexpired, this member), then bind the wallet."""
     limit("verify", f"m{member.id}")
     now = utcnow()
     n = db.scalar(select(TbNonce).where(TbNonce.nonce == str(nonce)[:64], TbNonce.member_id == member.id))
-    if n is None or n.used_at is not None or _aware(n.expires_at) < now:
+    if n is None or n.used_at is not None or _aware(n.expires_at) < now or not _spend(db, n, now):
         raise AccessError("That signing request expired or was already used. Start again.")
-    n.used_at = now  # spent even if the signature turns out wrong: no retries on one nonce
-    db.commit()
     try:
         signer = evm.recover(n.message, signature)
     except ValueError as e:
@@ -456,10 +462,8 @@ def login_verify(db: Session, nonce: str, signature: str, who: str) -> tuple[Mem
     limit("verify", f"login:{who}")
     now = utcnow()
     n = db.scalar(select(TbNonce).where(TbNonce.nonce == str(nonce)[:64], TbNonce.member_id.is_(None)))
-    if n is None or n.used_at is not None or _aware(n.expires_at) < now:
+    if n is None or n.used_at is not None or _aware(n.expires_at) < now or not _spend(db, n, now):
         raise AccessError("That sign-in request expired or was already used. Try again.")
-    n.used_at = now
-    db.commit()
     try:
         signer = evm.recover(n.message, signature)
     except ValueError as e:
@@ -485,17 +489,23 @@ def run_check(db: Session, member: Member, w: TbWallet, client: InfoClient) -> T
     s = settings(db)
     c = check(client, w.address, codes(s), s.min_deposit_usd)
     before = (w.referral_status, w.deposit_status)
-    w.referral_status, w.referral_code_seen = c.referral_status, c.referral_code
-    w.deposit_status, w.deposit_usd, w.other_inflow_usd = c.deposit_status, c.deposit_usd, c.other_inflow_usd
-    w.evidence, w.checked_at = c.evidence, utcnow()
+    # a part Hyperliquid couldn't be read for keeps its last proved result (an outage never erases a verified wallet)
+    keep_ref = "referral_error" in c.evidence and w.referral_status != "pending"
+    keep_dep = "deposit_error" in c.evidence and w.deposit_status != "pending"
+    if not keep_ref:
+        w.referral_status, w.referral_code_seen = c.referral_status, c.referral_code
+    if not keep_dep:
+        w.deposit_status, w.deposit_usd, w.other_inflow_usd = c.deposit_status, c.deposit_usd, c.other_inflow_usd
+    w.evidence = {**(w.evidence or {}), **c.evidence} if keep_ref or keep_dep else c.evidence
+    w.checked_at = utcnow()
     if c.referral_status == "verified":
         track(db, "referral_verified", member, once=True)
     if c.deposit_status == "verified":
         track(db, "deposit_verified", member, once=True)
     tier_xp(db, member, w)  # deposit tiers pay XP once each ($10 / $100 / $1,000 / $10,000)
     if before != (w.referral_status, w.deposit_status):
-        audit(db, None, member.id, "hyperliquid", "wallet_checked", {"referral": c.referral_status, "deposit": c.deposit_status,
-                                                                     "deposit_usd": c.deposit_usd, "other_inflow_usd": c.other_inflow_usd})
+        audit(db, None, member.id, "hyperliquid", "wallet_checked", {"referral": w.referral_status, "deposit": w.deposit_status,
+                                                                     "deposit_usd": w.deposit_usd, "other_inflow_usd": w.other_inflow_usd})
     db.commit()
     return w
 

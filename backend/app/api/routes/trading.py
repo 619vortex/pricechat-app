@@ -201,10 +201,10 @@ async def close_all(payload: CloseAllIn, db: DbSession, pc_session: SessionToken
     return accounts.state(db, m) | {"close_all": out}
 
 
-class ProtectionIn(StrictInput):
-    stop: float | None = Field(None, gt=0)
-    tp1: float | None = Field(None, gt=0)
-    tp2: float | None = Field(None, gt=0)
+class ProtectionIn(StrictInput):  # NaN passes every price comparison: it would replace a stop-loss with one that never triggers
+    stop: float | None = Field(None, gt=0, allow_inf_nan=False)
+    tp1: float | None = Field(None, gt=0, allow_inf_nan=False)
+    tp2: float | None = Field(None, gt=0, allow_inf_nan=False)
     dry_run: bool = True
 
 

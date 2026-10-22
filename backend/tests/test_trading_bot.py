@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes import tradingbot as routes
@@ -236,6 +236,25 @@ def test_api_outage_is_unverified_never_a_guess(tb: Any) -> None:
     assert s["wallet"]["referral"] == "unverified" and s["wallet"]["deposit"] == "unverified"
 
 
+def test_an_outage_after_a_check_keeps_the_last_proved_result(tb: Any) -> None:
+    """A Hyperliquid blip on a later re-check (opening Earn re-reads it) must not turn a verified wallet back to
+    "unverified" with $0 deposited: each part keeps what was last proved until Hyperliquid answers again."""
+    client, db, _ = tb
+    m = member(db, client, 4)
+    a = addr(ADDR_KEY)
+    FakeHL.referred[a] = "BANTER"
+    FakeHL.ledgers[a] = [deposit(150)]
+    assert prove(client, ADDR_KEY).json()["stage"] == "ELIGIBLE"
+    FakeHL.down = True
+    w = service.run_check(db, m, service.wallet_of(db, m), FakeHL())
+    assert (w.referral_status, w.referral_code_seen, w.deposit_status, w.deposit_usd) == ("verified", "BANTER", "verified", 150.0)
+    assert "referral_error" in w.evidence and w.evidence["deposits"]
+    FakeHL.down = False
+    FakeHL.ledgers[a] = []  # Hyperliquid answers again: its answer wins
+    w = service.run_check(db, m, w, FakeHL())
+    assert w.deposit_status == "insufficient" and w.deposit_usd == 0 and "referral_error" not in w.evidence
+
+
 def test_replayed_or_foreign_signatures_are_refused(tb: Any) -> None:
     client, db, _ = tb
     member(db, client, 4)
@@ -341,6 +360,26 @@ def test_wallet_gives_one_free_level_once(tb: Any) -> None:
     # the first wallet can't level up a second account either (claim is per wallet too)
     other = member(db, client, 1, telegram="555")
     assert service.free_level(db, other, addr(ADDR_KEY)) == 0
+
+
+def test_a_nonce_spent_by_a_racing_request_is_refused(tb: Any) -> None:
+    """Two sign-ins racing on one nonce (a double click): the second must not pass on a stale read of `used_at`
+    (it created a second Passport, then failed on the wallet's unique address)."""
+    from app.db.session import SessionLocal
+    from app.models.members import Member
+    from app.models.tradingbot import TbNonce
+
+    client, db, _ = tb
+    n = service.login_nonce(db, addr(ADDR_KEY), "pricechat.live", "visitor")
+    row = db.scalar(select(TbNonce).where(TbNonce.nonce == n["nonce"]))
+    assert row.used_at is None  # this request read it unused...
+    with SessionLocal() as other:  # ...and the racing one spends it meanwhile
+        other.get(TbNonce, row.id).used_at = service.utcnow()
+        other.commit()
+    before = db.scalar(select(func.count()).select_from(Member))
+    with pytest.raises(service.AccessError):
+        service.login_verify(db, n["nonce"], sign(n["message"], ADDR_KEY), "visitor")
+    assert db.scalar(select(func.count()).select_from(Member)) == before
 
 
 def test_sign_in_with_wallet(tb: Any) -> None:

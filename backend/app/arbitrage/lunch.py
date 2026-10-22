@@ -177,11 +177,14 @@ async def curves(client: httpx.AsyncClient, rpc: str, addresses: list[str]) -> d
         try:
             r = await client.post(rpc, json={"jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts", "params": [chunk, {"encoding": "base64"}]})
             r.raise_for_status()
-        except httpx.HTTPError as exc:  # this chunk is left out: unreadable this run (a trade only closes as "gone" after its timeout)
+            rows = (r.json().get("result") or {}).get("value") or []
+            got = {addr: parse_curve(acc["data"][0]) if acc and acc.get("data") else None for addr, acc in zip(chunk, rows)}
+        except (httpx.HTTPError, ValueError, LookupError, TypeError, AttributeError, struct.error) as exc:
+            # this chunk is left out: unreadable this run (a trade only closes as "gone" after its timeout). Also a 200 that
+            # isn't the JSON-RPC answer (an HTML error page, a bad account): it used to crash the whole run
             logger.info("lunch curve read failed (%s)", type(exc).__name__)
             continue
-        for addr, acc in zip(chunk, (r.json().get("result") or {}).get("value") or []):
-            out[addr] = parse_curve(acc["data"][0]) if acc and acc.get("data") else None
+        out.update(got)
     return out
 
 
@@ -219,8 +222,12 @@ async def pool_price(client: httpx.AsyncClient, mint: str, deadline: float | Non
     run is out of time)."""
     if _late(deadline):
         return None
-    pool = (await pools_of(client, mint)).get("pumpswap")
-    price = await candle(client, pool, "last") if pool and not _late(deadline) else None
+    try:
+        pool = (await pools_of(client, mint)).get("pumpswap")
+        price = await candle(client, pool, "last") if pool and not _late(deadline) else None
+    except (httpx.HTTPError, ValueError, LookupError, TypeError, AttributeError) as exc:  # GeckoTerminal down or garbled: not priced yet
+        logger.info("lunch pool price failed (%s)", type(exc).__name__)  # (raising here lost every exit of the run)
+        return None
     return {"pool": pool, "price": price} if price else None
 
 

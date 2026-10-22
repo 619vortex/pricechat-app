@@ -4,7 +4,7 @@ import threading
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -97,6 +97,29 @@ def test_hourly_funding_longs_pay_shorts_when_the_perp_trades_above_the_index(db
     assert _pos(db, lg.id, pm).margin_cents < m_long and _pos(db, sh.id, pm).margin_cents > m_short
     assert _pos(db, lg.id, pm).funding_cents < 0 < _pos(db, sh.id, pm).funding_cents
     assert perps.fund(db, pm) is None  # not again within the hour
+    _ok(db)
+
+
+def test_two_runs_racing_on_the_hour_fund_once(db: Session) -> None:
+    """Two job runs both read "funding is due" before either took the market lock: the second must re-check under the
+    lock, or every position pays (and is paid) twice."""
+    from datetime import timedelta
+
+    from app.db.base import utcnow
+    from app.models.exchange import PerpFunding
+
+    ex, pm = _setup(db)
+    lg, sh = _acct(db, "racelong"), _acct(db, "raceshort")
+    perps.place(db, sh, pm, "sell", "market", 10, None, 5, "rs1")
+    perps.place(db, lg, pm, "buy", "market", 10, None, 5, "rl1")
+    now = utcnow()
+    pm.last_funding_at = now - timedelta(hours=2)
+    db.commit()
+    assert pm.last_funding_at is not None  # this run has read it: due
+    with SessionLocal() as other:  # the racing run funds first
+        assert perps.fund(other, other.get(PerpMarket, pm.id), now) is not None
+    assert perps.fund(db, pm, now + timedelta(seconds=1)) is None
+    assert db.scalar(select(func.count()).select_from(PerpFunding).where(PerpFunding.market_id == pm.id)) == 1
     _ok(db)
 
 

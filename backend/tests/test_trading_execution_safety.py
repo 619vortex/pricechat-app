@@ -150,3 +150,13 @@ def test_the_footer_is_dropped_never_sliced_into_the_html() -> None:
     assert tg.sent[1][2] == "<b>short</b>" + foot
     sent = tg.sent[2][2]
     assert len(sent) <= 4096 and long.startswith(sent) and sent.endswith("y") and sent.count("<b>") == sent.count("</b>")
+
+
+def test_a_nan_or_infinite_stop_or_take_profit_is_refused_at_the_door(client: Any) -> None:
+    """NaN passes every "only tighter" / "wrong side" comparison in adjust_protection: it must never get that far."""
+    for field in ("stop", "tp1", "tp2"):
+        for bad in ("NaN", "Infinity"):
+            r = client.post("/api/members/trading/positions/1/protection", content=f'{{"{field}": {bad}, "dry_run": true}}',
+                            headers={"content-type": "application/json"})
+            assert r.status_code == 422, (field, bad, r.status_code)
+    assert client.post("/api/members/trading/positions/1/protection", json={"stop": 1.5, "dry_run": True}).status_code != 422

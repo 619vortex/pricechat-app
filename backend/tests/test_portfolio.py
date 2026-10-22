@@ -411,3 +411,29 @@ def test_edit_identification_keeps_photos_and_history_and_diagnostics_explain_un
     dash = client.get("/api/members/portfolio").json()
     assert dash["summary"]["value"] == 3_000 and dash["top"][0]["share"] == 100.0 and dash["composition"]["kind"][0]["key"] == "Graded"
     assert client.patch(f"/api/members/portfolio/holdings/{h['id']}", json={"card_id": 99_999_999}).status_code == 400
+
+
+def test_regrade_and_quantity_in_one_edit_records_the_flow_once(client: TestClient, db: Session) -> None:
+    """A PATCH that changes the quantity AND the grade: every recorded flow adds up to exactly what is now held (the
+    quantity's part was counted twice before, so the history showed a market loss that never happened)."""
+    zard = _card(db)
+    _price(db, zard, "PSA", "9", 1_000)
+    _price(db, zard, "PSA", "10", 3_000)
+    m = _member(db, "brock", client)
+    h = client.post("/api/members/portfolio/holdings", json={"card_id": zard.id, "kind": "graded", "grading_company": "PSA", "grade": "9"}).json()
+    r = client.patch(f"/api/members/portfolio/holdings/{h['id']}", json={"quantity": 2, "grade": "10"})
+    assert r.status_code == 200, r.text
+    p = db.scalar(select(PokemonPortfolio).where(PokemonPortfolio.member_id == m.id))
+    db.refresh(p)
+    flows = sum(e.value_delta_cents or 0 for e in db.scalars(select(PokemonHoldingEvent).where(PokemonHoldingEvent.portfolio_id == p.id)))
+    assert p.value_cents == 6_000_00 and flows == 6_000_00
+
+
+def test_raw_condition_without_prices_says_why_it_is_unpriced(db: Session) -> None:
+    from app.portfolio import valuation
+
+    zard = _card(db)
+    _price(db, zard, "RAW", "NM", 500)  # raw prices only for Near Mint
+    h = PokemonHolding(card_id=zard.id, kind="raw", quantity=1, condition_low=2.0, condition_high=3.0)
+    v = valuation.Pricer(db, [h]).value(h)
+    assert v.cents is None and v.reason == "raw_prices_unavailable"

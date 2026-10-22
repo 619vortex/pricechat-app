@@ -419,3 +419,43 @@ def test_one_ownership_query_for_any_number_of_candidates(db: Session) -> None:
     trade_selects = [s for s in seen if s.lstrip().upper().startswith("SELECT") and "arb_lunch_trades" in s]
     assert out["entered"] == 5 and len(trade_selects) == 2  # the open trades + ONE ownership query, not one per candidate
     assert db.scalar(select(ArbLunchDay)).entries == 5
+
+
+@pytest.mark.parametrize("answer", [httpx.Response(200, text="<html>Bad gateway</html>"), httpx.Response(200, json=["not", "an", "object"]),
+                                    httpx.Response(200, json={"result": {"value": [{"data": ["%%%not base64", "base64"]}]}})])
+def test_a_garbled_rpc_answer_leaves_that_chunk_unread_not_crashed(answer: httpx.Response) -> None:
+    async def read() -> dict[str, Any]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: answer)) as client:
+            return await lunch.curves(client, RPC, ["curve-a"])
+
+    assert asyncio.run(read()) == {}
+
+
+def test_geckoterminal_down_never_blocks_the_other_exits(db: Session) -> None:
+    """A graduated trade's pool price can't be read (timeout): the run still closes the others and commits; the graduated one
+    waits, then closes at the curve's last price."""
+    f = Fake()
+    for m in ("a", "c"):
+        f.launches.append(launch(m))
+        f.accounts[f"curve-{m}"] = grown(0.2)
+    run(db, f, NOW)
+    for m in ("a", "c"):
+        f.accounts[f"curve-{m}"] = grown(20.0)
+    assert run(db, f, NOW + timedelta(seconds=60))["entered"] == 2
+    trades = {t.mint: t for t in db.scalars(select(ArbLunchTrade))}
+    f.accounts["curve-a"] = grown(3.0)  # dumped: stop
+    f.accounts["curve-c"] = grown(85.0, complete=True)  # graduated, but GeckoTerminal times out
+    inner = f.transport()
+
+    def gecko_down(r: httpx.Request) -> httpx.Response:
+        if str(r.url).startswith(lunch.GECKO):
+            raise httpx.ReadTimeout("timed out", request=r)
+        return inner.handle_request(r)
+
+    later = NOW + timedelta(minutes=2)
+    asyncio.run(lunch.tick(db, later, RPC, httpx.MockTransport(gecko_down)))
+    db.expire_all()
+    assert trades["a"].exit_reason == "stop" and trades["c"].status == "open" and trades["c"].detail.get("awaiting_pool")
+    asyncio.run(lunch.tick(db, later + timedelta(minutes=lunch.TIMEOUT_MINUTES + lunch.POOL_WAIT_MINUTES), RPC, httpx.MockTransport(gecko_down)))
+    db.expire_all()
+    assert trades["c"].exit_reason == "graduated" and "no pool price" in trades["c"].detail["note"]

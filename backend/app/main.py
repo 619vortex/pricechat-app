@@ -3,6 +3,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -275,6 +278,13 @@ def create_app(
     @app.exception_handler(AgentPausedError)
     async def agent_paused(request: Request, exc: AgentPausedError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc), "code": "agent_paused"})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        try:
+            return await request_validation_exception_handler(request, exc)
+        except ValueError:  # the default 422 echoes each input: a NaN / Infinity in the body can't be, which made it a 500
+            return JSONResponse(status_code=422, content={"detail": jsonable_encoder([{k: v for k, v in e.items() if k != "input"} for e in exc.errors()])})
 
     @app.exception_handler(Exception)
     async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
