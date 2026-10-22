@@ -158,3 +158,14 @@ def test_history_sent_to_the_model_is_char_bounded(db: Session, agent_config: Ag
     assert sum(len(m.content) for m in history) <= HISTORY_CHAR_BUDGET
     assert history[0].role == "user" and history[-1].content.startswith("a5")  # newest kept, starts on a user turn
     assert len(SqlConversationMemory(db, agent_config.id, "long", window=4, char_budget=10**6).recent()) == 4
+
+
+def test_operator_preference_with_a_long_key_is_updated_not_duplicated(db: Session) -> None:
+    from app.learning.operator import set_preference
+    from app.models.social_intel import OperatorPreference
+
+    key = "rejects:has:" + "x" * 120
+    set_preference(db, key, "disable")
+    set_preference(db, key, "accept")  # used to look up the uncut key, miss, and insert the same 96-char key again
+    rows = list(db.scalars(select(OperatorPreference)))
+    assert len(rows) == 1 and rows[0].state == "accepted"

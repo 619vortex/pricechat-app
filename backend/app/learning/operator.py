@@ -217,9 +217,10 @@ def set_preference(db: Session, key: str, action: str) -> None:
     from app.db.base import utcnow
     from app.models.social_intel import OperatorPreference
 
+    key = key[:96]  # the column size; looking up the uncut key never found the stored row (a second insert -> 500)
     p = db.scalar(select(OperatorPreference).where(OperatorPreference.key == key))
     if p is None:
-        p = OperatorPreference(key=key[:96], state="active")
+        p = OperatorPreference(key=key, state="active")
         db.add(p)
     if action == "accept":
         p.state = "accepted"
