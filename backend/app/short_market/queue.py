@@ -11,7 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.brand_manager import brands, safety
-from app.brand_manager.queue import QueueError
+from app.brand_manager.queue import QueueError, _is_thumb, _num
 from app.db.base import utcnow
 from app.models.brand_manager import BmWorker
 from app.models.short_market import SmShort
@@ -171,8 +171,8 @@ def complete(db: Session, settings: Any, w: BmWorker, short_id: int, video: Any,
     video.seek(0)
     if meta.get("sha256") and meta["sha256"] != digest.hexdigest():
         problems.append("The upload was corrupted (checksum mismatch).")
-    dur = float(meta.get("duration") or 0)
-    if (int(meta.get("width") or 0), int(meta.get("height") or 0)) != (1080, 1920):
+    dur = _num(meta.get("duration"))
+    if (int(_num(meta.get("width"))), int(_num(meta.get("height")))) != (1080, 1920):
         problems.append(f"Wrong size {meta.get('width')}×{meta.get('height')} (needs 1080×1920).")
     if not 8 <= dur <= 120:
         problems.append(f"Length {dur:.1f}s is outside 8-120s.")
@@ -186,6 +186,8 @@ def complete(db: Session, settings: Any, w: BmWorker, short_id: int, video: Any,
         return fail(db, w, short_id, "Final check: " + "; ".join(problems), retryable=True)
     store = MediaStore(settings)
     base = f"short-market/{s.id}-g{s.generation}"
+    if thumb is not None and not _is_thumb(thumb):
+        thumb = None  # not a JPEG, or too big: the short is still good, it just has no poster
     store.put_file(f"{base}.mp4", video, "video/mp4")
     if thumb is not None:
         store.put_file(f"{base}.jpg", thumb, "image/jpeg")

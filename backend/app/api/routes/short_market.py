@@ -290,6 +290,8 @@ def worker_result(job_id: int, db: DbSession, runtime: Runtime, video: UploadFil
         info = json.loads(meta)
     except ValueError:
         raise HTTPException(400, "meta must be JSON.") from None
+    if not isinstance(info, dict):
+        raise HTTPException(400, "meta must be a JSON object.")
     try:
         return queue.complete(db, runtime.settings, w, job_id, video.file, thumb.file if thumb else None, info)
     except bm_queue.QueueError as exc:
