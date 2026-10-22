@@ -62,6 +62,7 @@ export interface Lunch {
   graduations: { measured: number; avg_gap_pct: number | null; median_gap_pct: number | null; positive: number; after_costs_positive: number;
                  recent: { mint: string; symbol: string; curve_price: number; pool_price: number | null; gap_pct: number | null; dex: string | null; at: string }[] };
   days: { day: string; launches_seen: number; entries: number }[];
+  scoreboard?: Scoreboard;
   menu: { size_sol: number; watch_minutes: number; min_real_sol: number; min_growth_pct: number; target_pct: number; stop_pct: number; timeout_minutes: number; max_open: number;
           graduation?: { min_progress_pct: number; max_progress_pct: number; min_rise_pts: number; stop_pct: number; timeout_minutes: number; max_open: number; near_now: number } };
   costs: { curve_fee_pct: number; pool_fee_pct: number; tx_cost_sol: number };
@@ -69,9 +70,15 @@ export interface Lunch {
              live?: { connected: boolean; events: number; fast_check_seconds: number; fast_triggers: number; trade_feed: boolean } | null };
 }
 
+export interface SeriesPoint { day: string; trades: number; wins: number; pnl_sol: number; cumulative: number }
+export interface GapStat { count: number; avg_gap_pct: number | null; median_gap_pct: number | null; positive: number }
+export interface Scoreboard { days: number; series: Partial<Record<LunchStrategy, SeriesPoint[]>>; gaps: { all: GapStat; last_7d: GapStat; costs_pct: number } }
+
 // The graduation-gap measurement stays hidden until its pool data is validated (some pools' first candle reads ~9x the curve);
 // the backend keeps measuring meanwhile.
 export const SHOW_GRADUATIONS = false;
+// The scoreboard's one-line gap summary (implausible >±50% candles already left out server-side); flip off to hide it too.
+export const SHOW_GAP_STAT = true;
 const EXIT: Record<string, string> = { graduated: "Graduated", target: "Target", stop: "Stop", timeout: "Timeout", gone: "Gone" };
 const sol = (v: number | null | undefined, d = 3) => (v == null ? "—" : `${v >= 0 ? "" : "−"}${Math.abs(v).toFixed(d)} SOL`);
 const signed = (v: number | null | undefined, d = 3) => (v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(d)}`);
@@ -212,7 +219,7 @@ export function LunchBot({ d }: { d: Lunch }) {
         <Stat label="Open now" value={`${s.open}`} sub={s.open ? `${signed(s.open_value_sol - s.open_cost_sol)} SOL unrealized` : undefined} />
       </div>
 
-      {d.by_strategy && (
+      {d.scoreboard ? <LunchScoreboard sb={d.scoreboard} by={d.by_strategy} /> : d.by_strategy && (
         <div className="arb-dishes" aria-label="Strategies">
           {(Object.keys(DISH) as LunchStrategy[]).map((k) => {
             const st = d.by_strategy?.[k];
@@ -296,6 +303,70 @@ export function LunchBot({ d }: { d: Lunch }) {
       )}
       <p className="tb-disclose">Paper trading on real data, not financial advice. Most pump.fun launches go to zero; a real version of this bot would risk the whole stake on each trade.</p>
     </section>
+  );
+}
+
+const shortDay = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** Per-strategy scorecards (all-time stats from SQL) with each one's 30-day cumulative paper P&L, plus the graduation gap. */
+export function LunchScoreboard({ sb, by }: { sb: Scoreboard; by?: Lunch["by_strategy"] }) {
+  const g7 = sb.gaps.last_7d, ga = sb.gaps.all;
+  return (
+    <section className="arb-card arb-score" aria-label="Scoreboard">
+      <h2>Scoreboard <b className="arb-paper">PAPER</b> <small className="arb-muted">· chart: last {sb.days} days, UTC</small></h2>
+      <div className="arb-score-grid">
+        {(Object.keys(DISH) as LunchStrategy[]).map((k) => {
+          const st = by?.[k], pts = sb.series[k] ?? [];
+          const [icon, name, what] = DISH[k];
+          const total = pts.length ? pts[pts.length - 1].cumulative : 0;
+          return (
+            <article key={k} className="arb-dish arb-scorecard" aria-label={`${name} scorecard`}>
+              <header><span aria-hidden>{icon}</span><div><b>{name}</b><small>{what}</small></div></header>
+              <p className="arb-score-pnl"><b className={tone(st?.pnl_sol)}>{sol(st?.pnl_sol ?? null)}</b> <small className="arb-muted">all-time paper P&L</small></p>
+              <dl className="arb-score-kv">
+                <div><dt>Win rate</dt><dd>{st?.win_rate == null ? "—" : `${st.win_rate}%`}</dd></div>
+                <div><dt>Trades</dt><dd>{st ? st.trades : 0}</dd></div>
+                <div><dt>Best</dt><dd className={tone(st?.best_sol)}>{signed(st?.best_sol ?? null)}</dd></div>
+                <div><dt>Worst</dt><dd className={tone(st?.worst_sol)}>{signed(st?.worst_sol ?? null)}</dd></div>
+              </dl>
+              <PnlLine pts={pts} label={`${name}: ${signed(total)} SOL over ${sb.days} days`} />
+              {pts.length > 0 && <p className="arb-score-axis"><span>{shortDay(pts[0].day)}</span><span>{signed(total)} SOL in {sb.days} d</span>
+                <span>{shortDay(pts[pts.length - 1].day)}</span></p>}
+            </article>
+          );
+        })}
+      </div>
+      {SHOW_GAP_STAT && (
+        <p className="arb-score-gap">
+          <b>Curve → pool gap at graduation</b>{" "}
+          {ga.count === 0 ? <span className="arb-muted">none measured yet</span> : <>
+            median <b>{pct(g7.median_gap_pct)}</b> over the last 7 days ({g7.count}), <b>{pct(ga.median_gap_pct)}</b> all time ({ga.count}; avg {pct(ga.avg_gap_pct)}).
+            {" "}<span className="arb-muted">Round-trip fees are about {sb.gaps.costs_pct}%: the gap has to beat that to pay.</span></>}
+        </p>
+      )}
+    </section>
+  );
+}
+
+const tone = (v: number | null | undefined) => (v == null ? "" : v > 0 ? "is-good" : v < 0 ? "is-bad" : "");
+
+/** Cumulative P&L as an inline SVG line with a zero baseline (no chart library). */
+export function PnlLine({ pts, label }: { pts: SeriesPoint[]; label: string }) {
+  const W = 300, H = 72, P = 4;
+  if (pts.length < 2) return <p className="arb-muted">No closed trades in the window yet.</p>;
+  const ys = pts.map((p) => p.cumulative);
+  const lo = Math.min(0, ...ys), hi = Math.max(0, ...ys), span = hi - lo || 1;
+  const x = (i: number) => (i / (pts.length - 1)) * W;
+  const y = (v: number) => P + (1 - (v - lo) / span) * (H - 2 * P);
+  const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.cumulative).toFixed(1)}`).join(" ");
+  const last = ys[ys.length - 1];
+  return (
+    <svg className={`arb-spark ${last > 0 ? "is-up" : last < 0 ? "is-down" : ""}`} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label}>
+      <title>{label}</title>
+      <polygon className="arb-spark-area" points={`0,${y(0).toFixed(1)} ${line} ${W},${y(0).toFixed(1)}`} />
+      <line className="arb-spark-zero" x1="0" x2={W} y1={y(0)} y2={y(0)} vectorEffect="non-scaling-stroke" />
+      <polyline className="arb-spark-line" points={line} vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }
 

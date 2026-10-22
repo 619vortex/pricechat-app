@@ -507,6 +507,48 @@ def _stats(groups: list[Any], opened: list[ArbLunchTrade]) -> dict[str, Any]:
             "open": len(opened), "open_value_sol": round(sum((t.last_value_sol or 0) for t in opened), 4), "open_cost_sol": round(sum(t.entry_sol for t in opened), 4)}
 
 
+SERIES_DAYS = 30
+GAP_SAMPLE = 2000  # newest measured gaps a median is taken over (avg / count are SQL over all rows)
+
+
+def daily_series(db: Session, now: datetime, days: int = SERIES_DAYS) -> dict[str, list[dict[str, Any]]]:
+    """Closed trades per strategy per UTC day over the last `days` (every day present, zeros included): trades, wins, pnl, and
+    the running total from the window's start. One grouped SQL query: at most strategies x days rows."""
+    start = (now - timedelta(days=days - 1)).date()
+    pnl = func.coalesce(ArbLunchTrade.pnl_sol, 0.0)
+    day = func.date(ArbLunchTrade.closed_at)
+    rows = db.execute(select(ArbLunchTrade.strategy, day, func.count(ArbLunchTrade.id), func.sum(case((pnl > 0, 1), else_=0)), func.sum(pnl))
+                      .where(ArbLunchTrade.status == "closed", ArbLunchTrade.closed_at >= datetime(start.year, start.month, start.day, tzinfo=timezone.utc))
+                      .group_by(ArbLunchTrade.strategy, day))
+    got = {(r[0], str(r[1])[:10]): r for r in rows}
+    out: dict[str, list[dict[str, Any]]] = {}
+    for strat in STRATEGIES:
+        cum, pts = 0.0, []
+        for i in range(days):
+            d = (start + timedelta(days=i)).isoformat()
+            r = got.get((strat, d))
+            p = float(r[4] or 0) if r else 0.0
+            cum += p
+            pts.append({"day": d, "trades": int(r[2]) if r else 0, "wins": int(r[3] or 0) if r else 0, "pnl_sol": round(p, 4), "cumulative": round(cum, 4)})
+        out[strat] = pts
+    return out
+
+
+def gap_stats(db: Session, now: datetime) -> dict[str, Any]:
+    """Curve-to-pool gap: count / avg in SQL, median over the newest GAP_SAMPLE; all time and the last 7 days."""
+    at = func.coalesce(ArbLunchGraduation.priced_at, ArbLunchGraduation.created_at)
+
+    def one(since: datetime | None) -> dict[str, Any]:
+        cond = [ArbLunchGraduation.gap_pct.is_not(None)] + ([at >= since] if since else [])
+        n, avg, pos = db.execute(select(func.count(ArbLunchGraduation.id), func.avg(ArbLunchGraduation.gap_pct),
+                                        func.sum(case((ArbLunchGraduation.gap_pct > 0, 1), else_=0))).where(*cond)).one()
+        vals = list(db.scalars(select(ArbLunchGraduation.gap_pct).where(*cond).order_by(at.desc()).limit(GAP_SAMPLE)))
+        return {"count": int(n or 0), "avg_gap_pct": round(float(avg), 2) if avg is not None else None,
+                "median_gap_pct": round(median(vals), 2) if vals else None, "positive": int(pos or 0)}
+
+    return {"all": one(None), "last_7d": one(now - timedelta(days=7)), "costs_pct": round((CURVE_FEE + POOL_FEE) * 100, 2)}
+
+
 def summary(db: Session, now: datetime) -> dict[str, Any]:
     groups = _closed_groups(db)
     closed = list(db.scalars(select(ArbLunchTrade).where(ArbLunchTrade.status == "closed").order_by(ArbLunchTrade.closed_at.desc()).limit(30)))
@@ -526,6 +568,7 @@ def summary(db: Session, now: datetime) -> dict[str, Any]:
                         "after_costs_positive": sum(1 for g in gaps if g > (CURVE_FEE + POOL_FEE) * 100),
                         "recent": [{"mint": g.mint, "symbol": g.symbol, "curve_price": g.curve_price, "pool_price": g.pool_price, "gap_pct": g.gap_pct,
                                     "dex": g.pool_dex, "at": (g.priced_at or g.created_at).isoformat()} for g in grads[:12]]},
+        "scoreboard": {"days": SERIES_DAYS, "series": daily_series(db, now), "gaps": gap_stats(db, now)},
         "days": [{"day": d.day, "launches_seen": d.launches_seen, "entries": d.entries} for d in days],
         "menu": {"size_sol": SIZE_SOL, "watch_minutes": WATCH_MINUTES, "min_real_sol": MIN_REAL_SOL, "min_growth_pct": MIN_GROWTH * 100,
                  "target_pct": TARGET * 100, "stop_pct": STOP * 100, "timeout_minutes": TIMEOUT_MINUTES, "max_open": MAX_OPEN,
