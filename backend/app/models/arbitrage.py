@@ -64,3 +64,15 @@ class ArbLunchDay(IdMixin, TimestampMixin, Base):
     day: Mapped[str] = mapped_column(String(10), nullable=False)
     launches_seen: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     entries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class ArbFundingAlert(IdMixin, TimestampMixin, Base):
+    """The last funding-spread alert posted for a coin (job tradingos.funding_alerts): its cooldown survives restarts."""
+    __tablename__ = "arb_funding_alerts"
+    __table_args__ = (UniqueConstraint("symbol", name="uq_arb_funding_alerts_symbol"),)
+
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    long_venue: Mapped[str] = mapped_column(String(24), nullable=False)
+    short_venue: Mapped[str] = mapped_column(String(24), nullable=False)
+    net_apr_pct: Mapped[float] = mapped_column(Float, nullable=False)  # net spread APR when posted
+    sent_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)

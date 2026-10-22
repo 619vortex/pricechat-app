@@ -169,7 +169,9 @@ function Markets() {
 function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
   const [v, setV] = useState({ ...s, trend_pullback_v1: !!s.strategies.trend_pullback_v1, intraday_15m_v1: !!s.strategies.intraday_15m_v1,
                                intraday_live: !!s.strategies.intraday_live,
-                               risk_v2_mode: (s.strategies.risk_v2 as { mode?: string } | undefined)?.mode === "enforce" ? "enforce" : "advisory" });
+                               risk_v2_mode: (s.strategies.risk_v2 as { mode?: string } | undefined)?.mode === "enforce" ? "enforce" : "advisory",
+                               funding_alerts_on: (s.strategies.funding_alerts as { on?: boolean } | undefined)?.on ?? true,
+                               funding_alert_min_apr: (s.strategies.funding_alerts as { min_net_apr?: number } | undefined)?.min_net_apr ?? 30 });
   const [err, setErr] = useState<unknown>(null);
   const [ok, setOk] = useState(false);
   const set = (k: string, val: unknown) => { setV({ ...v, [k]: val }); setOk(false); };
@@ -206,6 +208,13 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
               <option value="anywhere">Answer in the main chat (as before)</option>
               <option value="bot_chat">Post the chart in the signal group (Bot Chat), reply with a link</option>
             </select></label>
+        </div>
+        <h3 className="tos-h">Funding Arb alerts</h3>
+        <label className="tba-check"><input type="checkbox" checked={v.funding_alerts_on} onChange={(e) => set("funding_alerts_on", e.target.checked)} />
+          <span><b>Post wide funding gaps to the signal group</b><small className="muted">Every 10 minutes: a coin whose best cross-venue funding gap, after estimated taker fees on both legs, clears the line below. Once per coin per 12 h unless the gap grows 50%+.</small></span></label>
+        <div className="tba-grid">
+          <label className="tba-field"><span>Post when the net gap is at least (% a year)</span>
+            <input type="number" value={v.funding_alert_min_apr} onChange={(e) => set("funding_alert_min_apr", Number(e.target.value))} /></label>
         </div>
         <Advanced label="Fine-tuning (markets, filters, real money)">
           {check("intraday_live", "Let 15-minute signals trade real money", "Off: 15-minute signals are practice (paper) trades only. On: also real trades, only for members who opted in.")}

@@ -93,7 +93,7 @@ from app.models.vault import (  # noqa: E402
     VaultCard, VaultCardPhoto, VaultConditionRecord, VaultEvent, VaultListing, VaultRedemption, VaultRequest, VaultSource,
 )
 from app.models.brand_manager import BmAccount, BmAutomation, BmBrand, BmEvent, BmJob, BmMetric, BmTrendDay, BmVideo, BmWorker  # noqa: E402
-from app.models.arbitrage import ArbLunchDay, ArbLunchGraduation, ArbLunchTrade  # noqa: E402
+from app.models.arbitrage import ArbFundingAlert, ArbLunchDay, ArbLunchGraduation, ArbLunchTrade  # noqa: E402
 from app.models.short_market import SmIdea, SmShort  # noqa: E402
 from app.models.tradingbot import TbAffiliateSnapshot, TbApplication, TbAudit, TbEvent, TbNonce, TbReferralClick, TbSettings, TbWallet  # noqa: E402,F401
 from app.models.tradingos import KbConfig, KbEvent, TsAudit, TsDecision, TsIdea, TsKitchen, TsOiSnapshot, TsSettings, TsSignal, TsSignalAction  # noqa: E402

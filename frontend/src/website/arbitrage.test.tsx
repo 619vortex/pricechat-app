@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { EarnTabs, FundingArb, LunchBot, SHOW_GRADUATIONS, type FundingBoard, type Lunch } from "./arbitrage";
+import { EarnTabs, FundingArb, LunchBot, PnlLine, SHOW_GRADUATIONS, type FundingBoard, type Lunch, type Scoreboard, type SeriesPoint } from "./arbitrage";
 
 /** TEST FIXTURES only: made-up Lunch Bot paper results. */
 const now = new Date().toISOString();
@@ -95,6 +95,41 @@ describe("Earn › Arbitrage", () => {
     expect(screen.getByText(/Track pump.fun's fullest curves \(37 right now\)/)).toBeTruthy();
     expect(screen.getByText(/80–97% full and still filling/)).toBeTruthy();
     expect(screen.getByTitle("Graduation Run").textContent).toBe("🍰");
+  });
+
+  it("Lunch Bot's scoreboard: PAPER, per-strategy cards with win rate, P&L, trades, best / worst, a cumulative line and the gap", () => {
+    const series = (cum: number[]): SeriesPoint[] => cum.map((c, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, trades: 1, wins: 0, pnl_sol: 0, cumulative: c }));
+    const st = (pnl: number, wr: number, best: number, worst: number) => ({ trades: 12, wins: 5, win_rate: wr, pnl_sol: pnl, avg_pnl_sol: null, best_sol: best,
+      worst_sol: worst, by_exit: {}, open: 0, open_value_sol: 0, open_cost_sol: 0 });
+    const sb: Scoreboard = { days: 30, series: { starter: series([0, -0.02, -0.05]), graduation: series([0.01, 0.03, 0.08]) },
+      gaps: { all: { count: 40, avg_gap_pct: -1.2, median_gap_pct: -0.8, positive: 9 }, last_7d: { count: 6, avg_gap_pct: 0.5, median_gap_pct: 0.4, positive: 3 }, costs_pct: 1.55 } };
+    render(<LunchBot d={data({ scoreboard: sb, by_strategy: { starter: st(-0.05, 41.7, 0.04, -0.03), graduation: st(0.211, 58.3, 0.12, -0.025) } })} />);
+    const board = screen.getByRole("region", { name: "Scoreboard" });
+    expect(board.textContent).toContain("PAPER");
+    const grad = screen.getByLabelText("Graduation Run scorecard");
+    expect(grad.textContent).toContain("0.211 SOL");
+    expect(grad.textContent).toContain("58.3%");
+    expect(grad.textContent).toContain("12");
+    expect(grad.textContent).toContain("+0.120");
+    expect(grad.textContent).toContain("−0.025");
+    const line = screen.getByRole("img", { name: /Graduation Run: \+0\.080 SOL over 30 days/ });
+    expect(line.getAttribute("class")).toContain("is-up");
+    expect(screen.getByRole("img", { name: /Starter: −0\.050 SOL/ }).getAttribute("class")).toContain("is-down");
+    expect(board.textContent).toMatch(/median \+0\.4% over the last 7 days \(6\), −0\.8% all time \(40; avg −1\.2%\)/);
+    expect(board.textContent).toContain("about 1.55%");
+  });
+
+  it("the P&L line is an inline SVG polyline scaled to include zero, and says so when there's nothing to draw", () => {
+    const { container } = render(<PnlLine label="x" pts={[{ day: "2026-10-01", trades: 0, wins: 0, pnl_sol: 0, cumulative: 0.1 },
+                                                           { day: "2026-10-02", trades: 1, wins: 1, pnl_sol: 0.1, cumulative: 0.2 }]} />);
+    const pts = container.querySelector("polyline")!.getAttribute("points")!.split(" ").map((p) => p.split(",").map(Number));
+    expect(pts[0][0]).toBe(0);
+    expect(pts[1][0]).toBe(300);
+    expect(pts[1][1]).toBeLessThan(pts[0][1]);  // higher P&L is higher on screen
+    expect(Number(container.querySelector("line")!.getAttribute("y1"))).toBeCloseTo(68);  // zero sits at the bottom (all values ≥ 0)
+    cleanup();
+    render(<PnlLine label="x" pts={[]} />);
+    expect(screen.getByText(/No closed trades in the window yet/)).toBeTruthy();
   });
 
   it("says plainly when nothing is open", () => {

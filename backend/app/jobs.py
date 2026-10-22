@@ -707,6 +707,22 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             lunch.record_error(exc)
             raise
 
+    async def funding_alerts(ctx: JobContext) -> dict[str, Any]:
+        """Earn › Funding Arb: post wide cross-venue funding spreads (net of estimated fees) to the publish chat. Read-only."""
+        from app.arbitrage import funding_alerts as fa
+        from app.telegram.service import make_client
+
+        reason = fa.inactive_reason(ctx.db)
+        if reason:
+            raise JobSkipped(reason)
+        if not s.telegram_configured:
+            raise JobSkipped("Telegram is not configured")
+        tg = make_client(s, runtime.telegram.transport)
+        try:
+            return await fa.run(ctx.db, ctx.now, tg)
+        finally:
+            await tg.aclose()
+
     async def vault_sync(ctx: JobContext) -> dict[str, Any]:
         """Price Chat Vault: each enabled eBay seller's listings through the Browse API (budgeted), so the storefront's
         prices and availability stay within eBay's 6-hour freshness rule."""
@@ -799,6 +815,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 s.bm_tick_seconds, brand_tick, initial_delay_seconds=75, timeout_seconds=170),
         JobSpec("tradingos.lunch_bot", "Earn › Arbitrage › Lunch Bot (paper)", "Every minute: reads pump.fun's newest launches and their bonding curves on Solana, paper-buys launches with early momentum and closes them at graduation, target, stop or timeout at real on-chain prices; every 10 runs measures the curve-to-pool price gap of recent graduations. Never signs or sends a transaction",
                 60, lunch_bot, initial_delay_seconds=90, timeout_seconds=55),
+        JobSpec("tradingos.funding_alerts", "Earn › Funding Arb alerts", "Every 10 min: when a coin's best cross-venue funding spread, net of estimated taker fees on both legs, clears the threshold (Admin › Trading OS), posts it to the publish chat; 12 h cooldown per coin unless the spread grows 50%+. Read-only, never trades",
+                600, funding_alerts, initial_delay_seconds=240, timeout_seconds=120),
         JobSpec("brand.trends", "Brand Manager trend scan", "Every 30 min: reads today's headlines from crypto and finance outlets (CoinDesk, Cointelegraph, Decrypt, The Block, CNBC, MarketWatch, FT, BBC Business) and CoinGecko's most-searched coins, and counts which words are new or rising against the past 7 days, for Content Studio's topics and scripts",
                 1800, brand_trends, initial_delay_seconds=120, timeout_seconds=120),
         JobSpec("vault.sync", "Price Chat Vault: eBay seller sync", "Every 3 h: reads each approved seller's Japanese fixed-price listings through eBay's Browse API (within a daily call budget), classifies vintage cards for review, and re-checks approved listings' price and availability",

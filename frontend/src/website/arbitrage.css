@@ -77,3 +77,28 @@
 .arb-dish .is-bad { color: #ff5c5c; }
 .arb-dish-title { margin: 12px 0 6px; font-size: 15px; }
 .arb-dish-chip { margin-right: 6px; }
+
+/* Lunch Bot scoreboard: per-strategy scorecards + 30-day cumulative P&L sparkline (inline SVG) */
+.arb-score h2 small { font-weight: 400; }
+.arb-score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.arb-scorecard { display: grid; gap: 8px; align-content: start; }
+.arb-score-pnl { margin: 4px 0 0 !important; }
+.arb-score-pnl b { font-size: 24px; }
+.arb-score-kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.arb-score-kv div { min-width: 0; }
+.arb-score-kv dt { color: var(--site-soft); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.arb-score-kv dd { margin: 2px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.arb-score-kv .is-good { color: var(--tb-green); }
+.arb-score-kv .is-bad { color: #ff5c5c; }
+.arb-spark { width: 100%; height: 72px; display: block; overflow: visible; }
+.arb-spark-line { fill: none; stroke: var(--site-soft); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.arb-spark-zero { stroke: var(--site-line); stroke-width: 1; stroke-dasharray: 3 3; }
+.arb-spark-area { fill: rgba(255, 255, 255, 0.04); stroke: none; }
+.arb-spark.is-up .arb-spark-line { stroke: var(--tb-green, #00e58f); }
+.arb-spark.is-up .arb-spark-area { fill: rgba(0, 229, 143, 0.1); }
+.arb-spark.is-down .arb-spark-line { stroke: #ff5c5c; }
+.arb-spark.is-down .arb-spark-area { fill: rgba(255, 92, 92, 0.1); }
+.arb-score-axis { display: flex; justify-content: space-between; gap: 8px; margin: 0 !important; font-size: 11px; font-variant-numeric: tabular-nums; }
+.arb-score-gap { margin: 12px 0 0; font-size: 14px; }
+.arb-score-gap b { color: var(--site-text); }
+@media (max-width: 420px) { .arb-score-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
