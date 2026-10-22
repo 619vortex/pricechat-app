@@ -191,3 +191,41 @@ def test_file_sqlite_runs_in_wal_with_normal_sync(tmp_path) -> None:  # type: ig
         assert c.execute(text("PRAGMA synchronous")).scalar() == 1  # NORMAL
         assert c.execute(text("PRAGMA busy_timeout")).scalar() == 15000
     e.dispose()
+
+
+def test_market_lists_value_every_listing_with_one_pricer(db: Session) -> None:
+    """/members/market/home and the listing pages value all their listings with one Pricer (prices read once per grade),
+    not one Pricer (~3 queries) per listing; each estimate is exactly the single-item one."""
+    from app.market import service as market
+    from app.models.market import MarketItem, MarketListing
+
+    catalog.ensure_catalog(db)
+    cards = db.scalars(select(PokemonCard).order_by(PokemonCard.id).limit(6)).all()
+    seller = _member(db, "marketseller")
+    pokemon.import_sales(db, [{"card_id": c.id, "grading_company": "PSA", "grade": "10", "price": 100 + 10 * n, "source": "ebay",
+                               "sale_date": (utcnow() - timedelta(days=3)).isoformat(), "source_listing_id": f"s{n}"}
+                              for n, c in enumerate(cards[:3])], verified=True)
+    n = 0
+    for c in cards:
+        for comp, grade in (("PSA", "10"), ("PSA", "9"), ("BGS", "9.5"), ("RAW", "NM")):
+            n += 1
+            item = MarketItem(card_id=c.id, grading_company=comp, grade=grade, cert_number=f"{n:08d}", cert_key=f"{comp}:{n}",
+                              owner_member_id=seller.id, condition_low=7.0 if comp == "RAW" else None,
+                              condition_high=8.5 if comp == "RAW" else None)
+            db.add(item)
+            db.flush()
+            db.add(MarketListing(item_id=item.id, seller_id=seller.id, status="active", price_cents=10_000 + n, listed_at=utcnow()))
+    db.commit()
+    rows = market._rows(db, market._base().where(MarketListing.status == "active"))
+    assert len(rows) == 24
+    with statements(db) as sql:
+        out = market._out_many(db, rows, None)
+    assert [x["estimate"]["value"] for x in out] == [market.item_estimate(db, i)["value"] for _, i, _ in rows]
+    assert [x["estimate"] for x in out] == [{**{k: market.item_estimate(db, i).get(k) for k in ("value", "low", "high", "source", "confidence",
+                                                                                                    "note", "as_of")}, "currency": "USD"}
+                                            for _, i, _ in rows]
+    assert any(x["estimate"]["source"] == "sales" for x in out)
+    assert len(sql) <= 6, len(sql)  # photos + provider prices + one sales read per graded grade (was ~3 per listing)
+    with statements(db) as sql:
+        market.home(db, None, __import__("app.config.settings", fromlist=["get_settings"]).get_settings())
+    assert len(sql) < 40, len(sql)

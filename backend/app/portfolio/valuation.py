@@ -110,10 +110,15 @@ class Pricer:
         self.prov = _latest_provider(db, ids) if ids else {}
         graded_keys = {(h.card_id, h.grading_company, h.grade) for h in hs if h.kind == "graded" and h.grading_company and h.grade}
         self.sales: dict[tuple[int, str, str], pricing.Stats] = {}
+        by_grade: dict[tuple[str, str], set[int]] = {}
         for cid, comp, grade in graded_keys:
-            pts = history.load_sales(db, [cid], comp, grade).get((cid, comp, grade), [])
-            if pts:
-                self.sales[(cid, comp, grade)] = pricing.compute(pts, self.now)
+            by_grade.setdefault((comp, grade), set()).add(cid)
+        for (comp, grade), cids in by_grade.items():  # one read per grade, not per card
+            loaded = history.load_sales(db, sorted(cids), comp, grade)
+            for cid in cids:
+                pts = loaded.get((cid, comp, grade), [])
+                if pts:
+                    self.sales[(cid, comp, grade)] = pricing.compute(pts, self.now)
 
     def _fresh(self, r: PokemonProviderValuation) -> bool:
         return (self.now.date() - r.day) <= timedelta(days=STALE_DAYS)

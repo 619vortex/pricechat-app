@@ -122,15 +122,29 @@ def estimate(db: Session, card_id: int, company: str, grade: str) -> dict[str, A
     return valuation.Pricer(db, [h]).value(h).as_dict()
 
 
+def _holding(item: MarketItem) -> SimpleNamespace:
+    if item.grading_company != "RAW":
+        return SimpleNamespace(card_id=item.card_id, kind="graded", grading_company=item.grading_company, grade=item.grade,
+                               condition_low=None, condition_high=None)
+    return SimpleNamespace(card_id=item.card_id, kind="raw", grading_company=None, grade=None,
+                           condition_low=item.condition_low, condition_high=item.condition_high)
+
+
 def item_estimate(db: Session, item: MarketItem) -> dict[str, Any]:
     """The market estimate for this exact item: its official grade, or (RAW) its AI condition range."""
-    if item.grading_company != "RAW":
-        return estimate(db, item.card_id, item.grading_company, item.grade)
     from app.portfolio import valuation
 
-    h = SimpleNamespace(card_id=item.card_id, kind="raw", grading_company=None, grade=None,
-                        condition_low=item.condition_low, condition_high=item.condition_high)
+    h = _holding(item)
     return valuation.Pricer(db, [h]).value(h).as_dict()
+
+
+def item_estimates(db: Session, items: list[MarketItem]) -> dict[int, dict[str, Any]]:
+    """item_estimate for a whole list, with one Pricer (its prices read once for all the cards, not per listing)."""
+    from app.portfolio import valuation
+
+    hs = {i.id: _holding(i) for i in items}
+    pricer = valuation.Pricer(db, hs.values())
+    return {iid: pricer.value(h).as_dict() for iid, h in hs.items()}
 
 
 def _today_count(db: Session, model: Any, col: Any, member_id: int) -> int:
@@ -231,7 +245,8 @@ def _base() -> Any:
 
 def _out_many(db: Session, rows: list[tuple[MarketListing, MarketItem, PokemonCard]], viewer: Member | None) -> list[dict[str, Any]]:
     ph = _photos(db, [i.id for _, i, _ in rows])
-    return [listing_out(db, l, i, c, viewer=viewer, photos=ph.get(i.id, [])) for l, i, c in rows]
+    est = item_estimates(db, [i for _, i, _ in rows])
+    return [listing_out(db, l, i, c, viewer=viewer, photos=ph.get(i.id, []), est=est[i.id]) for l, i, c in rows]
 
 
 SORTS = {"price_asc": MarketListing.price_cents.asc(), "price_desc": MarketListing.price_cents.desc(), "recent": MarketListing.listed_at.desc(),
@@ -570,9 +585,10 @@ def cancel_listing(db: Session, member: Member | None, listing_id: int, actor: s
 def my_listings(db: Session, member: Member) -> list[dict[str, Any]]:
     rows = _rows(db, _base().where(MarketListing.seller_id == member.id).order_by(MarketListing.id.desc()).limit(200))
     ph = _photos(db, [i.id for _, i, _ in rows])
+    est = item_estimates(db, [i for _, i, _ in rows])
     out = []
     for l, i, c in rows:
-        d = listing_out(db, l, i, c, viewer=member, photos=ph.get(i.id, []))
+        d = listing_out(db, l, i, c, viewer=member, photos=ph.get(i.id, []), est=est[i.id])
         d.update({"review_note": l.review_note, "flags": l.flags})
         out.append(d)
     return out
