@@ -129,6 +129,14 @@ async def prepare(key: str, payload: PrepareIn, db: DbSession, runtime: Runtime)
     return await _prepare_telegram(db, runtime, agent_id, oid, item, high, origin)
 
 
+def _proposed_meanwhile(db, kind: str, oid: int) -> ApprovalOut | None:  # type: ignore[no-untyped-def]
+    """Drafting takes a while: a second Prepare for the same item (a double click, the card opened twice) may have queued
+    its proposal by now. Reuse it instead of queueing two, which could then both be approved and posted."""
+    pending = growth._pending_for(db, kind, oid)
+    a = db.get(ApprovalRequest, pending) if pending else None
+    return ApprovalOut.model_validate(a) if a is not None else None
+
+
 async def _prepare_x(db, runtime, agent_id, oid, item, high, origin, direction):  # type: ignore[no-untyped-def]
     from app.social.x_replies import draft_reply
 
@@ -142,6 +150,8 @@ async def _prepare_x(db, runtime, agent_id, oid, item, high, origin, direction):
                                     direction=direction, variants=high)
     if not drafted.worth_it:
         raise HTTPException(status.HTTP_409_CONFLICT, f"The AI found nothing worthwhile to add: {drafted.why or 'no reason given'}")
+    if not direction and (done := _proposed_meanwhile(db, "x", oid)) is not None:
+        return done
     author = db.get(SocialProfile, post.author_profile_id) if post.author_profile_id else None
     if standalone:
         req = ActionRequest(Platform.X, SocialAction.POST, None, None, drafted.text[:MAX_TEXT])
@@ -173,6 +183,8 @@ async def _prepare_telegram(db, runtime, agent_id, oid, item, high, origin):  # 
                                        variants=3 if high else 1, actor="ai")
     if not drafts:
         raise HTTPException(status.HTTP_409_CONFLICT, "No draft could be written")
+    if (done := _proposed_meanwhile(db, "telegram", oid)) is not None:
+        return done
     from app.social.x_replies import check_text
 
     variants = []

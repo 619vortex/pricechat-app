@@ -318,3 +318,39 @@ async def test_a_listening_pass_handles_messages_that_arrive_while_it_waits(db: 
     assert _time.monotonic() - t0 < 10 and polls["n"] > 3  # it kept polling (the last second is left out: long-polls wait whole seconds)
     once = await TelegramIngestor(db, _client(fake_telegram), TelegramRuntime()).sync()  # listen_seconds=0: one batch, as before
     assert once.updates == 0
+
+
+async def test_an_update_that_cannot_be_handled_is_skipped_not_redelivered_forever(db: Session, fake_telegram: FakeTelegram) -> None:
+    """A non-numeric date used to raise ValueError out of the batch: the offset was never saved, so every run fetched the
+    same update again and failed, and nothing after it (messages, bot commands) was ever handled."""
+    _source(db)
+    fake_telegram.raw({"update_id": 3000, "message": {"message_id": 60, "date": "soon", "chat": CHAT, "from": {"id": 2}, "text": "odd"}})
+    fake_telegram.raw({"update_id": 3001, "message": {"message_id": 61, "date": 1_790_000_000, "chat": CHAT, "from": {"id": 2}, "text": "valid one"}})
+    report = await TelegramIngestor(db, _client(fake_telegram), TelegramRuntime()).sync()
+    assert (report.malformed, report.stored) == (1, 1)
+    assert db.scalar(select(TelegramBotState.last_update_id)) == 3001
+
+
+async def test_total_ingested_counts_each_message_once_across_batches(db: Session, fake_telegram: FakeTelegram) -> None:
+    _source(db)
+    for i in range(150):  # two batches of getUpdates (100 + 50)
+        fake_telegram.message(-100111, f"message number {i}")
+    report = await TelegramIngestor(db, _client(fake_telegram), TelegramRuntime()).sync()
+    assert report.stored == 150
+    assert db.scalar(select(TelegramBotState.total_ingested)) == 150
+
+
+async def test_429_retry_after_is_respected_for_that_chat(fake_telegram: FakeTelegram) -> None:
+    """Sending again before retry_after only extends Telegram's limit: the client now waits it out for that chat."""
+    client = _client(fake_telegram)
+    fake_telegram.error = (429, {"ok": False, "error_code": 429, "description": "Too Many Requests", "parameters": {"retry_after": 17}})
+    with pytest.raises(TelegramRateLimitError):
+        await client.send_message(-100111, "first")
+    fake_telegram.error = None
+    sent = len(fake_telegram.calls)
+    with pytest.raises(TelegramRateLimitError) as exc:
+        await client.send_message(-100111, "too soon")
+    assert len(fake_telegram.calls) == sent and 0 < exc.value.retry_after <= 17  # nothing reached Telegram
+    await client.send_message(-100222, "another chat is not affected")
+    await client.get_updates(None)
+    assert len(fake_telegram.calls) == sent + 2

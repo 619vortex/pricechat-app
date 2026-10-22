@@ -6,7 +6,8 @@
 - A problem that was reported stays "open" until it is fixed; the fix sends one "recovered" message (no cooldown: it
   always pairs with an alert the owner already got).
 - Sources: a background job failing 3 runs in a row (the nightly backup: its first failure), and a Brand Manager TikTok
-  account that is expired / revoked / disconnected while AUTO is on (the `system.alerts` job).
+  account that is expired / revoked / disconnected while AUTO is on (the `system.alerts` job), and a Kiwi VPN server
+  the sync couldn't reach twice in a row / back online / past 90% of its capacity (after each `vpn.sync`).
 - Sending can never break the caller: a Telegram error is logged and swallowed. Messages never carry secrets (job
   errors are already redacted by the scheduler).
 """
@@ -28,6 +29,8 @@ COOLDOWN = timedelta(hours=6)
 FAIL_AFTER = 3  # failed runs in a row before the owner hears about a job
 FAIL_AFTER_JOB = {"system.backup": 1}  # the nightly backup runs once a day: its first failure already matters
 TIKTOK_BAD = ("expired", "revoked", "disconnected")
+VPN_OFFLINE_AFTER = 2  # syncs in a row that couldn't reach a VPN server's agent
+VPN_FULL_AT, VPN_FULL_CLEAR = 0.9, 0.8  # "nearly full" once past 90% of capacity, re-armed only below 80%
 
 
 def settings_row(db: Session) -> OwnerAlertSettings:
@@ -162,6 +165,49 @@ async def check_brand_accounts(db: Session, *, settings: Settings | None = None,
             elif not auto.running:
                 _close(db, key)  # AUTO was stopped: nothing is waiting on TikTok any more
     return {"tiktok_alerts": sent, "recovered": recovered}
+
+
+# --- Kiwi VPN servers (called by the vpn.sync job after each sync) -----------------------------------------------------------
+
+
+async def check_vpn_servers(db: Session, *, settings: Settings | None = None, transport: Any = None, now: datetime | None = None) -> dict[str, int]:
+    """One message per transition: offline (2 failed syncs in a row) → back online; nearly full (≥ 90% of capacity),
+    re-armed once it drops below 80%. A disabled server's open problems are closed quietly."""
+    from app.models.vpn import VpnServer
+    from app.vpn.service import device_counts
+
+    now = now or utcnow()
+    counts = device_counts(db)
+    out = {"vpn_offline": 0, "vpn_recovered": 0, "vpn_full": 0}
+    for v in list(db.scalars(select(VpnServer).order_by(VpnServer.id))):
+        off_key, full_key = f"vpn:offline:{v.id}", f"vpn:full:{v.id}"
+        if not v.enabled:
+            _close(db, off_key)
+            _close(db, full_key)
+            continue
+        if v.fail_streak >= VPN_OFFLINE_AFTER:
+            if not _is_open(db, off_key):
+                text = (f"Price Chat alert: Kiwi VPN server offline\nServer: {v.name} ({v.region or v.country_code})\n"
+                        f"The sync couldn't reach its agent {v.fail_streak} times in a row: {_first_line(v.last_error)}\n"
+                        f"Members can't add devices there until it's back.\nTime: {_when(now)}")
+                out["vpn_offline"] += await notify_owner(db, off_key, text, settings=settings, transport=transport, now=now,
+                                                         cooldown=False, open_=True)
+        elif v.online and _is_open(db, off_key):
+            text = f"Price Chat: recovered\nKiwi VPN server {v.name} is online again.\nTime: {_when(now)}"
+            if await notify_owner(db, f"{off_key}:recovered", text, settings=settings, transport=transport, now=now, cooldown=False):
+                out["vpn_recovered"] += 1
+                _close(db, off_key)
+        n = counts.get(v.id, 0)
+        load = n / v.capacity if v.capacity > 0 else 1.0
+        if load >= VPN_FULL_AT:
+            if not _is_open(db, full_key):
+                text = (f"Price Chat alert: Kiwi VPN server nearly full\nServer: {v.name}: {n} of {v.capacity} devices "
+                        f"({round(load * 100)}%).\nAdd a server or raise its capacity (Admin › Kiwi VPN).\nTime: {_when(now)}")
+                out["vpn_full"] += await notify_owner(db, full_key, text, settings=settings, transport=transport, now=now,
+                                                      cooldown=False, open_=True)
+        elif load < VPN_FULL_CLEAR:
+            _close(db, full_key)
+    return out
 
 
 # --- admin -------------------------------------------------------------------------------------------------------------

@@ -236,3 +236,15 @@ def test_only_the_community_group_counts_and_its_id_is_learned(db: Session) -> N
                                         "new_chat_members": [{"id": 9002, "username": "y_user"}]}}
     assert wk.joins_from_update(db, ours) == 1 and wk.settings(db).community_chat_id == -777
     assert wk.joins_from_update(db, other) == 0
+
+
+def test_rows_stuck_in_submitted_do_not_starve_newer_submissions(db: Session) -> None:
+    w, _, _ = setup(db)
+    stuck = [wk.submit(db, w, f"stuck_user_{i}") for i in range(3)]  # never seen joining: stay SUBMITTED for days
+    fresh = wk.submit(db, w, "fresh_friend")
+    join(db, 301, "fresh_friend")
+    for _ in range(2):  # a batch of 2 per run: in id order the stuck rows filled every batch
+        asyncio.run(wk.verify(db, Bot({301}), limit=2))
+    db.refresh(fresh)
+    assert fresh.status == "VERIFIED"
+    assert all(s.status == "SUBMITTED" for s in stuck)

@@ -134,6 +134,7 @@ class TelegramIngestor:
                 repair_source_ids(self.db)
             sources = {s.chat_id: s for s in self.db.scalars(select(TelegramSource))}
             max_update_id = state.last_update_id or 0
+            stored_before = report.stored  # `report` adds up every batch of this pass
             access_updates: list[dict] = []  # VIP Trading Bot private group: join requests and joins/leaves
             try:
                 for update in updates:
@@ -151,11 +152,18 @@ class TelegramIngestor:
                             self._wk_updates.append(update)  # Worker System: joins through a worker's invite link
                         report.ignored_other += 1
                         continue
-                    self._handle(update, sources, report)
+                    try:
+                        self._handle(update, sources, report)
+                    except SQLAlchemyError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - one odd update must not block every later one
+                        # Its offset is still acknowledged below: re-raising would re-deliver (and fail on) it every run.
+                        report.malformed += 1
+                        logger.warning("Skipping Telegram update %s that could not be handled (%s)", uid, type(exc).__name__)
                 # Messages and the new offset are committed together: if this fails, nothing
                 # is acknowledged, Telegram re-delivers, and the unique key prevents duplicates.
                 state.last_update_id = max_update_id
-                state.total_ingested += report.stored
+                state.total_ingested += report.stored - stored_before
                 self.db.commit()
             except SQLAlchemyError:
                 self.db.rollback()

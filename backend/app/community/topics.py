@@ -18,7 +18,7 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.ai.routing import ModelRouter
-from app.ai.structured import complete_structured
+from app.ai.structured import StructuredOutputError, complete_structured
 from app.community.formatting import format_messages
 from app.community.tuning import CommunityTuning
 from app.community.vectors import from_blob, load_vectors, normalise, to_blob
@@ -229,7 +229,14 @@ async def name_topics(db: Session, router: ModelRouter, limit: int = 10) -> int:
         reps = list(db.scalars(select(TelegramMessage).where(TelegramMessage.id.in_(ids)))) if ids else []
         messages = list({m.id: m for m in [*reps, *recent]}.values())
         text, _ = format_messages(messages, char_budget=5000, max_chars_each=300)
-        parsed, _, route = await complete_structured(router, "telegram.topic_naming", NAMING_SYSTEM, f"Messages:\n{text}", _TopicName)
+        try:
+            parsed, _, route = await complete_structured(router, "telegram.topic_naming", NAMING_SYSTEM, f"Messages:\n{text}", _TopicName)
+        except StructuredOutputError as exc:
+            # Skip it until the topic grows again (that sets needs_naming): left flagged, the most important topic
+            # would fail first on every run and take the whole topics job down with it.
+            logger.warning("Topic %s could not be named: %s", topic.id, exc)
+            topic.needs_naming = False
+            continue
         topic.name = parsed.name.strip().strip('"')[:160] or topic.name
         topic.description = parsed.description.strip()[:1000]
         topic.keywords = [k.strip().lower()[:40] for k in parsed.keywords if k.strip()][:6]

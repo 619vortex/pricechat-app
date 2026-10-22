@@ -50,6 +50,9 @@ def update_content(content_id: int, payload: ContentUpdate, db: DbSession) -> Co
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Content not found")
     changes = payload.model_dump(exclude_unset=True)
+    for required in ("body", "status"):  # NOT NULL columns: null means "leave as is" (title etc. may be cleared)
+        if required in changes and changes[required] is None:
+            changes.pop(required)
     _reject_published(changes.get("status"))
     for key, value in changes.items():
         setattr(item, key, value)

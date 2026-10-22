@@ -14,6 +14,8 @@ from app.models.conversation import ConversationMessage
 from app.models.enums import AgentTask, PromptPlatform
 from app.providers.base import ChatMessage, ChatResult
 
+HISTORY_CHAR_BUDGET = 16_000  # ~4k tokens of earlier turns sent with each request
+
 
 @dataclass(frozen=True, slots=True)
 class TurnContext:
@@ -32,11 +34,14 @@ class ConversationMemory(Protocol):
 
 
 class SqlConversationMemory:
-    def __init__(self, db: Session, agent_id: int, conversation_id: str, window: int = 20) -> None:
+    def __init__(
+        self, db: Session, agent_id: int, conversation_id: str, window: int = 20, char_budget: int = HISTORY_CHAR_BUDGET
+    ) -> None:
         self.db = db
         self.agent_id = agent_id
         self.conversation_id = conversation_id
         self.window = window
+        self.char_budget = char_budget
 
     def recent(self) -> list[ChatMessage]:
         stmt = (
@@ -49,6 +54,10 @@ class SqlConversationMemory:
             .limit(self.window)
         )
         rows = list(self.db.execute(stmt).all())[::-1]
+        # Messages can be 8,000 chars each: keep the newest that fit the budget, not 20 of any size, on every turn.
+        total = sum(len(content) for _, content in rows)
+        while rows and total > self.char_budget:
+            total -= len(rows.pop(0)[1])
         # Never start the history with a dangling assistant turn.
         while rows and rows[0][0] != "user":
             rows.pop(0)

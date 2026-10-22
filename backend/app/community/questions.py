@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai.routing import ModelRouter
-from app.ai.structured import complete_structured
+from app.ai.structured import StructuredOutputError, complete_structured
 from app.community.formatting import format_messages
 from app.community.tuning import CommunityTuning
 from app.community.vectors import from_blob, normalise, to_blob
@@ -148,10 +148,13 @@ async def canonicalise_questions(db: Session, router: ModelRouter, limit: int = 
             )
         )
         text, _ = format_messages(examples, char_budget=3000, max_chars_each=300)
-        parsed, _, route = await complete_structured(
-            router, "telegram.question_canonical", CANONICAL_SYSTEM, f"Examples:\n{text}", _Canonical
-        )
-        if parsed.question.strip():
+        try:
+            parsed, _, route = await complete_structured(
+                router, "telegram.question_canonical", CANONICAL_SYSTEM, f"Examples:\n{text}", _Canonical
+            )
+        except StructuredOutputError:  # keep the members' wording; a new ask flags it again
+            parsed = None
+        if parsed is not None and parsed.question.strip():
             group.text = parsed.question.strip()[:300]
             group.canonical_model = route.model
         group.needs_canonical = False

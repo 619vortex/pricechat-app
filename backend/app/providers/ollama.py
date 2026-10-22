@@ -8,6 +8,7 @@ API reference: https://github.com/ollama/ollama/blob/main/docs/api.md
 import logging
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -35,6 +36,12 @@ _EMBED_PREFIXES: dict[str, dict[str, str]] = {
 }
 
 
+def _without_credentials(url: str) -> str:
+    """The URL as shown in errors, logs and the dashboard: user:password@ (remote Ollama behind basic auth) removed."""
+    parts = urlsplit(url)
+    return urlunsplit(parts._replace(netloc=parts.netloc.rpartition("@")[2]))
+
+
 def _pull_hint(model: str) -> str:
     return f"Run: ollama pull {model}"
 
@@ -48,9 +55,9 @@ class _OllamaHttp:
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _without_credentials(base_url.rstrip("/"))
         self._client = httpx.AsyncClient(
-            base_url=self.base_url,
+            base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(timeout_seconds, connect=5.0),
             transport=transport,
         )
@@ -75,18 +82,22 @@ class _OllamaHttp:
 
         if response.status_code >= 400:
             try:
-                message = str(response.json().get("error", response.text))
+                body = response.json()
             except ValueError:
-                message = response.text
+                body = None
+            message = str(body.get("error", response.text)) if isinstance(body, dict) else response.text
             logger.warning("Ollama %s %s -> %s: %s", method, path, response.status_code, message)
             if model and response.status_code == 404 and "not found" in message.lower():
                 raise ModelNotFoundError(model, _pull_hint(model))
             raise ProviderResponseError(f"Ollama error ({response.status_code}): {message}")
 
         try:
-            return response.json()
+            data = response.json()
         except ValueError as exc:
             raise ProviderResponseError("Ollama returned a non-JSON response") from exc
+        if not isinstance(data, dict):
+            raise ProviderResponseError(f"Unexpected Ollama response: {data!r:.200}")
+        return data
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -150,6 +161,8 @@ class OllamaProvider(LLMProvider):
             content = data["message"]["content"]
         except (KeyError, TypeError) as exc:
             raise ProviderResponseError(f"Unexpected Ollama response: {data!r:.200}") from exc
+        if not isinstance(content, str):  # e.g. "content": null
+            raise ProviderResponseError(f"Unexpected Ollama response: {data!r:.200}")
 
         completion_tokens = data.get("eval_count")
         eval_ns = data.get("eval_duration")

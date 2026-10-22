@@ -252,10 +252,15 @@ class TelethonGateway:
     async def messages(self, chat: DialogInfo, *, min_id: int = 0, since: datetime | None = None, limit: int = 500) -> list[ParsedMessage]:
         entity = await self._entity(chat)
         out: list[ParsedMessage] = []
-        it = self._client.iter_messages(entity, limit=limit, min_id=min_id or 0)
+        # After min_id (the live sync) read forward, oldest first: newest-first with a limit would skip everything between
+        # min_id and the newest `limit` messages for good, as the next sync starts above them.
+        forward = bool(min_id)
+        it = self._client.iter_messages(entity, limit=limit, min_id=min_id or 0, reverse=forward)
         try:
             async for m in it:
                 if since is not None and _aware(m.date) < since:  # type: ignore[operator]
+                    if forward:
+                        continue
                     break
                 p = to_parsed(m, chat)
                 if p is not None:
@@ -268,7 +273,7 @@ class TelethonGateway:
             if isinstance(exc, errors.ChannelPrivateError):
                 raise AccountError(f"No longer allowed to read '{chat.title}'") from None
             raise
-        return list(reversed(out))  # oldest first
+        return out if forward else list(reversed(out))  # oldest first
 
     async def estimate_since(self, chat: DialogInfo, since: datetime) -> int | None:
         entity = await self._entity(chat)

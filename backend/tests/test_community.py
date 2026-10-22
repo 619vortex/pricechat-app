@@ -369,3 +369,33 @@ def test_citations_are_stripped_from_text(raw: str, clean: str) -> None:
     from app.community.formatting import strip_citations
 
     assert strip_citations(raw) == clean
+
+
+async def test_unparseable_extraction_does_not_block_later_summaries(db: Session, source: TelegramSource, fake_provider: FakeProvider, agent_config: AgentConfig) -> None:
+    emb = FakeEmbedder(dims=512)
+    await processed(db, source, fake_provider, emb, [*QUESTIONS, *FUNDING])
+    r = router(db, fake_provider)
+    await generate_summary(db, r, TUNING, SummaryKind.RECENT, NOW - timedelta(hours=6), NOW, source=source)
+    fake_provider.mangle = lambda title, content: "sorry, no JSON today"  # every attempt is unusable
+
+    report = await extract_memories(db, r, agent_config.id, emb)  # used to raise, leaving the summary first in line forever
+    assert report.created == 0
+    assert db.scalar(select(CommunitySummary.memories_extracted_at)) is not None
+
+
+async def test_unparseable_naming_and_wording_skip_the_item_instead_of_failing_the_job(db: Session, source: TelegramSource, fake_provider: FakeProvider) -> None:
+    emb = FakeEmbedder(dims=512)
+    await processed(db, source, fake_provider, emb, [*FUNDING, *QUESTIONS], authors=[1, 2, 3, 4, 5, 6, 6])
+    refresh_topic_stats(db, TUNING, NOW)
+    refresh_question_stats(db)
+    topic = db.scalar(select(CommunityTopic).where(CommunityTopic.status == TopicStatus.ACTIVE))
+    question = db.scalar(select(CommunityQuestion).order_by(CommunityQuestion.ask_count.desc()))
+    assert topic is not None and topic.needs_naming and question is not None and question.needs_canonical
+    wording = question.text
+    fake_provider.mangle = lambda title, content: "I'd rather not"
+
+    r = router(db, fake_provider)
+    assert await name_topics(db, r) == 0  # used to raise StructuredOutputError and fail community.topics on every run
+    assert await canonicalise_questions(db, r) >= 1
+    assert not topic.needs_naming and topic.named_at is None
+    assert not question.needs_canonical and question.text == wording and question.canonical_model is None
