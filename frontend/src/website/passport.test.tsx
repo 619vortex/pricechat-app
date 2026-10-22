@@ -569,11 +569,12 @@ describe("Kiwi Passport: Telegram chat bar, honest daily status, compact VIP", (
   it("shows the VIP Trading Bot as one compact line, not a banner above the Passport", async () => {
     serveV3({ ...base(v3()), "/api/website/home": { sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
               links: { telegram: null, x: null, youtube: null }, site_url: null, trading_bot: true },
-              "/api/members/trading-bot": { rules: { min_rank_level: 3 }, rank: { ok: false } } });
+              "/api/members/trading-bot": { rules: { min_rank_level: 3 }, rank: { ok: false, required: { name: "Kiwi" }, remaining: 108 } } });
     const { container } = await show(<ProfilePage />);
     const vip = container.querySelector<HTMLAnchorElement>(".pp-vip")!;
     {
-      expect(vip.textContent).toMatch(/Unlocks at Kiwi Rank 3.*View requirements/);
+      expect(vip.textContent).toMatch(/Unlocks at Kiwi Rank 3 \(Kiwi\) · 108 XP to go.*View requirements/);
+      expect(vip.getAttribute("aria-label")).toBeNull();  // screen readers hear the status too, not just "VIP Trading Bot"
       expect(container.querySelector(".pp-vipbot")).toBeNull();
       expect(vip.compareDocumentPosition(container.querySelector(".pp-a")!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();  // below the Kiwi card
     }
