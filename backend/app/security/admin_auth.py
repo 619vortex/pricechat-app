@@ -8,7 +8,9 @@ Make the hash on your own machine and paste only the hash into Railway:
 Sessions are server-side (admin_sessions: only a sha256 of the token is stored). The browser holds the token in an
 HttpOnly cookie, Secure in production, SameSite=Lax (first-party: Vercel forwards /api to the backend on the same
 domain; Lax still sends it on the top-level redirect back from Google's OAuth for the YouTube connection). Failed logins
-are rate-limited per client and globally. Required in production; locally it's off unless ADMIN_PASSWORD_HASH is set,
+are rate-limited per client and globally. A browser the owner has signed in from before carries a signed "known device"
+cookie (pc_admin_device); its attempts skip the global and per-address buckets and have a strict limit of their own, so a
+flood of failures from other (or spoofed) addresses can't lock the owner out of that browser. Required in production; locally it's off unless ADMIN_PASSWORD_HASH is set,
 so local development keeps working as before.
 """
 
@@ -31,6 +33,8 @@ from app.db.base import utcnow
 from app.models.admin import AdminSession
 
 COOKIE = "pc_admin"
+DEVICE_COOKIE = "pc_admin_device"  # "this browser has signed in as the owner before" (see known_device)
+DEVICE_DAYS = 180
 # scrypt parameters: ~16 MB memory, well under a second on a server
 _N, _R, _P, _DKLEN = 2 ** 14, 8, 1, 32
 
@@ -80,10 +84,15 @@ def client_key(request: Request) -> str:
     return fwd or (request.client.host if request.client else "unknown")
 
 
-def retry_after(key: str) -> int | None:
-    """Seconds until this client may try again, or None if it may try now."""
+def retry_after(key: str, device: str | None = None) -> int | None:
+    """Seconds until this client may try again, or None if it may try now. A known device (known_device) is limited on
+    its own (PER_CLIENT per window) and never by the global bucket a flood from anywhere else fills up."""
     now = time.monotonic()
     with _lock:
+        if device:
+            mine = _fails["d:" + device]
+            _prune(mine, PER_CLIENT_WINDOW, now)
+            return int(PER_CLIENT_WINDOW - (now - mine[0])) + 1 if len(mine) >= PER_CLIENT else None
         mine, every = _fails[key], _fails["*"]
         _prune(mine, PER_CLIENT_WINDOW, now)
         _prune(every, GLOBAL_WINDOW, now)
@@ -94,9 +103,12 @@ def retry_after(key: str) -> int | None:
     return None
 
 
-def record_failure(key: str) -> None:
+def record_failure(key: str, device: str | None = None) -> None:
     now = time.monotonic()
     with _lock:
+        if device:
+            _fails["d:" + device].append(now)
+            return
         _fails[key].append(now)
         _fails["*"].append(now)
 
@@ -104,6 +116,46 @@ def record_failure(key: str) -> None:
 def reset_for_tests() -> None:
     with _lock:
         _fails.clear()
+
+
+# --- known devices -------------------------------------------------------------------------------------------------
+
+
+def _device_key(settings: Settings) -> bytes:
+    """Signs device cookies. Derived from the password hash (changing the password revokes every device) and the app's
+    encryption key (a leaked password hash alone can't mint one)."""
+    stored = settings.admin_password_hash.get_secret_value().strip() if settings.admin_password_hash else ""
+    enc = settings.app_encryption_key.get_secret_value().strip() if settings.app_encryption_key else ""
+    return hashlib.sha256(f"pc-admin-device\0{stored}\0{enc}".encode()).digest()
+
+
+def _device_sig(settings: Settings, nonce: str, issued: int) -> str:
+    user = (settings.admin_username or "").strip()
+    return hmac.new(_device_key(settings), f"{user}\0{nonce}\0{issued}".encode(), hashlib.sha256).hexdigest()
+
+
+def device_token(settings: Settings) -> str:
+    nonce, issued = secrets.token_urlsafe(12), int(time.time())
+    return f"{nonce}.{issued}.{_device_sig(settings, nonce, issued)}"
+
+
+def known_device(settings: Settings, token: str | None) -> str | None:
+    """The device id when `token` is a valid device cookie for the current owner username + password, else None."""
+    if not token or len(token) > 200 or not (settings.admin_password_hash and settings.admin_password_hash.get_secret_value().strip()):
+        return None
+    try:
+        nonce, issued_s, sig = token.split(".")
+        issued = int(issued_s)
+    except ValueError:
+        return None
+    if not nonce or not 0 <= time.time() - issued <= DEVICE_DAYS * 86400:
+        return None
+    return nonce if hmac.compare_digest(_device_sig(settings, nonce, issued), sig) else None
+
+
+def remember_device(settings: Settings, response: Response) -> None:
+    response.set_cookie(DEVICE_COOKIE, device_token(settings), max_age=DEVICE_DAYS * 86400, httponly=True, samesite="lax",
+                        secure=secure_cookies(settings), path="/api/admin")
 
 
 # --- sessions -----------------------------------------------------------------------------------------------------

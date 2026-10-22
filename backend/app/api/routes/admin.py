@@ -13,6 +13,7 @@ from app.security import admin_auth
 router = APIRouter(tags=["admin"])
 
 AdminCookie = Annotated[str | None, Cookie(alias=admin_auth.COOKIE)]
+DeviceCookie = Annotated[str | None, Cookie(alias=admin_auth.DEVICE_COOKIE)]
 
 
 class AdminLogin(StrictInput):
@@ -29,17 +30,20 @@ def admin_session(db: DbSession, runtime: Runtime, pc_admin: AdminCookie = None)
 
 
 @router.post("/admin/login")
-def admin_login(payload: AdminLogin, request: Request, response: Response, db: DbSession, runtime: Runtime) -> Any:
+def admin_login(payload: AdminLogin, request: Request, response: Response, db: DbSession, runtime: Runtime,
+                pc_admin_device: DeviceCookie = None) -> Any:
     key = admin_auth.client_key(request)
-    wait = admin_auth.retry_after(key)
+    device = admin_auth.known_device(runtime.settings, pc_admin_device)  # a browser that signed in before: its own limit
+    wait = admin_auth.retry_after(key, device)
     if wait is not None:
         return JSONResponse(status_code=status.HTTP_429_TOO_MANY_REQUESTS, headers={"Retry-After": str(wait)},
                             content={"detail": "Too many attempts. Please wait a few minutes and try again.", "code": "rate_limited"})
     if not admin_auth.check_credentials(runtime.settings, payload.username, payload.password):
-        admin_auth.record_failure(key)
+        admin_auth.record_failure(key, device)
         return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED,
                             content={"detail": "Wrong username or password.", "code": "invalid_credentials"})
     admin_auth.start_session(db, runtime.settings, response, payload.username.strip())
+    admin_auth.remember_device(runtime.settings, response)  # renewed on every sign-in; kept after logout
     return {"authenticated": True, "username": payload.username.strip()}
 
 
