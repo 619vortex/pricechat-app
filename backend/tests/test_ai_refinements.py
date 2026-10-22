@@ -169,3 +169,47 @@ def test_operator_preference_with_a_long_key_is_updated_not_duplicated(db: Sessi
     set_preference(db, key, "accept")  # used to look up the uncut key, miss, and insert the same 96-char key again
     rows = list(db.scalars(select(OperatorPreference)))
     assert len(rows) == 1 and rows[0].state == "accepted"
+
+
+# --- query embeddings ----------------------------------------------------------------------------------
+
+
+def test_a_chat_turn_embeds_its_query_once(client, fake_embedder: FakeEmbedder) -> None:  # type: ignore[no-untyped-def]
+    from app.db.base import utcnow
+    from app.db.session import SessionLocal
+    from app.models.telegram import TelegramMessage, TelegramSource
+
+    with SessionLocal() as db:  # some community data, so the community context is gathered too
+        src = TelegramSource(chat_id=-100555, display_name="Community")
+        db.add(src)
+        db.flush()
+        db.add(TelegramMessage(source_id=src.id, chat_id=-100555, message_id=1, author_id=1, sent_at=utcnow(), text="gm"))
+        db.commit()
+    queries: list[str] = []
+    inner = fake_embedder.embed
+
+    async def spy(texts, purpose="document"):  # type: ignore[no-untyped-def]
+        if purpose == "query":
+            queries.extend(texts)
+        return await inner(texts, purpose)
+
+    fake_embedder.embed = spy  # type: ignore[method-assign]
+    assert client.post("/api/agent/chat", json={"message": "What are members saying about funding?"}).status_code == 200
+    assert queries == ["What are members saying about funding?"]  # memory search and community context share it
+
+
+async def test_query_cache_remembers_failures_and_passes_documents_through() -> None:
+    from app.memory.embeddings import QueryEmbeddingCache
+
+    emb = FakeEmbedder()
+    cache = QueryEmbeddingCache(emb)
+    emb.error = ProviderUnavailableError("down")
+    for _ in range(2):
+        try:
+            await cache.embed(["q"], purpose="query")
+        except ProviderUnavailableError:
+            pass
+    assert emb.calls == 1  # one timeout per request, not one per caller
+    emb.error = None
+    await cache.embed(["a doc"]), await cache.embed(["a doc"])
+    assert emb.calls == 3 and cache.model == emb.model
