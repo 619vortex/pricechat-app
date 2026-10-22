@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { MarketHome } from "../pages/pokemon/MarketHome";
 import { GradesPage, MoversPage, RecentPage, SetsPage, TrendingPage, YearsPage } from "../pages/pokemon/ListPages";
 import { MarketShell, PageHeadProvider, PublicMarketProvider, Skeleton, type PageHead } from "../pages/pokemon/mx";
+import { isNoindexPath, PAGE_HEADS } from "./seo";
 import { useHead } from "./useHead";
 import { SiteFooter, SiteHeader, useStored } from "./Website";
 import { site } from "./websiteData";
@@ -30,12 +31,13 @@ const wait = (el: React.ReactNode) => <Suspense fallback={<p className="pf-muted
  * trading (Paper Exchange, Play-USDT QuickTrade, the simulated P2P marketplace) is retired: its addresses lead here. */
 export function PublicMarket() {
   const home = useStored<HomeData>("/api/website/home");
-  // each page may name itself (a card, a list, a Vault card); the canonical URL is always the page's own path
+  // each page may name itself (a card, a list, a Vault card: website/seo.ts); the canonical URL is the page's own path
+  // unless the page names another (a one-set landing page keeps its ?set=)
   const [page, setPage] = useState<PageHead | null>(null);
   const { pathname } = useLocation();
-  useHead({ title: page?.title ?? "Pokémon Market · Price Chat",
-            description: page?.description ?? "Vintage Pokémon card prices, market caps and verified sales, and the Price Chat Vault of vintage Japanese cards.",
-            path: pathname, siteUrl: home?.site_url ?? null, image: page?.image || site.shareImage });
+  useHead({ title: page?.title ?? PAGE_HEADS.pokemon.title, description: page?.description ?? PAGE_HEADS.pokemon.description,
+            path: page?.path ?? pathname, siteUrl: home?.site_url ?? null, image: page?.image || site.shareImage,
+            noindex: !!page?.noindex || isNoindexPath(pathname), jsonLd: page?.jsonLd });
   return (
     <div className="site site-market">
       <SiteHeader home={home} base="/" solid />

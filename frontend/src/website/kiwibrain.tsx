@@ -11,6 +11,11 @@ import { TimeMachine } from "./brain/timemachine";
 import { SignalToasts } from "./brain/toasts";
 import "@fontsource-variable/archivo/wdth.css";
 import "./brain/brain.css";
+import { pageHead } from "./seo";
+import { useHead } from "./useHead";
+import { useStored } from "./Website";
+import { site } from "./websiteData";
+import type { HomeData } from "./websiteLogic";
 
 /* KIWI BRAIN: the secret trading command center (/earn/brain). Four tabs over one live state; every number is a real record
    or real Hyperliquid data, and anything unavailable says so. Nothing here can place an order. A panel that crashes shows an
@@ -42,7 +47,8 @@ export function KiwiBrainPage() {
   const [replay, setReplay] = useState<number | null>(null);
   const [ask, setAsk] = useState(false);
   const [control, setControl] = useState(false);
-  useEffect(() => { document.title = "Kiwi Brain · Price Chat"; }, []);
+  const home = useStored<HomeData>("/api/website/home");
+  useHead({ ...pageHead("earn/brain"), siteUrl: home?.site_url ?? null, image: site.shareImage });
   useEffect(() => {
     const on = () => setTabState(hashTab());
     window.addEventListener("hashchange", on);

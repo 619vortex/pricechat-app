@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { memberApi, type Rank } from "./members";
 import { RankKiwi } from "./RankKiwi";
 import { SitePage } from "./community";
+import { pageHead } from "./seo";
 
 /**
  * Kiwi Passport rank rewards: every rank as a milestone (artwork, XP needed, the reward, locked / unlocked / claim), and the
@@ -327,7 +328,7 @@ export function LearnPage() {
       .catch((e) => setState({ error: e instanceof Error ? e.message : "Couldn't load.", status: (e as { status?: number }).status ?? 0 }));
   }, []);
   return (
-    <SitePage title="Beginner content" description="Exclusive beginner lessons for Kiwi Chicks and above." path="/learn">
+    <SitePage {...pageHead("learn")}>
       <section className="rw-learn">
         <h1>🐣 Beginner content</h1>
         <p className="site-muted">Your Kiwi Chick reward: lessons from Price Chat for getting started.</p>

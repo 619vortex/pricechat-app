@@ -4,6 +4,7 @@ import { RankKiwi } from "../../../website/RankKiwi";
 import { openLogin } from "../../../website/emailLogin";
 import { DASH, num, usd } from "../format";
 import { usePageHead } from "../mx";
+import { PAGE_HEADS, portfolioHead, portfolioJsonLd } from "../../../website/seo";
 import { portfolioApi, type Comment, type ExploreRow, type Holding, type PublicPortfolio } from "./api";
 import { CompositionBars, GradeBadge, HoldingSheet, HoldingTile, PortfolioFrame, ValueCell, errorText, useMember } from "./shared";
 
@@ -19,8 +20,9 @@ export function PublicPortfolioPage() {
     void portfolioApi.publicPortfolio(username, sort).then(setP).catch((e) => { setP(null); setErr(errorText(e)); });
   }, [username, sort]);
   useEffect(() => { if (member !== undefined) load(); }, [load, member]);
-  usePageHead(p ? { title: `${p.username}'s Pokémon Card Collection · Price Chat`,
-                    description: `${p.username}'s Pokémon portfolio on Price Chat: ${num(p.cards)} cards, ${num(p.unique_cards)} unique, ${num(p.graded)} graded.${p.bio ? ` ${p.bio}` : ""}` } : null);
+  // a private portfolio (its owner's view) or a missing one is never indexed; a public one names itself (website/seo.ts)
+  usePageHead(p ? { ...portfolioHead(p), noindex: p.visibility !== "public", jsonLd: p.visibility === "public" ? portfolioJsonLd(p.username) : undefined }
+    : p === null ? { title: "Portfolio not available · Price Chat", noindex: true } : null);
   const crumbs: [string, string | null][] = [["Markets", "/pokemon"], ["Collectors", "/pokemon/portfolios"], [username, null]];
   if (p === undefined) return <PortfolioFrame crumbs={crumbs}><p className="pf-muted">Loading…</p></PortfolioFrame>;
   if (p === null) return <PortfolioFrame crumbs={crumbs}><section className="pf-empty"><h1>Portfolio not available</h1><p>{err}</p><Link className="pf-btn" to="/pokemon/portfolios">Explore collectors</Link></section></PortfolioFrame>;
@@ -136,7 +138,7 @@ export function ExplorePage() {
   const [tab, setTab] = useState("top");
   const [data, setData] = useState<{ rows: unknown[]; note?: string } | null>(null);
   const [open, setOpen] = useState<Holding | null>(null);
-  usePageHead({ title: "Explore Pokémon Card Collectors · Price Chat", description: "Public Pokémon card portfolios from the Price Chat community: top collections, most cards, most valuable cards and featured collectors." });
+  usePageHead(PAGE_HEADS["pokemon/portfolios"]);
   useEffect(() => {
     setData(null);
     void portfolioApi.explore(tab).then(setData).catch(() => setData({ rows: [] }));

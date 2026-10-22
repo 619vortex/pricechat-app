@@ -1,6 +1,19 @@
+# Price Chat. Sitemaps: /sitemap.xml (an index of every public page, card, set, year, Vault card and public collector).
+# Personal pages that can be crawled (a private portfolio, the wallet...) say noindex themselves.
 User-agent: *
 Allow: /
 Disallow: /admin
 Disallow: /passport
+Disallow: /website/profile
+Disallow: /website/preview
+# The API is not for search results, but the public pages read these parts of it while they render
+Disallow: /api/
+Allow: /api/website/
+Allow: /api/pokemon/
+Allow: /api/market/
+Allow: /api/members/
+Disallow: /api/members/auth/
+Disallow: /api/members/me
+Disallow: /api/website/seo/og/
 
 Sitemap: https://pricechat.live/sitemap.xml

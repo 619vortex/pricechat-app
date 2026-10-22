@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SitePage } from "./community";
+import { pageHead } from "./seo";
 import { openLogin } from "./emailLogin";
 import { burst } from "./fx";
 import { memberApi, trackedRef, type RankArt } from "./members";
@@ -270,7 +271,7 @@ export function TradingBotPage() {
       wallet: s.wallet?.address ?? null, referral: !!s.flow?.hyperliquid || s.steps.hyperliquid === "done", group: !!s.access?.group,
       bot: !!s.access?.bot, botUsername: s.bot?.username ?? "cryptopricechatbot", groupUrl: s.access?.group_url ?? "https://t.me/botpricechat" };
     return (
-      <SitePage title="Kiwi trading bot" description="Kiwi's trading signals, your Hyperliquid positions and P&L, in one place." path="/earn">
+      <SitePage {...pageHead("earn")}>
         <div className="tb">
           <EarnTabs current="bot" />
           <TradingTerminal conn={conn} />
@@ -284,7 +285,7 @@ export function TradingBotPage() {
     );
   }
   return (
-    <SitePage title="Earn: Kiwi Trading Bot" description="Free for every Kiwi Passport member: connect Hyperliquid and start in paper trading." path="/earn">
+    <SitePage {...pageHead("earn")}>
       <div className="tb">
         <EarnTabs current="bot" />
         {!waiting && !s?.access?.bot && <section className="tb-hero">

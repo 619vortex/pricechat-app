@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { MemberApiError, memberApi } from "./members";
 import { SitePage } from "./community";
+import { pageHead } from "./seo";
 import "./vpn.css";
 
 /**
@@ -86,7 +87,7 @@ export function VpnPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   return (
-    <SitePage title="Kiwi VPN" description="A private WireGuard VPN for Kiwi Passport members. No traffic logs." path="/vpn">
+    <SitePage {...pageHead("vpn")}>
       <section className="vpn">
         <header className="vpn-head">
           <span className="vpn-shield" aria-hidden>🛡️</span>

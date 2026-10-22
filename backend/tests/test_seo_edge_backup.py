@@ -51,7 +51,7 @@ def test_sitemaps_list_pages_cards_and_only_public_profiles(client: TestClient, 
     db.commit()
     index = client.get("/api/website/seo/sitemap.xml")
     assert index.status_code == 200 and index.headers["content-type"].startswith("application/xml")
-    assert "/sitemaps/pages.xml" in index.text and "/sitemaps/cards-1.xml" in index.text
+    assert "/sitemaps/pages-1.xml" in index.text and "/sitemaps/cards-1.xml" in index.text
     assert "s-maxage=3600" in index.headers["cache-control"]
     pages = client.get("/api/website/seo/sitemaps/pages.xml").text
     assert "/pokemon</loc>" in pages and "/earn</loc>" in pages and "passport" not in pages
@@ -69,16 +69,16 @@ def test_link_previews_show_what_the_page_shows(client: TestClient, db: Session)
     catalog.ensure_catalog(db)
     card = db.scalar(select(PokemonCard).where(PokemonCard.name == "Charizard", PokemonCard.edition == "1st Edition"))
     html = client.get(f"/api/website/seo/og/pokemon/cards/{card.id}").text
-    assert "<title>Charizard · Base Set" in html and 'property="og:image"' in html and f"/pokemon/cards/{card.id}" in html
+    assert "<title>Charizard 1st Edition · 1999 Base Set" in html and 'property="og:image"' in html and f"/pokemon/cards/{card.id}" in html
     assert "1st Edition" in html
     private = members.create_member(db)
     private.username, private.username_key, private.public_profile = "secret_kiwi", "secret_kiwi", False
     db.commit()
     p = client.get("/api/website/seo/og/u/secret_kiwi").text
-    assert "secret_kiwi on Price Chat" not in p and "Everything has a price" in p  # a private profile gets the site preview
+    assert "secret_kiwi" not in p and "Everything has a price" in p and 'content="noindex"' in p  # a private profile gets the site preview
     private.public_profile = True
     db.commit()
-    assert "secret_kiwi on Price Chat" in client.get("/api/website/seo/og/u/secret_kiwi").text
+    assert "secret_kiwi · Kiwi Passport · Price Chat" in client.get("/api/website/seo/og/u/secret_kiwi").text
     earn = client.get("/api/website/seo/og/earn").text
     assert "Kiwi Trading Bot" in earn and "summary_large_image" in earn
     assert "<script" not in client.get("/api/website/seo/og/u/%3Cscript%3E").text  # names are escaped

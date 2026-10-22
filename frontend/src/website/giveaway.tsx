@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { SitePage } from "./community";
+import { pageHead } from "./seo";
 import { openLogin } from "./emailLogin";
 import { burst } from "./fx";
 import { memberApi, refreshSession, useSession } from "./members";
@@ -318,7 +319,7 @@ export function GiveawayPage() {
   }
 
   return (
-    <SitePage title="Pack Giveaway" description="Open free virtual Pokémon packs for fun and earn Kiwi XP. Virtual cards only: no money, no real cards." path="/giveaway">
+    <SitePage {...pageHead("giveaway")}>
       <section className="gw">
         <div className="gw-warning" role="note">
           <strong>⚠️ Just for fun: test feature.</strong> These are <b>virtual</b> packs and <b>virtual</b> cards. No real money is involved, nothing can be bought,

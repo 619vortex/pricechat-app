@@ -30,7 +30,7 @@
   ],
   "rewrites": [
     {
-      "source": "/:page(pokemon|u|website|earn|giveaway|leaderboard|learn|join|content)/:rest*",
+      "source": "/:page(pokemon|u|website|earn|giveaway|leaderboard|learn|join|content|vpn)/:rest*",
       "has": [
         {
           "type": "header",

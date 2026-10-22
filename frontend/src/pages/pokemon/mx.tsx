@@ -24,18 +24,25 @@ export function usePublicMarket(): boolean {
 }
 
 /** A public page's own title / description / share image (the website adds the canonical URL of the page's path). */
-export interface PageHead { title: string; description?: string; image?: string | null }
+export interface PageHead {
+  title: string; description?: string; image?: string | null;
+  path?: string; // canonical address when it isn't the page's own path (a landing page with its query, e.g. /pokemon?set=…)
+  noindex?: boolean; // private or owner-only: search engines must not index it
+  jsonLd?: Record<string, unknown>[]; // structured data, built with site paths (website/seo.ts)
+}
 const HeadCtx = createContext<((h: PageHead | null) => void) | null>(null);
 export const PageHeadProvider = HeadCtx.Provider;
-/** Sets this page's head on the public website; a no-op in the dashboard (no provider). `null` = not known yet. */
+/** Sets this page's head on the public website; a no-op in the dashboard (no provider). `null` = not known yet.
+ * Titles and descriptions come from website/seo.ts, which the backend's link previews match. */
 export function usePageHead(h: PageHead | null): void {
   const set = useContext(HeadCtx);
-  const title = h?.title, description = h?.description, image = h?.image;
+  const title = h?.title, description = h?.description, image = h?.image, path = h?.path, noindex = h?.noindex;
+  const ld = h?.jsonLd ? JSON.stringify(h.jsonLd) : undefined; // compared as text: a new array each render must not re-run this
   useEffect(() => {
     if (!set || !title) return;
-    set({ title, description, image });
+    set({ title, description, image, path, noindex, jsonLd: ld ? JSON.parse(ld) as Record<string, unknown>[] : undefined });
     return () => set(null);
-  }, [set, title, description, image]);
+  }, [set, title, description, image, path, noindex, ld]);
 }
 
 // --- watchlist (shared across views) -------------------------------------------------------------------------------

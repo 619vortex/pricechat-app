@@ -1,0 +1,880 @@
+{
+ "_note": "Shared test cases: frontend/src/website/seo.ts and backend/app/seo/heads.py must both produce exactly these. Regenerate only on purpose.",
+ "base": "https://pricechat.live",
+ "pages": {
+  "": {
+   "title": "Price Chat · Everything has a price.",
+   "description": "Markets. Money. Culture. Everything has a price. Short stories and conversations from Price Chat."
+  },
+  "content": {
+   "title": "All content · Price Chat",
+   "description": "Every Price Chat video and Short, newest first."
+  },
+  "join": {
+   "title": "Join Price Chat",
+   "description": "Sign in with Telegram, X or Google. Earn XP. Level up."
+  },
+  "leaderboard": {
+   "title": "Kiwi Leaderboard · Price Chat",
+   "description": "Price Chat members by Kiwi XP and invites."
+  },
+  "giveaway": {
+   "title": "Pack Giveaway · Price Chat",
+   "description": "Open free virtual Pokémon packs for fun and earn Kiwi XP. Virtual cards only: no money, no real cards."
+  },
+  "earn": {
+   "title": "Earn: Kiwi Trading Bot · Price Chat",
+   "description": "Free for every Kiwi Passport member: connect Hyperliquid and start in paper trading."
+  },
+  "earn/brain": {
+   "title": "Kiwi Brain · Price Chat",
+   "description": "How the Kiwi trading bot reads the market, signal by signal, live."
+  },
+  "earn/lunch": {
+   "title": "Earn: Lunch Bot · Price Chat",
+   "description": "Lunch Bot paper-trades pump.fun launches at real on-chain prices."
+  },
+  "earn/funding": {
+   "title": "Earn: Funding Arb · Price Chat",
+   "description": "Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them."
+  },
+  "learn": {
+   "title": "Beginner content · Price Chat",
+   "description": "Exclusive beginner lessons for Kiwi Chicks and above."
+  },
+  "vpn": {
+   "title": "Kiwi VPN · Price Chat",
+   "description": "A private WireGuard VPN for Kiwi Passport members. No traffic logs."
+  },
+  "website/privacy": {
+   "title": "Privacy · Price Chat",
+   "description": "How Price Chat handles member data, connected accounts and Kiwi XP."
+  },
+  "website/terms": {
+   "title": "Terms · Price Chat",
+   "description": "The rules of the Price Chat community and Kiwi XP."
+  },
+  "website/disclaimer": {
+   "title": "Disclaimer · Price Chat",
+   "description": "Price Chat content is for information and entertainment."
+  },
+  "website/contact": {
+   "title": "Contact · Price Chat",
+   "description": "How to reach Price Chat."
+  },
+  "pokemon": {
+   "title": "Pokémon Market · Price Chat",
+   "description": "Vintage Pokémon card prices, market caps and verified sales, and the Price Chat Vault of vintage Japanese cards."
+  },
+  "pokemon/trending": {
+   "title": "Trending Pokémon Cards · Price Chat",
+   "description": "The vintage Pokémon cards collectors are talking about and trading right now, with prices, 30-day moves and the reason each one is trending."
+  },
+  "pokemon/gainers": {
+   "title": "Pokémon Card Top Gainers · Price Chat",
+   "description": "The vintage Pokémon cards whose estimated price rose the most over the last 30 and 90 days, by grade."
+  },
+  "pokemon/losers": {
+   "title": "Pokémon Card Top Losers · Price Chat",
+   "description": "The vintage Pokémon cards whose estimated price fell the most over the last 30 and 90 days, by grade."
+  },
+  "pokemon/recent": {
+   "title": "Recently Sold Pokémon Cards · Price Chat",
+   "description": "Completed, verified sales of vintage Pokémon cards, newest first: date, grade, price and where each card sold."
+  },
+  "pokemon/years": {
+   "title": "Pokémon Card Market Cap by Year · Price Chat",
+   "description": "The estimated market cap of Pokémon cards by release year, its share of the whole market, 30- and 90-day moves and each year's top cards."
+  },
+  "pokemon/sets": {
+   "title": "Pokémon Card Sets by Market Cap · Price Chat",
+   "description": "Every tracked Pokémon card set ranked by estimated market cap, with 30-day moves, verified sales volume, population and its most valuable cards."
+  },
+  "pokemon/grades": {
+   "title": "Pokémon Card Market by Grade · Price Chat",
+   "description": "PSA, BGS and CGC grades side by side: cards priced, market cap, verified sales volume, known population and the most valuable card at each grade."
+  },
+  "pokemon/vault": {
+   "title": "Price Chat Vault · Vintage Japanese Pokémon Cards",
+   "description": "Hand-picked 1996–2002 Japanese Pokémon cards (Base, Jungle, Fossil, Rocket Gang, Gym, Neo, e-Card) with the seller's real photos and prices."
+  },
+  "pokemon/portfolios": {
+   "title": "Explore Pokémon Card Collectors · Price Chat",
+   "description": "Public Pokémon card portfolios from the Price Chat community: top collections, most cards, most valuable cards and featured collectors."
+  }
+ },
+ "noindex": {
+  "/passport": true,
+  "/website/profile": true,
+  "/pokemon/portfolio": true,
+  "/pokemon/portfolio/add": true,
+  "/pokemon/portfolio/phone/abc": true,
+  "/pokemon/wallet": true,
+  "/pokemon/vault/requests": true,
+  "/pokemon/portfolios": false,
+  "/pokemon/portfolio/u/ash": false,
+  "/pokemon/vault/5": false,
+  "/earn": false,
+  "/u/kiwi_fan": false
+ },
+ "cards": [
+  {
+   "detail": {
+    "card": {
+     "id": 7,
+     "name": "Charizard",
+     "set_name": "Base Set",
+     "card_number": "4/102",
+     "year": 1999,
+     "language": "English",
+     "edition": "1st Edition",
+     "image_url": "https://images.example/base1-4.png"
+    },
+    "valuations": [
+     {
+      "label": "PSA 10",
+      "market_price": 42000000,
+      "population": 121
+     },
+     {
+      "label": "PSA 9",
+      "market_price": 1500000,
+      "population": 900
+     }
+    ],
+    "other_grades": [
+     {
+      "label": "BGS 9.5",
+      "market_price": null,
+      "population": null
+     }
+    ]
+   },
+   "grade": "PSA 10",
+   "head": {
+    "title": "Charizard 1st Edition · 1999 Base Set 4/102 · PSA 10 Price · Price Chat",
+    "description": "Charizard 1st Edition (1999 Base Set 4/102): estimated PSA 10 price $420,000, PSA 10 population 121. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+    "image": "https://images.example/base1-4.png"
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Charizard 1st Edition (1999 Base Set 4/102)",
+     "url": "https://pricechat.live/pokemon/cards/7",
+     "category": "Pokémon trading card",
+     "brand": {
+      "@type": "Brand",
+      "name": "Pokémon"
+     },
+     "description": "Charizard 1st Edition (1999 Base Set 4/102): estimated PSA 10 price $420,000, PSA 10 population 121. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+     "image": "https://images.example/base1-4.png",
+     "mpn": "4/102",
+     "additionalProperty": [
+      {
+       "@type": "PropertyValue",
+       "name": "Estimated PSA 10 price (USD)",
+       "value": 420000.0
+      },
+      {
+       "@type": "PropertyValue",
+       "name": "PSA 10 population",
+       "value": 121
+      }
+     ]
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Base Set",
+       "item": "https://pricechat.live/pokemon?set=Base%20Set"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Charizard PSA 10",
+       "item": "https://pricechat.live/pokemon/cards/7"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "detail": {
+    "card": {
+     "id": 1201,
+     "name": "Lugia",
+     "set_name": "Neo Genesis",
+     "card_number": null,
+     "year": 2000,
+     "language": "Japanese",
+     "edition": "—",
+     "image_url": null
+    },
+    "valuations": [
+     {
+      "label": "PSA 9",
+      "market_price": 12345,
+      "population": null
+     }
+    ],
+    "other_grades": []
+   },
+   "grade": "PSA 9",
+   "head": {
+    "title": "Lugia · 2000 Japanese Neo Genesis · PSA 9 Price · Price Chat",
+    "description": "Lugia (2000 Japanese Neo Genesis): estimated PSA 9 price $123.45. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+    "image": null
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Lugia (2000 Japanese Neo Genesis)",
+     "url": "https://pricechat.live/pokemon/cards/1201",
+     "category": "Pokémon trading card",
+     "brand": {
+      "@type": "Brand",
+      "name": "Pokémon"
+     },
+     "description": "Lugia (2000 Japanese Neo Genesis): estimated PSA 9 price $123.45. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+     "additionalProperty": [
+      {
+       "@type": "PropertyValue",
+       "name": "Estimated PSA 9 price (USD)",
+       "value": 123.45
+      }
+     ]
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Neo Genesis",
+       "item": "https://pricechat.live/pokemon?set=Neo%20Genesis"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Lugia PSA 9",
+       "item": "https://pricechat.live/pokemon/cards/1201"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "detail": {
+    "card": {
+     "id": 33,
+     "name": "Blastoise",
+     "set_name": "Base Set",
+     "card_number": "2/102",
+     "year": 1999,
+     "language": "English",
+     "edition": "Unlimited",
+     "image_url": null
+    },
+    "valuations": [
+     {
+      "label": "PSA 10",
+      "market_price": 100050,
+      "population": 4321
+     }
+    ],
+    "other_grades": []
+   },
+   "grade": "CGC 10",
+   "head": {
+    "title": "Blastoise Unlimited · 1999 Base Set 2/102 · CGC 10 Price · Price Chat",
+    "description": "Blastoise Unlimited (1999 Base Set 2/102). Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+    "image": null
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Blastoise Unlimited (1999 Base Set 2/102)",
+     "url": "https://pricechat.live/pokemon/cards/33",
+     "category": "Pokémon trading card",
+     "brand": {
+      "@type": "Brand",
+      "name": "Pokémon"
+     },
+     "description": "Blastoise Unlimited (1999 Base Set 2/102). Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+     "mpn": "2/102"
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Base Set",
+       "item": "https://pricechat.live/pokemon?set=Base%20Set"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Blastoise CGC 10",
+       "item": "https://pricechat.live/pokemon/cards/33"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "detail": {
+    "card": {
+     "id": 34,
+     "name": "Venusaur",
+     "set_name": "Base Set & Friends",
+     "card_number": "15/102",
+     "year": 1999,
+     "language": "English",
+     "edition": "Shadowless",
+     "image_url": "https://images.example/v.png"
+    },
+    "valuations": [
+     {
+      "label": "PSA 10",
+      "market_price": 99999,
+      "population": null
+     }
+    ],
+    "other_grades": []
+   },
+   "grade": "PSA 10",
+   "head": {
+    "title": "Venusaur Shadowless · 1999 Base Set & Friends 15/102 · PSA 10 Price · Price Chat",
+    "description": "Venusaur Shadowless (1999 Base Set & Friends 15/102): estimated PSA 10 price $999.99. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+    "image": "https://images.example/v.png"
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Venusaur Shadowless (1999 Base Set & Friends 15/102)",
+     "url": "https://pricechat.live/pokemon/cards/34",
+     "category": "Pokémon trading card",
+     "brand": {
+      "@type": "Brand",
+      "name": "Pokémon"
+     },
+     "description": "Venusaur Shadowless (1999 Base Set & Friends 15/102): estimated PSA 10 price $999.99. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.",
+     "image": "https://images.example/v.png",
+     "mpn": "15/102",
+     "additionalProperty": [
+      {
+       "@type": "PropertyValue",
+       "name": "Estimated PSA 10 price (USD)",
+       "value": 999.99
+      }
+     ]
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Base Set & Friends",
+       "item": "https://pricechat.live/pokemon?set=Base%20Set%20%26%20Friends"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Venusaur PSA 10",
+       "item": "https://pricechat.live/pokemon/cards/34"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "landing": {
+  "sets": [
+   "Base Set",
+   "Neo Genesis",
+   "Team Rocket (Rocket Gang)",
+   "Base Set & Friends"
+  ],
+  "years": [
+   1999,
+   2000
+  ],
+  "cases": [
+   {
+    "search": "set=Base%20Set",
+    "head": {
+     "title": "Base Set Pokémon Card Prices · Price Chat",
+     "path": "/pokemon?set=Base%20Set",
+     "description": "Every Base Set Pokémon card ranked by estimated market value, with verified sales, population and 30-day moves."
+    }
+   },
+   {
+    "search": "set=Base+Set",
+    "head": {
+     "title": "Base Set Pokémon Card Prices · Price Chat",
+     "path": "/pokemon?set=Base%20Set",
+     "description": "Every Base Set Pokémon card ranked by estimated market value, with verified sales, population and 30-day moves."
+    }
+   },
+   {
+    "search": "set=Team%20Rocket%20(Rocket%20Gang)",
+    "head": {
+     "title": "Team Rocket (Rocket Gang) Pokémon Card Prices · Price Chat",
+     "path": "/pokemon?set=Team%20Rocket%20(Rocket%20Gang)",
+     "description": "Every Team Rocket (Rocket Gang) Pokémon card ranked by estimated market value, with verified sales, population and 30-day moves."
+    }
+   },
+   {
+    "search": "set=Base%20Set%20%26%20Friends",
+    "head": {
+     "title": "Base Set & Friends Pokémon Card Prices · Price Chat",
+     "path": "/pokemon?set=Base%20Set%20%26%20Friends",
+     "description": "Every Base Set & Friends Pokémon card ranked by estimated market value, with verified sales, population and 30-day moves."
+    }
+   },
+   {
+    "search": "year=1999",
+    "head": {
+     "title": "1999 Pokémon Card Prices · Price Chat",
+     "path": "/pokemon?year=1999",
+     "description": "Every Pokémon card released in 1999 ranked by estimated market value, with verified sales, population and 30-day moves."
+    }
+   },
+   {
+    "search": "year=2001",
+    "head": null
+   },
+   {
+    "search": "set=Base%20Set&grade=PSA%209",
+    "head": null
+   },
+   {
+    "search": "set=Nope",
+    "head": null
+   },
+   {
+    "search": "year=19999",
+    "head": null
+   },
+   {
+    "search": "",
+    "head": null
+   },
+   {
+    "search": "set=Base%20Set&set=Neo%20Genesis",
+    "head": {
+     "title": "Base Set Pokémon Card Prices · Price Chat",
+     "path": "/pokemon?set=Base%20Set",
+     "description": "Every Base Set Pokémon card ranked by estimated market value, with verified sales, population and 30-day moves."
+    }
+   }
+  ]
+ },
+ "vault": [
+  {
+   "card": {
+    "id": 5,
+    "title": "[NM] Lugia Pokemon Card Japanese Neo Genesis Holo",
+    "pokemon": "Lugia",
+    "set_name": "Neo Genesis",
+    "year": 2000,
+    "condition": "Ungraded",
+    "price": 45000,
+    "currency": "USD",
+    "availability": "available",
+    "url": "https://www.ebay.test/itm/1",
+    "images": [
+     "https://i.ebayimg.test/a/s-l1600.jpg",
+     "https://i.ebayimg.test/b/s-l1600.jpg"
+    ]
+   },
+   "head": {
+    "title": "Lugia · Neo Genesis · $450.00 · Price Chat Vault",
+    "description": "[NM] Lugia Pokemon Card Japanese Neo Genesis Holo. Ungraded 2000 Japanese Pokémon card in the Price Chat Vault: the seller's own photos and price, re-checked every few hours.",
+    "image": "https://i.ebayimg.test/a/s-l1600.jpg"
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Lugia",
+     "description": "[NM] Lugia Pokemon Card Japanese Neo Genesis Holo",
+     "url": "https://pricechat.live/pokemon/vault/5",
+     "category": "Pokémon trading card",
+     "image": [
+      "https://i.ebayimg.test/a/s-l1600.jpg",
+      "https://i.ebayimg.test/b/s-l1600.jpg"
+     ],
+     "offers": {
+      "@type": "Offer",
+      "price": "450.00",
+      "priceCurrency": "USD",
+      "url": "https://www.ebay.test/itm/1",
+      "availability": "https://schema.org/InStock"
+     }
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Vault",
+       "item": "https://pricechat.live/pokemon/vault"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Lugia",
+       "item": "https://pricechat.live/pokemon/vault/5"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "card": {
+    "id": 6,
+    "title": "[NM] Gengar Pokemon Card Japanese No.094 Vintage Holo",
+    "pokemon": null,
+    "set_name": null,
+    "year": null,
+    "condition": null,
+    "price": 1234500,
+    "currency": "JPY",
+    "availability": "sold_out",
+    "url": null,
+    "images": []
+   },
+   "head": {
+    "title": "Gengar · ¥12,345 · Price Chat Vault",
+    "description": "[NM] Gengar Pokemon Card Japanese No.094 Vintage Holo. Ungraded Japanese Pokémon card in the Price Chat Vault: the seller's own photos and price, re-checked every few hours.",
+    "image": null
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Gengar",
+     "description": "[NM] Gengar Pokemon Card Japanese No.094 Vintage Holo",
+     "url": "https://pricechat.live/pokemon/vault/6",
+     "category": "Pokémon trading card",
+     "offers": {
+      "@type": "Offer",
+      "price": "12345.00",
+      "priceCurrency": "JPY",
+      "url": "https://pricechat.live/pokemon/vault/6",
+      "availability": "https://schema.org/SoldOut"
+     }
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Vault",
+       "item": "https://pricechat.live/pokemon/vault"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Gengar",
+       "item": "https://pricechat.live/pokemon/vault/6"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "card": {
+    "id": 9,
+    "title": "Mew Pokémon Japanese Promo",
+    "pokemon": null,
+    "set_name": "Promo",
+    "year": 1997,
+    "condition": "Used",
+    "price": null,
+    "currency": "EUR",
+    "availability": "unknown",
+    "url": null,
+    "images": [
+     "https://i.ebayimg.test/m.jpg"
+    ]
+   },
+   "head": {
+    "title": "Mew · Promo · Price Chat Vault",
+    "description": "Mew Pokémon Japanese Promo. Used 1997 Japanese Pokémon card in the Price Chat Vault: the seller's own photos and price, re-checked every few hours.",
+    "image": "https://i.ebayimg.test/m.jpg"
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Mew",
+     "description": "Mew Pokémon Japanese Promo",
+     "url": "https://pricechat.live/pokemon/vault/9",
+     "category": "Pokémon trading card",
+     "image": [
+      "https://i.ebayimg.test/m.jpg"
+     ]
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Vault",
+       "item": "https://pricechat.live/pokemon/vault"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Mew",
+       "item": "https://pricechat.live/pokemon/vault/9"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "card": {
+    "id": 10,
+    "title": "[EX] Dark Charizard Japanese Rocket Gang",
+    "pokemon": "Dark Charizard",
+    "set_name": "Team Rocket (Rocket Gang)",
+    "year": 1997,
+    "condition": "Ungraded",
+    "price": 123456,
+    "currency": "EUR",
+    "availability": "ended",
+    "url": null,
+    "images": []
+   },
+   "head": {
+    "title": "Dark Charizard · Team Rocket (Rocket Gang) · €1,234.56 · Price Chat Vault",
+    "description": "[EX] Dark Charizard Japanese Rocket Gang. Ungraded 1997 Japanese Pokémon card in the Price Chat Vault: the seller's own photos and price, re-checked every few hours.",
+    "image": null
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "Product",
+     "name": "Dark Charizard",
+     "description": "[EX] Dark Charizard Japanese Rocket Gang",
+     "url": "https://pricechat.live/pokemon/vault/10",
+     "category": "Pokémon trading card",
+     "offers": {
+      "@type": "Offer",
+      "price": "1234.56",
+      "priceCurrency": "EUR",
+      "url": "https://pricechat.live/pokemon/vault/10",
+      "availability": "https://schema.org/Discontinued"
+     }
+    },
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Vault",
+       "item": "https://pricechat.live/pokemon/vault"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "Dark Charizard",
+       "item": "https://pricechat.live/pokemon/vault/10"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "portfolios": [
+  {
+   "portfolio": {
+    "username": "ash",
+    "cards": 1234,
+    "unique_cards": 10,
+    "graded": 3,
+    "bio": "Vintage only."
+   },
+   "head": {
+    "title": "ash's Pokémon Card Collection · Price Chat",
+    "description": "ash's Pokémon portfolio on Price Chat: 1,234 cards, 10 unique, 3 graded. Vintage only."
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Collectors",
+       "item": "https://pricechat.live/pokemon/portfolios"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "ash",
+       "item": "https://pricechat.live/pokemon/portfolio/u/ash"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "portfolio": {
+    "username": "misty",
+    "cards": 1,
+    "unique_cards": 1,
+    "graded": 0,
+    "bio": ""
+   },
+   "head": {
+    "title": "misty's Pokémon Card Collection · Price Chat",
+    "description": "misty's Pokémon portfolio on Price Chat: 1 cards, 1 unique, 0 graded."
+   },
+   "jsonLd": [
+    {
+     "@context": "https://schema.org",
+     "@type": "BreadcrumbList",
+     "itemListElement": [
+      {
+       "@type": "ListItem",
+       "position": 1,
+       "name": "Markets",
+       "item": "https://pricechat.live/pokemon"
+      },
+      {
+       "@type": "ListItem",
+       "position": 2,
+       "name": "Collectors",
+       "item": "https://pricechat.live/pokemon/portfolios"
+      },
+      {
+       "@type": "ListItem",
+       "position": 3,
+       "name": "misty",
+       "item": "https://pricechat.live/pokemon/portfolio/u/misty"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "profiles": [
+  {
+   "profile": {
+    "username": "kiwi_fan",
+    "joined_at": "2026-03-14T10:00:00+00:00",
+    "rank": {
+     "name": "Kiwi Chick",
+     "level": 2
+    },
+    "badges": [
+     {
+      "key": "a"
+     },
+     {
+      "key": "b"
+     }
+    ]
+   },
+   "head": {
+    "title": "kiwi_fan · Kiwi Passport · Price Chat",
+    "description": "Kiwi Chick · Kiwi Rank 2 · 2 badges · in Price Chat since 2026-03."
+   }
+  },
+  {
+   "profile": {
+    "username": "newbie",
+    "joined_at": "2026-10-01T00:00:00+00:00",
+    "rank": {
+     "name": "Egg",
+     "level": 1
+    },
+    "badges": []
+   },
+   "head": {
+    "title": "newbie · Kiwi Passport · Price Chat",
+    "description": "Egg · Kiwi Rank 1 · in Price Chat since 2026-10."
+   }
+  }
+ ]
+}

@@ -17,6 +17,7 @@ import { burst } from "./fx";
 import { reducedMotion } from "./motion";
 import { playSound, warmSounds } from "./sound";
 import { useStored } from "./Website";
+import { profileHead } from "./seo";
 import type { HomeData } from "./websiteLogic";
 import { PassportPlay } from "./play";
 import { WatchEarn } from "./watch";
@@ -144,7 +145,7 @@ export function ProfilePage() {
 
   if (!p)
     return (
-      <SitePage title="Kiwi Passport" description="Your Price Chat identity." path="/profile">
+      <SitePage title="Kiwi Passport" description="Your Price Chat identity." path="/passport" noindex>
         {error ? (
           <div className="site-empty" role="alert">
             <p className="site-error">{error}</p>
@@ -160,7 +161,7 @@ export function ProfilePage() {
     ...(roles.includes("MANAGER") ? [["manager", "🧭 Manager"]] : [])] as [string, string][];
   const shownTab = tabs.some(([k]) => k === tab) ? tab : "passport";
   return (
-    <SitePage title="Kiwi Passport" description="Your Price Chat rank, XP and today's missions." path="/profile">
+    <SitePage title="Kiwi Passport" description="Your Price Chat rank, XP and today's missions." path="/passport" noindex>
       {welcome && !member.username_chosen && (
         <p className="site-banner" role="status">Welcome to Price Chat. Pick your name just below: it's how the community will see you.</p>
       )}
@@ -611,7 +612,7 @@ export function PublicProfilePage() {
   const level = p?.rank.level ?? 0;
   const isMe = !!viewer && !!p && viewer.username.toLowerCase() === p.username.toLowerCase();
   return (
-    <SitePage title={p ? `${p.username} · Kiwi Passport` : "Kiwi Passport"} description="A Price Chat member." path={`/u/${username}`}>
+    <SitePage {...(p ? profileHead(p) : { title: "Kiwi Passport", description: "A Price Chat member." })} path={`/u/${p?.username ?? username}`} noindex={p === null}>
       {p === undefined ? (
         <p className="site-empty">Loading…</p>
       ) : p === null ? (
