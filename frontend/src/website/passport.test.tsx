@@ -518,6 +518,19 @@ describe("Kiwi Passport: Telegram chat bar, honest daily status, compact VIP", (
     expect(calls.some((c) => c.startsWith("POST"))).toBe(false);  // opening the Passport never pays or sends anything
   });
 
+  it("still lets members invite friends to the Telegram (it pays XP): inside Invite friends, not a card of its own", async () => {
+    serveV3({ ...base(v3()), "/api/members/me/crew": crew });
+    const { container } = await show(<ProfilePage />);
+    expect(calls).not.toContain("GET /api/members/me/crew");  // asked only when the member opens Invite friends
+    await act(async () => screen.getByText("👥 Invite friends").click());
+    for (let i = 0; i < 2; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
+    const tg = screen.getByRole("dialog").querySelector(".iv-tg")!;
+    expect(tg.querySelector("a")!.getAttribute("href")).toBe(crew.share_url);
+    expect(tg.textContent).toContain("+100 XP for each new member who joins, and +500 XP bonus at 5 friends");
+    expect(tg.textContent).toContain("3 joined · 1 waiting");
+    expect(container.querySelector(".crew")).toBeNull();
+  });
+
   it("shows Telegram chat as a Daily Missions row next to the others, never as a separate box", async () => {
     const p = v3({ telegram: { username: "kiwi", messages_today: 4, eligible_today: 3, xp_today: 12, daily_cap: 50, active_days_7d: 2,
                               last_verified_at: null, next: "", note: "", messages_total: 120, xp_total: 300 } });
