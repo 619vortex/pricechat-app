@@ -42,6 +42,7 @@ class FakeNode:
         self.address = address
         self.peers: dict[str, dict[str, Any]] = {}
         self.fail = False
+        self.adblock: bool | None = None  # None: an agent that doesn't report it
         self.calls: list[tuple[str, str]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -52,9 +53,12 @@ class FakeNode:
         path = request.url.path
         self.calls.append((request.method, path))
         if path == "/v1/status":
-            return httpx.Response(200, json={"public_key": self.server_key, "listen_port": 51820, "endpoint_host": "203.0.113.10",
-                                             "address": self.address, "dns": ["1.1.1.1", "1.0.0.1"],
-                                             "peers": [{"public_key": k, **v} for k, v in self.peers.items()]})
+            body = {"public_key": self.server_key, "listen_port": 51820, "endpoint_host": "203.0.113.10", "address": self.address,
+                    "dns": ["10.66.0.1", "1.1.1.1"] if self.adblock else ["1.1.1.1", "1.0.0.1"],
+                    "peers": [{"public_key": k, **v} for k, v in self.peers.items()]}
+            if self.adblock is not None:
+                body["adblock"] = self.adblock
+            return httpx.Response(200, json=body)
         key = path.removeprefix("/v1/peers/").replace("-", "+").replace("_", "/")
         if request.method == "PUT":
             self.peers[key] = {"allowed_ip": json.loads(request.content)["allowed_ip"], "rx_bytes": 0, "tx_bytes": 0, "latest_handshake": 0}
@@ -125,7 +129,9 @@ def test_closed_and_rank_gate(client: TestClient, db: Session, fake: FakeNode) -
     open_vpn(db)
     r = client.get("/api/members/vpn").json()
     assert r["eligible"] and r["reason"] is None and r["required_rank"] == "Warrior Kiwi"
-    assert r["servers"] == [{"id": server.id, "name": "Frankfurt", "region": "Europe", "country_code": "DE", "online": True, "load": 0.0}]
+    assert r["servers"] == [{"id": server.id, "name": "Frankfurt", "region": "Europe", "country_code": "DE", "online": True, "load": 0.0,
+                            "adblock": False, "recommended": True}]
+    assert r["usage"]["used_bytes"] == 0 and r["usage"]["cap_bytes"] == 0 and r["usage"]["paused_until"] is None
     r = signed_in(client, db, low).get("/api/members/vpn").json()
     assert not r["eligible"] and "Warrior Kiwi" in r["reason"]
     assert client.post("/api/members/vpn/devices", json={"name": "phone", "server_id": server.id}).status_code == 403
@@ -244,12 +250,15 @@ def test_admin_routes(client: TestClient, db: Session, fake: FakeNode) -> None:
     assert row.cert_sha256 == FP and TOKEN not in row.agent_token_enc and vpn.agent_token(row) == TOKEN
     assert row.public_key == fake.server_key and row.address == "10.66.0.1/16"
     o = client.get("/api/vpn/admin/overview").json()
-    assert o["settings"] == {"enabled": False, "min_rank": "warrior", "max_devices": 3}
-    assert o["ranks"][0] == "egg" and "warrior" in o["ranks"]
+    assert o["settings"] == {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0}
+    assert o["ranks"][0] == {"key": "egg", "name": "The Egg"} and {"key": "warrior", "name": "Warrior Kiwi"} in o["ranks"]
+    assert [r["key"] for r in o["ranks"]] == [r.key for r in ledger.ranks(db)]  # ladder order
     assert o["servers"][0]["online"] is True and o["servers"][0]["capacity"] == 50 and "agent_token" not in json.dumps(o)
     assert o["totals"] == {"devices": 0, "members": 0, "active_24h": 0}
     assert client.put("/api/vpn/admin/settings", json={"min_rank": "knight", "max_devices": 5, "enabled": True}).json() == \
-        {"enabled": True, "min_rank": "knight", "max_devices": 5}
+        {"enabled": True, "min_rank": "knight", "max_devices": 5, "monthly_cap_gb": 0}
+    assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": 50}).json()["monthly_cap_gb"] == 50
+    assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": -1}).status_code == 422
     assert db.scalar(select(Entitlement.required_rank).where(Entitlement.key == "kiwi_vpn")) == 6  # the entitlement follows
     assert client.put("/api/vpn/admin/settings", json={"min_rank": "nope"}).status_code == 400
     assert client.put("/api/vpn/admin/settings", json={"max_devices": 11}).status_code == 422
@@ -295,7 +304,7 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
     drop.status = "banned"
     db.commit()
     out = vpn.sync_all(db)
-    assert out == {"servers": 1, "online": 1, "updated": 1, "readded": 1, "removed": 1, "revoked": 1, "errors": 0}
+    assert out == {"servers": 1, "online": 1, "updated": 1, "readded": 1, "removed": 1, "revoked": 1, "errors": 0, "paused": 0, "resumed": 0}
     assert set(fake.peers) == {keep_key, lost_key} and fake.peers[lost_key]["allowed_ip"] == f"{d_lost.ip}/32"
     db.expire_all()
     assert db.get(VpnDevice, drop_id) is None and drop_key not in fake.peers
@@ -444,3 +453,137 @@ def test_vpn_command_private_only_and_sends_the_config(db: Session, fake: FakeNo
     db.commit()
     asyncio.run(bot.handle_command(db, tg, 555, 555, "/vpn add phone"))
     assert "Warrior Kiwi" in tg.sent[-1][2] and db.scalars(select(VpnDevice)).all() == []
+
+
+# --- best server, ad blocking, the monthly cap ----------------------------------------------------------------------
+
+
+def test_recommended_server_and_the_bot_uses_it(client: TestClient, db: Session, fake: FakeNode) -> None:
+    a, b, c = add_server(db, fake, "A"), add_server(db, fake, "B"), add_server(db, fake, "C")
+    open_vpn(db, max_devices=10)
+    m = member_at(db, "warrior")
+    rec = lambda: [s["id"] for s in signed_in(client, db, m).get("/api/members/vpn").json()["servers"] if s["recommended"]]  # noqa: E731
+    assert rec() == [a.id]  # all empty: a tie, the lowest id wins
+    vpn.create_device(db, m, "x", a.id)
+    assert rec() == [b.id]
+    b.online = False  # offline servers are never recommended
+    db.commit()
+    assert rec() == [c.id]
+    for v in (a, c):
+        v.online = False
+    db.commit()
+    assert rec() == []  # nothing online: none
+    for v in (a, b, c):
+        v.online = True
+    c.capacity = 1
+    vpn.create_device(db, m, "y", c.id)
+    db.commit()
+    assert rec() == [b.id]  # c is full; a has 1 / 100, b is empty
+    members.link_identity(db, m, "telegram", "4242", "kiwi", None)
+    db.commit()
+    tg = DocTG()
+    asyncio.run(bot.handle_command(db, tg, 4242, 4242, "/vpn add laptop"))
+    assert tg.sent[-1][0] == "doc" and db.scalars(select(VpnDevice).where(VpnDevice.name == "laptop")).one().server_id == b.id
+    asyncio.run(bot.handle_command(db, tg, 4242, 4242, "/vpn"))
+    assert f"{a.id} A (recommended)" in tg.sent[-1][2]  # a and b now both 1 / 100: the lowest id
+
+
+def test_adblock_server_uses_its_own_dns(client: TestClient, db: Session, fake: FakeNode) -> None:
+    plain = add_server(db, fake, "Plain")
+    assert plain.adblock is False  # the agent doesn't report it: no blocking
+    fake.adblock = True
+    shield = add_server(db, fake, "Shield")
+    assert shield.adblock is True and shield.dns == ["10.66.0.1", "1.1.1.1"]
+    open_vpn(db)
+    c = signed_in(client, db, member_at(db, "warrior"))
+    servers = {s["name"]: s for s in c.get("/api/members/vpn").json()["servers"]}
+    assert servers["Shield"]["adblock"] is True and servers["Plain"]["adblock"] is False
+    cfg = c.post("/api/members/vpn/devices", json={"name": "p", "server_id": shield.id}).json()["config"]
+    assert "DNS = 10.66.0.1\n" in cfg  # only the server's own (blocking) resolver
+    assert client.get("/api/vpn/admin/overview").json()["servers"][1]["adblock"] is True
+    fake.adblock = False  # the agent turned it off: the next sync follows
+    vpn.sync_all(db)
+    db.refresh(shield)
+    assert shield.adblock is False
+    cfg = c.post("/api/members/vpn/devices", json={"name": "q", "server_id": plain.id}).json()["config"]
+    assert "DNS = 1.1.1.1, 1.0.0.1" in cfg
+
+
+def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Session, fake: FakeNode) -> None:
+    server = add_server(db, fake)
+    open_vpn(db, max_devices=5, monthly_cap_gb=1)
+    m, other = member_at(db, "warrior", "heavy"), member_at(db, "warrior", "light")
+    d1, d2 = vpn.create_device(db, m, "phone", server.id)[0], vpn.create_device(db, m, "laptop", server.id)[0]
+    d3 = vpn.create_device(db, other, "phone", server.id)[0]
+    k1, k2, k3, id1 = d1.public_key, d2.public_key, d3.public_key, d1.id
+    now = dt.datetime(2026, 10, 20, 12, tzinfo=dt.timezone.utc)
+    fake.peers[k1].update(rx_bytes=600 * 1024 ** 2, tx_bytes=10)
+    fake.peers[k2].update(rx_bytes=500 * 1024 ** 2)  # the two devices together pass 1 GB
+    fake.peers[k3].update(rx_bytes=100)
+    out = vpn.sync_all(db, now)
+    assert out["paused"] == 2 and out["resumed"] == 0
+    assert k1 not in fake.peers and k2 not in fake.peers and k3 in fake.peers  # peers removed at the node, devices kept
+    db.expire_all()
+    assert db.get(VpnDevice, id1).paused_until == dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+    use = vpn.usage_out(db, m, vpn.settings(db), now)
+    assert use["used_bytes"] == 1100 * 1024 ** 2 + 10 and use["cap_bytes"] == 1024 ** 3 and use["paused_until"].startswith("2026-11-01")
+    c = signed_in(client, db, m)
+    body = c.get("/api/members/vpn").json()
+    assert len(body["devices"]) == 2 and body["usage"]["cap_bytes"] == 1024 ** 3
+    r = c.post("/api/members/vpn/devices", json={"name": "tablet", "server_id": server.id})
+    assert r.status_code == 403 and "1 GB" in r.json()["detail"]
+    # still paused on the next sync: the peers stay off
+    assert vpn.sync_all(db, now + dt.timedelta(minutes=5))["readded"] == 0 and k1 not in fake.peers
+    # the month rolls over: re-added automatically, counting from zero
+    out = vpn.sync_all(db, dt.datetime(2026, 11, 1, 0, 5, tzinfo=dt.timezone.utc))
+    assert out["readded"] == 2 and out["paused"] == 0 and k1 in fake.peers and k2 in fake.peers
+    db.expire_all()
+    assert db.get(VpnDevice, id1).paused_until is None
+    # the owner removes the cap mid-month: a paused member resumes on the next sync
+    vpn.sync_all(db, now)  # (back in October's numbers: paused again)
+    assert k1 not in fake.peers
+    vpn.update_settings(db, {"monthly_cap_gb": 0})
+    assert vpn.sync_all(db, now)["resumed"] == 2 and k1 in fake.peers
+
+
+# --- owner alerts for servers ---------------------------------------------------------------------------------------
+
+
+async def test_owner_alerts_offline_recovered_and_nearly_full(db: Session, fake: FakeNode) -> None:
+    from app import alerts
+    from tests.test_owner_alerts import SETTINGS, Bot
+
+    tg = Bot()
+    alerts.settings_row(db).telegram_chat = "424242"
+    db.commit()
+    server = add_server(db, fake)
+    open_vpn(db, max_devices=10)
+    run = lambda: alerts.check_vpn_servers(db, settings=SETTINGS, transport=tg.transport)  # noqa: E731
+    fake.fail = True
+    await asyncio.to_thread(vpn.sync_all, db)
+    assert await run() == {"vpn_offline": 0, "vpn_recovered": 0, "vpn_full": 0}  # one failed sync: could be a blip
+    for _ in range(3):  # two in a row: one message, however long it stays down
+        await asyncio.to_thread(vpn.sync_all, db)
+        await run()
+    assert len(tg.sent) == 1 and "Kiwi VPN server offline" in tg.sent[0]["text"] and "Frankfurt" in tg.sent[0]["text"]
+    fake.fail = False
+    await asyncio.to_thread(vpn.sync_all, db)
+    assert (await run())["vpn_recovered"] == 1 and "online again" in tg.sent[-1]["text"]
+    await run()
+    assert len(tg.sent) == 2  # recovered once
+    # nearly full: once past 90%, again only after it dropped below 80%
+    server.capacity = 10
+    db.commit()
+    m = member_at(db, "warrior")
+    devs = [vpn.create_device(db, m, f"d{i}", server.id)[0] for i in range(9)]
+    assert (await run())["vpn_full"] == 1 and "nearly full" in tg.sent[-1]["text"] and "9 of 10" in tg.sent[-1]["text"]
+    vpn.delete_device(db, m, devs[0].id)  # 80%: not re-armed yet
+    await run()
+    vpn.create_device(db, m, "again", server.id)
+    assert (await run())["vpn_full"] == 0 and len(tg.sent) == 3
+    for d in devs[1:3]:
+        vpn.delete_device(db, m, d.id)  # 70%: re-armed
+    await run()
+    for i in range(2):
+        vpn.create_device(db, m, f"e{i}", server.id)
+    assert (await run())["vpn_full"] == 1 and len(tg.sent) == 4
