@@ -76,6 +76,7 @@ describe("Earn › Arbitrage", () => {
     expect(screen.getByText(/1,234 launches seen today/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "$HOT" }).getAttribute("href")).toBe("https://pump.fun/coin/m1");
     expect(screen.getByText("+48.5%")).toBeTruthy();
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(expect.arrayContaining(["In (SOL)", "Now / out (SOL)"]));  // units on the trade table
     expect(screen.getByText(/Buy 0.1 SOL when buyers have put at least 2 SOL in/)).toBeTruthy();
     expect(screen.getByText(/1.25% per curve trade, 0.3% per pool trade, 0.001 SOL per transaction/)).toBeTruthy();
     expect(SHOW_GRADUATIONS).toBe(false);
