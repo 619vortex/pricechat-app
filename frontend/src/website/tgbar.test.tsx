@@ -24,6 +24,11 @@ describe("Telegram chat bar", () => {
     expect(played).toEqual([]);  // first visit: nothing to convert
   });
 
+  it("says when today's chat XP is maxed, so more messages aren't expected to pay", () => {
+    const { container } = render(<TelegramBar t={t({ xp_today: 50 })} />);
+    expect(container.textContent).toContain("4 today · 50 / 50 XP · max for today ✓");
+  });
+
   it("converts the messages sent since the last visit into XP: coins while counting, then the XP pops", () => {
     localStorage.setItem("pc-tg-seen", JSON.stringify({ m: 115, xp: 290 }));
     const { container } = render(<TelegramBar t={t({})} />);

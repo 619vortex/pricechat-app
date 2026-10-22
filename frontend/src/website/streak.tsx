@@ -103,7 +103,8 @@ export function StreakCard({ s }: { s: StreakView }) {
           </li>
         ))}
       </ol>
-      <span className={`stk-state${s.done_today ? " is-done" : ""}`}>{s.done_today ? "Today ✓" : `+${s.next_reward} XP today`}</span>
+      <span className={`stk-state${s.done_today ? " is-done" : ""}`}
+            title={s.done_today ? "Today counts for your streak" : `Finish any task today (a mission, a video, a post, a pack) to keep your streak: +${s.next_reward} XP`}>{s.done_today ? "Today ✓" : `+${s.next_reward} XP today`}</span>
       {pop && <span className="stk-pop" role="status">{pop}</span>}
     </div>
   );
