@@ -60,6 +60,16 @@ def test_main_chat_by_id_and_never_when_it_is_also_bot_chat(db: Session) -> None
     assert asyncio.run(autodelete.run(db, FakeTG()))["queued"] == 0
 
 
+def test_a_burst_reads_the_settings_once(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    chats(db)
+    reads = []
+    real = signals.settings
+    monkeypatch.setattr(signals, "settings", lambda d: reads.append(1) or real(d))
+    for i in range(50):
+        autodelete.note(sent(-100, i + 1, "thepricechat"))
+    assert asyncio.run(autodelete.run(db, FakeTG()))["queued"] == 50 and len(reads) <= 2
+
+
 def test_off_and_telegram_trouble(db: Session) -> None:
     chats(db, minutes=0)
     autodelete.note(sent(-100, 1, "thepricechat"))

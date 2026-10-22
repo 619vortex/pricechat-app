@@ -52,19 +52,18 @@ def _matches(setting: str, chat_id: int, username: str) -> bool:
     return bool(s) and (s == str(chat_id) or (bool(username) and s.lstrip("@") == username))
 
 
-def is_main_chat(db: Session, chat_id: int, username: str) -> bool:
-    """The main chat, and never Bot Chat (publish_chat), even if both settings name the same chat."""
-    st = signals.settings(db)
+def is_main_chat(st: Any, chat_id: int, username: str) -> bool:
+    """The main chat, and never Bot Chat (publish_chat), even if both settings name the same chat. `st`: TsSettings."""
     return _matches(st.main_chat or "", chat_id, username) and not _matches(st.publish_chat or "", chat_id, username)
 
 
 async def run(db: Session, client: Any, now: datetime | None = None) -> dict[str, int]:
     now = now or utcnow()
-    minutes = config(db)["minutes"]
+    st, minutes = signals.settings(db), config(db)["minutes"]  # read once, not per noted message
     queued = 0
     while _sent:
         chat_id, username, message_id, at = _sent.popleft()
-        if minutes > 0 and is_main_chat(db, chat_id, username):
+        if minutes > 0 and is_main_chat(st, chat_id, username):
             db.add(TsAutoDelete(chat_id=chat_id, message_id=message_id, delete_at=at + timedelta(minutes=minutes)))
             queued += 1
     db.commit()
