@@ -119,7 +119,8 @@ def test_a_chart_photo_fails_like_every_other_send(status: int, body: dict[str, 
         with pytest.raises(error) as exc:
             asyncio.run(c.send_photo(-100, b"png", "caption", html=True))
         assert "123:abc" not in str(exc.value)
-        asyncio.run(c.send_photo(-100, b"png", "caption", buttons=[[{"text": "x", "callback_data": "y"}]], html=True))
+        # (another chat: after a 429 the client waits out retry_after for -100 itself)
+        asyncio.run(c.send_photo(-101, b"png", "caption", buttons=[[{"text": "x", "callback_data": "y"}]], html=True))
         assert b'name="photo"' in calls[-1].content and b"inline_keyboard" in calls[-1].content
         assert [m[2] for m in autodelete._sent] == [5]
     finally:
