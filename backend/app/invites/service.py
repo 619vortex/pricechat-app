@@ -304,6 +304,7 @@ async def poll(db: Session, settings: Settings) -> dict[str, int]:
                         out["messages"] += 1
                         if not first and has_keyword(s, m.text) and consent(db, m.sender_id, a.id, m.username, "keyword"):
                             out["opt_ins"] += 1  # only keywords written after the group was approved count
+                    db.commit()  # this group's batch is saved before the next Telegram read: no write held open across it
                 for m in sorted(await g.private_messages(since, 100), key=lambda m: m.at):
                     contacted = db.scalar(select(InviteSend).where(InviteSend.user_id == m.sender_id, InviteSend.method.in_(("dm", "personal")),
                                                                    InviteSend.status.in_(("sent", "opened"))).order_by(InviteSend.id.desc()))
