@@ -831,12 +831,8 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
         if size <= 0:
             continue
         cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
-<<<<<<< HEAD
         _order(db, pos, kind, not long, size, px, True, place(kind, size, px, cl), cl)
-=======
-        _order(db, pos, kind, not long, size, px, True, ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "tp", cl), cl)
         db.commit()
->>>>>>> r11-perf
 
 
 def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | None = None, tp1: float | None = None,
