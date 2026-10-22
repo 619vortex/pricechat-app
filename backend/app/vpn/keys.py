@@ -50,14 +50,30 @@ def filename(server_name: str, device_name: str) -> str:
     return f"kiwi-vpn-{server}-{name}.conf"
 
 
-def render_config(private_key: str, ip: str, dns: list[str], server_public_key: str, endpoint_host: str, listen_port: int) -> str:
+def ipv6_for(pool4: str, ip: str, pool6: str | None) -> str | None:
+    """The device's IPv6: the same offset in the server's v6 pool as its IPv4 has in the v4 pool (10.66.0.0/16 -> 10.66.1.2
+    is offset 258 -> fd66:66::102 in fd66:66::/64). None without a (valid) v6 pool or when it wouldn't fit."""
+    if not pool6:
+        return None
+    try:
+        net4, net6 = ipaddress.ip_interface(pool4).network, ipaddress.ip_interface(pool6).network
+        offset = int(ipaddress.ip_address(ip)) - int(net4.network_address)
+    except ValueError:
+        return None
+    if net6.version != 6 or not 0 < offset < net6.num_addresses:
+        return None
+    return str(net6.network_address + offset)
+
+
+def render_config(private_key: str, ip: str, dns: list[str], server_public_key: str, endpoint_host: str, listen_port: int,
+                  ip6: str | None = None) -> str:
     host = endpoint_host
     try:
         if ipaddress.ip_address(host).version == 6:
             host = f"[{host}]"
     except ValueError:
         pass  # a hostname
-    lines = ["[Interface]", f"PrivateKey = {private_key}", f"Address = {ip}/32"]
+    lines = ["[Interface]", f"PrivateKey = {private_key}", f"Address = {ip}/32, {ip6}/128" if ip6 else f"Address = {ip}/32"]
     if dns:
         lines.append(f"DNS = {', '.join(dns)}")
     lines += ["", "[Peer]", f"PublicKey = {server_public_key}", f"Endpoint = {host}:{listen_port}",

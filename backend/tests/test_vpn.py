@@ -43,6 +43,7 @@ class FakeNode:
         self.peers: dict[str, dict[str, Any]] = {}
         self.fail = False
         self.adblock: bool | None = None  # None: an agent that doesn't report it
+        self.address6: str | None = None
         self.calls: list[tuple[str, str]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -58,6 +59,8 @@ class FakeNode:
                     "peers": [{"public_key": k, **v} for k, v in self.peers.items()]}
             if self.adblock is not None:
                 body["adblock"] = self.adblock
+            if self.address6 is not None:
+                body["address6"] = self.address6
             return httpx.Response(200, json=body)
         key = path.removeprefix("/v1/peers/").replace("-", "+").replace("_", "/")
         if request.method == "PUT":
@@ -113,6 +116,10 @@ def test_keys_and_config_contents() -> None:
     assert "DNS = 1.1.1.1" in cfg and f"[Peer]\nPublicKey = {server_pub}" in cfg and "Endpoint = 203.0.113.10:51820" in cfg
     assert "AllowedIPs = 0.0.0.0/0, ::/0" in cfg and "PersistentKeepalive = 25" in cfg
     assert "Endpoint = [2001:db8::1]:51820" in keys.render_config(priv, "10.66.0.2", [], server_pub, "2001:db8::1", 51820)
+    assert "Address = 10.66.1.2/32, fd66:66::102/128\n" in keys.render_config(priv, "10.66.1.2", [], server_pub, "h", 1, "fd66:66::102")
+    assert keys.ipv6_for("10.66.0.1/16", "10.66.1.2", "fd66:66::1/64") == "fd66:66::102"  # offset 258 = 0x102
+    assert keys.ipv6_for("10.66.0.1/16", "10.66.0.2", "") is None and keys.ipv6_for("10.66.0.1/16", "10.66.0.2", "junk") is None
+    assert keys.ipv6_for("10.66.0.1/16", "10.66.1.2", "fd66:66::1/120") is None  # doesn't fit the v6 pool
     fn = keys.filename("Frankfurt 1", "My iPhone 15 Pro Max!!")
     assert fn.startswith("kiwi-vpn-frankfurt-my-iphone") and fn.endswith(".conf") and len(fn) - 5 <= 32
 
@@ -156,7 +163,7 @@ def test_create_device_returns_config_once_and_stores_public_key_only(client: Te
     assert body["filename"] == "kiwi-vpn-frankfurt-my-phone.conf"
     assert dev["ip"] == "10.66.0.2" and dev["name"] == "My phone" and dev["last_handshake"] is None and dev["rx_bytes"] == 0
     priv = next(line.split(" = ", 1)[1] for line in cfg.splitlines() if line.startswith("PrivateKey"))
-    assert f"PublicKey = {fake.server_key}" in cfg and "DNS = 1.1.1.1, 1.0.0.1" in cfg and "Endpoint = 203.0.113.10:51820" in cfg
+    assert f"PublicKey = {fake.server_key}" in cfg and "DNS = 1.1.1.1\n" in cfg  # the server's own resolver only and "Endpoint = 203.0.113.10:51820" in cfg
     row = db.get(VpnDevice, dev["id"])
     pub = keys.public_from_private(priv)
     assert row is not None and row.public_key == pub and fake.peers[pub]["allowed_ip"] == "10.66.0.2/32"
@@ -499,14 +506,14 @@ def test_adblock_server_uses_its_own_dns(client: TestClient, db: Session, fake: 
     servers = {s["name"]: s for s in c.get("/api/members/vpn").json()["servers"]}
     assert servers["Shield"]["adblock"] is True and servers["Plain"]["adblock"] is False
     cfg = c.post("/api/members/vpn/devices", json={"name": "p", "server_id": shield.id}).json()["config"]
-    assert "DNS = 10.66.0.1\n" in cfg  # only the server's own (blocking) resolver
+    assert "DNS = 10.66.0.1\n" in cfg  # the server's own resolver
     assert client.get("/api/vpn/admin/overview").json()["servers"][1]["adblock"] is True
     fake.adblock = False  # the agent turned it off: the next sync follows
     vpn.sync_all(db)
     db.refresh(shield)
     assert shield.adblock is False
     cfg = c.post("/api/members/vpn/devices", json={"name": "q", "server_id": plain.id}).json()["config"]
-    assert "DNS = 1.1.1.1, 1.0.0.1" in cfg
+    assert "DNS = 1.1.1.1\n" in cfg  # always just the first one the agent reports
 
 
 def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Session, fake: FakeNode) -> None:
@@ -587,3 +594,21 @@ async def test_owner_alerts_offline_recovered_and_nearly_full(db: Session, fake:
     for i in range(2):
         vpn.create_device(db, m, f"e{i}", server.id)
     assert (await run())["vpn_full"] == 1 and len(tg.sent) == 4
+
+
+def test_ipv6_address_in_config_when_the_agent_has_a_v6_pool(client: TestClient, db: Session, fake: FakeNode) -> None:
+    v4only = add_server(db, fake, "Old")
+    assert v4only.address6 == ""  # an agent that doesn't report address6: IPv4 only
+    fake.address6 = "fd66:66::1/64"
+    dual = add_server(db, fake, "Dual")
+    assert dual.address6 == "fd66:66::1/64"
+    open_vpn(db)
+    c = signed_in(client, db, member_at(db, "warrior"))
+    cfg = c.post("/api/members/vpn/devices", json={"name": "p", "server_id": dual.id}).json()["config"]
+    assert "Address = 10.66.0.2/32, fd66:66::2/128\n" in cfg
+    cfg = c.post("/api/members/vpn/devices", json={"name": "q", "server_id": v4only.id}).json()["config"]
+    assert "Address = 10.66.0.2/32\n" in cfg
+    fake.address6 = "not-an-address"  # garbage from the agent: treated as no v6
+    vpn.sync_all(db)
+    db.refresh(dual)
+    assert dual.address6 == ""

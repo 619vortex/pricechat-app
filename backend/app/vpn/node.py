@@ -135,7 +135,8 @@ class NodeClient:
             out = {"public_key": std_key(str(data["public_key"])), "listen_port": int(data["listen_port"]),
                    "endpoint_host": str(data["endpoint_host"]), "address": str(data["address"]),
                    "dns": [str(d) for d in data.get("dns") or []], "peers": peers,
-                   "adblock": data.get("adblock") is True}  # an agent that doesn't report it doesn't block
+                   "adblock": data.get("adblock") is True,  # an agent that doesn't report it doesn't block
+                   "address6": str(data.get("address6") or "")}  # the v6 pool ("fd66:66::1/64"); "" = IPv4 only
         except (KeyError, TypeError, ValueError, AttributeError):
             raise NodeError("The VPN agent's status is malformed") from None
         if not is_key(out["public_key"]):

@@ -42,6 +42,7 @@ class VpnServer(IdMixin, TimestampMixin, Base):
     endpoint_host: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     listen_port: Mapped[int] = mapped_column(Integer, default=51820, server_default="51820", nullable=False)
     address: Mapped[str] = mapped_column(String(64), default="", nullable=False)  # the server's tunnel address + pool, "10.66.0.1/16"
+    address6: Mapped[str] = mapped_column(String(64), default="", server_default="", nullable=False)  # its IPv6 pool, "fd66:66::1/64"; "" = none
     dns: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
     online: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     last_seen: Mapped[datetime | None] = mapped_column(UTCDateTime())

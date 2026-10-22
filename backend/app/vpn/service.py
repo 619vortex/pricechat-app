@@ -202,11 +202,18 @@ def usage_out(db: Session, member: Member, s: VpnSettings, now: datetime | None 
 
 
 def _dns(server: VpnServer) -> list[str]:
-    """An ad-blocking server's own resolver (the first it reports); else whatever it reports, or Cloudflare."""
+    """The server's own resolver: the first DNS its agent reports (no logs; with `adblock` on it also blocks ads &
+    trackers), or Cloudflare if it reports none."""
     dns = [str(d) for d in server.dns or []]
-    if server.adblock and dns:
-        return dns[:1]
-    return dns or ["1.1.1.1"]
+    return dns[:1] or ["1.1.1.1"]
+
+
+def _v6_pool(value: str) -> str:
+    """The agent's IPv6 pool if it's a valid v6 interface, else "" (IPv4 only)."""
+    try:
+        return value if value and ipaddress.ip_interface(value).version == 6 else ""
+    except ValueError:
+        return ""
 
 
 def overview(db: Session, member: Member) -> dict[str, Any]:
@@ -308,7 +315,7 @@ def create_device(db: Session, member: Member, name: str, server_id: int) -> tup
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503) from None
     db.commit()
     config = keys.render_config(private_key, ip, _dns(server), server.public_key, server.endpoint_host,
-                                server.listen_port)
+                                server.listen_port, keys.ipv6_for(server.address, ip, server.address6))
     return dev, config, keys.filename(server.name, dev.name)
 
 
@@ -339,7 +346,7 @@ def _apply_status(server: VpnServer, st: dict[str, Any], now: datetime) -> None:
     server.public_key, server.listen_port = st["public_key"], st["listen_port"]
     server.endpoint_host, server.address, server.dns = st["endpoint_host"], st["address"], st["dns"]
     server.online, server.last_seen, server.last_error = True, now, None
-    server.adblock, server.fail_streak = bool(st.get("adblock")), 0
+    server.adblock, server.fail_streak, server.address6 = bool(st.get("adblock")), 0, _v6_pool(str(st.get("address6") or ""))
 
 
 def _check_pool(address: str) -> None:
