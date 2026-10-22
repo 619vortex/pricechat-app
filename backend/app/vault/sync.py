@@ -188,7 +188,9 @@ async def sync_ebay_seller(db: Session, settings: Any, source: VaultSource, tran
             db.commit()
             return {"status": "error", "message": exc.reason, **counts}
     counts["seen"] = len(seen)
-    db.flush()
+    # saved now, not flushed: a flush would hold the database's write lock through every eBay call of steps 2-3 (on SQLite
+    # every other job and request waits on it); the rows below change in memory and are written once at the end
+    db.commit()
 
     # 2. details for new / never-detailed listings that could be in the store (eligible, or unsure from the title alone)
     maybe = ("language not stated", "no vintage set or year stated")
