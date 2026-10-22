@@ -137,6 +137,8 @@ describe("join page", () => {
     const buttons = [...container.querySelectorAll(".lg-social .site-provider")].map((b) => b.textContent!.trim());
     expect(buttons).toEqual(["Continue with Telegram", "Continue with Google"]);  // X isn't set up: not shown at all
     expect(screen.getByText(/never posts or messages for you/)).toBeTruthy();
+    // a first-time visitor sees what they get before signing up
+    expect(screen.getByRole("list", { name: "What you get" }).textContent).toContain("every rank has a reward");
     expect(container.querySelector("input[type=email]")).toBeNull();  // email sign-in not set up: no dead end, no empty form
     expect(container.querySelector(".lg-legacy-box")).toBeNull();
   });
@@ -309,6 +311,19 @@ describe("leaderboard", () => {
     expect(container.querySelector(".lb-list li")!.textContent).toContain("5 referrals");
     expect(container.querySelector(".lb-me-row")).toBeNull();
   });
+
+  it("says when the board couldn't load (never 'nobody here yet') and tries again on request", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });  // leaderboard: 404
+    const { container } = await show(<LeaderboardPage />);
+    expect(container.textContent).toContain("Couldn't load the leaderboard");
+    expect(container.textContent).not.toContain("Nobody here yet");
+    routes["/api/members/leaderboard"] = { period: "all", metric: "score", note: "", me: null, rows: [row(1, "KiwiKing", 561)] };
+    await act(async () => screen.getByRole("button", { name: "Try again" }).click());
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    expect(container.querySelector(".lb-list li")!.textContent).toContain("KiwiKing");
+  });
 });
 
 describe("legal pages", () => {
@@ -317,6 +332,9 @@ describe("legal pages", () => {
     const { container } = await show(<LegalPage kind="privacy" />);
     expect(screen.getByRole("note").textContent).toContain("Draft");
     expect(container.textContent).toContain("Connected accounts may be used to verify eligible Price Chat community activity");
+    // honest about X: its token is kept so Reply / Repost work, and only a member's own press posts anything
+    expect(container.textContent).toContain("we only post on X when you press Reply or Repost yourself");
+    expect(container.textContent).not.toContain("we don't post, like or message anything");
     cleanup();
     for (const kind of ["terms", "disclaimer", "contact"] as const) {
       await show(<LegalPage kind={kind} />);

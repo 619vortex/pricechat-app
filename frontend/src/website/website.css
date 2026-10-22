@@ -911,6 +911,9 @@ a:hover .site-worth-subject { background-size: 100% 1.5px; }
 .site-join-intro .rk { margin-bottom: 20px; }
 .site-join-lines { margin-top: 24px; color: var(--site-soft); font-size: clamp(18px, 1.6vw, 22px); line-height: 1.5; }
 .site-join-lines span { display: block; }
+.site-join-perks { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 8px; color: var(--site-soft); font-size: 15px; line-height: 1.45; }
+.site-join-perks li { display: flex; gap: 10px; align-items: baseline; }
+.site-join-perks span { flex: none; width: 1.3em; text-align: center; }
 .site-join-box { display: flex; flex-direction: column; gap: 12px; }
 .site-provider-wrap { display: flex; flex-direction: column; gap: 8px; }
 .site-provider {
@@ -1259,6 +1262,7 @@ a:hover .site-worth-subject { background-size: 100% 1.5px; }
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 229, 143, 0.06); animation: lg-rise 200ms cubic-bezier(0.2, 0.7, 0.2, 1); }
 .lg-close { position: absolute; top: 10px; right: 12px; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent;
   color: var(--site-muted); font-size: 26px; line-height: 1; cursor: pointer; }
+.lg-dialog:focus { outline: none; }
 .lg-close:hover { color: var(--site-text); background: rgba(255, 255, 255, 0.06); }
 .lg-panel { display: flex; flex-direction: column; align-items: stretch; text-align: center; }
 .lg-kiwi { align-self: center; width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 0 18px rgba(0, 229, 143, 0.35)); }
