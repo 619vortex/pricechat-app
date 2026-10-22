@@ -217,6 +217,28 @@ def test_button_needs_start_in_the_bot(db: Session, md: MarksMD) -> None:
     assert not mine(db) and "press Start" in tg.sent[-1][2]
 
 
+def test_button_double_tap_sets_one_alert_and_telegram_trouble_isnt_blamed_on_start(db: Session, md: MarksMD) -> None:
+    plan = type("P", (), {"side": "LONG", "entry": (79_000.0, 79_500.0), "stop": 77_000.0, "target": 84_000.0})()
+    data = alerts.button("BTC", plan, "1h")[0][0]["callback_data"]  # type: ignore[index]
+    tg = FakeTG()
+    for _ in range(2):
+        asyncio.run(bot.handle_callback(db, tg, {"id": "c1", "from": {"id": 9}, "data": data}))
+    assert len(mine(db)) == 1 and "Already set" in tg.sent[-1][2]
+    md.marks["BTC"] = 85_000.0
+    run(db, tg, md)
+    md.marks["BTC"] = 79_200.0
+    run(db, tg, md)
+    assert len([s for s in tg.sent if s[0] == "msg" and "entered the" in s[2]]) == 1
+
+    class Down(FakeTG):
+        async def send_message(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            raise TelegramRateLimitError("Telegram rate limit; retry after 30s", 30)
+
+    down = Down()
+    asyncio.run(bot.handle_callback(db, down, {"id": "c2", "from": {"id": 10}, "data": data}))
+    assert not mine(db, 10) and "in a moment" in down.sent[-1][2] and "Start" not in down.sent[-1][2]
+
+
 def test_zone_jump_and_button_size() -> None:
     a = TsPriceAlert(kind="zone", price=100.0, price_hi=101.0, last_price=99.0)
     assert alerts.crossed(a, 102.0) and alerts.crossed(a, 100.5) and not alerts.crossed(a, 99.5)

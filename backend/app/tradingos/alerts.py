@@ -186,6 +186,10 @@ async def callback(db: Session, client: Any, cq: dict[str, Any], uid: int, data:
         await _answer(client, cq, uid, "This button isn't valid any more.", dm=False)
         return
     coin, plan, lo, hi = got
+    same = next((a for a in _active(db, uid) if a.kind == "zone" and a.coin == coin.upper() and (a.price, a.price_hi) == (lo, hi)), None)
+    if same is not None:  # a double tap: one alert, not two messages when it fires
+        await _answer(client, cq, uid, f"Already set: alert #{same.id}, {coin} entry zone. /alerts lists yours.", dm=False)
+        return
     if not _room(db, uid):
         await _answer(client, cq, uid, f"You have {MAX_ACTIVE} active alerts (the most). Remove one first: /alerts", alert=True)
         return
@@ -201,13 +205,18 @@ async def callback(db: Session, client: Any, cq: dict[str, Any], uid: int, data:
             f" (now {_fmt(now_px)}{', inside it: fires when it comes back' if inside else ''}).\n{_plan_line(plan, lo, hi)}")
     try:
         await client.send_message(uid, text, html=True)
-    except Exception:  # noqa: BLE001 - they never pressed Start: a private message isn't possible, so no alert
+    except Exception as e:  # noqa: BLE001 - no private message, so no alert
+        from app.telegram.errors import TelegramRequestError
         from app.telegram.ingestion import get_bot_state
 
         db.delete(a)
         db.commit()
-        name = get_bot_state(db).bot_username or "cryptopricechatbot"
-        await _answer(client, cq, uid, f"Open t.me/{name} and press Start, then tap the button again: alerts come privately.", alert=True, dm=False)
+        if isinstance(e, TelegramRequestError):  # they never pressed Start (or blocked the bot)
+            name = get_bot_state(db).bot_username or "cryptopricechatbot"
+            note = f"Open t.me/{name} and press Start, then tap the button again: alerts come privately."
+        else:  # Telegram busy or down: nothing wrong on their side
+            note = "Couldn't set the alert right now. Tap the button again in a moment."
+        await _answer(client, cq, uid, note, alert=True, dm=False)
         return
     await _answer(client, cq, uid, f"Alert set: {coin} entry zone. Details sent privately.", dm=False)
 
