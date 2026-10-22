@@ -672,8 +672,9 @@ def explore(db: Session, tab: str = "top", limit: int = 50) -> dict[str, Any]:
         rows.sort(key=lambda r: -(r[0].last_activity_at.timestamp() if r[0].last_activity_at else 0))
     else:
         rows = [r for r in rows if r[0].review_status == "featured"]
+    all_ranks = ledger.ranks(db)  # read once, not once per row
     for i, (p, m) in enumerate(rows[:limit]):
-        rank = ledger.rank_for(db, m.rank_score)
+        rank = ledger.rank_for(db, m.rank_score, all_ranks)
         out.append({"position": i + 1, "username": m.username, "bio": p.bio, "rank": {"name": rank.name, "key": rank.key, "art": rank.art or {}},
                     "value": p.public_value_cents if p.show_value else None, "cards": counts.get(p.id, 0),
                     "updated_at": p.last_activity_at.isoformat() if p.last_activity_at else None})

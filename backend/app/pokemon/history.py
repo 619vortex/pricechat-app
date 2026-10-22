@@ -231,9 +231,10 @@ def rebuild(db: Session, keys: Iterable[Key] | None = None, now: datetime | None
 
 def ensure_built(db: Session) -> None:
     """Derived data: if sales exist but no point was ever built (fresh migration), build every series once."""
-    if db.scalar(select(func.count()).select_from(PokemonValuationPoint)):
+    # runs on every public market request: "is there any row" (LIMIT 1), never a count over the whole table
+    if db.scalar(select(PokemonValuationPoint.id).limit(1)) is not None:
         return
-    if db.scalar(select(func.count()).select_from(PokemonSale).where(PokemonSale.verified.is_(True), PokemonSale.excluded.is_(False))):
+    if db.scalar(select(PokemonSale.id).where(PokemonSale.verified.is_(True), PokemonSale.excluded.is_(False)).limit(1)) is not None:
         rebuild(db)
 
 

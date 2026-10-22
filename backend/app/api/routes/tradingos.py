@@ -26,6 +26,7 @@ def _actor(db: Any, request: Request) -> str:
 
 
 def sig_out(db: Any, s: TsSignal) -> dict[str, Any]:
+    part = signals.participation(db, s)  # once per signal (it was read twice: for the counts and for the card)
     return {"id": s.id, "number": s.number, "coin": s.coin, "side": s.side, "timeframe": s.timeframe, "strategy": s.strategy,
             "entry": [s.entry_lo, s.entry_hi], "stop": s.stop, "target": s.target, "leverage": [s.lev_lo, s.lev_hi], "rr": s.rr,
             "status": s.status, "status_label": signals.STATUS_LABEL.get(s.status, s.status), "reason": s.reason,
@@ -34,7 +35,7 @@ def sig_out(db: Any, s: TsSignal) -> dict[str, Any]:
             "activated_at": s.activated_at.isoformat() if s.activated_at else None, "closed_at": s.closed_at.isoformat() if s.closed_at else None,
             "tp2": risk.tp2_of((s.entry_lo + s.entry_hi) / 2, s.target),
             "model_pnl_pct": s.model_pnl_pct, "exit_price": s.exit_price, "tg_error": s.tg_error,
-            "participation": signals.participation(db, s), "card": signals.card(s, signals.participation(db, s))}
+            "participation": part, "card": signals.card(s, part)}
 
 
 @router.get("/tradingos/admin/overview")
