@@ -249,6 +249,9 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
   const onGive = typeof location !== "undefined" && location.pathname.startsWith("/giveaway");
   const onBot = typeof location !== "undefined" && (location.pathname.startsWith("/earn") || location.pathname.startsWith("/trading-bot"));
   const showBot = !!home?.trading_bot || onBot;  // the tab appears once the owner opens the funnel
+  const onVpn = typeof location !== "undefined" && location.pathname.startsWith("/vpn");
+  const member = useSession();
+  const showVpn = !!member || onVpn;  // Kiwi VPN is a member perk: signed-in members only
   return (
     <header className={`site-header${scrolled || open ? " is-solid" : ""}${open ? " is-open" : ""}`}>
       <div className="site-header-inner">
@@ -268,6 +271,11 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
           {showBot && (
             <a href="/earn" className={`site-link site-link-bot${onBot ? " is-current" : ""}`} aria-current={onBot ? "page" : undefined}>
               Earn
+            </a>
+          )}
+          {showVpn && (
+            <a href="/vpn" className={`site-link site-link-vpn${onVpn ? " is-current" : ""}`} aria-current={onVpn ? "page" : undefined}>
+              VPN
             </a>
           )}
         </nav>
@@ -294,6 +302,11 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
           {showBot && (
             <a href="/earn" onClick={() => setOpen(false)}>
               💰 Earn
+            </a>
+          )}
+          {showVpn && (
+            <a href="/vpn" onClick={() => setOpen(false)}>
+              🛡️ Kiwi VPN
             </a>
           )}
           <a href="/giveaway" onClick={() => setOpen(false)}>
