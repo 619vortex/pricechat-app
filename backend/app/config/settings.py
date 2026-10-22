@@ -301,7 +301,8 @@ class Settings(BaseSettings):
     app_encryption_key_previous: SecretStr | None = None
     # Client addresses for rate limits (app/security/client_ip.py). PROXY_SHARED_SECRET: the same long random value in
     # Railway and in Vercel's project env; Vercel's /api rewrite sends it as x-pc-edge, and only then is Vercel's report of
-    # the visitor believed. Unset: every caller is keyed on the address Railway's edge saw (right-most X-Forwarded-For).
+    # the visitor believed; other callers are keyed on the address Railway's edge saw (right-most X-Forwarded-For).
+    # Unset: the old, forgeable left-most entry is kept (and startup warns).
     # Comma-separate old,new while rotating. TRUSTED_PROXY_HOPS: how many right-most X-Forwarded-For entries our own
     # proxies append (Railway's edge: 1).
     proxy_shared_secret: SecretStr | None = None

@@ -10,8 +10,12 @@ Two ways in, and only one can be trusted to report the visitor:
   X-Forwarded-For entry (Vercel wrote it; Railway appends after it).
 * Directly to the Railway domain (anyone can): every header is the caller's to forge, EXCEPT the entry Railway's edge
   adds at the right of X-Forwarded-For (the address that connected to it). So the key is the right-most entry
-  (TRUSTED_PROXY_HOPS counts in from the right, default 1) and never the left-most one. Without the secret configured,
-  website traffic is also keyed this way: on Vercel's egress addresses, i.e. coarser, but never spoofable.
+  (TRUSTED_PROXY_HOPS counts in from the right, default 1) and never the left-most one.
+
+Until a valid PROXY_SHARED_SECRET is configured, the old rule stays (LEGACY: the left-most X-Forwarded-For entry, which
+direct callers can forge) and startup warns: switching to the strict rule without the secret would key every website
+visitor on Vercel's few egress addresses, making the per-visitor limits (sign-in, admin login...) effectively site-wide.
+Once a secret is configured, a request without the matching header always gets the strict right-most rule.
 
 request.client is not used while an X-Forwarded-For header is present: uvicorn runs with --proxy-headers
 --forwarded-allow-ips=* (needed so request.url keeps Railway's https scheme), which overwrites request.client with the
@@ -104,6 +108,10 @@ def client_ip(request: Request, settings: Settings | None = None) -> str:
         ip = parse_ip(vercel) or (parse_ip(hops[0]) if hops else None)
         if ip:
             return ip
+    if hops and not secrets_of(settings):  # LEGACY until the secret is set up (see the module docstring)
+        ip = parse_ip(hops[0])
+        if ip:
+            return ip
     if hops:
         n = max(1, settings.trusted_proxy_hops)
         # the entry our own edge appended; never fall back to entries further left (those are the caller's to write)
@@ -149,7 +157,8 @@ def startup_check(settings: Settings) -> None:
         return
     raw = settings.proxy_shared_secret.get_secret_value().strip() if settings.proxy_shared_secret else ""
     if not raw:
-        log.warning("PROXY_SHARED_SECRET is not set: rate limits key website visitors on Vercel's egress address "
-                    "(right-most X-Forwarded-For hop). Set the same value in Railway and Vercel to key on the visitor.")
+        log.warning("PROXY_SHARED_SECRET is not set: rate limits still trust the left-most X-Forwarded-For entry, which "
+                    "direct callers can forge. Set the same value in Railway and Vercel to key on the real visitor.")
     elif not secrets_of(settings):
-        log.warning("PROXY_SHARED_SECRET is too short (min %d characters) and is ignored.", MIN_SECRET_LEN)
+        log.warning("PROXY_SHARED_SECRET is too short (min %d characters) and is ignored: rate limits still trust the "
+                    "left-most X-Forwarded-For entry.", MIN_SECRET_LEN)

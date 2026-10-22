@@ -85,12 +85,23 @@ def test_vercel_path_with_the_right_secret_uses_the_reported_visitor() -> None:
 def test_wrong_missing_or_unconfigured_secret_falls_back_to_the_edge_address() -> None:
     for edge in ("wrong-secret-0123456789abcdef", SECRET + "x", SECRET[:-1], ""):
         assert client_ip.client_ip(_req(_vercel("192.0.2.44", edge=edge)), _settings()) == "76.76.21.9", edge
-    assert client_ip.client_ip(_req(_vercel("192.0.2.44")), _settings(secret=None)) == "76.76.21.9"
-    # Vercel sends the literal reference when its env var is missing: never accepted, even if configured the same way
-    lit = "$PROXY_SHARED_SECRET"
-    assert client_ip.client_ip(_req(_vercel("192.0.2.44", edge=lit)), _settings(secret=lit)) == "76.76.21.9"
-    # too short to be a secret
-    assert client_ip.client_ip(_req(_vercel("192.0.2.44", edge="short")), _settings(secret="short")) == "76.76.21.9"
+    # Vercel sends the literal reference when its env var is missing: never a match
+    assert client_ip.client_ip(_req(_vercel("192.0.2.44", edge="$PROXY_SHARED_SECRET")), _settings()) == "76.76.21.9"
+
+
+def test_without_a_valid_secret_configured_the_legacy_left_most_rule_stays() -> None:
+    """Unset (or unusable) PROXY_SHARED_SECRET: today's behaviour, so website visitors aren't all keyed on Vercel's few
+    egress addresses on deploy day. Forgeable, which startup_check warns about."""
+    for s in (_settings(secret=None), _settings(secret=""), _settings(secret="short"),
+              _settings(secret="$PROXY_SHARED_SECRET")):
+        assert not client_ip.secrets_of(s)
+        assert client_ip.client_ip(_req(_vercel("192.0.2.44")), s) == "192.0.2.44"
+        assert client_ip.client_ip(_req(_vercel("192.0.2.44", edge="$PROXY_SHARED_SECRET")), s) == "192.0.2.44"
+        assert client_ip.client_ip(_req({"x-forwarded-for": "198.51.100.1, 203.0.113.7"}), s) == "198.51.100.1"
+        assert client_ip.client_key(_req({"x-forwarded-for": "2001:db8:0:1::5, 203.0.113.7"}), s) == "2001:db8:0:1::/64"
+        # an unparsable left-most entry: the edge's entry rather than "unknown"
+        assert client_ip.client_ip(_req({"x-forwarded-for": "junk, 203.0.113.7"}), s) == "203.0.113.7"
+        assert client_ip.client_ip(_req(), s) == "10.1.2.3"
 
 
 def test_secret_rotation_accepts_old_and_new() -> None:
@@ -127,7 +138,8 @@ def test_parse_ip_rejects_junk() -> None:
 # --- wired into the app's limiters ------------------------------------------------------------------------------------
 
 
-def test_health_limit_ignores_forged_left_most_entries(client: TestClient) -> None:
+def test_health_limit_ignores_forged_left_most_entries(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(client_ip, "_settings", lambda request: _settings())  # strict once the secret is configured
     codes = [client.get("/api/health/public", headers={"x-forwarded-for": f"198.51.100.{i}, 203.0.113.70"}).status_code
              for i in range(12)]
     assert codes[:10] == [200] * 10 and codes[10] == 429  # a fresh forged address each time, still one bucket
