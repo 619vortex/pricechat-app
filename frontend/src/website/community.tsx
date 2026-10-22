@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { SiteFooter, SiteHeader, useReveal, useStored } from "./Website";
+import { pageHead } from "./seo";
 import { useHead } from "./useHead";
 import { site } from "./websiteData";
 import type { HomeData } from "./websiteLogic";
@@ -15,10 +16,12 @@ import { ConnectButton, PIcon, TelegramButton } from "./socialButtons";
 
 export { ConnectButton, PIcon, TelegramButton };
 
-/** A website page with the standard header and footer. */
-export function SitePage({ title, description, path, children }: { title: string; description: string; path: string; children: ReactNode }) {
+/** A website page with the standard header and footer. A title that already names Price Chat is used as it is (the fixed
+ * pages' heads live in seo.ts: `<SitePage {...pageHead("vpn")}>`); `noindex` for personal pages. */
+export function SitePage({ title, description, path, noindex, children }: { title: string; description: string; path: string; noindex?: boolean; children: ReactNode }) {
   const home = useStored<HomeData>("/api/website/home");
-  useHead({ title: `${title} · Price Chat`, description, path, siteUrl: home?.site_url ?? null, image: site.shareImage });
+  useHead({ title: title.includes("Price Chat") ? title : `${title} · Price Chat`, description, path, siteUrl: home?.site_url ?? null,
+            image: site.shareImage, noindex });
   const root = useReveal();
   return (
     <div className="site" ref={root}>
@@ -61,7 +64,7 @@ export function JoinPage() {
   }, [member]);
   const emailOn = providers ? !!providers.email?.available : null;
   return (
-    <SitePage title="Join Price Chat" description="Sign in with Telegram, X or Google. Earn XP. Level up." path="/join">
+    <SitePage {...pageHead("join")}>
       <section className="site-join-page site-reveal">
         <div className="site-join-intro">
           <RankKiwi art={{ treatment: "egg", overlay: null, placeholder: null, slot: null }} rankKey="egg" size={120} />
@@ -219,7 +222,7 @@ export function LeaderboardPage() {
     </li>
   );
   return (
-    <SitePage title="Kiwi Leaderboard" description="Price Chat members by Kiwi XP and invites." path="/leaderboard">
+    <SitePage {...pageHead("leaderboard")}>
       <div className="site-archive-head">
         <h1 className="site-display site-h1">🏆 Kiwi Leaderboard</h1>
         {tabs("Period", [["all", "All time"], ["week", "This week"]], period, setPeriod)}
@@ -367,7 +370,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
   return (
-    <SitePage title={page.title} description={page.description} path={`/${kind}`}>
+    <SitePage {...pageHead(`website/${kind}`)}>
       <article className="site-legal site-reveal">
         <p className="site-draft" role="note">
           Draft: this page has not had final legal review yet.

@@ -6,6 +6,16 @@ export interface HeadInfo {
   path: string; // public path of this page, e.g. "/" or "/content"
   siteUrl: string | null; // public origin from the dashboard; null = not decided yet (no canonical/og:url)
   image?: string | null; // absolute URL, or a path that is made absolute with siteUrl
+  noindex?: boolean; // private / owner-only page: <meta name="robots" content="noindex">
+  jsonLd?: Record<string, unknown>[] | null; // structured data with site paths ("/pokemon/…"), made absolute with siteUrl
+}
+
+/** JSON-LD is built with site paths ("/pokemon/…"); the origin is added once it is known. */
+export function absolutize<T>(v: T, origin: string): T {
+  if (typeof v === "string") return (v.startsWith("/") ? `${origin.replace(/\/$/, "")}${v}` : v) as T;
+  if (Array.isArray(v)) return v.map((x) => absolutize(x, origin)) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, absolutize(x, origin)])) as T;
+  return v;
 }
 
 /**
@@ -13,7 +23,8 @@ export interface HeadInfo {
  * mount and removed on unmount, so the dashboard (same app) is never left with website metadata.
  * No production domain is assumed: without a configured public address there is no canonical or og:url.
  */
-export function useHead({ title, description, path, siteUrl, image }: HeadInfo) {
+export function useHead({ title, description, path, siteUrl, image, noindex, jsonLd }: HeadInfo) {
+  const ld = jsonLd?.length ? JSON.stringify(jsonLd) : ""; // compared as text so a new array each render changes nothing
   useEffect(() => {
     const prevTitle = document.title;
     document.title = title;
@@ -44,6 +55,18 @@ export function useHead({ title, description, path, siteUrl, image }: HeadInfo) 
     meta("name", "twitter:title", title);
     meta("name", "twitter:description", description);
     meta("name", "twitter:image", img);
+    if (noindex) meta("name", "robots", "noindex");
+    if (ld) {
+      const origin = siteUrl ?? (typeof location !== "undefined" ? location.origin : "");
+      for (const block of JSON.parse(ld) as Record<string, unknown>[]) {
+        const s = document.createElement("script");
+        s.type = "application/ld+json";
+        s.textContent = JSON.stringify(absolutize(block, origin)).replace(/</g, "\\u003c");
+        s.dataset.siteHead = "";
+        document.head.appendChild(s);
+        added.push(s);
+      }
+    }
     if (url) {
       const link = document.createElement("link");
       link.rel = "canonical";
@@ -57,5 +80,5 @@ export function useHead({ title, description, path, siteUrl, image }: HeadInfo) 
       if (base && prevDescription !== undefined) base.content = prevDescription;
       added.forEach((el) => el.remove());
     };
-  }, [title, description, path, siteUrl, image]);
+  }, [title, description, path, siteUrl, image, noindex, ld]);
 }

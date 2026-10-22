@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useSearchParams } from "react-router-dom";
 import { MarketShell, usePageHead } from "../mx";
+import { PAGE_HEADS } from "../../../website/seo";
 import { AVAILABILITY, SORTS, ago, cardName, money, vaultApi, type VaultCard, type VaultFilters, type VaultHome } from "./api";
 
 /** The Vault is a tab of the Pokémon Market: the market's frame (stats, tabs), then the Vault's own strip + nav. */
@@ -76,7 +77,7 @@ export function VaultStore() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   };
-  usePageHead({ title: "Price Chat Vault · Vintage Japanese Pokémon Cards", description: "Hand-picked 1996–2002 Japanese Pokémon cards (Base, Jungle, Fossil, Rocket Gang, Gym, Neo, e-Card) with the seller's real photos and prices." });
+  usePageHead(PAGE_HEADS["pokemon/vault"]);
   const active = FILTER_KEYS.filter((k) => k !== "sort" && filters[k]).length;
   const seller = home?.sources[0];
 

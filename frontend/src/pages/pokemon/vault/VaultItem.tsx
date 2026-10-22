@@ -4,6 +4,7 @@ import { openLogin } from "../../../website/emailLogin";
 import { MemberApiError, useSession } from "../../../website/members";
 import { AVAILABILITY, REQUEST_STATUS, ago, cardName, money, vaultApi, type VaultDetail, type VaultRequest } from "./api";
 import { usePageHead } from "../mx";
+import { vaultHead, vaultJsonLd } from "../../../website/seo";
 import { VaultShell } from "./VaultStore";
 
 export function VaultItemPage() {
@@ -18,11 +19,7 @@ export function VaultItemPage() {
     setError(null);
     vaultApi.listing(id).then(setC).catch((e: unknown) => setError(e instanceof MemberApiError && e.status === 404 ? "missing" : (e as Error).message));
   }, [id, member?.username]);
-  usePageHead(c && c.id === id ? {
-    title: `${cardName(c)}${c.set_name ? ` · ${c.set_name}` : ""}${c.price !== null ? ` · ${money(c.price, c.currency)}` : ""} · Price Chat Vault`,
-    description: `${c.title}. ${c.condition ?? "Ungraded"} ${c.year ? `${c.year} ` : ""}Japanese Pokémon card in the Price Chat Vault: the seller's own photos and price, re-checked every few hours.`,
-    image: c.images[0] ?? null,
-  } : null);
+  usePageHead(c && c.id === id ? { ...vaultHead(c), jsonLd: vaultJsonLd(c) } : null); // website/seo.ts: the link previews match it
 
   if (error === "missing") {
     return <VaultShell><div className="vt-empty"><h2>This card isn't in the Vault</h2><p>It may have sold or been removed by the seller.</p><Link className="vt-btn" to="/pokemon/vault">Back to the store</Link></div></VaultShell>;

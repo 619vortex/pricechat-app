@@ -4,6 +4,7 @@ import {
   displayTitle, fallbackThumb, filterArchive, formatDate, formatViews, growthChange, handleFromUrl, sectionStates, sparkPoints,
   type ArchiveFilter, type Growth, type HomeData, type Quote, type SectionKey, type WebsiteCard,
 } from "./websiteLogic";
+import { PAGE_HEADS } from "./seo";
 import { useHead } from "./useHead";
 import { noteContentOpened, useSession } from "./members";
 import { RankKiwi } from "./RankKiwi";
@@ -26,8 +27,7 @@ export function Website() {
   const states = home ? sectionStates(home) : null;
   const show = (k: SectionKey) => !!states?.[k].visible;
   useHead({
-    title: "Price Chat · Everything has a price.",
-    description: site.description,
+    ...PAGE_HEADS[""], // seo.ts (the link previews match it)
     path: site.publicPaths.home,
     siteUrl: home?.site_url ?? null,
     image: site.shareImage ?? home?.latest[0]?.thumbnail ?? null,
@@ -61,8 +61,8 @@ export function ContentArchive() {
   const shown = items ? filterArchive(items, filter, category) : null;
   const heading = category ? navLabel(category) : "All content";
   useHead({
-    title: `${heading} · Price Chat`,
-    description: "Every Price Chat video and Short, newest first.",
+    title: category ? `${heading} · Price Chat` : PAGE_HEADS.content.title,
+    description: PAGE_HEADS.content.description,
     path: site.publicPaths.content,
     siteUrl: home?.site_url ?? null,
     image: site.shareImage ?? items?.[0]?.thumbnail ?? null,

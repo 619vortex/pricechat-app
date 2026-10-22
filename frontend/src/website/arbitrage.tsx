@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { SitePage } from "./community";
+import { pageHead } from "./seo";
 import { memberApi } from "./members";
 import "./tradingbot.css";
 import "./arbitrage.css";
@@ -97,7 +98,7 @@ const ago = (iso: string | null) => {
 export function LunchPage() {
   const [data, err] = usePoll<Lunch>("/members/arbitrage/lunch", 30000);
   return (
-    <SitePage title="Earn: Lunch Bot" description="Lunch Bot paper-trades pump.fun launches at real on-chain prices." path="/earn/lunch">
+    <SitePage {...pageHead("earn/lunch")}>
       <div className="tb arb">
         <EarnTabs current="lunch" />
         {err && <p className="site-error" role="alert">{err}</p>}
@@ -122,8 +123,7 @@ const apr = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toF
 export function FundingPage() {
   const [data, err] = usePoll<FundingBoard>("/members/arbitrage/funding", 60000);
   return (
-    <SitePage title="Earn: Funding Arb" description="Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them."
-              path="/earn/funding">
+    <SitePage {...pageHead("earn/funding")}>
       <div className="tb arb">
         <EarnTabs current="funding" />
         {err && <p className="site-error" role="alert">{err}</p>}

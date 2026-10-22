@@ -6,6 +6,7 @@ import { marketApi, type GradeRow, type QualityRow, type RankRow, type Sale, typ
 import { DASH, day, num, sourceLabel, usd } from "./format";
 import { CardCell, Change, Confidence, GradeSelect, MarketShell, Pills, Thumb, usePageHead, usePublicMarket } from "./mx";
 import { Pager, RankTable } from "./RankTable";
+import { PAGE_HEADS } from "../../website/seo";
 
 function useParam(name: string, dflt: string): [string, (v: string) => void] {
   const [sp, setSp] = useSearchParams();
@@ -34,7 +35,7 @@ function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T | null; 
 export function TrendingPage() {
   const [grade, setGrade] = useParam("grade", "PSA 10");
   const { data, error } = useLoad(() => marketApi.trending(grade), [grade]);
-  usePageHead({ title: "Trending Pokémon Cards · Price Chat", description: "The vintage Pokémon cards collectors are talking about and trading right now, with prices, 30-day moves and the reason each one is trending." });
+  usePageHead(PAGE_HEADS["pokemon/trending"]);
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Trending", null]]}>
       <header>
@@ -55,8 +56,7 @@ export function MoversPage({ direction }: { direction: "gainers" | "losers" }) {
   const [period, setPeriod] = useParam("period", "30d");
   const { data, error } = useLoad(() => marketApi.movers(direction, grade, period as "30d" | "90d"), [direction, grade, period]);
   const title = direction === "gainers" ? "🚀 Top Gainers" : "📉 Top Losers";
-  usePageHead({ title: `Pokémon Card ${direction === "gainers" ? "Top Gainers" : "Top Losers"} · Price Chat`,
-                description: `The vintage Pokémon cards whose estimated price ${direction === "gainers" ? "rose" : "fell"} the most over the last 30 and 90 days, by grade.` });
+  usePageHead(PAGE_HEADS[`pokemon/${direction}`]);
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], [direction === "gainers" ? "Top Gainers" : "Top Losers", null]]}>
       <header>
@@ -85,7 +85,7 @@ export function RecentPage() {
   const per = 50;
   const isPublic = usePublicMarket();
   const { data, error } = useLoad(() => marketApi.recent(per, (page - 1) * per, grade === "all" ? undefined : grade), [grade, page]);
-  usePageHead({ title: "Recently Sold Pokémon Cards · Price Chat", description: "Completed, verified sales of vintage Pokémon cards, newest first: date, grade, price and where each card sold." });
+  usePageHead(PAGE_HEADS["pokemon/recent"]);
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Recently Sold", null]]}>
       <header>
@@ -134,7 +134,7 @@ export function YearsPage() {
   const { data, error } = useLoad(() => marketApi.years(grade, language || undefined), [grade, language]);
   const max = Math.max(1, ...(data?.years ?? []).map((y) => y.market_cap ?? 0));
   const jp = language === "Japanese";
-  usePageHead({ title: "Pokémon Card Market Cap by Year · Price Chat", description: "The estimated market cap of Pokémon cards by release year, its share of the whole market, 30- and 90-day moves and each year's top cards." });
+  usePageHead(PAGE_HEADS["pokemon/years"]);
   const link = (y: YearRow) => `/pokemon?year=${y.year}${language ? `&language=${encodeURIComponent(language)}` : ""}${grade !== "PSA 10" ? `&grade=${encodeURIComponent(grade)}` : ""}`;
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Years", null]]}>
@@ -196,7 +196,7 @@ export function YearsPage() {
 export function SetsPage() {
   const [grade, setGrade] = useParam("grade", "PSA 10");
   const { data, error } = useLoad(() => marketApi.sets(grade), [grade]);
-  usePageHead({ title: "Pokémon Card Sets by Market Cap · Price Chat", description: "Every tracked Pokémon card set ranked by estimated market cap, with 30-day moves, verified sales volume, population and its most valuable cards." });
+  usePageHead(PAGE_HEADS["pokemon/sets"]);
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Sets", null]]}>
       <header>
@@ -238,7 +238,7 @@ export function SetsPage() {
 
 export function GradesPage() {
   const { data, error } = useLoad(() => marketApi.grades(), []);
-  usePageHead({ title: "Pokémon Card Market by Grade · Price Chat", description: "PSA, BGS and CGC grades side by side: cards priced, market cap, verified sales volume, known population and the most valuable card at each grade." });
+  usePageHead(PAGE_HEADS["pokemon/grades"]);
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Grades", null]]}>
       <header>

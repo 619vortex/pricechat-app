@@ -5,7 +5,8 @@ import { play } from "./marketSound";
 import { marketApi, type MarketQuery, type MarketResp, type RankRow, type SortKey } from "./api";
 import { DASH, num, usd } from "./format";
 
-import { Change, fxNote, GradeSelect, MarketShell, Pills, Skeleton, Thumb, useCountUp, useFx, usePublicMarket } from "./mx";
+import { Change, fxNote, GradeSelect, MarketShell, Pills, Skeleton, Thumb, useCountUp, useFx, usePageHead, usePublicMarket } from "./mx";
+import { landingHead } from "../../website/seo";
 import { MarketPulse } from "./pulse";
 import { Pager, RankTable } from "./RankTable";
 
@@ -70,6 +71,8 @@ export function MarketHome() {
   const [data, setData] = useState<MarketResp | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [retry, setRetry] = useState(0);
+  // the table narrowed to just one set or one year is a landing page with its own title and canonical address (website/seo.ts)
+  usePageHead(landingHead(sp.toString(), data?.options.sets ?? null, data?.options.years ?? null));
   const [filterText, setFilterText] = useState(sp.get("q") ?? "");
   const [showHighlights, setShowHighlights] = useState(readHighlights);
   const [showFilters, setShowFilters] = useState(false);
