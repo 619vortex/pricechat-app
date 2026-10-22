@@ -250,3 +250,20 @@ def test_daily_brief_retries_when_nothing_went_out(db: Session, md: StudyMD) -> 
     assert signals.settings(db).brief_sent_on is None
     tg = FakeTG()
     assert asyncio.run(bot.daily_brief(db, tg, md, at(9))) == "sent"
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_daily_brief_without_a_setup_posts_only_the_overview(db: Session, md: StudyMD, monkeypatch: pytest.MonkeyPatch, fails: bool) -> None:
+    signals.settings(db).publish_chat = "@botpricechat"
+    db.commit()
+
+    async def no_setup(*a: object, **kw: object) -> tuple[str, None]:
+        if fails:
+            raise market.MarketError("Hyperliquid is busy")
+        return "Couldn't read the markets right now. Try /signal BTC.", None
+
+    monkeypatch.setattr(bot, "best_signal", no_setup)
+    tg = FakeTG()
+    assert asyncio.run(bot.daily_brief(db, tg, md, at(8))) == "sent (overview only)"
+    assert len(tg.sent) == 1 and "Daily brief" in tg.sent[0][2]  # never "Try /signal BTC" in the group
+    assert asyncio.run(bot.daily_brief(db, tg, md, at(9))) == "already sent today"
