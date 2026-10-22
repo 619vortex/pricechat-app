@@ -70,6 +70,24 @@ def dec(blob: str) -> str:
     return unprotect(base64.b64decode(blob)).decode()
 
 
+SDK_TIMEOUT = 15.0  # seconds per Hyperliquid request through the SDK
+
+
+def check_cancel(resp: Any) -> None:
+    """Hyperliquid's cancel answer: ok, or "never placed, already canceled, or filled" (gone either way); anything else raises."""
+    if isinstance(resp, dict) and resp.get("status") == "ok":
+        try:
+            st = resp["response"]["data"]["statuses"][0]
+        except (KeyError, IndexError, TypeError):
+            st = None
+        if st == "success":
+            return
+        err = str(st.get("error", "")) if isinstance(st, dict) else ""
+        if "already canceled" in err or "never placed" in err:
+            return
+    raise ExchangeError(f"Hyperliquid refused the cancel: {str(resp)[:200]}")
+
+
 def parse_status(resp: Any) -> Result:
     """Hyperliquid's order response → Result. Anything unrecognised is an ERROR, never a fill."""
     if not isinstance(resp, dict) or resp.get("status") != "ok":
@@ -78,6 +96,8 @@ def parse_status(resp: Any) -> Result:
         st = resp["response"]["data"]["statuses"][0]
     except (KeyError, IndexError, TypeError):
         return Result("ERROR", error="no order status in Hyperliquid's answer", raw=resp)
+    if not isinstance(st, dict):  # e.g. a bare string: `"filled" in st` would be a substring test, never a fill
+        return Result("ERROR", error=f"unknown status {str(st)[:200]}", raw=resp)
     if "filled" in st:
         f = st["filled"]
         return Result("FILLED", float(f.get("totalSz") or 0), float(f.get("avgPx") or 0) or None, f.get("oid"), raw=resp)
@@ -123,8 +143,10 @@ class HyperliquidExecutor:
 
         self.mode, self.master = mode, master
         self.url = URLS[mode]
-        self.info = Info(self.url, skip_ws=True)
-        self.ex = Exchange(eth_account.Account.from_key(agent_key), self.url, account_address=master)
+        # the SDK's default is no timeout: one stalled connection would hang an entry (its OPENING row) or a close (its row lock)
+        # forever. A timeout raises, and every caller treats a raise as "may have reached the exchange" (adopt / reconcile).
+        self.info = Info(self.url, skip_ws=True, timeout=SDK_TIMEOUT)
+        self.ex = Exchange(eth_account.Account.from_key(agent_key), self.url, account_address=master, timeout=SDK_TIMEOUT)
 
     def equity(self) -> float:
         st = self.info.user_state(self.master)
@@ -154,8 +176,15 @@ class HyperliquidExecutor:
         return parse_status(self.ex.order(coin, is_buy, size, trigger_px, order_type, reduce_only=True, cloid=Cloid.from_str(cloid)))
 
     def cancel(self, coin: str, oid: int | None) -> None:
+        """Raises ExchangeError when Hyperliquid refuses: a protective order that is still resting must never be booked as
+        cancelled. "Already cancelled or filled" counts as gone."""
         if oid is not None:
-            self.ex.cancel(coin, oid)
+            check_cancel(self.ex.cancel(coin, oid))
+
+    def cancel_by_cloid(self, coin: str, cloid: str) -> None:
+        from hyperliquid.utils.types import Cloid
+
+        check_cancel(self.ex.cancel_by_cloid(coin, Cloid.from_str(cloid)))
 
     def fills_since(self, start_ms: int) -> list[dict[str, Any]]:
         return self.info.user_fills_by_time(self.master, start_ms)

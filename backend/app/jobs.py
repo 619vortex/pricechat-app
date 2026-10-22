@@ -370,7 +370,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 auto += len(execution.run_auto(db, sig))
         paper = execution.track_paper(db)
         reconciled, errors = 0, 0
-        ids = {a for (a,) in db.execute(select(TrPosition.account_id).where(TrPosition.status.in_(execution.RECONCILED),
+        ids = {a for (a,) in db.execute(select(TrPosition.account_id).where(TrPosition.status.in_(execution.TO_RECONCILE),
                                                                          TrPosition.mode != "PAPER")).all()}
         for acc in db.scalars(select(TrAccount).where(TrAccount.id.in_(ids))).all() if ids else []:
             try:
