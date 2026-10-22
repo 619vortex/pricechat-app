@@ -23,6 +23,12 @@ export function ControlRoom({ o, open, onClose, onChanged }: { o: Overview; open
   const [lim, setLim] = useState(o.limits);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (st.data) setDraft(st.data.config); }, [st.data]);
+  useEffect(() => {  // Escape closes the dialog, like every other dialog on Earn
+    if (!open) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [open, onClose]);
   useEffect(() => {
     if (!draft || !st.data) return;
     const id = window.setTimeout(() => {

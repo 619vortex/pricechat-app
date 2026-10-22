@@ -56,7 +56,7 @@ export function StatusBar({ o, onChanged, onAsk, onControl }: { o: Overview; onC
       </div>
       {err && <p className="kbs-err" role="alert">{err}</p>}
       {ask && (
-        <div className="kb-dialog" role="dialog" aria-modal="true" aria-label="Pause new trades">
+        <div className="kb-dialog" role="dialog" aria-modal="true" aria-label="Pause new trades" onKeyDown={(e) => { if (e.key === "Escape") setAsk(false); }}>
           <div className="kb-dialog-in">
             <h3>Pause all new trades?</h3>
             <p>No new entries (manual or AUTO) until you resume. Open positions keep their stop-loss and take-profit orders on the exchange:
