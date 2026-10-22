@@ -34,6 +34,7 @@ const KiwiBrainPage = lazy(() => import("./website/kiwibrain").then((m) => ({ de
 const LunchPage = lazy(() => import("./website/arbitrage").then((m) => ({ default: m.LunchPage })));
 const FundingPage = lazy(() => import("./website/arbitrage").then((m) => ({ default: m.FundingPage })));
 const LearnPage = lazy(() => import("./website/rewards").then((m) => ({ default: m.LearnPage })));
+const VpnPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.VpnPage })));
 
 const page = (el: React.ReactNode) => <Suspense fallback={null}>{el}</Suspense>;
 
@@ -56,6 +57,7 @@ function PublicSite() {
         <Route path="earn/arbitrage" element={<Navigate to="/earn/lunch" replace />} />
         <Route path="trading-bot" element={page(<TradingBotPage />)} />
         <Route path="learn" element={page(<LearnPage />)} />
+        <Route path="vpn" element={page(<VpnPage />)} />
         <Route path="arena" element={<Navigate to="/passport#realm" replace />} />
         <Route path="realm" element={<Navigate to="/passport#realm" replace />} />
         <Route path="pokemon/*" element={page(<PublicMarket />)} />
