@@ -183,15 +183,18 @@ class Scheduler:
         started = time.perf_counter()
         status, result, error = "success", {}, None
         with self.session_factory() as db:
+            limit = asyncio.timeout(spec.timeout_seconds)
             try:
-                result = await asyncio.wait_for(
-                    spec.func(JobContext(db=db, trigger=trigger, now=started_at)), timeout=spec.timeout_seconds
-                ) or {}
+                async with limit:
+                    result = await spec.func(JobContext(db=db, trigger=trigger, now=started_at)) or {}
             except JobSkipped as exc:
                 status, error = "skipped", str(exc) or None
                 db.rollback()
-            except TimeoutError:
-                status, error = "failed", f"Timed out after {spec.timeout_seconds}s"
+            except TimeoutError as exc:
+                # only the scheduler's own limit is "timed out"; a TimeoutError the job raised itself (a socket, its own
+                # wait_for) is an ordinary failure with its own message
+                status, error = "failed", (f"Timed out after {spec.timeout_seconds}s" if limit.expired()
+                                           else redact_text(f"{type(exc).__name__}: {exc}")[:1000])
                 db.rollback()
             except Exception as exc:  # noqa: BLE001 - a job must never crash the scheduler
                 status, error = "failed", redact_text(f"{type(exc).__name__}: {exc}")[:1000]

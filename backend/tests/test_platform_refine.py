@@ -181,3 +181,13 @@ async def test_a_job_that_chains_itself_runs_again_soon_not_after_its_interval()
     with SessionLocal() as db:
         row = db.get(ScheduledJob, "test.job")
         assert row is not None and row.next_run_at - utcnow() > timedelta(minutes=59)  # no request: the regular interval
+
+
+async def test_a_timeout_error_raised_by_the_job_is_not_reported_as_the_scheduler_timeout() -> None:
+    async def job(ctx: JobContext) -> dict:
+        raise TimeoutError("upstream read timed out")
+
+    s = Scheduler(SessionLocal, [JobSpec("test.job", "Test job", "testing", 60, job, initial_delay_seconds=0, timeout_seconds=900)])
+    s.sync_jobs()
+    out = await s.run_job("test.job")
+    assert out.status == "failed" and "upstream read timed out" in (out.error or "") and "900s" not in (out.error or "")
