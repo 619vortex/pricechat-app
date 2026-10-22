@@ -178,7 +178,8 @@ class Pricer:
         got = [(c, prices[c].market_cents) for c in span if c in prices]
         if not got:
             have = ", ".join(RAW_LABEL[c] for c in prices)
-            return Value(None, None, None, "none", None, f"Price unavailable for this condition range (raw prices exist only for {have})")
+            return Value(None, None, None, "none", None, f"Price unavailable for this condition range (raw prices exist only for {have})",
+                         reason="raw_prices_unavailable")
         # point: the lower middle of the range (conservative); when the condition is unknown, Lightly Played if priced
         point_cond = "LP" if not assessed and "LP" in prices else span[max(0, (len(span) - 1) // 2)]
         point = prices[point_cond].market_cents if point_cond in prices else sorted(v for _, v in got)[(len(got) - 1) // 2]
