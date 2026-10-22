@@ -217,3 +217,33 @@ def test_device_cookie_is_bound_to_username_and_password() -> None:
     nonce, issued, sig = tok.split(".")
     assert admin_auth.known_device(s, f"{nonce}.{int(issued) + 1}.{sig}") is None  # tampered
     assert admin_auth.known_device(s, "garbage") is None and admin_auth.known_device(s, None) is None
+
+
+# --- live Kitchen streams per member, public signal charts ---------------------------------------------------------------
+
+
+def test_kitchen_streams_are_capped_per_member(client: TestClient, db: Session) -> None:
+    from app.api.routes import tradingbot
+    from tests.test_burner import signed_in
+
+    mid = signed_in(client, db)
+    url = "/api/members/trading-bot/kitchen/stream?after=0&once=true"
+    assert client.get(url).status_code == 200
+    assert mid not in tradingbot._streams  # a finished stream gives its slot back
+    held = [tradingbot._stream_slot(mid) for _ in range(tradingbot.KITCHEN_STREAMS_PER_MEMBER)]  # three tabs open
+    assert all(held)
+    assert client.get(url).status_code == 429
+    tradingbot._stream_release(mid, held[0])  # one tab closed
+    assert client.get(url).status_code == 200
+    for s in held[1:]:
+        tradingbot._stream_release(mid, s)
+    tradingbot._streams[mid] = [0.0] * 3  # slots that were never released expire after the stream's lifetime
+    assert client.get(url).status_code == 200
+    tradingbot._streams.clear()
+
+
+def test_public_signal_chart_is_rate_limited(client: TestClient) -> None:
+    ip = {"x-forwarded-for": "203.0.113.50"}
+    codes = [client.get("/api/members/trading-os/signals/999999/chart.png", headers=ip).status_code for _ in range(25)]
+    assert codes[0] == 404 and codes[-1] == 429
+    assert client.get("/api/members/trading-os/signals/999999/chart.png", headers={"x-forwarded-for": "203.0.113.51"}).status_code == 404

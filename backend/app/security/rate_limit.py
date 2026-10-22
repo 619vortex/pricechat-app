@@ -68,6 +68,8 @@ LIMITS = {
     # starting a Google / X / Telegram sign-in (each stores a pending attempt) and the Telegram widget check: a person
     # needs a handful; the shared bucket is generous so a flood from one script can't lock everyone else out of signing in
     "signin": Bucket(burst=10, every=6, shared_burst=600, shared_every=0.05),
+    # the public signal chart images (a candle fetch + render per signal per minute): the terminal shows up to ~10 at once
+    "chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
     "vpn_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),  # Kiwi VPN device creation, per member
 }
 
