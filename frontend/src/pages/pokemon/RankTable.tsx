@@ -80,11 +80,13 @@ export function RankTable({ rows, sort, dir, onSort, grade, caption, reason, jpy
             const r = override[base.card.id] ?? base;
             const fl = flash[base.card.id];
             return (
-              <tr key={base.card.id} className={fl ? `mx-flash-${fl}` : undefined} onClick={() => nav(`/pokemon/cards/${r.card.id}?grade=${encodeURIComponent(r.label)}`)}
+              // a click on the card's own link (or a control) is handled there: navigating twice would make Back need two presses
+              <tr key={base.card.id} className={fl ? `mx-flash-${fl}` : undefined}
+                  onClick={(e) => { if (!(e.target as HTMLElement).closest("a, button, select, input")) nav(cardHref(r)); }}
                   style={{ cursor: "pointer", ["--i" as string]: i } as React.CSSProperties}>
                 <td className="mx-c-star mx-sticky-col"><Star id={r.card.id} label={r.card.name} /></td>
                 <td className="mx-c-rank mx-sticky-col">{base.rank ?? DASH}</td>
-                <td className="mx-sticky-col mx-c-card"><CardCell card={r.card} inline extra={reason?.(base) ? <span className="mx-why">{reason(base)}</span> : undefined} /></td>
+                <td className="mx-sticky-col mx-c-card"><CardCell card={r.card} inline to={cardHref(r)} extra={reason?.(base) ? <span className="mx-why">{reason(base)}</span> : undefined} /></td>
                 <td><GradeSelect className="mx-grade-select" value={r.label} label={`Grade for ${r.card.name}`} onChange={(g) => void regrade(base, g)} /></td>
                 <td className="mx-num mx-price" title={priceTitle(r)}>
                   <span className="mx-price-main">
@@ -112,6 +114,11 @@ export function RankTable({ rows, sort, dir, onSort, grade, caption, reason, jpy
       </table>
     </div>
   );
+}
+
+/** The card page at the row's grade (PSA 10 is the page's default, so it stays out of the URL). */
+function cardHref(r: RankRow): string {
+  return `/pokemon/cards/${r.card.id}${r.label && r.label !== "PSA 10" ? `?grade=${encodeURIComponent(r.label)}` : ""}`;
 }
 
 /** 1,234 / 12.3K / 1.2M: populations stay readable in a compact column (the exact count is in the tooltip). */

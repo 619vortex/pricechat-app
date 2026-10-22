@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ApiErrorBanner, Loading } from "../../components/ui";
 import { marketApi, type GradeRow, type QualityRow, type RankRow, type Sale, type SetRow, type YearRow } from "./api";
 import { DASH, day, num, sourceLabel, usd } from "./format";
-import { CardCell, Change, Confidence, GradeSelect, MarketShell, Pills, Thumb } from "./mx";
+import { CardCell, Change, Confidence, GradeSelect, MarketShell, Pills, Thumb, usePageHead, usePublicMarket } from "./mx";
 import { Pager, RankTable } from "./RankTable";
 
 function useParam(name: string, dflt: string): [string, (v: string) => void] {
@@ -34,6 +34,7 @@ function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T | null; 
 export function TrendingPage() {
   const [grade, setGrade] = useParam("grade", "PSA 10");
   const { data, error } = useLoad(() => marketApi.trending(grade), [grade]);
+  usePageHead({ title: "Trending Pokémon Cards · Price Chat", description: "The vintage Pokémon cards collectors are talking about and trading right now, with prices, 30-day moves and the reason each one is trending." });
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Trending", null]]}>
       <header>
@@ -54,6 +55,8 @@ export function MoversPage({ direction }: { direction: "gainers" | "losers" }) {
   const [period, setPeriod] = useParam("period", "30d");
   const { data, error } = useLoad(() => marketApi.movers(direction, grade, period as "30d" | "90d"), [direction, grade, period]);
   const title = direction === "gainers" ? "🚀 Top Gainers" : "📉 Top Losers";
+  usePageHead({ title: `Pokémon Card ${direction === "gainers" ? "Top Gainers" : "Top Losers"} · Price Chat`,
+                description: `The vintage Pokémon cards whose estimated price ${direction === "gainers" ? "rose" : "fell"} the most over the last 30 and 90 days, by grade.` });
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], [direction === "gainers" ? "Top Gainers" : "Top Losers", null]]}>
       <header>
@@ -78,9 +81,11 @@ export function MoversPage({ direction }: { direction: "gainers" | "losers" }) {
 export function RecentPage() {
   const [grade, setGrade] = useParam("grade", "all");
   const [sp, setSp] = useSearchParams();
-  const page = Math.max(1, Number(sp.get("page") ?? 1));
+  const page = Math.max(1, Math.floor(Number(sp.get("page"))) || 1);
   const per = 50;
+  const isPublic = usePublicMarket();
   const { data, error } = useLoad(() => marketApi.recent(per, (page - 1) * per, grade === "all" ? undefined : grade), [grade, page]);
+  usePageHead({ title: "Recently Sold Pokémon Cards · Price Chat", description: "Completed, verified sales of vintage Pokémon cards, newest first: date, grade, price and where each card sold." });
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Recently Sold", null]]}>
       <header>
@@ -92,8 +97,8 @@ export function RecentPage() {
       </div></div>
       <ApiErrorBanner error={error} />
       {!data ? <Loading /> : data.sales.length === 0 ? (
-        <p className="mx-banner"><b>No verified sales on record yet.</b> They appear here as soon as sales are imported (Data sources › CSV) or synced from a connected
-          sales provider.</p>
+        <p className="mx-banner"><b>No verified sales on record{grade !== "all" ? ` for ${grade}` : ""} yet.</b>{" "}
+          {isPublic ? "They appear here as soon as they're recorded." : "They appear here as soon as sales are imported (Data sources › CSV) or synced from a connected sales provider."}</p>
       ) : (
         <>
           <div className="mx-table-wrap">
@@ -129,6 +134,7 @@ export function YearsPage() {
   const { data, error } = useLoad(() => marketApi.years(grade, language || undefined), [grade, language]);
   const max = Math.max(1, ...(data?.years ?? []).map((y) => y.market_cap ?? 0));
   const jp = language === "Japanese";
+  usePageHead({ title: "Pokémon Card Market Cap by Year · Price Chat", description: "The estimated market cap of Pokémon cards by release year, its share of the whole market, 30- and 90-day moves and each year's top cards." });
   const link = (y: YearRow) => `/pokemon?year=${y.year}${language ? `&language=${encodeURIComponent(language)}` : ""}${grade !== "PSA 10" ? `&grade=${encodeURIComponent(grade)}` : ""}`;
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Years", null]]}>
@@ -175,7 +181,7 @@ export function YearsPage() {
                   <td className="mx-num">{y.sets}</td>
                   <td className="mx-years-top">{y.top.map((r) => (
                     <Link key={r.card.id} to={`/pokemon/cards/${r.card.id}${grade !== "PSA 10" ? `?grade=${encodeURIComponent(grade)}` : ""}`}
-                          title={`${r.card.name} · ${r.card.set_name} · ${usd(r.market_price)}`}><Thumb card={r.card} className="mx-inline-thumb" /></Link>
+                          title={`${r.card.name} · ${r.card.set_name} · ${usd(r.market_price)}`} aria-label={`${r.card.name}, ${r.card.set_name}`}><Thumb card={r.card} className="mx-inline-thumb" /></Link>
                   ))}</td>
                 </tr>
               ))}
@@ -190,6 +196,7 @@ export function YearsPage() {
 export function SetsPage() {
   const [grade, setGrade] = useParam("grade", "PSA 10");
   const { data, error } = useLoad(() => marketApi.sets(grade), [grade]);
+  usePageHead({ title: "Pokémon Card Sets by Market Cap · Price Chat", description: "Every tracked Pokémon card set ranked by estimated market cap, with 30-day moves, verified sales volume, population and its most valuable cards." });
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Sets", null]]}>
       <header>
@@ -198,7 +205,7 @@ export function SetsPage() {
       </header>
       <div className="mx-controls"><div className="mx-controls-left"><GradeSelect value={grade} onChange={setGrade} /></div></div>
       <ApiErrorBanner error={error} />
-      {!data ? <Loading /> : (
+      {!data ? <Loading /> : !data.sets.length ? <p className="mx-banner">No sets in the catalog yet.</p> : (
         <div className="mx-table-wrap">
           <table className="mx-list mx-sets">
             <thead><tr><th>#</th><th>Set</th><th>Year</th><th>Language</th><th className="mx-num">Cards</th><th className="mx-num">Priced</th>
@@ -215,9 +222,10 @@ export function SetsPage() {
                   <td className="mx-num">{s.cards_priced}</td>
                   <td className="mx-num"><b>{usd(s.market_cap, true)}</b></td>
                   <td className="mx-num"><Change v={s.market_cap_change_30d} /></td>
-                  <td className="mx-num">{s.sales_30d ? <>{usd(s.volume_30d, true)}<div className="mx-note">{s.sales_30d} sales</div></> : DASH}</td>
+                  <td className="mx-num">{s.sales_30d ? <>{usd(s.volume_30d, true)}<div className="mx-note">{s.sales_30d} sale{s.sales_30d === 1 ? "" : "s"}</div></> : DASH}</td>
                   <td className="mx-num">{num(s.population)}</td>
-                  <td>{s.top.map((c) => <Link key={c.id} to={`/pokemon/cards/${c.id}`} style={{ marginRight: 6 }}><Thumb card={c} className="mx-inline-thumb" /></Link>)}</td>
+                  <td>{s.top.map((c) => <Link key={c.id} to={`/pokemon/cards/${c.id}${grade !== "PSA 10" ? `?grade=${encodeURIComponent(grade)}` : ""}`} style={{ marginRight: 6 }}
+                                              aria-label={c.name} title={c.name}><Thumb card={c} className="mx-inline-thumb" /></Link>)}</td>
                 </tr>
               ))}
             </tbody>
@@ -230,6 +238,7 @@ export function SetsPage() {
 
 export function GradesPage() {
   const { data, error } = useLoad(() => marketApi.grades(), []);
+  usePageHead({ title: "Pokémon Card Market by Grade · Price Chat", description: "PSA, BGS and CGC grades side by side: cards priced, market cap, verified sales volume, known population and the most valuable card at each grade." });
   return (
     <MarketShell crumbs={[["Markets", "/pokemon"], ["Grades", null]]}>
       <header>
@@ -247,10 +256,10 @@ export function GradesPage() {
                 <tr key={g.grade}>
                   <td><b>{g.grade}</b>{!g.graded && <div className="mx-note">ungraded: no population or market cap</div>}</td>
                   <td className="mx-num">{num(g.cards_priced)} <span className="mx-muted">/ {num(data.cards_tracked)}</span></td>
-                  <td className="mx-num"><b>{g.graded ? usd(g.market_cap, true) : "n/a"}</b></td>
+                  <td className="mx-num"><b>{g.graded ? usd(g.market_cap, true) : <span className="mx-dash" title="Ungraded cards have no population, so no market cap">{DASH}</span>}</b></td>
                   <td className="mx-num">{g.sales_30d || DASH}</td>
                   <td className="mx-num">{g.sales_30d ? usd(g.volume_30d, true) : DASH}</td>
-                  <td className="mx-num">{g.graded ? num(g.population) : "n/a"}</td>
+                  <td className="mx-num">{g.graded ? num(g.population) : <span className="mx-dash" title="Ungraded cards have no population">{DASH}</span>}</td>
                   <td>{g.top_card ? <TopCard r={g.top_card} /> : <span className="mx-muted">{DASH}</span>}</td>
                   <td><Link to={`/pokemon${g.grade !== "PSA 10" ? `?grade=${encodeURIComponent(g.grade)}` : ""}`} className="mx-box-link">View market ›</Link></td>
                 </tr>

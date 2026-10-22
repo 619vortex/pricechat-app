@@ -6,7 +6,7 @@ import { marketApi, pokemonApi, type CardDetail, type CardMeta, type ChartRange,
 import { MarketChart, MultiLineChart, compareSeries, pricePopSeries, type ChartMode, type ChartStyle } from "./charts";
 import { DASH, day, num, sourceLabel, usd, yen } from "./format";
 import { play } from "./marketSound";
-import { Change, Conf, GRADES, MarketShell, Pills, Skeleton, Tags, Thumb, Tilt, useCountUp, useWatch, fxNote, useFx, Confidence, usePublicMarket } from "./mx";
+import { Change, Conf, GRADES, MarketShell, Pills, Skeleton, Tags, Thumb, Tilt, useCountUp, useWatch, fxNote, useFx, Confidence, usePageHead, usePublicMarket } from "./mx";
 import { PsaLinkBox } from "./psa";
 
 const RANGES: [ChartRange, string][] = [["30d", "30D"], ["90d", "90D"], ["all", "ALL"]];
@@ -28,9 +28,12 @@ export function PokemonCardPage() {
   const [chart, setChart] = useState<ChartResp | null>(null);
   const [chartErr, setChartErr] = useState<unknown>(null);
   useEffect(() => {
+    let live = true; // a quick grade / range switch must never show the previous request's chart
     setChart(null);
-    marketApi.chart(id, grade, range).then((c) => { setChart(c); setChartErr(null); }).catch(setChartErr);
+    marketApi.chart(id, grade, range).then((c) => { if (live) { setChart(c); setChartErr(null); } }).catch((e) => live && setChartErr(e));
+    return () => { live = false; };
   }, [id, grade, range]);
+  usePageHead(data && data.card.id === id ? cardHead(data, grade) : null);
   const announced = useRef<string>("");
   useEffect(() => {
     // one soft blip when a card / grade opens: rising if its 30-day move is up, falling if down
@@ -77,22 +80,48 @@ export function PokemonCardPage() {
   );
 }
 
+/** Search / share title and description: "Charizard 1st Edition · 1999 Base Set 4/102 · PSA 10 Price · Price Chat". */
+export function cardHead(d: CardDetail, grade: string): { title: string; description: string; image: string | null } {
+  const c = d.card;
+  const ident = `${c.year} ${c.language === "English" ? "" : `${c.language} `}${c.set_name}${c.card_number ? ` ${c.card_number}` : ""}`;
+  const name = `${c.name}${c.edition !== "—" ? ` ${c.edition}` : ""}`;
+  const v = [...d.valuations, ...d.other_grades].find((x) => x.label === grade);
+  const facts = [v?.market_price !== null && v?.market_price !== undefined ? `estimated ${grade} price ${usd(v.market_price)}` : null,
+    v?.population !== null && v?.population !== undefined ? `${grade} population ${num(v.population)}` : null].filter(Boolean).join(", ");
+  return {
+    title: `${name} · ${ident} · ${grade} Price · Price Chat`,
+    description: `${name} (${ident})${facts ? `: ${facts}` : ""}. Verified sales, price history, population and every grade on the Price Chat Pokémon Market.`,
+    image: c.image_url,
+  };
+}
+
 // --- left column -----------------------------------------------------------------------------------------------------
 
 function Side({ detail, chart, grade, grades, onGrade }: { detail: CardDetail; chart: ChartResp | null; grade: string; grades: string[]; onGrade: (g: string) => void }) {
   const c = detail.card;
+  const isPublic = usePublicMarket();
   const { ids, toggle } = useWatch();
   const watched = ids.has(c.id);
   const s = chart?.summary;
-  const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState<"copied" | "failed" | null>(null);
   const share = async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
+    const url = window.location.href;
+    // phones: the system share sheet; elsewhere (or if it's unavailable): copy the link, and say when that fails
+    if (typeof navigator.share === "function" && window.matchMedia?.("(pointer: coarse)").matches) {
+      try {
+        await navigator.share({ title: document.title, url });
+        return;
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+      }
     }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShared("copied");
+    } catch {
+      setShared("failed");
+    }
+    window.setTimeout(() => setShared(null), 2000);
   };
   const fx = useFx();
   const priceShown = useCountUp(s?.market_price, 650);
@@ -132,10 +161,14 @@ function Side({ detail, chart, grade, grades, onGrade }: { detail: CardDetail; c
         ) : <div className="mx-coin-sub">Estimated {grade} market price <Conf c={s?.confidence} reasons={s?.confidence_reasons} /></div>}
       </div>
       <div className="mx-btnrow">
-        <button type="button" className={`mx-btn${watched ? " is-on" : ""}`} aria-pressed={watched} onClick={() => void toggle(c.id)}>
-          {watched ? "★ On watchlist" : "☆ Add to watchlist"}
+        {!isPublic && (
+          <button type="button" className={`mx-btn${watched ? " is-on" : ""}`} aria-pressed={watched} onClick={() => void toggle(c.id).catch(() => undefined)}>
+            {watched ? "★ On watchlist" : "☆ Add to watchlist"}
+          </button>
+        )}
+        <button type="button" className="mx-btn" onClick={() => void share()} aria-live="polite">
+          {shared === "copied" ? "Link copied" : shared === "failed" ? "Copy the address bar link" : "Share"}
         </button>
-        <button type="button" className="mx-btn" onClick={() => void share()}>{copied ? "Link copied" : "Share"}</button>
         <Link className="pf-shiny pf-sm" to={`/pokemon/portfolio/add?card=${c.id}`}>＋ Add to Portfolio</Link>
       </div>
       <dl className="mx-facts">
@@ -347,6 +380,7 @@ function Related({ detail, grade }: { detail: CardDetail; grade: string }) {
 // --- sales -------------------------------------------------------------------------------------------------------------
 
 function SalesTab({ detail, grade }: { detail: CardDetail; grade: string }) {
+  const isPublic = usePublicMarket();
   const [all, setAll] = useState<ChartResp | null>(null);
   useEffect(() => {
     void marketApi.chart(detail.card.id, grade, "all").then(setAll).catch(() => setAll(null));
@@ -356,7 +390,8 @@ function SalesTab({ detail, grade }: { detail: CardDetail; grade: string }) {
     <>
       <Card title={`Historical ${grade} sales (completed, newest first)`}>
         {!all ? <Loading /> : sales.length === 0 ? (
-          <p className="mx-empty">No completed {grade} sales on record for this card. Sales appear when imported (CSV) or synced from a connected sales source.</p>
+          <p className="mx-empty">No completed {grade} sales on record for this card.{isPublic ? " Verified sales appear here as soon as they're recorded."
+            : " Sales appear when imported (CSV) or synced from a connected sales source."}</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table className="mx-list">
@@ -438,14 +473,16 @@ function GradeRowView({ v, cardId }: { v: Valuation; cardId: number }) {
 // --- population -------------------------------------------------------------------------------------------------------
 
 function PopulationTab({ detail, chart, grade, onChanged }: { detail: CardDetail; chart: ChartResp | null; grade: string; onChanged: () => void }) {
+  const isPublic = usePublicMarket();
   const companies = Object.keys(detail.population_totals);
   return (
     <>
       <div className="mx-two">
         <Card title="Population by grade (card-wide)">
           {detail.population.length === 0 ? (
-            <p className="mx-empty">No population on record. Link a PSA cert of this card below: PSA's SpecID brings in its card-wide population per grade
-              (once PSA has approved API access for the key).</p>
+            <p className="mx-empty">{isPublic ? "No grading population on record for this card yet. Market cap needs one, so it stays blank rather than guessed."
+              : <>No population on record. Link a PSA cert of this card below: PSA's SpecID brings in its card-wide population per grade
+              (once PSA has approved API access for the key).</>}</p>
           ) : companies.map((co) => (
             <div key={co} style={{ marginBottom: 10, overflowX: "auto" }}>
               <table className="mx-list" style={{ minWidth: 0 }}>
@@ -465,7 +502,7 @@ function PopulationTab({ detail, chart, grade, onChanged }: { detail: CardDetail
                           empty="Needs population history (reports over time) and a price history for this grade. Neither is estimated." />
         </Card>
       </div>
-      {!usePublicMarket() && <PsaLinkBox card={detail.card} onChanged={onChanged} />}
+      {!isPublic && <PsaLinkBox card={detail.card} onChanged={onChanged} />}
     </>
   );
 }
@@ -524,7 +561,7 @@ function useMeta(cardId: number) {
 
 function describe(d: CardDetail, m: CardMeta["meta"]): string {
   const c = d.card;
-  let s = `${c.name} is card ${c.card_number ?? "(unnumbered)"} from the ${c.year} ${c.language} ${c.set_name} set${c.edition !== "—" ? `, ${c.edition} printing` : ""}.`;
+  let s = `${c.name} is card ${c.card_number ?? "(unnumbered)"} from the ${c.year} ${c.language} ${c.set_name}${/\bset$/i.test(c.set_name) ? "" : " set"}${c.edition !== "—" ? `, ${c.edition} printing` : ""}.`;
   if (m?.illustrator) s += ` Illustrated by ${m.illustrator}.`;
   if (c.rarity ?? m?.rarity) s += ` Rarity: ${c.rarity ?? m?.rarity}.`;
   return s;
@@ -552,6 +589,7 @@ function AboutSnippet({ cardId }: { cardId: number }) {
 }
 
 function AboutTab({ cardId, detail }: { cardId: number; detail: CardDetail }) {
+  const isPublic = usePublicMarket();
   const m = useMeta(cardId);
   const meta = m?.meta ?? null;
   const c = detail.card;
@@ -586,7 +624,7 @@ function AboutTab({ cardId, detail }: { cardId: number; detail: CardDetail }) {
           {meta?.weaknesses && <Fact k="Weakness" v={meta.weaknesses.map((w) => `${w.type} ${w.value ?? ""}`).join(", ")} />}
           {meta?.retreat !== undefined && <Fact k="Retreat cost" v={String(meta.retreat)} />}
           <Fact k="Catalog & image" v={m?.source === "tcgdex" ? "TCGdex" : c.image_source ?? DASH} href={m?.url ?? undefined} />
-          <Fact k="PSA spec" v={c.psa_spec ?? "Not linked"} />
+          {(c.psa_spec || !isPublic) && <Fact k="PSA spec" v={c.psa_spec ?? "Not linked"} />}
         </dl>
       </Card>
     </div>

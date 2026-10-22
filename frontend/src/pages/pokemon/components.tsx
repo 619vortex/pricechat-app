@@ -10,7 +10,7 @@ export function CardThumb({ card, size = "sm" }: { card: PCard; size?: "sm" | "m
     <img className={`pm-thumb pm-thumb-${size}`} src={card.image_url} alt={`${card.name} (${card.set_name})`} loading="lazy" />
   ) : (
     <span className={`pm-thumb pm-thumb-${size} pm-thumb-empty`} role="img" aria-label={`${card.name}: no image yet`}
-          title="No image yet: add one from Data sources (Pokémon TCG API) or review this card">
+          title="No image of this card yet">
       <span>{card.name}</span>
       <em className="pm-noimg">No image</em>
     </span>

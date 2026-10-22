@@ -8,7 +8,7 @@ import { PokemonCardPage } from "./PokemonCardPage";
 import { PokemonSources } from "./PokemonSources";
 import { MarketPulse, type PulseStatus } from "./pulse";
 import { marketSoundOn, play } from "./marketSound";
-import { resetFx, Sparkline, SoundToggle } from "./mx";
+import { PageHeadProvider, PublicMarketProvider, resetFx, resetGlobalStats, Sparkline, SoundToggle, type PageHead } from "./mx";
 import { cardLine, usd } from "./format";
 
 // Lightweight Charts draws on canvas, which jsdom lacks: record what each series is given instead.
@@ -94,6 +94,7 @@ async function settle(ms = 0) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  resetGlobalStats();
   chartLog.length = 0;
 });
 
@@ -616,5 +617,65 @@ describe("data sources", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(committed).toEqual({ csv: "card,set\nCharizard,Base Set", accept: [{ row: 1, card_id: null }, { row: 2, card_id: 3 }], verified: true });
     expect(screen.getByRole("status").textContent).toBe("2 imported · 0 skipped · 1 failed");
+  });
+});
+
+describe("public website polish", () => {
+  const detail = (over: Partial<CardDetail> = {}): CardDetail => ({
+    card: card(), headline: null, active_listings: [], reference_prices: [], total_market_cap: null, watched: false, other_grades: [], population: [],
+    population_totals: {}, recent_sales: [], valuations: [val("PSA 10", { market_price: 250_000_00, population: 120 }), val("PSA 9")], ...over,
+  });
+  const meta = { source: null, meta: null, reason: "Not linked to TCGdex yet." };
+
+  it("a public card page names itself for search and sharing, and hides owner-only controls and copy", async () => {
+    serve({ "/pokemon/cards/1/chart": chart(), "/pokemon/cards/1/meta": meta, "/pokemon/cards/1": detail() });
+    const heads: (PageHead | null)[] = [];
+    const { container } = await show(
+      <PageHeadProvider value={(h) => heads.push(h)}><PublicMarketProvider value={true}><PokemonCardPage /></PublicMarketProvider></PageHeadProvider>, "/pokemon/cards/1");
+    const head = heads.filter(Boolean).at(-1)!;
+    expect(head.title).toBe("Charizard 1st Edition · 1999 Base Set 4/102 · PSA 10 Price · Price Chat");
+    expect(head.description).toContain("estimated PSA 10 price $250,000, PSA 10 population 120");
+    expect(screen.queryByRole("button", { name: /watchlist/ })).toBeNull(); // the watchlist is the owner's: no dead button for visitors
+    expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    await act(async () => screen.getByRole("tab", { name: "Population" }).click());
+    await settle();
+    expect(container.textContent).not.toContain("Link a PSA cert");
+    expect(container.textContent).toContain("No grading population on record for this card yet");
+    await act(async () => screen.getByRole("tab", { name: "About" }).click());
+    await settle();
+    expect(container.textContent).not.toContain("PSA spec");
+    expect(container.textContent).toContain("Charizard is card 4/102 from the 1999 English Base Set, 1st Edition printing."); // never "Base Set set"
+  });
+
+  it("the dashboard card page keeps the watchlist button (no head provider: nothing to set)", async () => {
+    serve({ "/pokemon/cards/1/chart": chart(), "/pokemon/cards/1/meta": meta, "/pokemon/cards/1": detail(), "/pokemon/watchlist": { cards: [] } });
+    await show(<PokemonCardPage />, "/pokemon/cards/1");
+    expect(screen.getByRole("button", { name: /Add to watchlist/ })).toBeTruthy();
+  });
+
+  it("clicking a card's name in the table navigates once, to that row's grade", async () => {
+    serve({ "/pokemon/market?ids=1": market([priced({ label: "PSA 9", grade: "9" })]), "/pokemon/market": market([priced()]) });
+    await show(<MarketHome />);
+    fireEvent.click(screen.getByRole("link", { name: "Charizard" }));
+    await settle();
+    expect(where).toBe("/pokemon/cards/1"); // PSA 10 is the page default; the row click no longer piles a second entry on top
+    cleanup();
+    await show(<MarketHome />);
+    fireEvent.change(screen.getByLabelText("Grade for Charizard"), { target: { value: "PSA 9" } });
+    await settle();
+    fireEvent.click(screen.getByRole("link", { name: "Charizard" }));
+    await settle();
+    expect(where).toBe("/pokemon/cards/1?grade=PSA%209");
+  });
+
+  it("a broken page number in the URL falls back to page 1, and a failed load offers a retry", async () => {
+    serve({});
+    await show(<MarketHome />, "/pokemon?page=abc&per=7");
+    expect(calls.some((c) => c.includes("/pokemon/market?") && c.includes("offset=0") && c.includes("limit=100"))).toBe(true);
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    serve({ "/pokemon/market": market([priced()]) });
+    await act(async () => screen.getByRole("button", { name: "Try again" }).click());
+    await settle();
+    expect(screen.getAllByRole("link", { name: "Charizard" }).length).toBeGreaterThan(0);
   });
 });
