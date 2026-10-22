@@ -29,6 +29,7 @@ DAILY_XP_CAP = 60  # overall automatic XP per member per UTC day
 X_ENGAGEMENT_EVENTS = frozenset({"x.mention_pricechat", "x.reply_pricechat", "x.like_pricechat", "x.repost_pricechat"})
 FLAG_AFTER_REFUSALS = 30  # refused attempts in one day before a "rapid activity" flag is raised
 _CLAIM_SALT = "price-chat-xp-claim-v1"
+LIVE_SECONDS = 600  # an award for activity this recent is the member acting now (not a job re-checking the past)
 
 _refusals: dict[tuple[str, int], int] = defaultdict(int)
 _refusals_lock = threading.Lock()
@@ -84,9 +85,15 @@ def telegram_paid_today(db: Session, member_id: int, day: str) -> int:
         ReputationEvent.source == "telegram")) or 0)
 
 
-def _refuse(db: Session, member: Member, rule: XPRule, why: str, day: str) -> AwardResult:
-    if rule.verification_source in AUTOMATIC_SOURCES and why in {"daily_cap", "overall_cap", "cooldown", "duplicate"}:
+def _refuse(db: Session, member: Member, rule: XPRule, why: str, day: str, live: bool = True) -> AwardResult:
+    """Refuse an award. Only live attempts count towards the rapid-activity flag: a verification job re-checking
+    activity from earlier (already paid, or over a past day's cap) is not the member doing anything now."""
+    if live and rule.verification_source in AUTOMATIC_SOURCES and why in {"daily_cap", "overall_cap", "cooldown", "duplicate"}:
         with _refusals_lock:
+            if (day, member.id) not in _refusals:  # a new key: forget the days that can no longer be flagged
+                oldest = day_of(utcnow() - timedelta(days=1))
+                for k in [k for k in _refusals if k[0] < oldest]:
+                    del _refusals[k]
             _refusals[(day, member.id)] += 1
             hits = _refusals[(day, member.id)]
         if hits == FLAG_AFTER_REFUSALS:
@@ -116,6 +123,7 @@ def award(
     rule = get_rule(db, event_type)
     when = occurred_at or utcnow()
     day = day_of(when)
+    live = occurred_at is None or abs((utcnow() - when).total_seconds()) < LIVE_SECONDS
     if rule.availability != "available" or not rule.enabled:
         return AwardResult(False, 0, "rule_off")
     staff = rule.verification_source in STAFF_SOURCES
@@ -130,7 +138,7 @@ def award(
     source_ref = source_ref[:128]  # as stored: the duplicate check must compare what the unique constraint compares
     if db.scalar(select(ReputationEvent.id).where(ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type,
                                                  ReputationEvent.source_ref == source_ref)):
-        return _refuse(db, member, rule, "duplicate", day)
+        return _refuse(db, member, rule, "duplicate", day, live)
     if claim_key and db.scalar(select(XPClaim.id).where(XPClaim.claim_hash == claim_hash(event_type, claim_key))):
         return AwardResult(False, 0, "already_claimed")
     if rule.max_per_member is not None:
@@ -144,7 +152,7 @@ def award(
             ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type, ReputationEvent.reverses_id.is_(None),
         ).order_by(ReputationEvent.occurred_at.desc()).limit(1))
         if last is not None and abs((when - last).total_seconds()) < rule.cooldown_seconds:
-            return _refuse(db, member, rule, "cooldown", day)
+            return _refuse(db, member, rule, "cooldown", day, live)
 
     amount = xp if xp is not None else rule.xp
     if amount == 0:
@@ -153,7 +161,7 @@ def award(
     if amount > 0 and rule.daily_cap is not None:
         room = rule.daily_cap - _paid_today(db, member.id, day, event_type=event_type)
         if room <= 0:
-            return _refuse(db, member, rule, "daily_cap", day)
+            return _refuse(db, member, rule, "daily_cap", day, live)
         if amount > room:
             amount, capped = room, True
     if amount > 0 and event_type.startswith("telegram.") and rule.verification_source == "telegram":
@@ -161,13 +169,13 @@ def award(
 
         room = rep_settings(db).telegram_daily_cap - telegram_paid_today(db, member.id, day)
         if room <= 0:
-            return _refuse(db, member, rule, "telegram_cap", day)
+            return _refuse(db, member, rule, "telegram_cap", day, live)
         if amount > room:
             amount, capped = room, True
     if amount > 0 and rule.verification_source in AUTOMATIC_SOURCES:
         room = DAILY_XP_CAP - _paid_today(db, member.id, day, sources=AUTOMATIC_SOURCES)
         if room <= 0:
-            return _refuse(db, member, rule, "overall_cap", day)
+            return _refuse(db, member, rule, "overall_cap", day, live)
         if amount > room:
             amount, capped = room, True
 

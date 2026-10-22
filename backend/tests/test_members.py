@@ -740,3 +740,76 @@ def test_admin_overview_member_table_and_audit(mc: TestClient, db: Session) -> N
     bad = mc.patch("/api/members-admin/ranks/3", json={"min_xp": 10})
     assert bad.status_code == 400  # thresholds must keep increasing
     assert mc.patch("/api/members-admin/ranks/3", json={"name": "Kiwi Regular"}).status_code == 200
+
+
+def test_verify_job_rechecks_skip_paid_activity_and_raise_no_flag(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The members.verify job re-reads 14 days of Telegram every run. What was paid is skipped (not sent to the ledger
+    again), and refusals for past activity (repeats, a past day's cap) never count towards a rapid-activity flag."""
+    ledger.reset_for_tests()
+    m = new_member(db, "chatty")
+    _link(db, m, "telegram", "8080", ago=timedelta(days=5))
+    src = TelegramSource(chat_id=-100808, display_name="Price Chat Community", enabled=True)
+    db.add(src)
+    db.flush()
+    for i in range(60):  # a busy day two days ago: more than every daily cap
+        _tg_msg(db, src, 8080, f"distinct thought number {i} about the market", timedelta(days=2, seconds=-10 * i), 100 + i)
+    db.commit()
+    calls: list[str] = []
+    real = ledger.award
+
+    def counting(db_, member, event_type, *a, **k):  # type: ignore[no-untyped-def]
+        calls.append(event_type)
+        return real(db_, member, event_type, *a, **k)
+
+    monkeypatch.setattr(verified.ledger, "award", counting)
+    verified.telegram_participation(db)
+    verified.telegram_message_xp(db)
+    first = len(calls)
+    paid = db.scalar(select(func.count()).select_from(ReputationEvent).where(ReputationEvent.member_id == m.id,
+                                                                            ReputationEvent.event_type.like("telegram.%")))
+    for _ in range(3):
+        verified.telegram_participation(db)
+        verified.telegram_message_xp(db)
+    rechecks = len(calls) - first
+    assert rechecks < 3 * (first - paid + 1)  # only what was refused (over a cap) is looked at again, never what was paid
+    assert db.scalar(select(func.count()).select_from(ModerationFlag).where(ModerationFlag.member_id == m.id)) == 0
+
+
+def test_live_refusals_still_raise_the_flag_and_old_days_are_forgotten(db: Session) -> None:
+    ledger.reset_for_tests()
+    m = new_member(db)
+    ledger._refusals[("2000-01-01", m.id)] = 5  # a day long gone
+    ledger.award(db, m, "website.content_view", "content:same")
+    for _ in range(ledger.FLAG_AFTER_REFUSALS):
+        ledger.award(db, m, "website.content_view", "content:same")
+    db.commit()
+    assert ("2000-01-01", m.id) not in ledger._refusals
+    assert db.scalar(select(ModerationFlag.kind).where(ModerationFlag.member_id == m.id)) == "rapid_activity"
+
+
+def test_x_interactions_loads_only_recent_posts(db: Session) -> None:
+    from sqlalchemy import event
+
+    m = new_member(db, "xfan")
+    fan = SocialProfile(platform=Platform.X, external_id="4242", username="xfan")
+    db.add(fan)
+    db.flush()
+    _link(db, m, "x", "4242", ago=timedelta(days=60))
+    now = utcnow()
+    db.add_all([SocialPost(platform=Platform.X, external_id=f"old-{i}", text="an old post that mentions @pricechat a lot",
+                           author_profile_id=fan.id, posted_at=now - timedelta(days=30 + i), source_kinds=["mention"]) for i in range(20)])
+    db.add(SocialPost(platform=Platform.X, external_id="new-1", text="a recent post that mentions @pricechat a lot",
+                      author_profile_id=fan.id, posted_at=now - timedelta(hours=2), source_kinds=["mention"]))
+    db.commit()
+    db.expunge_all()
+    loaded: list[str] = []
+
+    def on_load(target, _ctx):  # type: ignore[no-untyped-def]
+        loaded.append(target.external_id)
+
+    event.listen(SocialPost, "load", on_load)
+    try:
+        verified.x_interactions(db)
+    finally:
+        event.remove(SocialPost, "load", on_load)
+    assert loaded == ["new-1"]  # posts older than the lookback never leave the database
