@@ -21,7 +21,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, select, update
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -334,15 +334,21 @@ def new_nonce(db: Session, member: Member, address: str, domain: str) -> dict[st
     return {"message": msg, "nonce": n}
 
 
+def _spend(db: Session, n: TbNonce, now: datetime) -> bool:
+    """Use a nonce up, atomically: False when another request (a double click, a replay racing this one) spent it first.
+    Spent even if the signature turns out wrong: no retries on one nonce."""
+    spent = db.execute(update(TbNonce).where(TbNonce.id == n.id, TbNonce.used_at.is_(None)).values(used_at=now)).rowcount == 1
+    db.commit()
+    return spent
+
+
 def verify_wallet(db: Session, member: Member, nonce: str, signature: str, client: InfoClient | None) -> TbWallet:
     """Check the signature over the exact message we issued (single use, unexpired, this member), then bind the wallet."""
     limit("verify", f"m{member.id}")
     now = utcnow()
     n = db.scalar(select(TbNonce).where(TbNonce.nonce == str(nonce)[:64], TbNonce.member_id == member.id))
-    if n is None or n.used_at is not None or _aware(n.expires_at) < now:
+    if n is None or n.used_at is not None or _aware(n.expires_at) < now or not _spend(db, n, now):
         raise AccessError("That signing request expired or was already used. Start again.")
-    n.used_at = now  # spent even if the signature turns out wrong: no retries on one nonce
-    db.commit()
     try:
         signer = evm.recover(n.message, signature)
     except ValueError as e:
@@ -456,10 +462,8 @@ def login_verify(db: Session, nonce: str, signature: str, who: str) -> tuple[Mem
     limit("verify", f"login:{who}")
     now = utcnow()
     n = db.scalar(select(TbNonce).where(TbNonce.nonce == str(nonce)[:64], TbNonce.member_id.is_(None)))
-    if n is None or n.used_at is not None or _aware(n.expires_at) < now:
+    if n is None or n.used_at is not None or _aware(n.expires_at) < now or not _spend(db, n, now):
         raise AccessError("That sign-in request expired or was already used. Try again.")
-    n.used_at = now
-    db.commit()
     try:
         signer = evm.recover(n.message, signature)
     except ValueError as e:

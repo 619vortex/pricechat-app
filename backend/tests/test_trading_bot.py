@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.routes import tradingbot as routes
@@ -360,6 +360,26 @@ def test_wallet_gives_one_free_level_once(tb: Any) -> None:
     # the first wallet can't level up a second account either (claim is per wallet too)
     other = member(db, client, 1, telegram="555")
     assert service.free_level(db, other, addr(ADDR_KEY)) == 0
+
+
+def test_a_nonce_spent_by_a_racing_request_is_refused(tb: Any) -> None:
+    """Two sign-ins racing on one nonce (a double click): the second must not pass on a stale read of `used_at`
+    (it created a second Passport, then failed on the wallet's unique address)."""
+    from app.db.session import SessionLocal
+    from app.models.members import Member
+    from app.models.tradingbot import TbNonce
+
+    client, db, _ = tb
+    n = service.login_nonce(db, addr(ADDR_KEY), "pricechat.live", "visitor")
+    row = db.scalar(select(TbNonce).where(TbNonce.nonce == n["nonce"]))
+    assert row.used_at is None  # this request read it unused...
+    with SessionLocal() as other:  # ...and the racing one spends it meanwhile
+        other.get(TbNonce, row.id).used_at = service.utcnow()
+        other.commit()
+    before = db.scalar(select(func.count()).select_from(Member))
+    with pytest.raises(service.AccessError):
+        service.login_verify(db, n["nonce"], sign(n["message"], ADDR_KEY), "visitor")
+    assert db.scalar(select(func.count()).select_from(Member)) == before
 
 
 def test_sign_in_with_wallet(tb: Any) -> None:
