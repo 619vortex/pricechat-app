@@ -685,8 +685,7 @@ say "Setting up the VPN DNS resolver on $WG_ADDR:53 (no query logging; ad blocki
 systemctl mask -q unbound-resolvconf.service 2>/dev/null || true
 render_unbound_conf > "$UNBOUND_CONF"
 if [ "$ADBLOCK" = 1 ]; then
-  printf 'BLOCKLIST_URL=%s
-' "$BLOCKLIST_URL" > "$ETC/adblock.env"
+  echo "BLOCKLIST_URL=$BLOCKLIST_URL" > "$ETC/adblock.env"
   [ -s "$BLOCKLIST" ] && grep -q '^local-zone:' "$BLOCKLIST" || echo "# empty until the first download" > "$BLOCKLIST"
   (umask 022; render_blocklist_updater > "$UPDATER.new"); chmod 0755 "$UPDATER.new"; mv -f "$UPDATER.new" "$UPDATER"
   render_blocklist_service > "$BL_SERVICE"

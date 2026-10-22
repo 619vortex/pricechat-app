@@ -478,3 +478,21 @@ def test_blocklist_conversion():
     res = _bash("-c", 'awk "$1" | sort -u', "_", awk, stdin=hosts)
     assert res.returncode == 0, res.stderr
     assert res.stdout.split() == ["ads.example.com", "t_rack.example.co.uk"]
+
+
+# ---- address6 in status + the IPv4 -> IPv6 mapping rule the backend mirrors ----
+def test_status_address6(cfg):
+    assert A.Agent(cfg, runner=lambda a: SAMPLE_DUMP).status()["address6"] is None
+    a = A.Agent({**cfg, "POOL6": "fd66:66::1/64"}, runner=lambda a: SAMPLE_DUMP)
+    assert a.status()["address6"] == "fd66:66::1/64"
+
+
+@pytest.mark.parametrize("ip4,ip6", [("10.66.0.5/32", "fd66:66::5/128"), ("10.66.1.2/32", "fd66:66::102/128"),
+                                     ("10.66.255.254/32", "fd66:66::fffe/128")])
+def test_ipv6_for_rule(ip4, ip6):
+    assert A.ipv6_for(ip4, "10.66.0.1/16", "fd66:66::1/64") == ip6
+
+
+def test_ipv6_for_rejects_outside_pool():
+    with pytest.raises(ValueError):
+        A.ipv6_for("10.67.0.5/32", "10.66.0.1/16", "fd66:66::1/64")

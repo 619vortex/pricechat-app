@@ -48,6 +48,26 @@ DEFAULTS = {
 Runner = Callable[[list], str]
 
 
+def ipv6_for(ip4: str, pool: str, pool6: str) -> str:
+    """The IPv6 /128 that belongs to a peer's IPv4 /32 (the backend mirrors this rule).
+
+    Rule: offset = int(peer IPv4) - int(network address of POOL);
+          IPv6   = network address of POOL6 + offset, as a /128.
+    Example with POOL=10.66.0.1/16, POOL6=fd66:66::1/64:
+        10.66.0.5/32   -> fd66:66::5/128       (offset 5)
+        10.66.1.2/32   -> fd66:66::102/128     (offset 258 = 0x102)
+        10.66.255.254/32 -> fd66:66::fffe/128  (offset 65534)
+    A client config then uses `Address = <v4>/32, <v6>/128`.
+    """
+    v4 = ipaddress.ip_interface(ip4).ip
+    net4 = ipaddress.ip_interface(pool).network
+    net6 = ipaddress.ip_interface(pool6).network
+    offset = int(v4) - int(net4.network_address)
+    if v4 not in net4 or offset >= net6.num_addresses:
+        raise ValueError("IPv4 outside POOL or POOL6 too small")
+    return f"{net6.network_address + offset}/128"
+
+
 def log(msg: str) -> None:
     print(f"kiwi-vpn-agent: {msg}", file=sys.stderr, flush=True)
 
@@ -201,8 +221,7 @@ class Agent:
         """The kernel allowed-ips for a peer: its /32, plus the matching IPv6 /128 if POOL6 is set."""
         if self.address6 is None:
             return ip
-        offset = int(ipaddress.ip_interface(ip).ip) - int(self.address.network.network_address)
-        return f"{ip},{self.address6.network.network_address + offset}/128"
+        return f"{ip},{ipv6_for(ip, str(self.address), str(self.address6))}"
 
     def _wg_add(self, key: str, ip: str) -> None:
         self.run(["set", self.iface, "peer", key, "allowed-ips", self.allowed_ips(ip)])
@@ -254,6 +273,8 @@ class Agent:
             "address": str(self.address),
             "dns": [d.strip() for d in self.cfg["DNS"].split(",") if d.strip()],
             "adblock": self.adblock,
+            # wg0's IPv6 ULA, e.g. "fd66:66::1/64" (None if POOL6 is unset). Peers' v6 = ipv6_for().
+            "address6": str(self.address6) if self.address6 is not None else None,
             "peers": peers,
         }
 
