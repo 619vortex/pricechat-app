@@ -65,6 +65,9 @@ LIMITS = {
     "health": Bucket(burst=10, every=6, shared_burst=200, shared_every=0.1),  # 10/min per client after a burst of 10
     "referral": Bucket(burst=10, every=6, shared_burst=300, shared_every=0.2),  # over it: still redirected, click not counted
     "earn": Bucket(burst=30, every=1, shared_burst=600, shared_every=0.02),
+    # starting a Google / X / Telegram sign-in (each stores a pending attempt) and the Telegram widget check: a person
+    # needs a handful; the shared bucket is generous so a flood from one script can't lock everyone else out of signing in
+    "signin": Bucket(burst=10, every=6, shared_burst=600, shared_every=0.05),
 }
 
 
