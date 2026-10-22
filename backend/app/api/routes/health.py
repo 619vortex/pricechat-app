@@ -5,7 +5,7 @@ import time
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text
 
@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/health", response_model=HealthOut)
-async def health(db: DbSession, runtime: Runtime) -> HealthOut:
+async def health(request: Request, db: DbSession, runtime: Runtime) -> HealthOut:
+    """The owner's detailed check: database, AI model, and every subsystem's ok / warn / fail (app/observability.py)."""
     try:
         db.execute(text("SELECT 1"))
         db_ok = True
@@ -30,12 +31,19 @@ async def health(db: DbSession, runtime: Runtime) -> HealthOut:
 
     model = get_agent_config(db).model_name if db_ok else None
     llm = await runtime.llm_health(model)
+    from app import observability
+
+    checks = observability.deep_checks(db, runtime, getattr(request.app.state, "watchdog", None),
+                                       getattr(request.app.state, "http_errors", None))
+    overall = observability.worst(checks)
     return HealthOut(
-        status="ok" if db_ok else "degraded",
+        status="ok" if db_ok and overall != "fail" else "degraded",
         app=runtime.settings.app_name,
         environment=runtime.settings.environment,
         database=db_ok,
         llm=provider_status(llm),
+        checks=checks,
+        checks_status=overall,
     )
 
 

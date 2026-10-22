@@ -176,6 +176,19 @@ def create_app(
             runtime.scheduler.sync_jobs()
         if background_jobs and app_settings.scheduler_enabled and initialize_database:
             runtime.scheduler.start()
+        from app import observability
+
+        # error rate / slow + stalled jobs -> one owner alert each (and one "recovered"); runs where the scheduler does
+        watchdog = observability.Watchdog(SessionLocal, app.state.http_errors, settings=app_settings,
+                                          transport=runtime.telegram.transport, scheduler=runtime.scheduler)
+        app.state.watchdog = watchdog
+        if background_jobs and app_settings.scheduler_enabled and initialize_database:
+            watchdog.start()
+        if initialize_database:
+            with SessionLocal() as db:
+                observability.startup_self_check(app_settings, [s.name for s in specs], db)
+        else:
+            observability.startup_self_check(app_settings, [s.name for s in specs])
         if app_settings.is_production and initialize_database:
             # build the market homepage's rows once now, in the background, so the first visitor after a deploy doesn't
             # wait for the ~50k-card build (the scheduled warm-up only runs where background jobs are on)
@@ -204,6 +217,7 @@ def create_app(
         try:
             yield
         finally:
+            await watchdog.stop()
             await runtime.aclose()
 
     # API docs exist only outside production (in production they'd advertise every internal endpoint)
@@ -315,8 +329,13 @@ def create_app(
 
     @app.exception_handler(Exception)
     async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-        return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "internal_error"})
+        from app.observability import route_of
+
+        rid = getattr(request.state, "request_id", None) or "-"
+        # the route template, not the raw path (ids / tokens in it); the request id matches the request log line
+        logger.exception("Unhandled error on %s %s rid=%s", request.method, route_of(request.scope), rid)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error", "code": "internal_error", "request_id": rid},
+                            headers={"X-Request-ID": rid})
 
     for module in (
         health, overview, agent, brand, model, knowledge, content, connectors, activity, settings, api_keys,
@@ -325,6 +344,11 @@ def create_app(
     ):
         app.include_router(module.router, prefix="/api")
 
+    from app.observability import ErrorWindow, RequestObserver
+
+    # outermost (added last): one log line + X-Request-ID per request, and the 5xx window the watchdog alerts on
+    app.state.http_errors = ErrorWindow()
+    app.add_middleware(RequestObserver, window=app.state.http_errors)
     return app
 
 

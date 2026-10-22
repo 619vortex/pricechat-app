@@ -60,6 +60,9 @@ class HealthOut(BaseModel):
     environment: str
     database: bool
     llm: ProviderStatusOut
+    # per subsystem: {"status": ok | warn | fail | off, "detail": ..., numbers}; checks_status: the worst of them
+    checks: dict[str, dict[str, Any]] = {}
+    checks_status: str = "ok"
 
 
 class ModelStatusOut(BaseModel):
