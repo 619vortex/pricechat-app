@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -111,3 +111,69 @@ def test_engine_pool_fits_the_request_threads_and_jobs(tmp_path) -> None:  # typ
     small = build_engine(f"sqlite:///{(tmp_path / 'q.db').as_posix()}", pool_size=2)  # callers still decide
     assert small.pool.size() == 2
     small.dispose()
+
+
+def _verify_member(db: Session, name: str, tg_user: int, src_chat: int) -> Member:
+    from app.members import service as member_service
+    from app.models.telegram import TelegramMessage, TelegramSource
+
+    m = _member(db, name)
+    ident = member_service.link_identity(db, m, "telegram", str(tg_user), name, name)
+    ident.verified_at = utcnow() - timedelta(days=5)
+    src = TelegramSource(chat_id=src_chat, display_name="Price Chat Community", enabled=True)
+    db.add(src)
+    db.flush()
+    texts = [(f"distinct thought number {i} about the market", timedelta(days=2, seconds=-10 * i)) for i in range(60)]
+    texts += [(f"today's thought number {i} about the market", timedelta(minutes=30 - i)) for i in range(10)]
+    texts += [(f"a fresh live thought number {i} right now", timedelta(seconds=60 - i)) for i in range(3)]  # live: never skipped
+    for n, (text, ago) in enumerate(texts):
+        db.add(TelegramMessage(source_id=src.id, chat_id=src_chat, message_id=100 + n, author_id=tg_user, author_name=name,
+                               sent_at=utcnow() - ago, text=text))
+    db.commit()
+    return m
+
+
+def _ledger_of(db: Session, m: Member) -> tuple[list[tuple[str, str, int]], tuple[int, int, int, int | None, int]]:
+    from app.models.members import MemberBadge, MemberNotification, ReputationEvent
+
+    rows = sorted((e.event_type, e.day, e.xp) for e in db.scalars(select(ReputationEvent).where(ReputationEvent.member_id == m.id)))
+    db.refresh(m)
+    notes = db.scalar(select(func.count()).select_from(MemberNotification).where(MemberNotification.member_id == m.id))
+    badges = db.scalar(select(func.count()).select_from(MemberBadge).where(MemberBadge.member_id == m.id))
+    return rows, (m.xp_total, m.rank_score, m.legacy_points, m.rank_level, notes * 1000 + badges)
+
+
+def test_verify_job_awards_in_a_batch_same_results_far_fewer_queries(db: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """members.verify re-reads 14 days of Telegram every run. In a ledger batch each award costs a handful of statements
+    (not ~27), and past activity already over a daily cap is skipped rather than refused again on every run, with exactly
+    the ledger, totals, rank, notifications and badges of unbatched awards."""
+    from contextlib import nullcontext
+
+    from app.members import verified
+    from app.members import xp as ledger
+    from app.models.members import LinkedIdentity
+
+    ledger.reset_for_tests()
+
+    def run() -> tuple[int, int]:
+        with statements(db) as sql:
+            a = verified.telegram_participation(db)["awarded"] + verified.telegram_message_xp(db)["awarded"]
+        return a, len(sql)
+
+    with monkeypatch.context() as mp:  # the old way: no batch
+        mp.setattr(verified.ledger, "batch", lambda _db: nullcontext())
+        plain = _verify_member(db, "plainmember", 9001, -100901)
+        awarded_plain, sql_plain = run()
+        _, rerun_plain = run()
+    expected = _ledger_of(db, plain)
+    for i in db.scalars(select(LinkedIdentity).where(LinkedIdentity.member_id == plain.id)):
+        i.status = "revoked"
+    db.commit()
+
+    batched = _verify_member(db, "batchmember", 9002, -100902)
+    awarded, sql_first = run()
+    _, rerun = run()
+    assert awarded == awarded_plain > 70
+    assert _ledger_of(db, batched) == expected
+    assert sql_first * 3 < sql_plain and sql_first < 8 * awarded  # was ~27 statements per award
+    assert rerun * 5 < rerun_plain and rerun <= 30  # capped past activity is not retried every run

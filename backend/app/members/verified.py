@@ -8,8 +8,10 @@ real discussion, within daily caps; X pays per real post that replies to or ment
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
+from functools import wraps
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, TypeVar
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -27,6 +29,19 @@ MIN_CHARS = 15  # a message / post must say something: "gm", "lol" or an emoji n
 CHAT_MIN_CHARS = 3  # the per-message XP ("telegram.message"): any real message, just not empty / a single emoji
 REPEAT_FLAG_AT = 5  # the same text this many times in a day raises a flag for review
 _MENTION_OR_LINK = re.compile(r"(@\w+|https?://\S+)")
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _batched(fn: _F) -> _F:
+    """Run a verification pass as one XP-ledger batch (rules, totals and daily amounts read once per member; past activity
+    already over a daily cap is skipped instead of being refused again on every run for 14 days)."""
+    @wraps(fn)
+    def run(db: Session, *a: Any, **k: Any) -> Any:
+        with ledger.batch(db):
+            return fn(db, *a, **k)
+    return run  # type: ignore[return-value]
 
 
 def _norm(text: str) -> str:
@@ -76,6 +91,7 @@ def _paid_refs(db: Session, member: Member, event_types: tuple[str, ...], since:
         ReputationEvent.day >= ledger.day_of(since)))}
 
 
+@_batched
 def telegram_participation(db: Session) -> dict[str, int]:
     """telegram.first_participation (+3, once a day) and telegram.discussion (+1 per further real message, capped)."""
     out = {"members": 0, "awarded": 0, "flags": 0}
@@ -90,7 +106,8 @@ def telegram_participation(db: Session) -> dict[str, int]:
                                      {"day": day, "count": repeats}):
                     out["flags"] += 1
                 continue  # a spamming day earns nothing
-            if len(info["eligible"]) >= 3 and ("telegram.active_day", f"tg-day:{day}") not in paid:  # an active community day (+2)
+            if len(info["eligible"]) >= 3 and ("telegram.active_day", f"tg-day:{day}") not in paid \
+                    and not ledger.known_capped(db, member, "telegram.active_day", info["eligible"][2].sent_at):  # an active community day (+2)
                 r = ledger.award(db, member, "telegram.active_day", f"tg-day:{day}", occurred_at=info["eligible"][2].sent_at,
                                  reason=f"Active community day on {day}", commit=False)
                 out["awarded"] += int(r.awarded)
@@ -98,6 +115,8 @@ def telegram_participation(db: Session) -> dict[str, int]:
                 if i == 0 and ("telegram.first_participation", f"tg-first:{day}") in paid:
                     continue
                 if i > 0 and ("telegram.discussion", f"tg-msg:{m.chat_id}:{m.message_id}") in paid:
+                    continue
+                if ledger.known_capped(db, member, "telegram.first_participation" if i == 0 else "telegram.discussion", m.sent_at):
                     continue
                 if i == 0:
                     r = ledger.award(db, member, "telegram.first_participation", f"tg-first:{day}", occurred_at=m.sent_at,
@@ -115,6 +134,7 @@ def telegram_participation(db: Session) -> dict[str, int]:
     return out
 
 
+@_batched
 def telegram_message_xp(db: Session) -> dict[str, int]:
     """telegram.message: +1 XP for every distinct message of your own in an authorised Price Chat chat, up to 50 a day,
     5 seconds apart (the rule's daily cap and cooldown). Its own ledger label ("tgchat"), so neither the Telegram cap nor the
@@ -131,7 +151,8 @@ def telegram_message_xp(db: Session) -> dict[str, int]:
             if max(info["texts"].values(), default=0) >= REPEAT_FLAG_AT:
                 continue
             for m in info["each"]:
-                if ("telegram.message", f"tg-each:{m.chat_id}:{m.message_id}") in paid:
+                if ("telegram.message", f"tg-each:{m.chat_id}:{m.message_id}") in paid \
+                        or ledger.known_capped(db, member, "telegram.message", m.sent_at):
                     continue
                 r = ledger.award(db, member, "telegram.message", f"tg-each:{m.chat_id}:{m.message_id}", occurred_at=m.sent_at,
                                  reason="Sent a message in the Price Chat Telegram", source="tgchat", commit=False)
@@ -149,6 +170,7 @@ def replied_to_ids(post: SocialPost) -> set[str]:
     return {str(r.get("id")) for r in (post.referenced or []) if r.get("type") in ("replied_to", "quoted") and r.get("id")}
 
 
+@_batched
 def x_interactions(db: Session) -> dict[str, int]:
     """Replies to Price Chat posts / mentions of Price Chat by linked X accounts, from posts already ingested.
     A reply that answers an active mission completes that mission instead of paying the general reply XP."""
@@ -184,7 +206,7 @@ def x_interactions(db: Session) -> dict[str, int]:
                 kind, reason = "x.mention_pricechat", "Mentioned Price Chat on X"
             else:
                 continue
-            if (kind, f"x-post:{p.external_id}") in paid:
+            if (kind, f"x-post:{p.external_id}") in paid or ledger.known_capped(db, member, kind, when):
                 continue
             r = ledger.award(db, member, kind, f"x-post:{p.external_id}", occurred_at=when, reason=reason, commit=False)
             out["awarded"] += int(r.awarded)

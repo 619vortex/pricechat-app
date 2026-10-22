@@ -24,13 +24,24 @@ def _meets(db: Session, member: Member, criteria: dict) -> bool:
     return False
 
 
-def evaluate_auto_badges(db: Session, member: Member) -> list[str]:
-    owned = set(db.scalars(select(MemberBadge.badge_id).where(MemberBadge.member_id == member.id)))
+def auto_badges(db: Session) -> list[Badge]:
+    return list(db.scalars(select(Badge).where(Badge.kind == "auto", Badge.enabled.is_(True))))
+
+
+def owned_badge_ids(db: Session, member: Member) -> set[int]:
+    return set(db.scalars(select(MemberBadge.badge_id).where(MemberBadge.member_id == member.id)))
+
+
+def evaluate_auto_badges(db: Session, member: Member, badges: list[Badge] | None = None, owned: set[int] | None = None) -> list[str]:
+    """Give the auto badges the member now meets. The XP ledger's batch passes the badges to check and the member's owned
+    badge ids (read once, and updated here)."""
+    owned = owned_badge_ids(db, member) if owned is None else owned
     new = []
-    for badge in db.scalars(select(Badge).where(Badge.kind == "auto", Badge.enabled.is_(True))):
+    for badge in auto_badges(db) if badges is None else badges:
         if badge.id not in owned and _meets(db, member, badge.criteria or {}):
             db.add(MemberBadge(member_id=member.id, badge_id=badge.id, awarded_by="system", reason=badge.description))
             notify(db, member.id, "badge", f"Badge earned: {badge.name}", badge.description, {"badge": badge.key})
+            owned.add(badge.id)
             new.append(badge.key)
     if new:
         db.flush()

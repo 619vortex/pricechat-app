@@ -131,11 +131,14 @@ def attribute(db: Session, new_member: Member, code: str | None, *, browser: str
 # --- qualification -------------------------------------------------------------------------------------------------
 
 
-def on_award(db: Session, member: Member, event: ReputationEvent) -> None:
-    """Called by the XP ledger after every award: the invited member's first qualifying action qualifies the referral."""
-    if event.event_type.startswith("referral."):
+def on_award(db: Session, member: Member, event: ReputationEvent, no_referral: set[int] | None = None) -> None:
+    """Called by the XP ledger after every award: the invited member's first qualifying action qualifies the referral.
+    `no_referral` (the ledger's batch) remembers members found without a pending referral, so it is looked up once."""
+    if event.event_type.startswith("referral.") or (no_referral is not None and member.id in no_referral):
         return
     ref = db.scalar(select(Referral).where(Referral.referred_id == member.id, Referral.status == "joined"))
+    if ref is None and no_referral is not None:
+        no_referral.add(member.id)
     if ref is None or event.event_type not in (program(db).referral_qualifying_events or []):
         return
     qualify(db, ref, event.event_type)
