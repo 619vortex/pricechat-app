@@ -32,6 +32,11 @@ DEFAULTS = {
     "ENDPOINT_HOST": "",
     "LISTEN_PORT": "51820",
     "DNS": "1.1.1.1",
+    "ADBLOCK": "0",
+    # Optional IPv6 ULA on wg0 (e.g. fd66:66::1/64). Each peer then also gets the /128 at the
+    # same offset as its IPv4 (10.66.0.5 -> fd66:66::5), so a client that is given that
+    # address gets a fast ICMPv6 "no route" from the node's firewall instead of a hang.
+    "POOL6": "",
     "AGENT_BIND": "0.0.0.0",
     "AGENT_PORT": "8443",
     "TLS_CERT": "/etc/kiwi-vpn/tls.crt",
@@ -41,6 +46,26 @@ DEFAULTS = {
 }
 
 Runner = Callable[[list], str]
+
+
+def ipv6_for(ip4: str, pool: str, pool6: str) -> str:
+    """The IPv6 /128 that belongs to a peer's IPv4 /32 (the backend mirrors this rule).
+
+    Rule: offset = int(peer IPv4) - int(network address of POOL);
+          IPv6   = network address of POOL6 + offset, as a /128.
+    Example with POOL=10.66.0.1/16, POOL6=fd66:66::1/64:
+        10.66.0.5/32   -> fd66:66::5/128       (offset 5)
+        10.66.1.2/32   -> fd66:66::102/128     (offset 258 = 0x102)
+        10.66.255.254/32 -> fd66:66::fffe/128  (offset 65534)
+    A client config then uses `Address = <v4>/32, <v6>/128`.
+    """
+    v4 = ipaddress.ip_interface(ip4).ip
+    net4 = ipaddress.ip_interface(pool).network
+    net6 = ipaddress.ip_interface(pool6).network
+    offset = int(v4) - int(net4.network_address)
+    if v4 not in net4 or offset >= net6.num_addresses:
+        raise ValueError("IPv4 outside POOL or POOL6 too small")
+    return f"{net6.network_address + offset}/128"
 
 
 def log(msg: str) -> None:
@@ -66,6 +91,10 @@ def run_wg(args: list) -> str:
     if res.returncode != 0:
         raise RuntimeError(f"wg {args[0] if args else ''} failed (rc={res.returncode})")
     return res.stdout
+
+
+def truthy(value: str) -> bool:
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 class BadRequest(Exception):
@@ -101,9 +130,10 @@ def parse_dump(text: str) -> tuple[dict, list]:
             iface = {"public_key": f[1], "listen_port": int(f[2]) if f[2].isdigit() else 0}
         elif len(f) >= 8:
             ips = [] if f[3] == "(none)" else f[3].split(",")
+            v4 = [ip for ip in ips if "." in ip]  # the contract reports the IPv4 /32
             peers.append({
                 "public_key": f[0],
-                "allowed_ip": ips[0] if ips else "",
+                "allowed_ip": (v4 or ips or [""])[0],
                 "rx_bytes": int(f[5]),
                 "tx_bytes": int(f[6]),
                 "latest_handshake": int(f[4]),
@@ -120,6 +150,13 @@ class Agent:
         self.address = ipaddress.ip_interface(self.cfg["POOL"])
         if self.address.version != 4:
             raise ValueError("POOL must be IPv4, e.g. 10.66.0.1/16")
+        self.address6 = None
+        if self.cfg["POOL6"].strip():
+            self.address6 = ipaddress.ip_interface(self.cfg["POOL6"].strip())
+            if (self.address6.version != 6
+                    or self.address6.network.num_addresses < self.address.network.num_addresses):
+                raise ValueError("POOL6 must be an IPv6 prefix at least as large as POOL")
+        self.adblock = truthy(self.cfg["ADBLOCK"])
         self.iface = self.cfg["WG_INTERFACE"]
         self.state_file = self.cfg["STATE_FILE"]
         self.run = runner
@@ -180,8 +217,14 @@ class Agent:
                 os.close(dfd)
 
     # ----- wg operations -----
+    def allowed_ips(self, ip: str) -> str:
+        """The kernel allowed-ips for a peer: its /32, plus the matching IPv6 /128 if POOL6 is set."""
+        if self.address6 is None:
+            return ip
+        return f"{ip},{ipv6_for(ip, str(self.address), str(self.address6))}"
+
     def _wg_add(self, key: str, ip: str) -> None:
-        self.run(["set", self.iface, "peer", key, "allowed-ips", ip])
+        self.run(["set", self.iface, "peer", key, "allowed-ips", self.allowed_ips(ip)])
 
     def _wg_remove(self, key: str) -> None:
         self.run(["set", self.iface, "peer", key, "remove"])
@@ -229,6 +272,9 @@ class Agent:
             "endpoint_host": self.cfg["ENDPOINT_HOST"],
             "address": str(self.address),
             "dns": [d.strip() for d in self.cfg["DNS"].split(",") if d.strip()],
+            "adblock": self.adblock,
+            # wg0's IPv6 ULA, e.g. "fd66:66::1/64" (None if POOL6 is unset). Peers' v6 = ipv6_for().
+            "address6": str(self.address6) if self.address6 is not None else None,
             "peers": peers,
         }
 

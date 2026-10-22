@@ -273,3 +273,226 @@ def test_http_roundtrip(http_server, capsys):
 def test_http_body_limit(http_server):
     big = json.dumps({"allowed_ip": "10.66.0.5/32", "pad": "x" * (A.MAX_BODY + 1)})
     assert request(http_server, "PUT", f"/v1/peers/{urlkey(key(1))}", big)[0] == 413
+
+
+# ---- adblock flag (from agent.env) ----
+def test_status_adblock_false_by_default(cfg):
+    a = A.Agent(cfg, runner=lambda args: SAMPLE_DUMP)
+    assert call(a, "GET", "/v1/status")[1]["adblock"] is False
+
+
+@pytest.mark.parametrize("raw,expected", [("1", True), ("true", True), ("YES", True), ("on", True),
+                                          ("0", False), ("", False), ("no", False), ("off", False)])
+def test_status_adblock_from_env(cfg, raw, expected):
+    a = A.Agent({**cfg, "ADBLOCK": raw, "DNS": "10.66.0.1"}, runner=lambda args: SAMPLE_DUMP)
+    body = call(a, "GET", "/v1/status")[1]
+    assert body["adblock"] is expected
+    assert body["dns"] == ["10.66.0.1"]
+
+
+def test_load_config_reads_adblock_and_dns(tmp_path):
+    env = tmp_path / "agent.env"
+    env.write_text(f"# managed\nTOKEN={TOKEN}\nDNS=10.66.0.1\nADBLOCK=1\n", encoding="utf-8")
+    cfg = A.load_config(str(env))
+    a = A.Agent({**cfg, "STATE_FILE": str(tmp_path / "peers.json")}, runner=lambda args: SAMPLE_DUMP)
+    body = a.status()
+    assert body["adblock"] is True and body["dns"] == ["10.66.0.1"]
+    # An agent.env from before the adblock feature (no ADBLOCK line) reports false.
+    env.write_text(f"TOKEN={TOKEN}\n", encoding="utf-8")
+    assert A.Agent({**A.load_config(str(env)), "STATE_FILE": str(tmp_path / "p.json")},
+                   runner=lambda args: SAMPLE_DUMP).status()["adblock"] is False
+
+
+# ---- optional IPv6 ULA per peer (so clients' v6 gets a clean reject, not a hang) ----
+def test_pool6_adds_matching_v6_and_status_reports_v4(cfg, wg):
+    a = A.Agent({**cfg, "POOL6": "fd66:66::1/64"}, runner=wg)
+    a.start()
+    assert call(a, "PUT", f"/v1/peers/{urlkey(key(1))}", body={"allowed_ip": "10.66.1.2/32"})[0] == 200
+    assert ["set", "wg0", "peer", key(1), "allowed-ips", "10.66.1.2/32,fd66:66::102/128"] in wg.calls
+    assert a.peers == {key(1): "10.66.1.2/32"}  # the peer file stays IPv4-only
+    assert a.status()["peers"][0]["allowed_ip"] == "10.66.1.2/32"
+
+
+def test_parse_dump_prefers_v4_when_v6_listed_first():
+    dump = f"P\t{SERVER_PUB}\t51820\toff\n{key(1)}\t(none)\t(none)\tfd66:66::5/128,10.66.0.5/32\t0\t0\t0\toff\n"
+    assert A.parse_dump(dump)[1][0]["allowed_ip"] == "10.66.0.5/32"
+
+
+@pytest.mark.parametrize("bad", ["10.0.0.1/8", "fd66:66::1/120", "nonsense"])
+def test_bad_pool6_refused(cfg, wg, bad):
+    with pytest.raises(ValueError):
+        A.Agent({**cfg, "POOL6": bad}, runner=wg)
+
+
+# ---- install.sh: syntax + rendered templates (via the --print-config dry run) ----
+import re as _re  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _find_bash():
+    for p in (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe"):
+        if os.path.exists(p):
+            return p
+    found = shutil.which("bash")
+    # On Windows, System32\bash.exe is the WSL launcher, not a usable bash.
+    if found and "system32" not in found.lower():
+        return found
+    return None
+
+
+BASH = _find_bash()
+needs_bash = pytest.mark.skipif(BASH is None, reason="bash not available")
+
+
+def _bash(*args, stdin=None):
+    env = {k: v for k, v in os.environ.items() if k not in ("POOL", "POOL6", "DNS", "PUBLIC_IP", "WAN_IF")}
+    return subprocess.run([BASH, *args], cwd=HERE, capture_output=True, text=True, timeout=60,
+                          input=stdin, env=env)
+
+
+def _render(*flags) -> dict:
+    res = _bash("install.sh", "--print-config", *flags)
+    assert res.returncode == 0, res.stderr
+    files, cur = {}, None
+    for line in res.stdout.splitlines():
+        m = _re.fullmatch(r"##### (\S+) #####", line)
+        if m:
+            cur = m.group(1)
+            files[cur] = ""
+        elif cur:
+            files[cur] += line + "\n"
+    return files
+
+
+@needs_bash
+def test_install_sh_syntax():
+    res = _bash("-n", "install.sh")
+    assert res.returncode == 0, res.stderr
+
+
+@needs_bash
+def test_install_sh_lf_endings():
+    with open(os.path.join(HERE, "install.sh"), "rb") as f:
+        assert b"\r\n" not in f.read()
+
+
+@needs_bash
+@pytest.mark.parametrize("flags", [(), ("--adblock",)])
+def test_nftables_hardening_rules(flags):
+    nft = _render(*flags)["/etc/nftables.conf"]
+    # IPv6 from clients is answered with an ICMP unreachable, never forwarded.
+    assert _re.search(r'iifname "wg0" meta nfproto ipv6 fib daddr type != local reject with icmpx type no-route', nft)
+    assert _re.search(r"chain forward \{[^}]*meta nfproto ipv6 reject", nft)
+    # Peers cannot reach each other or the node's own services.
+    assert 'iifname "wg0" oifname "wg0" reject' in nft
+    assert 'iifname "wg0" reject with icmpx type admin-prohibited' in nft
+    # No outbound SMTP abuse; MSS clamped; metadata/private ranges unreachable.
+    assert 'iifname "wg0" tcp dport 25 reject' in nft
+    assert "tcp option maxseg size set rt mtu" in nft
+    assert "169.254.0.0/16" in nft
+    assert 'oifname "eth0" ip saddr 10.66.0.0/16 masquerade' in nft
+    # The isolation/25/v6 rules come before the catch-all accept for client traffic.
+    fwd = nft[nft.index("chain forward"):nft.index("chain output")]
+    accept = fwd.index('oifname "eth0" ip saddr 10.66.0.0/16 accept')
+    for rule in ("client isolation", "smtp 25 blocked", "kiwi: v6 reject"):
+        assert fwd.index(rule) < accept
+    # No logging of any kind in the firewall.
+    for line in nft.splitlines():
+        if not line.strip().startswith("#"):
+            assert not _re.search(r"(^|\s)log(\s|$)", line), line
+
+
+@needs_bash
+@pytest.mark.parametrize("flags", [(), ("--adblock",)])
+def test_resolver_always_on_and_dns_never_changes(flags):
+    # Toggling ad blocking must never change the DNS that existing device configs point at.
+    files = _render(*flags)
+    env = files["/etc/kiwi-vpn/agent.env"]
+    lines = env.splitlines()
+    assert "DNS=10.66.0.1" in lines
+    assert ("ADBLOCK=1" if flags else "ADBLOCK=0") in lines
+    nft = files["/etc/nftables.conf"]
+    for proto in ("udp", "tcp"):
+        assert f'iifname "wg0" ip saddr 10.66.0.0/16 ip daddr 10.66.0.1 {proto} dport 53 accept' in nft
+    assert nft.index("dport 53") < nft.index("tunnel to host")  # DNS accepted before the reject
+    ub = files["/etc/unbound/unbound.conf.d/kiwi-vpn.conf"]
+    ub_lines = [ln.strip() for ln in ub.splitlines()]
+    for must in ("interface: 10.66.0.1", "port: 53", "access-control: 0.0.0.0/0 refuse",
+                 "access-control: 10.66.0.0/16 allow", "verbosity: 0", "log-queries: no",
+                 "log-replies: no", "log-local-actions: no", "log-servfail: no",
+                 'include: "/etc/unbound/kiwi-vpn-blocklist.conf"'):
+        assert must in ub_lines, must
+    assert _re.findall(r"^\s*interface:", ub, _re.M) == ["  interface:"]  # only the tunnel address
+    # The blocklist updater + daily timer exist only with --adblock.
+    has_updater = any("blocklist" in path for path in files)
+    assert has_updater is bool(flags)
+
+
+@needs_bash
+def test_host_basics():
+    files = _render()
+    sysctl = files["/etc/sysctl.d/99-kiwi-vpn.conf"]
+    assert "net.ipv4.ip_forward = 1" in sysctl and "net.ipv6.conf.all.forwarding = 0" in sysctl
+    assert 'APT::Periodic::Unattended-Upgrade "1";' in files["/etc/apt/apt.conf.d/20auto-upgrades"]
+    assert "Address = 10.66.0.1/16, fd66:66::1/64" in files["/etc/wireguard/wg0.conf"]
+
+
+@needs_bash
+def test_adblock_blocklist_updater():
+    files = _render("--adblock")
+    upd = files["/usr/local/sbin/kiwi-vpn-blocklist-update"]
+    assert "--proto '=https'" in upd and "always_nxdomain" in upd
+    assert "unbound-checkconf" in upd and "MIN_BYTES" in upd and "MAX_BYTES" in upd
+    assert '.prev' in upd  # previous list kept/restored on failure
+    assert "OnCalendar=daily" in files["/etc/systemd/system/kiwi-vpn-blocklist.timer"]
+
+
+@needs_bash
+def test_generated_scripts_parse():
+    files = _render("--adblock")
+    for path in ("/usr/local/bin/kiwi-vpn-doctor", "/usr/local/sbin/kiwi-vpn-blocklist-update"):
+        res = _bash("-n", stdin=files[path])
+        assert res.returncode == 0, (path, res.stderr)
+    doctor = files["/usr/local/bin/kiwi-vpn-doctor"]
+    assert "/v1/health" in doctor and "latest-handshakes" in doctor
+    # Never reads keys, endpoints (client IPs) or the full dump.
+    assert not _re.search(r"wg show \S+ (endpoints|dump|public-key|private-key|allowed-ips)", doctor)
+    assert "wg show \"$WG_IF\" peers" in doctor  # peers are only counted
+
+
+@needs_bash
+def test_update_refuses_setting_changes():
+    res = _bash("install.sh", "--update", "--adblock")
+    assert res.returncode != 0 and "--update never changes settings" in res.stderr
+
+
+@needs_bash
+def test_blocklist_conversion():
+    awk = _re.search(r"awk '(\{ sub.*?)' \"\$tmp/hosts\"", _render("--adblock")["/usr/local/sbin/kiwi-vpn-blocklist-update"], _re.S).group(1)
+    hosts = ("# StevenBlack\r\n127.0.0.1 localhost\r\n0.0.0.0 0.0.0.0\r\n0.0.0.0 Ads.Example.com # c\r\n"
+             "0.0.0.0 bad..name\r\n0.0.0.0 t_rack.example.co.uk\r\n::1 ip6-localhost\r\n"
+             "0.0.0.0 localhost.localdomain\r\n0.0.0.0 -bad.com\r\n0.0.0.0 ads.example.com\r\n")
+    res = _bash("-c", 'awk "$1" | sort -u', "_", awk, stdin=hosts)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.split() == ["ads.example.com", "t_rack.example.co.uk"]
+
+
+# ---- address6 in status + the IPv4 -> IPv6 mapping rule the backend mirrors ----
+def test_status_address6(cfg):
+    assert A.Agent(cfg, runner=lambda a: SAMPLE_DUMP).status()["address6"] is None
+    a = A.Agent({**cfg, "POOL6": "fd66:66::1/64"}, runner=lambda a: SAMPLE_DUMP)
+    assert a.status()["address6"] == "fd66:66::1/64"
+
+
+@pytest.mark.parametrize("ip4,ip6", [("10.66.0.5/32", "fd66:66::5/128"), ("10.66.1.2/32", "fd66:66::102/128"),
+                                     ("10.66.255.254/32", "fd66:66::fffe/128")])
+def test_ipv6_for_rule(ip4, ip6):
+    assert A.ipv6_for(ip4, "10.66.0.1/16", "fd66:66::1/64") == ip6
+
+
+def test_ipv6_for_rejects_outside_pool():
+    with pytest.raises(ValueError):
+        A.ipv6_for("10.67.0.5/32", "10.66.0.1/16", "fd66:66::1/64")
