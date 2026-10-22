@@ -273,3 +273,52 @@ def test_http_roundtrip(http_server, capsys):
 def test_http_body_limit(http_server):
     big = json.dumps({"allowed_ip": "10.66.0.5/32", "pad": "x" * (A.MAX_BODY + 1)})
     assert request(http_server, "PUT", f"/v1/peers/{urlkey(key(1))}", big)[0] == 413
+
+
+# ---- adblock flag (from agent.env) ----
+def test_status_adblock_false_by_default(cfg):
+    a = A.Agent(cfg, runner=lambda args: SAMPLE_DUMP)
+    assert call(a, "GET", "/v1/status")[1]["adblock"] is False
+
+
+@pytest.mark.parametrize("raw,expected", [("1", True), ("true", True), ("YES", True), ("on", True),
+                                          ("0", False), ("", False), ("no", False), ("off", False)])
+def test_status_adblock_from_env(cfg, raw, expected):
+    a = A.Agent({**cfg, "ADBLOCK": raw, "DNS": "10.66.0.1"}, runner=lambda args: SAMPLE_DUMP)
+    body = call(a, "GET", "/v1/status")[1]
+    assert body["adblock"] is expected
+    assert body["dns"] == ["10.66.0.1"]
+
+
+def test_load_config_reads_adblock_and_dns(tmp_path):
+    env = tmp_path / "agent.env"
+    env.write_text(f"# managed\nTOKEN={TOKEN}\nDNS=10.66.0.1\nADBLOCK=1\n", encoding="utf-8")
+    cfg = A.load_config(str(env))
+    a = A.Agent({**cfg, "STATE_FILE": str(tmp_path / "peers.json")}, runner=lambda args: SAMPLE_DUMP)
+    body = a.status()
+    assert body["adblock"] is True and body["dns"] == ["10.66.0.1"]
+    # An agent.env from before the adblock feature (no ADBLOCK line) reports false.
+    env.write_text(f"TOKEN={TOKEN}\n", encoding="utf-8")
+    assert A.Agent({**A.load_config(str(env)), "STATE_FILE": str(tmp_path / "p.json")},
+                   runner=lambda args: SAMPLE_DUMP).status()["adblock"] is False
+
+
+# ---- optional IPv6 ULA per peer (so clients' v6 gets a clean reject, not a hang) ----
+def test_pool6_adds_matching_v6_and_status_reports_v4(cfg, wg):
+    a = A.Agent({**cfg, "POOL6": "fd66:66::1/64"}, runner=wg)
+    a.start()
+    assert call(a, "PUT", f"/v1/peers/{urlkey(key(1))}", body={"allowed_ip": "10.66.1.2/32"})[0] == 200
+    assert ["set", "wg0", "peer", key(1), "allowed-ips", "10.66.1.2/32,fd66:66::102/128"] in wg.calls
+    assert a.peers == {key(1): "10.66.1.2/32"}  # the peer file stays IPv4-only
+    assert a.status()["peers"][0]["allowed_ip"] == "10.66.1.2/32"
+
+
+def test_parse_dump_prefers_v4_when_v6_listed_first():
+    dump = f"P\t{SERVER_PUB}\t51820\toff\n{key(1)}\t(none)\t(none)\tfd66:66::5/128,10.66.0.5/32\t0\t0\t0\toff\n"
+    assert A.parse_dump(dump)[1][0]["allowed_ip"] == "10.66.0.5/32"
+
+
+@pytest.mark.parametrize("bad", ["10.0.0.1/8", "fd66:66::1/120", "nonsense"])
+def test_bad_pool6_refused(cfg, wg, bad):
+    with pytest.raises(ValueError):
+        A.Agent({**cfg, "POOL6": bad}, runner=wg)
