@@ -268,6 +268,9 @@ def build_facts(md: Any, tr: Trade, rules: tuple[str, float, float, float] = ("1
     pl4, ph4 = _pivots(signals.closed(h4, "4h")[-120:])
     pld, phd = _pivots(day)
     lows, highs = pl4 + pld, ph4 + phd
+    if day:  # the window's own extremes, when no swing stands on that side (a one-way market)
+        lows.append(min(c.l for c in day))
+        highs.append(max(c.h for c in day))
     support, resistance = _nearest(lows, price, True), _nearest(highs, price, False)
     mmr = 1 / (2 * max(1, m.max_leverage))  # Hyperliquid: maintenance margin is half the initial margin at max leverage
     lev = tr.leverage
@@ -460,7 +463,8 @@ def plain(htm: str) -> str:
 # ---------------------------------------------------------------- Vortex's answer: untrusted text
 _URL = re.compile(r"(?i)(?:\b(?:https?|ftp)://|\bwww\.)\S+|\b(?:t\.me|telegram\.(?:me|dog))/\S*"
                   r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|xyz|me|gg|app|co|ru|ly|link|info|biz|finance|exchange|trade|live"
-                  r"|site|online|top|vip|cc|tk|to|so|ai|dev|fi|pro|club|bet|cash|money)\b(?:/\S*)?")
+                  r"|site|online|top|vip|cc|tk|to|so|ai|dev|fi|pro|club|bet|cash|money|fun|gl|ws|lol|wtf)\b(?:/\S*)?"
+                  r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/\S*")  # any other domain with a path
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩]")
 
 
@@ -686,7 +690,7 @@ async def answer(db: Session, client: Any, job: TsAssistJob, text: str, now: dat
         await _fallback(db, client, job, "expired", now)
         raise Conflict("Too late: the bot already answered with its own assessment.")
     clean = sanitize(text)
-    if not clean:
+    if not re.sub(r"\[link removed\]", "", clean).strip():
         raise ValueError("empty")
     if not _take(db, job, "answered", now):
         raise Conflict("This job is already finished.")
