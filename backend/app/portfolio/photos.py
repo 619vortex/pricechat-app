@@ -34,6 +34,11 @@ def process(data: bytes) -> tuple[bytes, bytes, int, int, str]:
     try:
         probe = Image.open(io.BytesIO(data))
         fmt = probe.format
+        pw, ph = probe.size
+        # PIL itself only REFUSES above 2 x MAX_IMAGE_PIXELS (it merely warns in between): a small, highly compressed PNG
+        # of ~100 MP would still be decoded (~400 MB, and more for the RGB copy). JPEGs are decoded reduced (draft below).
+        if fmt not in ("JPEG", "MPO") and pw * ph > MAX_PIXELS:
+            raise Image.DecompressionBombError(f"{pw}x{ph}")
         probe.verify()  # structural check before decoding
         img = Image.open(io.BytesIO(data))
         if img.format in ("JPEG", "MPO"):

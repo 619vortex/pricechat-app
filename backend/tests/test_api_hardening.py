@@ -68,3 +68,21 @@ def test_owner_routes_are_not_limited_here(prod: TestClient) -> None:  # noqa: F
     big = b'{"pad": "' + b"x" * (body_limit.DEFAULT + 10) + b'"}'
     # refused for the missing login (401), not for the size: the body is never read without the login
     assert prod.post("/api/knowledge/import", content=big, headers={"content-type": "application/json"}).status_code == 401
+
+
+# --- image decompression bombs ------------------------------------------------------------------------------------------
+
+
+def test_highly_compressed_huge_png_is_refused_before_decoding() -> None:
+    from PIL import Image
+
+    from app.portfolio import photos
+
+    buf = io.BytesIO()
+    Image.new("1", (8000, 7000)).save(buf, "PNG")  # 56 MP in a few KB: between MAX_PIXELS and PIL's own 2x refusal
+    assert len(buf.getvalue()) < photos.MAX_UPLOAD
+    with pytest.raises(photos.PhotoError):
+        photos.process(buf.getvalue())
+    ok = io.BytesIO()
+    Image.new("RGB", (900, 1200), "white").save(ok, "PNG")
+    assert photos.process(ok.getvalue())[2:4] == (900, 1200)
