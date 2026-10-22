@@ -29,7 +29,7 @@ from app.security.credentials import info as secret_info
 from app.security.credentials import resolve, secret_store
 from app.services.activity import ActivityLogger
 from app.youtube import oauth
-from app.youtube.client import YouTubeAuthError, YouTubeClient, YouTubeError, YouTubeNotConfigured
+from app.youtube.client import YouTubeAuthError, YouTubeClient, YouTubeError, YouTubeNotConfigured, YouTubeQuotaError
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ def _select(db: Session, ch: dict[str, Any], log: str) -> None:
     summary = _channel_summary(ch)
     state.account_external_id, state.account_username, state.account_name = summary["id"], summary["handle"], summary["title"]
     state.status, state.last_success_at, state.last_error = "connected", utcnow(), None
-    _set_caps(db, channel=summary)
+    _set_caps(db, channel=summary, quota_paused_until=None)  # a new key / sign-in may come with its own quota
     db.commit()
     ActivityLogger(db).log("youtube_connected", f"YouTube channel {summary['title']} ({summary['handle'] or summary['id']}) {log}", actor="dashboard")
 
@@ -379,6 +379,24 @@ def _published(value: str | None) -> datetime | None:
         return None
 
 
+QUOTA_TZ = "America/Los_Angeles"  # YouTube Data API quotas reset at midnight Pacific time
+
+
+def quota_reset_after(now: datetime) -> datetime:
+    """The next midnight Pacific time after `now`, in UTC (plus a minute of margin)."""
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(QUOTA_TZ)
+    day = now.astimezone(tz).date() + timedelta(days=1)
+    return datetime(day.year, day.month, day.day, tzinfo=tz).astimezone(timezone.utc) + timedelta(minutes=1)
+
+
+def quota_paused_until(db: Session, now: datetime | None = None) -> datetime | None:
+    """When syncing may try again after YouTube said the day's quota is used up; None when it may run now."""
+    until = _published((get_connector_state(db, Platform.YOUTUBE).capabilities or {}).get("quota_paused_until"))
+    return until if until is not None and until > (now or utcnow()) else None
+
+
 async def sync(db: Session, settings: Settings, rt: YouTubeRuntime) -> SyncReport:
     report = SyncReport()
     state = get_connector_state(db, Platform.YOUTUBE)
@@ -388,9 +406,19 @@ async def sync(db: Session, settings: Settings, rt: YouTubeRuntime) -> SyncRepor
     ch = channel_info(db)
     known = {i.external_id: i for i in db.scalars(select(ContentItem).where(ContentItem.platform == Platform.YOUTUBE))}
     now = utcnow()
+    paused = quota_paused_until(db, now)
+    if paused is not None:  # every call would be refused until the quota resets: don't keep knocking
+        raise YouTubeQuotaError(f"YouTube's daily API quota is used up; syncing resumes after {paused:%Y-%m-%d %H:%M} UTC "
+                                "(the quota resets at midnight Pacific time)", daily=True)
 
     # 1. network (no database writes held open meanwhile)
-    client = await _client(db, settings, rt)
+    try:
+        client = await _client(db, settings, rt)
+    except YouTubeError as exc:  # the Google sign-in itself failed (revoked, client deleted): show it, don't stay "connected"
+        if isinstance(exc, YouTubeAuthError):
+            rt.access_token, rt.access_expires = None, 0.0
+        _record_error(db, exc)
+        raise
     counted = client.on_request
 
     def count(endpoint: str) -> None:
@@ -430,6 +458,10 @@ async def sync(db: Session, settings: Settings, rt: YouTubeRuntime) -> SyncRepor
                 videos[v["id"]] = v
     except YouTubeError as exc:
         db.rollback()
+        if isinstance(exc, YouTubeQuotaError) and exc.daily:
+            _set_caps(db, quota_paused_until=quota_reset_after(now).isoformat())
+        if isinstance(exc, YouTubeAuthError):
+            rt.access_token, rt.access_expires = None, 0.0  # a revoked token isn't reused until it would have expired
         _record_error(db, exc)
         raise
     finally:
@@ -541,6 +573,7 @@ def status(db: Session, settings: Settings, rt: YouTubeRuntime, next_sync_at: da
     m = mode(db, settings)
     tot = lambda k: sum((i.metrics or {}).get(k) or 0 for i in mine if (i.metrics or {}).get(k) is not None) if any((i.metrics or {}).get(k) is not None for i in mine) else None  # noqa: E731
     today = (state.usage or {}).get(utcnow().strftime("%Y-%m-%d")) or {}
+    paused = quota_paused_until(db)
     return {
         "status": state.status if m else "not_configured", "mode": m,
         "api_key": _secret("youtube_api_key", settings),
@@ -552,7 +585,8 @@ def status(db: Session, settings: Settings, rt: YouTubeRuntime, next_sync_at: da
         "last_sync": caps.get("sync"), "next_sync_at": next_sync_at.isoformat() if next_sync_at else None,
         "last_success_at": state.last_success_at.isoformat() if state.last_success_at else None,
         "last_error": state.last_error, "last_error_at": state.last_error_at.isoformat() if state.last_error_at else None,
-        "quota_today": {"requests": today.get("requests", 0), "units": today.get("units", 0), "daily_limit": 10000},
+        "quota_today": {"requests": today.get("requests", 0), "units": today.get("units", 0), "daily_limit": 10000,
+                        "paused_until": paused.isoformat() if paused else None},
         "content": {
             "shorts": sum(1 for i in mine if i.content_type == "short"), "long_form": sum(1 for i in mine if i.content_type == "long_form"),
             "on_website": sum(1 for i in mine if public(i)), "unavailable": sum(1 for i in mine if not i.available or i.privacy_status != "public"),

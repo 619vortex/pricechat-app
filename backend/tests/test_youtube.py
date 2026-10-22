@@ -302,3 +302,64 @@ def test_website_endpoints_are_read_only_and_never_call_youtube(yt_client: TestC
         yt_client.get("/api/website/content")
     assert fake_youtube.calls == []
     assert yt_client.get("/api/website/latest", params={"limit": 50}).status_code == 422
+
+
+# --- quota and sign-in failures ------------------------------------------------------------------------------------------
+
+
+def test_quota_resets_at_midnight_pacific_in_utc() -> None:
+    from datetime import datetime, timezone
+
+    from app.youtube.service import quota_reset_after
+
+    summer = quota_reset_after(datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc))  # PDT, UTC-7
+    assert summer == datetime(2026, 7, 2, 7, 1, tzinfo=timezone.utc)
+    winter = quota_reset_after(datetime(2026, 12, 1, 9, 0, tzinfo=timezone.utc))  # 01:00 PST that day, UTC-8
+    assert winter == datetime(2026, 12, 2, 8, 1, tzinfo=timezone.utc)
+
+
+def test_a_used_up_daily_quota_pauses_syncing_until_it_resets(yt_client: TestClient, fake_youtube: FakeYouTube, db: Session) -> None:
+    from app.connectors.state import get_connector_state
+    from app.models.enums import Platform
+
+    fake_youtube.upload("v1", "Before the quota ran out")
+    _connect(yt_client)
+    _sync(yt_client)
+    fake_youtube.error = (403, {"error": {"code": 403, "message": "quota", "errors": [{"reason": "quotaExceeded"}]}})
+    assert yt_client.post("/api/youtube/sync").status_code == 429
+    calls = len(fake_youtube.calls)
+    fake_youtube.error = None
+    # until the reset nothing calls YouTube: the scheduled job waits (skipped, not failed) and Sync now says why
+    r = yt_client.post("/api/jobs/youtube.sync/run").json()
+    assert r["status"] == "skipped" and "quota" in str(r)
+    again = yt_client.post("/api/youtube/sync")
+    assert again.status_code == 429 and "midnight Pacific" in again.json()["detail"]
+    assert len(fake_youtube.calls) == calls
+    assert yt_client.get("/api/youtube").json()["quota_today"]["paused_until"]
+    # the quota is back after the reset
+    state = get_connector_state(db, Platform.YOUTUBE)
+    state.capabilities = {**state.capabilities, "quota_paused_until": (utcnow() - timedelta(minutes=1)).isoformat()}
+    db.commit()
+    assert yt_client.post("/api/jobs/youtube.sync/run").json()["status"] == "success"
+
+
+def test_a_short_rate_limit_doesnt_pause_for_the_day(yt_client: TestClient, fake_youtube: FakeYouTube) -> None:
+    _connect(yt_client)
+    fake_youtube.error = (403, {"error": {"code": 403, "message": "slow down", "errors": [{"reason": "rateLimitExceeded"}]}})
+    assert yt_client.post("/api/youtube/sync").status_code == 429
+    fake_youtube.error = None
+    assert yt_client.post("/api/youtube/sync").status_code == 200
+
+
+def test_a_revoked_google_sign_in_shows_as_an_error_not_connected(yt_client: TestClient, fake_youtube: FakeYouTube) -> None:
+    yt_client.put("/api/youtube/oauth-client", json={"client_id": YT_CLIENT_ID, "client_secret": YT_CLIENT_SECRET})
+    state = parse_qs(urlparse(yt_client.post("/api/youtube/oauth/start").json()["url"]).query)["state"][0]
+    yt_client.get("/api/youtube/oauth/callback", params={"code": "good-code", "state": state}, follow_redirects=False)
+    _sync(yt_client)
+    assert yt_client.get("/api/youtube").json()["status"] == "connected"
+    # the owner removed Price Chat's access in their Google account; the cached access token has expired
+    yt_client.app.state.runtime.youtube.access_expires = 0.0  # type: ignore[attr-defined]
+    fake_youtube.token_error = "invalid_grant"
+    assert yt_client.post("/api/youtube/sync").status_code == 401
+    st = yt_client.get("/api/youtube").json()
+    assert st["status"] == "error" and "invalid_grant" in st["last_error"]

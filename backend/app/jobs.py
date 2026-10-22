@@ -524,6 +524,9 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             raise JobSkipped("YouTube is not connected (YouTube page)")
         if not get_connector_state(ctx.db, Platform.YOUTUBE).account_external_id:
             raise JobSkipped("Choose the Price Chat YouTube channel first")
+        paused = yt.quota_paused_until(ctx.db, ctx.now)
+        if paused is not None:  # YouTube refuses every call until its quota resets: wait instead of failing every run
+            raise JobSkipped(f"YouTube's daily API quota is used up; syncing resumes after {paused:%H:%M} UTC")
         return (await yt.sync(ctx.db, s, runtime.youtube)).as_dict()
 
     async def growth_snapshots(ctx: JobContext) -> dict[str, Any]:
