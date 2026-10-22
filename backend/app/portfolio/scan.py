@@ -155,6 +155,7 @@ async def identify(db: Session, settings: Settings, member: Member, image: bytes
     url = f"{settings.scrydex_api_base.rstrip('/')}/vision/v1/cards/identify"
     row = PokemonScan(member_id=member.id, at=utcnow(), kind="identify", image_sha256=sha, status="error", credits=0, result={})
     db.add(row)
+    db.commit()  # counted towards the limits at once, and nothing written is held open while Scrydex answers
     try:
         async with httpx.AsyncClient(timeout=45.0, transport=transport) as client:
             r = await client.post(url, headers=headers, files={"image": ("card.jpg", full, "image/jpeg")}, data={"games": "pokemon"})

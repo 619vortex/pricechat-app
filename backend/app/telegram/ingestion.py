@@ -118,6 +118,7 @@ class TelegramIngestor:
         report = SyncReport()
         state = get_bot_state(self.db)
         if state.bot_id is None:
+            self.db.commit()  # (a first run creates the state row)
             await self.verify()
             state = get_bot_state(self.db)
         until = time.monotonic() + listen_seconds
@@ -126,6 +127,9 @@ class TelegramIngestor:
             offset = state.last_update_id + 1 if state.last_update_id is not None else None
             remaining = until - time.monotonic()
             wait = long_poll_seconds if batch == 0 else (max(1, min(long_poll_seconds, int(remaining))) if remaining >= 1 else 0)
+            # the long poll waits up to `wait` seconds: whatever the last batch's handlers wrote is saved first, so no
+            # write transaction (SQLite's single write lock) is held while Telegram has nothing to say
+            self.db.commit()
             updates = await self.client.get_updates(offset, timeout=wait)
             if not updates:
                 if until - time.monotonic() >= 1:

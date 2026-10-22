@@ -331,14 +331,15 @@ def create_device(db: Session, member: Member, name: str, server_id: int) -> tup
             tried.add(ip)
     else:
         raise VpnError("The server is busy. Try again in a moment.", 503)
+    db.commit()  # the IP is reserved before the node is called: no write transaction (SQLite's only write lock) waits on it
     try:
         with node.client_for(server) as agent:
             agent.put_peer(public_key, f"{ip}/32")
     except node.NodeError as e:
-        db.rollback()
+        db.delete(dev)
+        db.commit()
         logger.warning("vpn: adding a peer on server %s failed: %s", server_id, e)
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503) from None
-    db.commit()
     config = keys.render_config(private_key, ip, _dns(server), server.public_key, server.endpoint_host,
                                 server.listen_port, keys.ipv6_for(server.address, ip, server.address6))
     return dev, config, keys.filename(server.name, dev.name)

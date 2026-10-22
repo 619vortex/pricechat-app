@@ -647,3 +647,17 @@ def test_ipv6_address_in_config_when_the_agent_has_a_v6_pool(client: TestClient,
     vpn.sync_all(db)
     db.refresh(dual)
     assert dual.address6 == ""
+
+
+def test_adding_a_device_holds_no_write_lock_while_the_node_answers(client: TestClient, db: Session, fake: FakeNode) -> None:
+    from tests.locks import http_calls_under_write_lock
+
+    server = add_server(db, fake)
+    open_vpn(db)
+    c = signed_in(client, db, member_at(db, "warrior"))
+    with http_calls_under_write_lock() as held:
+        assert c.post("/api/members/vpn/devices", json={"name": "My phone", "server_id": server.id}).status_code == 201
+        fake.fail = True  # a failed node call still leaves nothing behind
+        assert c.post("/api/members/vpn/devices", json={"name": "Tablet", "server_id": server.id}).status_code == 503
+    assert held == []
+    assert [d.name for d in db.scalars(select(VpnDevice))] == ["My phone"]

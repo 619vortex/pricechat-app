@@ -287,6 +287,7 @@ def _close(t: ArbLunchTrade, now: datetime, exit_sol: float, reason: str, **deta
 
 def _count_launches(db: Session, now: datetime, n: int) -> None:
     _day(db, now).launches_seen += n
+    db.commit()  # saved now: the chain reads that follow never wait inside a write transaction (SQLite's only write lock)
 
 
 def _load(db: Session, mints: list[str]) -> tuple[list[ArbLunchTrade], set[tuple[str, str]]]:

@@ -459,3 +459,16 @@ def test_geckoterminal_down_never_blocks_the_other_exits(db: Session) -> None:
     asyncio.run(lunch.tick(db, later + timedelta(minutes=lunch.TIMEOUT_MINUTES + lunch.POOL_WAIT_MINUTES), RPC, httpx.MockTransport(gecko_down)))
     db.expire_all()
     assert trades["c"].exit_reason == "graduated" and "no pool price" in trades["c"].detail["note"]
+
+
+def test_a_tick_holds_no_write_lock_during_its_reads(db: Session) -> None:
+    from tests.locks import http_calls_under_write_lock
+
+    f = Fake()
+    f.launches = [launch("hot"), launch("cold")]
+    f.accounts = {"curve-hot": grown(0.5), "curve-cold": grown(0.5)}
+    with http_calls_under_write_lock() as held:
+        run(db, f, NOW)
+        f.accounts = {"curve-hot": grown(6.0), "curve-cold": grown(1.0)}
+        assert run(db, f, NOW + timedelta(seconds=60))["entered"] == 1
+    assert held == []

@@ -218,6 +218,7 @@ def bot_leaderboard(db: DbSession, pc_session: SessionToken = None) -> dict[str,
 
     me = _current(db, pc_session)
     people = service.leaderboard_members(db)[:200]
+    db.close()  # everything needed is loaded: the connection goes back to the pool during the Hyperliquid reads
     client = hyperliquid_client()
     with ThreadPoolExecutor(max_workers=4) as pool:  # a few at a time: Hyperliquid rate-limits by IP
         pnls = list(pool.map(lambda mw: _pnl(mw[1].address, client), people))
