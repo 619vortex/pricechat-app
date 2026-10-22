@@ -109,3 +109,57 @@ def test_kitchen_stream_releases_the_request_connection(client: TestClient, db: 
     monkeypatch.setattr(kitchen, "events_after", events_after)
     r = client.get("/api/members/trading-bot/kitchen/stream?after=0&once=true", headers={"last-event-id": "\u00b2".encode("latin-1")})  # "²": not a 500
     assert r.status_code == 200 and seen and seen[0] == 1  # only the read's own session: the request's one was released
+
+
+# --- inputs that used to be 500s ----------------------------------------------------------------------------------------
+
+
+def test_odd_numbers_get_4xx_not_500(client: TestClient) -> None:
+    for url in ("/api/website/seo/og/pokemon/cards/²", "/api/website/seo/sitemaps/cards-².xml",
+                "/api/pokemon/compare?series=²:PSA%2010"):
+        assert client.get(url).status_code < 500, url
+    assert client.get("/api/website/seo/og/pokemon/cards/99999999999999999999999").status_code == 200  # the site preview
+    for q in ("min_price=inf", "max_price=1e308", "min_price=nan"):
+        assert client.get(f"/api/members/market/listings?{q}").status_code == 422, q
+    assert client.get("/api/members/market/listings?min_price=5&max_price=100").status_code == 200
+
+
+def test_huge_ids_are_not_found_not_500(client: TestClient) -> None:
+    assert client.get("/api/pokemon/cards/99999999999999999999999").status_code in (400, 404)
+
+
+def test_nan_and_infinity_in_json_bodies_are_refused(client: TestClient, db: Session) -> None:
+    from tests.test_burner import signed_in
+
+    signed_in(client, db)
+    for v in ("NaN", "Infinity", "-Infinity"):
+        r = client.put("/api/members/trading/settings", content='{"max_loss_per_trade_usd": %s}' % v,  # an unbounded float field
+                       headers={"content-type": "application/json"})
+        assert r.status_code == 422, (v, r.text)
+
+
+# --- sign-in rate limits ------------------------------------------------------------------------------------------------
+
+
+def test_sign_in_starts_are_rate_limited_per_visitor(client: TestClient) -> None:
+    ip = {"x-forwarded-for": "203.0.113.9"}
+    codes = [client.get("/api/members/auth/google/start", headers=ip, follow_redirects=False) for _ in range(12)]
+    assert all(r.status_code == 303 for r in codes)
+    assert "code=rate_limited" not in codes[0].headers["location"] and "code=rate_limited" in codes[-1].headers["location"]
+    assert client.post("/api/members/auth/telegram/start", json={}, headers=ip).status_code == 429
+    assert client.post("/api/members/auth/telegram/start", json={}, headers={"x-forwarded-for": "203.0.113.10"}).status_code != 429
+
+
+def test_referral_visits_are_counted_within_the_limit(client: TestClient, db: Session) -> None:
+    from app.members import referrals
+    from app.models.members import Member, ReferralCode
+    from tests.test_burner import signed_in
+
+    mid = signed_in(client, db)
+    code = referrals.code_for(db, db.get(Member, mid))
+    db.commit()
+    client.cookies.clear()  # an anonymous visitor (a signed-in member opening an invite changes nothing)
+    for _ in range(15):
+        assert client.post("/api/members/referrals/visit", json={"code": code}).json()["valid"] is True
+    db.expire_all()
+    assert db.query(ReferralCode).filter(ReferralCode.code == code).one().clicks == 10  # the "referral" burst; the rest not counted

@@ -29,9 +29,10 @@ class ORMModel(BaseModel):
 
 
 class StrictInput(BaseModel):
-    """Request bodies reject unknown fields so typos fail loudly."""
+    """Request bodies reject unknown fields so typos fail loudly, and NaN / Infinity in any number (Python's JSON reader
+    accepts them; a browser's JSON.stringify never sends them): they slip past ge/le checks and break arithmetic later."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class ErrorOut(BaseModel):
