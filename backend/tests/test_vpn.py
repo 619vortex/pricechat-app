@@ -163,7 +163,7 @@ def test_create_device_returns_config_once_and_stores_public_key_only(client: Te
     assert body["filename"] == "kiwi-vpn-frankfurt-my-phone.conf"
     assert dev["ip"] == "10.66.0.2" and dev["name"] == "My phone" and dev["last_handshake"] is None and dev["rx_bytes"] == 0
     priv = next(line.split(" = ", 1)[1] for line in cfg.splitlines() if line.startswith("PrivateKey"))
-    assert f"PublicKey = {fake.server_key}" in cfg and "DNS = 1.1.1.1\n" in cfg  # the server's own resolver only and "Endpoint = 203.0.113.10:51820" in cfg
+    assert f"PublicKey = {fake.server_key}" in cfg and "DNS = 1.1.1.1\n" in cfg and "Endpoint = 203.0.113.10:51820" in cfg
     row = db.get(VpnDevice, dev["id"])
     pub = keys.public_from_private(priv)
     assert row is not None and row.public_key == pub and fake.peers[pub]["allowed_ip"] == "10.66.0.2/32"
