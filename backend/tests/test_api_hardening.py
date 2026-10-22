@@ -163,3 +163,87 @@ def test_referral_visits_are_counted_within_the_limit(client: TestClient, db: Se
         assert client.post("/api/members/referrals/visit", json={"code": code}).json()["valid"] is True
     db.expire_all()
     assert db.query(ReferralCode).filter(ReferralCode.code == code).one().clicks == 10  # the "referral" burst; the rest not counted
+
+
+# --- owner login: a known device can't be locked out by a flood -----------------------------------------------------------
+
+
+def test_known_device_is_exempt_from_the_global_lockout(prod: TestClient) -> None:  # noqa: F811
+    from app.security import admin_auth
+    from tests.test_production import PASSWORD
+
+    ok = prod.post("/api/admin/login", json={"username": "owner", "password": PASSWORD})
+    assert ok.status_code == 200
+    cookie = next(h for h in ok.headers.get_list("set-cookie") if h.startswith(admin_auth.DEVICE_COOKIE + "="))
+    assert "httponly" in cookie.lower() and "secure" in cookie.lower() and "samesite=lax" in cookie.lower()
+    device = prod.cookies.get(admin_auth.DEVICE_COOKIE)
+    prod.post("/api/admin/logout")
+    assert prod.cookies.get(admin_auth.DEVICE_COOKIE) == device  # logging out keeps the device known
+
+    # a flood of failures from many (spoofed) addresses fills the global bucket
+    prod.cookies.delete(admin_auth.DEVICE_COOKIE)
+    for i in range(admin_auth.GLOBAL):
+        prod.post("/api/admin/login", json={"username": "owner", "password": "wrong!"}, headers={"x-forwarded-for": f"198.51.100.{i}"})
+    assert prod.post("/api/admin/login", json={"username": "owner", "password": PASSWORD},
+                     headers={"x-forwarded-for": "192.0.2.1"}).status_code == 429  # an unknown browser waits
+    prod.cookies.set(admin_auth.DEVICE_COOKIE, device)
+    assert prod.post("/api/admin/login", json={"username": "owner", "password": PASSWORD},
+                     headers={"x-forwarded-for": "192.0.2.1"}).status_code == 200  # the owner's browser gets in
+
+
+def test_known_device_keeps_a_strict_limit_of_its_own(prod: TestClient) -> None:  # noqa: F811
+    from app.security import admin_auth
+    from tests.test_production import PASSWORD
+
+    prod.post("/api/admin/login", json={"username": "owner", "password": PASSWORD})
+    for i in range(admin_auth.PER_CLIENT):  # new addresses each time: the device itself is what's counted
+        assert prod.post("/api/admin/login", json={"username": "owner", "password": "nope"},
+                         headers={"x-forwarded-for": f"203.0.113.{i}"}).status_code == 401
+    assert prod.post("/api/admin/login", json={"username": "owner", "password": PASSWORD},
+                     headers={"x-forwarded-for": "203.0.113.99"}).status_code == 429
+
+
+def test_device_cookie_is_bound_to_username_and_password() -> None:
+    from app.security import admin_auth
+    from tests.test_production import prod_settings
+
+    s = prod_settings()
+    tok = admin_auth.device_token(s)
+    assert admin_auth.known_device(s, tok)
+    same_key = s.app_encryption_key.get_secret_value()
+    assert admin_auth.known_device(prod_settings(admin_password_hash=admin_auth.hash_password("a new password!!"), app_encryption_key=same_key), tok) is None
+    assert admin_auth.known_device(prod_settings(admin_username="someone", app_encryption_key=same_key,
+                                                 admin_password_hash=s.admin_password_hash.get_secret_value()), tok) is None
+    nonce, issued, sig = tok.split(".")
+    assert admin_auth.known_device(s, f"{nonce}.{int(issued) + 1}.{sig}") is None  # tampered
+    assert admin_auth.known_device(s, "garbage") is None and admin_auth.known_device(s, None) is None
+
+
+# --- live Kitchen streams per member, public signal charts ---------------------------------------------------------------
+
+
+def test_kitchen_streams_are_capped_per_member(client: TestClient, db: Session) -> None:
+    from app.api.routes import tradingbot
+    from tests.test_burner import signed_in
+
+    mid = signed_in(client, db)
+    url = "/api/members/trading-bot/kitchen/stream?after=0&once=true"
+    assert client.get(url).status_code == 200
+    assert mid not in tradingbot._streams  # a finished stream gives its slot back
+    held = [tradingbot._stream_slot(mid) for _ in range(tradingbot.KITCHEN_STREAMS_PER_MEMBER)]  # three tabs open
+    assert all(held)
+    assert client.get(url).status_code == 429
+    tradingbot._stream_release(mid, held[0])  # one tab closed
+    assert client.get(url).status_code == 200
+    for s in held[1:]:
+        tradingbot._stream_release(mid, s)
+    tradingbot._streams[mid] = [0.0] * 3  # slots that were never released expire after the stream's lifetime
+    assert client.get(url).status_code == 200
+    tradingbot._streams.clear()
+
+
+def test_public_signal_chart_is_rate_limited(client: TestClient) -> None:
+    ip = {"x-forwarded-for": "203.0.113.50"}
+    codes = [client.get("/api/members/trading-os/signals/999999/chart.png", headers=ip).status_code for _ in range(25)]
+    assert codes[0] == 404 and codes[-1] == 429
+    assert client.get("/api/members/trading-os/signals/999999/chart.png", headers={"x-forwarded-for": "203.0.113.51"}).status_code == 404

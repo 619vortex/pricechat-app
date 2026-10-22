@@ -5,7 +5,7 @@ import asyncio
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import Field
 from sqlalchemy import func, select
 
@@ -14,7 +14,7 @@ from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
 from app.arbitrage import funding_alerts
 from app.models.tradingos import TsAudit, TsSignal
-from app.security import admin_auth
+from app.security import admin_auth, rate_limit
 from app.tradingos import assist, autodelete, bot, market, risk, signals
 
 router = APIRouter(tags=["trading-os"])
@@ -328,7 +328,7 @@ def site_signals(db: DbSession) -> dict[str, Any]:
 _charts: dict[tuple[int, int], bytes] = {}
 
 
-@router.get("/members/trading-os/signals/{sid}/chart.png")
+@router.get("/members/trading-os/signals/{sid}/chart.png", dependencies=[Depends(rate_limit.limit("chart"))])  # public: each miss = a fetch + render
 async def site_signal_chart(sid: int, db: DbSession) -> Response:
     """The same chart the Telegram card shows (real Hyperliquid candles, the signal's levels), redrawn at most once a minute."""
     from app.tradingos import chart
