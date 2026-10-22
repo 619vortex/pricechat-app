@@ -90,7 +90,7 @@ describe("Earn › Arbitrage", () => {
       open: [trade({ strategy: "graduation" }) as never] });
     render(<LunchBot d={d} />);
     expect(screen.getByText("Graduation Run")).toBeTruthy();
-    expect(screen.getByText("0.120 SOL")).toBeTruthy();
+    expect(screen.getByText("+0.120 SOL")).toBeTruthy();  // a gain is signed, never read as a balance
     expect(screen.getByText("−0.050 SOL")).toBeTruthy();
     expect(screen.getByText(/Track pump.fun's fullest curves \(37 right now\)/)).toBeTruthy();
     expect(screen.getByText(/80–97% full and still filling/)).toBeTruthy();
