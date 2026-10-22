@@ -97,7 +97,9 @@ def _forwarded_for(request: Request) -> list[str]:
 def client_ip(request: Request, settings: Settings | None = None) -> str:
     settings = settings or _settings(request)
     hops = _forwarded_for(request)
-    if via_vercel(request, settings):
+    trusted = via_vercel(request, settings)
+    _note(request, settings, trusted)
+    if trusted:
         vercel = request.headers.get("x-vercel-forwarded-for", "").split(",")[0]
         ip = parse_ip(vercel) or (parse_ip(hops[0]) if hops else None)
         if ip:
@@ -108,6 +110,22 @@ def client_ip(request: Request, settings: Settings | None = None) -> str:
         return (parse_ip(hops[-n]) if len(hops) >= n else None) or UNKNOWN
     peer = request.client.host if request.client else None
     return parse_ip(peer) or (peer or UNKNOWN)
+
+
+_noted: set[str] = set()
+
+
+def _note(request: Request, settings: Settings, trusted: bool) -> None:
+    """Once per process: confirm the secret works, or flag Vercel-looking traffic without it (a mismatch between the
+    Railway and Vercel values, or a frontend not redeployed since the env var was added). A forger can trigger the
+    warning too, hence "may"."""
+    if trusted and "ok" not in _noted:
+        _noted.add("ok")
+        log.info("Website traffic carries the proxy secret: rate limits key on the visitor Vercel reports.")
+    elif not trusted and "bad" not in _noted and request.headers.get("x-vercel-id") and secrets_of(settings):
+        _noted.add("bad")
+        log.warning("A request with Vercel's headers arrived without a valid %s: PROXY_SHARED_SECRET may differ between "
+                    "Railway and Vercel (or the frontend wasn't redeployed after setting it).", EDGE_HEADER)
 
 
 def bucket(ip: str) -> str:

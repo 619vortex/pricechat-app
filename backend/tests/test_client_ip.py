@@ -153,3 +153,14 @@ def test_startup_check_warns_in_production(caplog: pytest.LogCaptureFixture, mon
         client_ip.startup_check(prod.model_copy(update={"proxy_shared_secret": SecretStr(SECRET)}))
     msgs = [r.getMessage() for r in caplog.records]
     assert len(msgs) == 2 and "not set" in msgs[0] and "too short" in msgs[1]
+
+
+def test_notes_once_whether_website_traffic_carries_the_secret(caplog: pytest.LogCaptureFixture,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(client_ip, "_noted", set())
+    with caplog.at_level(logging.INFO, logger="app.security.client_ip"):
+        for _ in range(3):
+            client_ip.client_ip(_req(_vercel("192.0.2.1", edge="wrong-wrong-wrong-wrong")), _settings())
+            client_ip.client_ip(_req(_vercel("192.0.2.1")), _settings())
+    msgs = [r.getMessage() for r in caplog.records]
+    assert len(msgs) == 2 and "may differ" in msgs[0] and "carries the proxy secret" in msgs[1]

@@ -4,6 +4,30 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "routes": [
+    {
+      "src": "^/api/(.*)$",
+      "continue": true,
+      "transforms": [
+        {
+          "type": "request.headers",
+          "op": "delete",
+          "target": {
+            "key": "x-pc-edge"
+          }
+        },
+        {
+          "type": "request.headers",
+          "op": "set",
+          "target": {
+            "key": "x-pc-edge"
+          },
+          "args": "$PROXY_SHARED_SECRET",
+          "env": ["PROXY_SHARED_SECRET"]
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/:page(pokemon|u|website|earn|giveaway|leaderboard|learn|join|content)/:rest*",
