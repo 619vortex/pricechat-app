@@ -176,6 +176,7 @@ PUBLIC_EXACT = {
     ("POST", "/api/admin/login"),
     ("POST", "/api/admin/logout"),
     ("GET", "/api/health/live"),
+    ("GET", "/api/health/public"),  # uptime monitors (HEAD too): ok/error words only, rate-limited
     ("GET", "/api/website/home"),
     ("GET", "/api/website/latest"),
     ("GET", "/api/website/content"),

@@ -545,14 +545,16 @@ async def admin_affiliate_snapshot(db: DbSession) -> dict[str, Any]:
 # ---------------------------------------------------------------- tracked referral links (public redirect + owner counts)
 @router.get("/r/{placement}", include_in_schema=False)
 def referral_redirect(placement: str, request: Request, db: DbSession, src: str | None = None) -> Response:
-    """Count one click on a referral spot, then 302 to the current referral link (none set: the website). Bots aren't counted."""
+    """Count one click on a referral spot, then 302 to the current referral link (none set: the website). Bots aren't counted,
+    nor clicks over the rate limit (rate_limit "referral"): those are still redirected, a sign-up click never breaks."""
     from fastapi.responses import RedirectResponse
 
+    from app.security import rate_limit
     from app.tradingbot import clicks
     from app.tradingos.bot import SITE, referral_url
 
     url = referral_url(db)
-    if url and request.method == "GET" and not clicks.is_bot(request.headers.get("user-agent")):
+    if url and request.method == "GET" and not clicks.is_bot(request.headers.get("user-agent")) and rate_limit.retry_after("referral", request) is None:
         try:
             clicks.record(db, placement, clicks.source_of(src, request.headers.get("referer")))
         except Exception:  # noqa: BLE001 - counting never blocks the redirect

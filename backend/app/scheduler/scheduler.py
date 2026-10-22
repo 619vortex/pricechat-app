@@ -80,6 +80,7 @@ class Scheduler:
         self._serial = asyncio.Lock()
         self._active: str | None = None
         self._loop_task: asyncio.Task[None] | None = None
+        self.started_at: datetime | None = None  # when the loop started (the public health check's grace period)
         self._running: set[asyncio.Task[JobOutcome]] = set()
 
     # --- state ------------------------------------------------------------------------
@@ -280,6 +281,7 @@ class Scheduler:
         self.sync_jobs()
         if self._loop_task is None:
             self._loop_task = asyncio.create_task(self._loop())
+            self.started_at = utcnow()
 
     async def stop(self) -> None:
         if self._loop_task is not None:
