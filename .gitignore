@@ -37,4 +37,3 @@ backups/
 .claude/
 worker/cache/
 *.log
-backend/realm/*.gz
