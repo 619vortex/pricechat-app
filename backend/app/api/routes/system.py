@@ -218,3 +218,14 @@ async def test_owner_alert(db: DbSession, runtime: Runtime) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - shown to the owner (e.g. "chat not found": press Start in the bot first)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Telegram didn't deliver it: {exc}") from exc
     return {"sent": True}
+
+
+# --- key rotation (owner only) ------------------------------------------------------------------------------------------
+
+
+@router.post("/system/rekey")
+def rekey(db: DbSession) -> dict[str, Any]:
+    """Re-encrypt every stored secret under APP_ENCRYPTION_KEY (old keys in APP_ENCRYPTION_KEY_PREVIOUS). Counts only."""
+    from app.security import rekey as rk
+
+    return rk.run(db)

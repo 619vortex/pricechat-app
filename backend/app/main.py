@@ -144,6 +144,15 @@ def create_app(
                     f"Telegram: {'configured' if runtime.telegram.configured else 'not configured'})",
                 )
 
+        prev = app_settings.app_encryption_key_previous
+        if initialize_database and prev and prev.get_secret_value().strip():
+            # key rotation: re-seal everything under the new key, in the background (boot isn't held up; errors only logged)
+            import threading
+
+            from app.security import rekey
+
+            threading.Thread(target=rekey.run_at_startup, args=(SessionLocal,), name="rekey", daemon=True).start()
+
         from app.tradingos import autodelete
 
         autodelete.install()  # notes the bot's main-chat messages for tradingos.autodelete

@@ -294,6 +294,9 @@ class Settings(BaseSettings):
     # Encrypts stored secrets and members' X tokens where Windows DPAPI isn't available (production on Linux).
     # A Fernet key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     app_encryption_key: SecretStr | None = None
+    # Key rotation: the old key(s), comma-separated, still accepted for decrypting; new values always use the key above.
+    # While set, startup re-encrypts everything under the new key (app/security/rekey.py). Remove once that's done.
+    app_encryption_key_previous: SecretStr | None = None
 
     @property
     def is_production(self) -> bool:

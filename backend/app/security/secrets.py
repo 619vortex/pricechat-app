@@ -55,20 +55,58 @@ def dpapi_available() -> bool:
 _FERNET_TAG = b"fernet:"
 
 
-def _fernet():  # type: ignore[no-untyped-def]
-    """The production cipher, when APP_ENCRYPTION_KEY is set (else None)."""
-    from app.config.settings import get_settings
-
-    key = get_settings().app_encryption_key
-    raw = key.get_secret_value().strip() if key else ""
-    if not raw:
-        return None
+def _keys() -> list:  # type: ignore[type-arg]
+    """APP_ENCRYPTION_KEY then each APP_ENCRYPTION_KEY_PREVIOUS key, as Fernet ciphers ([] when no key is set)."""
     from cryptography.fernet import Fernet
 
+    from app.config.settings import get_settings
+
+    s = get_settings()
+    raw = s.app_encryption_key.get_secret_value().strip() if s.app_encryption_key else ""
+    if not raw:
+        return []
+    old = s.app_encryption_key_previous.get_secret_value() if s.app_encryption_key_previous else ""
+    out = []
+    for name, k in [("APP_ENCRYPTION_KEY", raw)] + [("APP_ENCRYPTION_KEY_PREVIOUS", k.strip()) for k in old.split(",") if k.strip()]:
+        try:
+            out.append(Fernet(k.encode()))
+        except ValueError:
+            raise SecretStoreError(f"{name} is not a valid Fernet key") from None
+    return out
+
+
+def _fernet():  # type: ignore[no-untyped-def]
+    """The production cipher, when APP_ENCRYPTION_KEY is set (else None): encrypts with that key, decrypts with it or
+    any APP_ENCRYPTION_KEY_PREVIOUS key (key rotation)."""
+    keys = _keys()
+    if not keys:
+        return None
+    from cryptography.fernet import MultiFernet
+
+    return MultiFernet(keys)
+
+
+def reseal(data: bytes) -> bytes | None:
+    """Re-encrypt a stored value under the current key (key rotation, app/security/rekey.py).
+    None = nothing to do (already under the current key, or not a Fernet value: DPAPI / plain).
+    Raises SecretStoreError when no configured key can decrypt it."""
+    if not data.startswith(_FERNET_TAG):
+        return None
+    keys = _keys()
+    if not keys:
+        raise SecretStoreError("A stored secret needs APP_ENCRYPTION_KEY to decrypt")
+    from cryptography.fernet import InvalidToken, MultiFernet
+
+    token = data[len(_FERNET_TAG):]
     try:
-        return Fernet(raw.encode())
-    except ValueError:
-        raise SecretStoreError("APP_ENCRYPTION_KEY is not a valid Fernet key") from None
+        keys[0].decrypt(token)
+        return None
+    except InvalidToken:
+        pass
+    try:
+        return _FERNET_TAG + MultiFernet(keys).rotate(token)
+    except InvalidToken:
+        raise SecretStoreError("Could not decrypt a stored secret with any configured key") from None
 
 
 def _production() -> bool:
@@ -106,7 +144,7 @@ def unprotect(data: bytes) -> bytes:
         try:
             return f.decrypt(data[len(_FERNET_TAG):])
         except InvalidToken:
-            raise SecretStoreError("Could not decrypt a stored secret (APP_ENCRYPTION_KEY changed?)") from None
+            raise SecretStoreError("Could not decrypt a stored secret (APP_ENCRYPTION_KEY changed? put the old one in APP_ENCRYPTION_KEY_PREVIOUS)") from None
     if not dpapi_available():
         if _production():
             raise SecretStoreError("A stored secret was not encrypted with APP_ENCRYPTION_KEY")
@@ -180,6 +218,34 @@ class SecretStore:
             if existed:
                 self._write(data)
             return existed
+
+    def reseal(self) -> dict[str, int]:
+        """Re-encrypt every entry under the current key (key rotation). Counts only; values are never returned."""
+        out = {"rotated": 0, "current": 0, "failed": 0, "other": 0}
+        with self._lock:
+            data = self._read()
+            for entry in data.values():
+                try:
+                    raw = base64.b64decode(entry["value"])
+                except (KeyError, TypeError, ValueError):
+                    out["other"] += 1
+                    continue
+                if not raw.startswith(_FERNET_TAG):
+                    out["other"] += 1  # DPAPI (Windows dev) or plain: not ours to rotate
+                    continue
+                try:
+                    new = reseal(raw)
+                except SecretStoreError:
+                    out["failed"] += 1  # left as it is
+                    continue
+                if new is None:
+                    out["current"] += 1
+                    continue
+                entry["value"] = base64.b64encode(new).decode("ascii")
+                out["rotated"] += 1
+            if out["rotated"]:
+                self._write(data)
+        return out
 
     def saved_at(self, name: str) -> datetime | None:
         with self._lock:
