@@ -103,3 +103,31 @@ def test_community_rename_moves_saved_settings_to_thepricechat(tmp_path: Path) -
         insert(conn, "wk_settings", {"id": 2})
         assert conn.execute(text("SELECT community_chat FROM wk_settings WHERE id = 2")).scalar() == "@thepricechat"  # new default
     engine.dispose()
+
+
+def test_perf_indexes_upgrade_and_downgrade(tmp_path: Path) -> None:
+    """0090: every hot-query index is created (and the models declare the same, see test_migrations_match_models); a
+    downgrade removes them and restores the narrower ex_orders / perp_orders account index."""
+    from sqlalchemy import inspect
+
+    from app.models.perf_indexes import PERF_INDEXES
+
+    url = f"sqlite:///{(tmp_path / 'perf.db').as_posix()}"
+    upgrade_database(url)
+    engine = build_engine(url, enforce_foreign_keys=False)
+
+    def indexes(conn, table: str) -> dict[str, list[str]]:  # type: ignore[no-untyped-def]
+        return {i["name"]: i["column_names"] for i in inspect(conn).get_indexes(table)}
+
+    with engine.begin() as conn:
+        for ix in PERF_INDEXES:
+            assert indexes(conn, ix.table.name)[ix.name] == [c.name for c in ix.columns]
+        assert indexes(conn, "ex_orders")["ix_ex_orders_account"] == ["account_id", "status", "updated_at"]
+        config = alembic_config()
+        config.attributes["connection"] = conn
+        command.downgrade(config, "0089_workers_checks")
+        assert "ix_telegram_messages_source_sent" not in indexes(conn, "telegram_messages")
+        assert indexes(conn, "perp_orders")["ix_perp_orders_account"] == ["account_id", "status"]
+        command.upgrade(config, "head")
+        assert "ix_telegram_messages_source_sent" in indexes(conn, "telegram_messages")
+    engine.dispose()

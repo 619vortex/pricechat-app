@@ -208,6 +208,34 @@ def test_sold_out_ended_and_stale_listings(client: TestClient, db: Session, ebay
     assert card["stale"] is True and card["can_request"] is False and card["price"] == 10000
 
 
+def test_sync_holds_no_write_lock_while_asking_ebay(client: TestClient, db: Session, ebay: FakeEbay, monkeypatch: pytest.MonkeyPatch) -> None:
+    """While the per-listing eBay calls run, another connection can still write (the search's rows are already saved)."""
+    import sqlite3
+
+    path = db.get_bind().url.database
+    can_write: list[bool] = []
+    handle = ebay.transport().handler  # type: ignore[attr-defined]
+
+    def checking(r: httpx.Request) -> httpx.Response:
+        if "/buy/browse/v1/item/" in r.url.path:
+            other = sqlite3.connect(path, timeout=0)
+            try:
+                other.execute("BEGIN IMMEDIATE")
+                other.rollback()
+                can_write.append(True)
+            except sqlite3.OperationalError:
+                can_write.append(False)
+            finally:
+                other.close()
+        return handle(r)
+
+    monkeypatch.setattr(client.app.state.runtime, "pokemon_transport", httpx.MockTransport(checking), raising=False)  # type: ignore[attr-defined]
+    ebay.items = [_summary("301", "[NM] Lugia Pokemon Card Japanese Neo Genesis Holo", "100.00")]
+    ebay.details = {"v1|301|0": _detail("301", "[NM] Lugia Pokemon Card Japanese Neo Genesis Holo", "100.00")}
+    assert _sync(client)["details"] == 1
+    assert can_write == [True]
+
+
 def test_not_connected_and_bad_username_are_reported(client: TestClient, db: Session) -> None:
     out = _sync(client)
     assert out["status"] == "not_connected" and "eBay isn't connected" in out["message"]

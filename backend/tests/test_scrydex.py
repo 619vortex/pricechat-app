@@ -146,6 +146,35 @@ def test_three_card_sync_stores_labelled_valuations_population_and_history(clien
     assert again["requests"] == 1 and again["cache_hits"] == 6  # only the usage check is live; cards + history from cache
 
 
+def test_history_requests_hold_no_write_lock(client: TestClient, db: Session, scrydex: list[str], monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The card's current values are saved before its price history is asked for: another connection can write meanwhile."""
+    import sqlite3
+
+    catalog.ensure_catalog(db)
+    path = db.get_bind().url.database
+    inner = api(scrydex).handler  # type: ignore[attr-defined]
+    can_write: list[bool] = []
+
+    def checking(r: httpx.Request) -> httpx.Response:
+        if r.url.path.endswith("/price_history"):
+            other = sqlite3.connect(path, timeout=0)
+            try:
+                other.execute("BEGIN IMMEDIATE")
+                other.rollback()
+                can_write.append(True)
+            except sqlite3.OperationalError:
+                can_write.append(False)
+            finally:
+                other.close()
+        return inner(r)
+
+    monkeypatch.setattr(client.app.state.runtime, "pokemon_transport", httpx.MockTransport(checking), raising=False)  # type: ignore[attr-defined]
+    r = client.post("/api/pokemon/sources/scrydex/sync", json={"card_ids": [_id(db, "Charizard", "1st Edition")], "history": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"]["history_points"] == 2
+    assert can_write and all(can_write)
+
+
 def test_request_cap_and_auth_errors_are_reported(client: TestClient, db: Session, scrydex: list[str], monkeypatch) -> None:  # type: ignore[no-untyped-def]
     catalog.ensure_catalog(db)
     ids = [_id(db, "Charizard", "1st Edition"), _id(db, "Blastoise", "1st Edition"), _id(db, "Lugia", "1st Edition", "Neo Genesis")]

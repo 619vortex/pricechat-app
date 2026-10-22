@@ -89,7 +89,7 @@ class ExOrder(IdMixin, Base):
     __tablename__ = "ex_orders"
     __table_args__ = (UniqueConstraint("account_id", "client_id"),
                       Index("ix_ex_orders_book", "market_id", "status", "side", "price_cents", "id"),
-                      Index("ix_ex_orders_account", "account_id", "status"))
+                      Index("ix_ex_orders_account", "account_id", "status", "updated_at"))  # + updated_at: maker.prune (0090)
 
     market_id: Mapped[int] = mapped_column(ForeignKey("ex_markets.id", ondelete="CASCADE"), nullable=False)
     account_id: Mapped[int] = mapped_column(ForeignKey("ex_accounts.id", ondelete="CASCADE"), nullable=False)
@@ -209,7 +209,7 @@ class PerpOrder(IdMixin, Base):
     __tablename__ = "perp_orders"
     __table_args__ = (UniqueConstraint("account_id", "client_id"),
                       Index("ix_perp_orders_book", "market_id", "status", "side", "price_cents", "id"),
-                      Index("ix_perp_orders_account", "account_id", "status"))
+                      Index("ix_perp_orders_account", "account_id", "status", "updated_at"))  # + updated_at: maker.prune (0090)
 
     market_id: Mapped[int] = mapped_column(ForeignKey("perp_markets.id", ondelete="CASCADE"), nullable=False)
     account_id: Mapped[int] = mapped_column(ForeignKey("ex_accounts.id", ondelete="CASCADE"), nullable=False)

@@ -240,6 +240,7 @@ async def sync(db: Session, settings: Any, card_ids: list[int] | None = None, wi
                     for company, grade in history_grades:
                         if not any(k == f"{company} {grade}" for k in prices):
                             continue  # no current price at that grade: no history request
+                        db.commit()  # what's stored so far is saved first: no flushed write (SQLite's write lock) waits on Scrydex
                         try:
                             days = await p.price_history(sid, str(v.get("name")), company, grade)
                         except Unavailable as exc:

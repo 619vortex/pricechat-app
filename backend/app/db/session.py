@@ -11,12 +11,25 @@ from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+POOL_SIZE = 10
+POOL_OVERFLOW = 30
+
 
 def build_engine(database_url: str, enforce_foreign_keys: bool = True, **kwargs: Any) -> Engine:
     """Create an engine. Migrations pass enforce_foreign_keys=False: SQLite rebuilds
     tables to alter them, and cascading FKs would otherwise delete dependent rows."""
     url = make_url(database_url)
     is_sqlite = url.get_backend_name() == "sqlite"
+    if "poolclass" not in kwargs and (not is_sqlite or (url.database and url.database != ":memory:")):
+        # One process serves sync routes from a 40-thread pool while the scheduler's jobs each hold a session for their whole
+        # run; SQLAlchemy's default 5 + 10 connections made requests wait (then fail after 30 s) at busy moments. 10 kept +
+        # 30 overflow = 40 at most: SQLite connections are cheap, and on PostgreSQL it stays well under Railway's default
+        # max_connections (100) with room for backups and psql.
+        kwargs.setdefault("pool_size", POOL_SIZE)
+        kwargs.setdefault("max_overflow", POOL_OVERFLOW)
+    if not is_sqlite:
+        kwargs.setdefault("pool_pre_ping", True)  # a server/proxy-closed idle connection is replaced, not handed to a request
+        kwargs.setdefault("pool_recycle", 1800)
     if is_sqlite:
         kwargs.setdefault("connect_args", {"check_same_thread": False})
         if url.database and url.database != ":memory:":

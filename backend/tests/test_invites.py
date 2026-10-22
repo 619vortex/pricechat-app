@@ -375,3 +375,34 @@ def test_one_click_tool_auto_for_askers_personal_for_others_never_twice(client: 
     assert {x["recipient"]: (x["account"], x["how"], bool(x["replied_at"])) for x in h} == {
         "@newer": ("DREAM", "you, in Telegram", True), "@asker": ("DREAM", "sent by the bot", False)}
     assert svc.queue(db, a) == [] and len(tg.sent) == 1  # a reply after a personal invite never triggers a second (bot) one
+
+
+def test_poll_saves_each_group_before_reading_the_next(client: TestClient, db: Session, tg: FakeTG, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """No write is held open across a Telegram read (on SQLite that is the database-wide write lock every other job waits on)."""
+    from sqlalchemy import event
+
+    aid = _setup(client, db, tg)
+    client.post("/api/invites/groups", json={"account_id": aid, "chat_id": -100, "title": "Crypto Talk"})
+    client.post("/api/invites/groups", json={"account_id": aid, "chat_id": -200, "title": "Friendly Group"})
+    tg.group_msgs[-100] = [_msg(1, 10, "gm everyone")]
+    tg.group_msgs[-200] = [_msg(1, 11, "hello")]
+    unsaved = {"writes": False}
+    event.listen(db, "after_flush", lambda *_: unsaved.update(writes=True))
+    event.listen(db, "after_commit", lambda *_: unsaved.update(writes=False))
+    held: list[bool] = []
+    real = svc.RT.factory
+
+    def watching(*a, **kw):  # type: ignore[no-untyped-def]
+        c = real(*a, **kw)
+        inner = c.group_messages
+
+        async def group_messages(chat_id: int, after_id: int, limit: int):  # type: ignore[no-untyped-def]
+            held.append(unsaved["writes"])
+            return await inner(chat_id, after_id, limit)
+
+        c.group_messages = group_messages
+        return c
+
+    monkeypatch.setattr(svc.RT, "factory", watching)
+    out = asyncio.run(svc.poll(db, client.app.state.runtime.settings))  # type: ignore[attr-defined]
+    assert out["messages"] == 2 and held == [False, False]

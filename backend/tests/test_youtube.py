@@ -292,6 +292,31 @@ def test_metric_snapshots(yt_client: TestClient, fake_youtube: FakeYouTube, db: 
     assert db.scalar(select(ContentItemMetric).order_by(ContentItemMetric.id.desc())).views is None
 
 
+def test_metric_snapshot_check_is_one_query_per_sync(yt_client: TestClient, fake_youtube: FakeYouTube, db: Session) -> None:
+    """Whether a video is due a metric snapshot is read for all videos at once, not one query per video."""
+    from sqlalchemy import event
+
+    for i in range(6):
+        fake_youtube.upload(f"v{i}", f"Video {i}", published=(utcnow() - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"), views=i)
+    _connect(yt_client)
+    assert _sync(yt_client)["metric_snapshots"] == 6
+    for m in db.scalars(select(ContentItemMetric).where(ContentItemMetric.item_id.in_(select(ContentItem.id).where(ContentItem.external_id.in_(["v0", "v1"]))))):
+        m.captured_at = utcnow() - timedelta(hours=2)  # two are due again, four were just taken
+    db.commit()
+    sql: list[str] = []
+    engine = db.get_bind()
+
+    def on(_c, _cur, statement, *_a):  # type: ignore[no-untyped-def]
+        sql.append(statement)
+
+    event.listen(engine, "before_cursor_execute", on)
+    try:
+        assert _sync(yt_client)["metric_snapshots"] == 2
+    finally:
+        event.remove(engine, "before_cursor_execute", on)
+    assert sum("FROM content_item_metrics" in q for q in sql) == 1
+
+
 def test_website_endpoints_are_read_only_and_never_call_youtube(yt_client: TestClient, fake_youtube: FakeYouTube) -> None:
     fake_youtube.upload("v1", "Cached")
     _connect(yt_client)
