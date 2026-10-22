@@ -5,7 +5,31 @@ import { memberApi } from "./members";
 export interface Vault { v: 1; kdf: "PBKDF2-SHA256"; cipher: "AES-GCM"; iterations: number; salt: string; iv: string; ct: string }
 export interface Burner { address: string; vault: Vault; created_at: string | null }
 
-const ITERATIONS = 310_000;  // PBKDF2-SHA256: OWASP's recommendation for this hash
+// PBKDF2-SHA256, OWASP's current figure. New vaults only: each vault stores its own count (older ones: 310,000) and decrypts with it.
+const ITERATIONS = 600_000;
+export const MIN_PASSWORD = 12;
+// The most-used passwords and their bases: a stolen vault is guessed offline, and these go first. Also checked with digits and
+// symbols stripped from the ends, so "Password2024!" counts as "password".
+const COMMON = new Set(("password passw0rd qwerty qwertyuiop asdfghjkl zxcvbnm azerty letmein iloveyou admin administrator welcome " +
+  "monkey dragon football baseball basketball soccer superman batman sunshine princess shadow master michael jordan trustno1 " +
+  "starwars whatever freedom computer internet abc123 abcdef abcdefgh 123456 1234567890 123456789012 1q2w3e4r 1qaz2wsx " +
+  "qazwsx changeme secret default bitcoin ethereum crypto metamask wallet pricechat passport burner").split(" "));
+
+/** Why a backup password isn't good enough, or null when it is. */
+export function passwordProblem(pw: string): string | null {
+  if (pw.length < MIN_PASSWORD) return `Use at least ${MIN_PASSWORD} characters for the password.`;
+  if (/^(.)\1*$/su.test(pw)) return "Not one character repeated: pick something harder to guess.";
+  const low = pw.toLowerCase();
+  if (COMMON.has(low) || COMMON.has(low.replace(/^[^a-z]+|[^a-z]+$/g, ""))) return "That's one of the most common passwords. Pick something less guessable.";
+  return null;
+}
+
+/** A rough hint shown while typing: length and character variety. */
+export function passwordStrength(pw: string): "weak" | "fair" | "strong" {
+  if (passwordProblem(pw)) return "weak";
+  const kinds = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) => r.test(pw)).length;
+  return pw.length >= 16 || (pw.length >= 14 && kinds >= 3) ? "strong" : "fair";
+}
 const b64 = (buf: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(buf instanceof Uint8Array ? buf : new Uint8Array(buf))));
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
@@ -69,7 +93,8 @@ export function BurnerRow() {
 
   async function create() {
     setErr(null);
-    if (pw.length < 8) return setErr("Use at least 8 characters for the password.");
+    const problem = passwordProblem(pw);
+    if (problem) return setErr(problem);
     if (pw !== pw2) return setErr("The two passwords don't match.");
     if (!ack) return setErr("Tick the box first: we can't recover the phrase without this password.");
     setBusy(true);
@@ -135,8 +160,10 @@ export function BurnerRow() {
       )}
       {step === "password" && (
         <form className="pp-account-extra pp-burner-form" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-          <label>Backup password<input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} minLength={8} required /></label>
-          <label>Repeat it<input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} minLength={8} required /></label>
+          <label>Backup password<input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} minLength={MIN_PASSWORD} required /></label>
+          {pw && <p className="site-muted" aria-live="polite">Strength: {{ weak: "too weak", fair: "fair", strong: "strong" }[passwordStrength(pw)]}
+            {passwordProblem(pw) ? ` (${passwordProblem(pw)})` : passwordStrength(pw) === "fair" ? " (a few unrelated words, 16+ characters, is stronger)" : ""}</p>}
+          <label>Repeat it<input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} minLength={MIN_PASSWORD} required /></label>
           <label className="pp-burner-ack"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
             I understand Price Chat can't recover my recovery phrase if I forget this password.</label>
           <div className="pp-burner-actions">
