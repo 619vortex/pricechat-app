@@ -40,7 +40,37 @@ class Unreachable(Exception):
 
 
 class NotAllowed(Exception):
-    """The account may no longer post in this group."""
+    """The account may no longer post in (or read) this group."""
+
+
+class AccountGone(Exception):
+    """This account's session is dead (logged out elsewhere, revoked, deleted, duplicated key): stop using it."""
+
+
+# Telegram restricted the ACCOUNT itself (not one recipient): pause everything for this long.
+RESTRICTED_SECONDS = 24 * 3600
+BANNED_SECONDS = 7 * 24 * 3600
+
+
+def account_error(exc: BaseException) -> Exception | None:
+    """The account-level meaning of a Telethon error (any call), or None when it's about one chat/recipient.
+    Never retried: a flood wait is never slept through and re-sent (flood_sleep_threshold=0 below)."""
+    try:
+        from telethon import errors
+    except ImportError:  # pragma: no cover - telethon is a production dependency
+        return None
+    if isinstance(exc, errors.FrozenMethodInvalidError):  # the account is frozen by Telegram (spam): long pause
+        return RateLimited(BANNED_SECONDS, "Telegram froze this account (FrozenMethodInvalid)")
+    if isinstance(exc, errors.UserDeactivatedBanError):  # banned: everything pauses, the owner must look
+        return RateLimited(BANNED_SECONDS, "Telegram banned this account (UserDeactivatedBan)")
+    if isinstance(exc, errors.FloodError):  # FloodWait, FloodPremiumWait, SlowModeWait, ...
+        seconds = int(getattr(exc, "seconds", 0) or 0) or RESTRICTED_SECONDS
+        return RateLimited(seconds, f"Telegram rate limit ({type(exc).__name__}): wait {seconds}s")
+    if isinstance(exc, (errors.PeerFloodError, errors.UserBannedInChannelError)):  # spam-restricted account
+        return RateLimited(RESTRICTED_SECONDS, f"Telegram limited messaging ({type(exc).__name__})")
+    if isinstance(exc, (errors.UnauthorizedError, errors.AuthKeyError)):  # AuthKeyUnregistered, SessionRevoked, UserDeactivated...
+        return AccountGone(f"The Telegram session no longer works ({type(exc).__name__}): log in again")
+    return None
 
 
 class NeedPassword(Exception):
@@ -74,7 +104,7 @@ class Gateway(Protocol):
     async def groups(self) -> list[GroupInfo]: ...
     async def group_messages(self, chat_id: int, after_id: int, limit: int) -> list[Msg]: ...
     async def private_messages(self, since: datetime, limit: int) -> list[Msg]: ...
-    async def send(self, peer: int | str, text: str) -> None: ...
+    async def send(self, peer: int | str, text: str, expect_id: int | None = None) -> None: ...
     async def stop(self) -> None: ...
 
 
@@ -83,11 +113,17 @@ class TelethonGateway:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
 
-        self.client = TelegramClient(StringSession(session), api_id, api_hash, device_model="Price Chat Invite Bot", app_version="1.0")
+        # flood_sleep_threshold=0: Telethon must never sleep through a FloodWait and silently re-send; we stop instead
+        self.client = TelegramClient(StringSession(session), api_id, api_hash, device_model="Price Chat Invite Bot", app_version="1.0",
+                                     flood_sleep_threshold=0)
 
     async def start(self) -> bool:
-        await self.client.connect()
-        return bool(await self.client.is_user_authorized())
+        try:
+            await self.client.connect()
+            return bool(await self.client.is_user_authorized())
+        except Exception as exc:
+            _raise_mapped(exc)
+            raise
 
     async def send_code(self, phone: str) -> str:
         return str((await self.client.send_code_request(phone)).phone_code_hash)
@@ -114,54 +150,83 @@ class TelethonGateway:
         from telethon.utils import get_peer_id
 
         out = []
-        async for d in self.client.iter_dialogs(limit=300):
-            if d.is_group or (d.is_channel and getattr(d.entity, "megagroup", False)):
-                out.append(GroupInfo(get_peer_id(d.entity), d.name or "?", getattr(d.entity, "username", None)))
+        try:
+            async for d in self.client.iter_dialogs(limit=300):
+                if d.is_group or (d.is_channel and getattr(d.entity, "megagroup", False)):
+                    out.append(GroupInfo(get_peer_id(d.entity), d.name or "?", getattr(d.entity, "username", None)))
+        except Exception as exc:
+            _raise_mapped(exc)
         return out
 
     async def group_messages(self, chat_id: int, after_id: int, limit: int) -> list[Msg]:
+        from telethon import errors
         from telethon.tl.types import User
 
         out = []
-        async for m in self.client.iter_messages(chat_id, min_id=after_id, limit=limit):
-            s = m.sender
-            if isinstance(s, User):
-                out.append(Msg(m.id, s.id, public_username(s), m.raw_text or "", m.date, not is_real_person(s)))
+        try:
+            async for m in self.client.iter_messages(chat_id, min_id=after_id, limit=limit):
+                s = m.sender
+                if isinstance(s, User):
+                    out.append(Msg(m.id, s.id, public_username(s), m.raw_text or "", m.date, not is_real_person(s)))
+        except (errors.ChannelPrivateError, errors.ChatAdminRequiredError, errors.ChatForbiddenError, errors.ChannelInvalidError,
+                errors.ChatIdInvalidError, ValueError) as exc:
+            raise NotAllowed(type(exc).__name__) from exc  # left / kicked / gone: that one group, not the account
+        except Exception as exc:
+            _raise_mapped(exc)
         return out
 
     async def private_messages(self, since: datetime, limit: int) -> list[Msg]:
         from telethon.tl.types import User
 
         out = []
-        async for d in self.client.iter_dialogs(limit=limit):
-            if not d.is_user or not isinstance(d.entity, User) or not is_real_person(d.entity):
-                continue  # e.g. the "Telegram" account that sent the login code is NOT someone asking for an invite
-            if d.message is None or d.message.date <= since:
-                continue
-            async for m in self.client.iter_messages(d.entity, limit=5):
-                if m.date <= since:
-                    break
-                if not m.out:
-                    out.append(Msg(m.id, d.entity.id, public_username(d.entity), m.raw_text or "", m.date))
+        try:
+            async for d in self.client.iter_dialogs(limit=limit):
+                if not d.is_user or not isinstance(d.entity, User) or not is_real_person(d.entity):
+                    continue  # e.g. the "Telegram" account that sent the login code is NOT someone asking for an invite
+                if d.message is None or d.message.date <= since:
+                    continue
+                async for m in self.client.iter_messages(d.entity, limit=5):
+                    if m.date <= since:
+                        break
+                    if not m.out:
+                        out.append(Msg(m.id, d.entity.id, public_username(d.entity), m.raw_text or "", m.date))
+        except Exception as exc:
+            _raise_mapped(exc)
         return out
 
-    async def send(self, peer: int | str, text: str) -> None:
+    async def send(self, peer: int | str, text: str, expect_id: int | None = None) -> None:
+        """`expect_id`: the person who asked. A @username can change hands: if it now resolves to anyone else, nothing is sent."""
         from telethon import errors
 
         try:
+            if expect_id is not None and isinstance(peer, str):
+                peer = await self.client.get_entity(peer)
+                if getattr(peer, "id", None) != expect_id:
+                    raise Unreachable("UsernameChangedOwner")
             await self.client.send_message(peer, text, link_preview=False)
-        except errors.FloodWaitError as exc:
-            raise RateLimited(int(exc.seconds), f"Telegram rate limit: wait {exc.seconds}s") from exc
-        except (errors.PeerFloodError, errors.SlowModeWaitError) as exc:
-            raise RateLimited(24 * 3600, f"Telegram limited messaging ({type(exc).__name__})") from exc
-        except (errors.UserIsBlockedError, errors.UserPrivacyRestrictedError, errors.InputUserDeactivatedError, errors.UserDeactivatedError,
-                ValueError) as exc:
-            raise Unreachable(type(exc).__name__) from exc
-        except (errors.ChatWriteForbiddenError, errors.ChatAdminRequiredError, errors.ChannelPrivateError) as exc:
-            raise NotAllowed(type(exc).__name__) from exc
+        except Unreachable:
+            raise
+        except Exception as exc:
+            mapped = account_error(exc)  # first: e.g. UserDeactivated / UserBannedInChannel are about THIS account, not the recipient
+            if mapped is not None:
+                raise mapped from exc
+            if isinstance(exc, (errors.UserIsBlockedError, errors.UserPrivacyRestrictedError, errors.InputUserDeactivatedError,
+                                errors.UsernameNotOccupiedError, errors.UsernameInvalidError, errors.PeerIdInvalidError, ValueError)):
+                raise Unreachable(type(exc).__name__) from exc
+            if isinstance(exc, (errors.ChatWriteForbiddenError, errors.ChatAdminRequiredError, errors.ChannelPrivateError,
+                                errors.ChatRestrictedError, errors.ChatSendPlainForbiddenError)):
+                raise NotAllowed(type(exc).__name__) from exc
+            raise
 
     async def stop(self) -> None:
         await self.client.disconnect()
+
+
+def _raise_mapped(exc: Exception) -> None:
+    mapped = account_error(exc)
+    if mapped is not None:
+        raise mapped from exc
+    raise exc
 
 
 def default_factory(api_id: int, api_hash: str, session: str = "") -> Any:
