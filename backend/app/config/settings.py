@@ -191,6 +191,8 @@ class Settings(BaseSettings):
     # TIKTOK_CLIENT_SECRET). Redirect URI to register: {members_public_url}/api/brand-manager/tiktok/callback
     tiktok_client_key: SecretStr | None = None
     tiktok_client_secret: SecretStr | None = None
+    # Vortex trade checks (/help <trade>): the bearer Vortex (the owner's home AI) uses on /api/vortex/*. Set in Admin › Trading OS.
+    vortex_assist_token: SecretStr | None = None
     # Earn › Arbitrage › Lunch Bot (paper only: reads pump.fun launches and Solana accounts, never signs anything)
     lunch_bot_enabled: bool = True
     solana_rpc_url: str = "https://api.mainnet-beta.solana.com"

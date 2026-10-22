@@ -69,6 +69,7 @@ LIMITS = {
     # starting a Google / X / Telegram sign-in (each stores a pending attempt) and the Telegram widget check: a person
     # needs a handful; the shared bucket is generous so a flood from one script can't lock everyone else out of signing in
     "signin": Bucket(burst=10, every=6, shared_burst=600, shared_every=0.05),
+    "vortex_auth": Bucket(burst=5, every=60, shared_burst=30, shared_every=10),  # failed bearer tokens on /api/vortex/*
 }
 
 

@@ -89,6 +89,7 @@ class TelegramIngestor:
         self._wk_starts: list[tuple[int, int, str, str | None, bool]] = []  # Worker System: (chat, user, code, username, is_bot)
         self._welcome: dict[int, list[str]] = {}  # signal group chat id -> names of people who just joined it
         self._commands: list[tuple[int, int, str, bool, int | None]] = []  # Trading OS: (chat, user, "/cmd args", in a group?, message id)
+        self._followups: list[tuple[int, int, str, int, int]] = []  # Vortex trade checks: (chat, user, text, message id, replied-to id)
         self.runtime = runtime
 
     async def verify(self) -> TelegramBotState:
@@ -226,6 +227,13 @@ class TelegramIngestor:
                                        getattr(parsed, "message_id", None), parsed.chat.username, parsed.author_name))  # answered after the commit
                 report.ignored_other += 1  # a command to the bot; never stored as a message
                 return
+        if (isinstance(parsed, ParsedMessage) and not parsed.author_is_bot and parsed.author_id and parsed.reply_to_message_id
+                and not parsed.edited and parsed.text.strip()):
+            from app.tradingos import assist
+
+            if assist.is_reply_to_check(self.db, parsed.chat.chat_id, parsed.reply_to_message_id):  # a follow-up to a trade check
+                self._followups.append((parsed.chat.chat_id, parsed.author_id, parsed.text.strip()[:assist.MAX_QUESTION],
+                                        parsed.message_id, parsed.reply_to_message_id))  # answered after the commit
 
         source = sources.get(parsed.chat.chat_id)
         if isinstance(parsed, MembershipChange):
@@ -350,6 +358,16 @@ class TelegramIngestor:
             except Exception as exc:  # noqa: BLE001
                 self.db.rollback()
                 logger.warning("Bot command not answered (%s)", type(exc).__name__)
+        followups, self._followups = self._followups, []
+        if followups:
+            from app.tradingos import assist
+
+            for chat_id, user_id, text, msg_id, replied_to in followups:
+                try:
+                    await assist.followup(self.db, self.client, chat_id, user_id, text, msg_id, replied_to)
+                except Exception as exc:  # noqa: BLE001
+                    self.db.rollback()
+                    logger.warning("Trade check follow-up not handled (%s)", type(exc).__name__)
         for cq in callbacks:
             try:
                 await bot.handle_callback(self.db, self.client, cq)

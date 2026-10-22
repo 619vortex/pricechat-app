@@ -752,6 +752,21 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         finally:
             await tg.aclose()
 
+    async def vortex_expire(ctx: JobContext) -> dict[str, Any]:
+        """Vortex trade checks: placeholders still unanswered after 60 s become the bot's own assessment."""
+        from app.telegram.service import make_client
+        from app.tradingos import assist
+
+        if not assist.stale(ctx.db, ctx.now):
+            return {"expired": 0}
+        if not s.telegram_configured:
+            raise JobSkipped("Telegram is not configured")
+        tg = make_client(s, runtime.telegram.transport)
+        try:
+            return {"expired": await assist.expire(ctx.db, tg, ctx.now)}
+        finally:
+            await tg.aclose()
+
     async def funding_alerts(ctx: JobContext) -> dict[str, Any]:
         """Earn › Funding Arb: post wide cross-venue funding spreads (net of estimated fees) to the publish chat. Read-only."""
         from app.arbitrage import funding_alerts as fa
@@ -899,6 +914,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 60, lunch_bot, initial_delay_seconds=90, timeout_seconds=55),
         JobSpec("tradingos.autodelete", "Trading OS: main-chat tidy-up", "Every minute: deletes the bot's own messages in the main chat a few minutes after they were sent (Admin › Trading OS; 0 = off). Bot Chat and private chats are never touched",
                 60, autodelete, initial_delay_seconds=50, timeout_seconds=50),
+        JobSpec("tradingos.vortex_expire", "Trading OS: Vortex trade-check expiry", "Every 20 s: a /help <trade> check Vortex hasn't answered within 60 s gets the bot's own assessment instead (a late answer from Vortex is then ignored)",
+                20, vortex_expire, initial_delay_seconds=30, timeout_seconds=18),
         JobSpec("tradingos.funding_alerts", "Earn › Funding Arb alerts", "Every 10 min: when a coin's best cross-venue funding spread, net of estimated taker fees on both legs, clears the threshold (Admin › Trading OS), posts it to the publish chat; 12 h cooldown per coin unless the spread grows 50%+. Read-only, never trades",
                 600, funding_alerts, initial_delay_seconds=240, timeout_seconds=120),
         JobSpec("brand.trends", "Brand Manager trend scan", "Every 30 min: reads today's headlines from crypto and finance outlets (CoinDesk, Cointelegraph, Decrypt, The Block, CNBC, MarketWatch, FT, BBC Business) and CoinGecko's most-searched coins, and counts which words are new or rising against the past 7 days, for Content Studio's topics and scripts",
