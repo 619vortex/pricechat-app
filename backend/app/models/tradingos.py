@@ -258,3 +258,23 @@ class TsLiquidation(IdMixin, Base):
     px: Mapped[float] = mapped_column(Float, nullable=False)
     qty: Mapped[float] = mapped_column(Float, nullable=False)  # coins
     usd: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class TsPriceAlert(IdMixin, TimestampMixin, Base):
+    """A Telegram user's price alert on a Hyperliquid perp: fires once by private message when the price crosses `price`
+    (above / below) or enters the zone price..price_hi (a /signal entry zone, with its plan). Expires after 30 days."""
+
+    __tablename__ = "ts_price_alerts"
+    __table_args__ = (Index("ix_ts_price_alerts_status", "status"), Index("ix_ts_price_alerts_user", "telegram_user_id"))
+
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    coin: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(5), nullable=False)  # above | below | zone
+    price: Mapped[float] = mapped_column(Float, nullable=False)  # the level (zone: its low)
+    price_hi: Mapped[float | None] = mapped_column(Float)  # zone: its high
+    last_price: Mapped[float] = mapped_column(Float, nullable=False)  # the mark at the last check: crossings are measured from it
+    plan: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # zone alerts: {side, tf, stop, target}
+    status: Mapped[str] = mapped_column(String(10), default="active", server_default="active", nullable=False)  # active | fired | off | expired | blocked
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    fired_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    fired_price: Mapped[float | None] = mapped_column(Float)

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.models.members import LinkedIdentity, Member
 from app.models.tradingos import TsSignal, TsSignalAction
-from app.tradingos import chart, market, readout, signals, tickers, venues
+from app.tradingos import alerts, chart, market, readout, signals, tickers, venues
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,9 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 /signal · the most promising setup right now (top markets)
 /signal DOGE · the best setup on one coin, even without a full signal
 /signals · the bot's open signals
+
+🔔 <b>Alerts</b> (DM me)
+/alert BTC 85000 · /alert ETH -5% · /alerts · /alert off 3
 
 💡 <b>Community ideas</b>
 /idea BTC long tp 72000 inv 64000 why · /ideas (members' views, never traded)
@@ -97,7 +100,7 @@ def _pct(x: float) -> str:
 PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/idea", "/ideas"}  # groups too
 MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator"}
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
-PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close"}  # account: DMs only
+PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close"} | alerts.COMMANDS  # DMs only
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
 HEADLINE = ("BTC", "ETH", "SOL", "HYPE")
 
@@ -338,7 +341,8 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         from app.telegram.ingestion import get_bot_state
 
         name = get_bot_state(db).bot_username or "cryptopricechatbot"
-        await client.send_message(chat_id, f"Account commands work privately: t.me/{name}", reply_to=reply_to)
+        what = "Alerts are set" if cmd in alerts.COMMANDS else "Account commands work"
+        await client.send_message(chat_id, f"{what} privately: t.me/{name}", reply_to=reply_to)
         return
     s = signals.settings(db)
     bot_chat = (s.publish_chat or "").strip()
@@ -435,6 +439,8 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
             candles = await _md(md.candles, a.coin, tf, 200)
         a.indicators = {**signals.chart_indicators(candles, tf), **a.indicators}  # short histories still get a read
         return await _send_signal(client, chat_id, reply_to, listing, tf, a, candles)
+    if cmd in alerts.COMMANDS:  # per Telegram user: no Passport needed
+        return await alerts.command(db, user_id, cmd, args, md)
     # ---- the private trading service: a linked Kiwi Passport at the required rank
     if m is None:
         return f"Link your Kiwi Passport first: {SITE}/passport → Connect Telegram."
@@ -582,7 +588,8 @@ async def _send_signal(client: Any, chat_id: int | str, reply_to: int | None, li
     png = await asyncio.to_thread(chart.render_study, candles, title, listing.label, show=min(120, len(candles)),
                                   interval_ms=INTERVALS[tf] * 1000, levels=(a.indicators.get("support"), a.indicators.get("resistance")),
                                   plan=plan, change=listing.change_24h, source=listing.label)
-    await client.send_photo(chat_id, png, text, reply_to=reply_to, html=True)
+    btns = alerts.button(a.coin, plan, tf) if listing.venue == "hyperliquid" else None  # 🔔 Alert me at entry
+    await client.send_photo(chat_id, png, text, buttons=btns, reply_to=reply_to, html=True)
     return None
 
 
@@ -748,6 +755,9 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     uid = int((cq.get("from") or {}).get("id") or 0)
     if data[:3] in ("cf:", "cx:", "cl:") and uid:
         await _trade_callback(db, client, cq, uid, data)
+        return
+    if data.startswith("pa:") and uid:  # 🔔 Alert me at entry (under /signal)
+        await alerts.callback(db, client, cq, uid, data)
         return
     if not data.startswith("sig:") or not uid:
         return

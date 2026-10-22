@@ -97,6 +97,7 @@ from app.models.arbitrage import ArbLunchDay, ArbLunchGraduation, ArbLunchTrade 
 from app.models.short_market import SmIdea, SmShort  # noqa: E402
 from app.models.tradingbot import TbAffiliateSnapshot, TbApplication, TbAudit, TbEvent, TbNonce, TbSettings, TbWallet  # noqa: E402
 from app.models.tradingos import KbConfig, KbEvent, TsAudit, TsDecision, TsIdea, TsKitchen, TsOiSnapshot, TsSettings, TsSignal, TsSignalAction  # noqa: E402
+from app.models.tradingos import TsPriceAlert  # noqa: E402,F401
 from app.models.trading import TrAccount, TrIntent, TrOrder, TrPosition  # noqa: E402
 from app.models.workers import WkAssignment, WkAudit, WkCredit, WkJoin, WkLink, WkReport, WkReview, WkRole, WkSettings, WkSubmission  # noqa: E402,F401
 from app.models.rewards import ArenaRun, BeginnerContent, RankReward, RewardAudit, RewardClaim, RewardSettings  # noqa: E402,F401

@@ -261,6 +261,19 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
     _kiwis_shown: dict[int, int] = {}  # signal id -> the entry count its Telegram card shows
 
+    async def tradingos_alerts(ctx: JobContext) -> dict[str, Any]:
+        """Price alerts (/alert, the /signal "Alert me at entry" button): one markets read, crossed alerts fire once by DM."""
+        from app.telegram.service import make_client
+        from app.tradingos import alerts, market
+
+        if not s.telegram_configured:
+            return {"skipped": "telegram not configured"}
+        client = make_client(s, runtime.telegram.transport)
+        try:
+            return await alerts.check(ctx.db, client, market.data())
+        finally:
+            await client.aclose()
+
     async def tradingos_track(ctx: JobContext) -> dict[str, Any]:
         """Trading OS: follow open signals on real 1-minute candles, publish approved ones (auto-publish), update cards."""
         import asyncio
@@ -388,6 +401,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 300, tradingos_shadow, initial_delay_seconds=120, timeout_seconds=180),
         JobSpec("tradingos.riskteam", "Trading OS: AI Risk Team memos", "The Chief Risk Officer explains each kitchen risk decision (memo only)",
                 60, tradingos_riskteam, initial_delay_seconds=100, timeout_seconds=300),
+        JobSpec("tradingos.alerts", "Trading OS: price alerts", "Check members' Telegram price alerts against Hyperliquid marks; each fires once, privately",
+                60, tradingos_alerts, initial_delay_seconds=70, timeout_seconds=50),
         JobSpec("tradingos.track", "Trading OS: signal tracking", "Follow open signals on real prices and update their Telegram cards", 60,
                 tradingos_track, initial_delay_seconds=60, timeout_seconds=300),
         JobSpec("telegram.ingest", "Telegram ingestion", "Fetch new messages from authorised chats (read-only) and answer bot commands; each run keeps listening for TELEGRAM_LISTEN_SECONDS so replies come within about a second", s.job_telegram_ingest_seconds, telegram_ingest, initial_delay_seconds=5, timeout_seconds=s.telegram_listen_seconds + 60),
