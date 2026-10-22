@@ -485,17 +485,23 @@ def run_check(db: Session, member: Member, w: TbWallet, client: InfoClient) -> T
     s = settings(db)
     c = check(client, w.address, codes(s), s.min_deposit_usd)
     before = (w.referral_status, w.deposit_status)
-    w.referral_status, w.referral_code_seen = c.referral_status, c.referral_code
-    w.deposit_status, w.deposit_usd, w.other_inflow_usd = c.deposit_status, c.deposit_usd, c.other_inflow_usd
-    w.evidence, w.checked_at = c.evidence, utcnow()
+    # a part Hyperliquid couldn't be read for keeps its last proved result (an outage never erases a verified wallet)
+    keep_ref = "referral_error" in c.evidence and w.referral_status != "pending"
+    keep_dep = "deposit_error" in c.evidence and w.deposit_status != "pending"
+    if not keep_ref:
+        w.referral_status, w.referral_code_seen = c.referral_status, c.referral_code
+    if not keep_dep:
+        w.deposit_status, w.deposit_usd, w.other_inflow_usd = c.deposit_status, c.deposit_usd, c.other_inflow_usd
+    w.evidence = {**(w.evidence or {}), **c.evidence} if keep_ref or keep_dep else c.evidence
+    w.checked_at = utcnow()
     if c.referral_status == "verified":
         track(db, "referral_verified", member, once=True)
     if c.deposit_status == "verified":
         track(db, "deposit_verified", member, once=True)
     tier_xp(db, member, w)  # deposit tiers pay XP once each ($10 / $100 / $1,000 / $10,000)
     if before != (w.referral_status, w.deposit_status):
-        audit(db, None, member.id, "hyperliquid", "wallet_checked", {"referral": c.referral_status, "deposit": c.deposit_status,
-                                                                     "deposit_usd": c.deposit_usd, "other_inflow_usd": c.other_inflow_usd})
+        audit(db, None, member.id, "hyperliquid", "wallet_checked", {"referral": w.referral_status, "deposit": w.deposit_status,
+                                                                     "deposit_usd": w.deposit_usd, "other_inflow_usd": w.other_inflow_usd})
     db.commit()
     return w
 

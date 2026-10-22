@@ -236,6 +236,25 @@ def test_api_outage_is_unverified_never_a_guess(tb: Any) -> None:
     assert s["wallet"]["referral"] == "unverified" and s["wallet"]["deposit"] == "unverified"
 
 
+def test_an_outage_after_a_check_keeps_the_last_proved_result(tb: Any) -> None:
+    """A Hyperliquid blip on a later re-check (opening Earn re-reads it) must not turn a verified wallet back to
+    "unverified" with $0 deposited: each part keeps what was last proved until Hyperliquid answers again."""
+    client, db, _ = tb
+    m = member(db, client, 4)
+    a = addr(ADDR_KEY)
+    FakeHL.referred[a] = "BANTER"
+    FakeHL.ledgers[a] = [deposit(150)]
+    assert prove(client, ADDR_KEY).json()["stage"] == "ELIGIBLE"
+    FakeHL.down = True
+    w = service.run_check(db, m, service.wallet_of(db, m), FakeHL())
+    assert (w.referral_status, w.referral_code_seen, w.deposit_status, w.deposit_usd) == ("verified", "BANTER", "verified", 150.0)
+    assert "referral_error" in w.evidence and w.evidence["deposits"]
+    FakeHL.down = False
+    FakeHL.ledgers[a] = []  # Hyperliquid answers again: its answer wins
+    w = service.run_check(db, m, w, FakeHL())
+    assert w.deposit_status == "insufficient" and w.deposit_usd == 0 and "referral_error" not in w.evidence
+
+
 def test_replayed_or_foreign_signatures_are_refused(tb: Any) -> None:
     client, db, _ = tb
     member(db, client, 4)
