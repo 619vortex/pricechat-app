@@ -226,7 +226,7 @@ def test_member_device_round_trip_through_the_agent(client: TestClient, db: Sess
     assert agent.agent.peers == {pub: f"{body['device']['ip']}/32"}
     assert wg.peers[pub]["allowed_ip"] == f"{body['device']['ip']}/32" == conf["Interface"]["Address"]
     assert conf["Peer"]["PublicKey"] == wg.public_key and conf["Peer"]["Endpoint"] == "198.51.100.7:51820"
-    assert conf["Interface"]["DNS"] == "1.1.1.1, 1.0.0.1" and conf["Peer"]["AllowedIPs"] == "0.0.0.0/0, ::/0"
+    assert conf["Interface"]["DNS"] == "1.1.1.1" and conf["Peer"]["AllowedIPs"] == "0.0.0.0/0, ::/0"
     st = agent.agent.status()
     assert [p["public_key"] for p in st["peers"]] == [pub]
     # the peer file on disk has it too (survives a reboot)
@@ -257,7 +257,7 @@ def test_sync_against_the_agent(client: TestClient, db: Session, agent: RunningA
     d2 = c.post("/api/members/vpn/devices", json={"name": "two", "server_id": sid}).json()["device"]
     dd = vpn.create_device(db, drop, "drop", sid)[0]
     k1, k2, kd = (db.get(VpnDevice, d1["id"]).public_key, db.get(VpnDevice, d2["id"]).public_key, dd.public_key)
-    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 3, "readded": 0, "removed": 0, "revoked": 0, "errors": 0}
+    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 3, "readded": 0, "removed": 0, "revoked": 0, "errors": 0, "paused": 0, "resumed": 0}
 
     # a peer vanished from the kernel -> re-added; an unknown peer -> removed
     del wg.peers[k2]
@@ -283,7 +283,7 @@ def test_sync_against_the_agent(client: TestClient, db: Session, agent: RunningA
     assert kd not in wg.peers and kd not in agent.agent.peers and set(agent.agent.peers) == {k1, k2}
     db.expire_all()
     assert db.scalars(select(VpnDevice).where(VpnDevice.member_id == drop.id)).all() == []
-    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "errors": 0}
+    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "errors": 0, "paused": 0, "resumed": 0}
 
 
 def test_pinning_a_wrong_certificate_never_sends_the_token(client: TestClient, db: Session, agent: RunningAgent, tmp_path: Path) -> None:
@@ -325,7 +325,7 @@ def test_agent_restart_reapplies_peers_and_sync_is_clean(client: TestClient, db:
     assert agent.agent.peers == before
     assert {k: p["allowed_ip"] for k, p in wg.peers.items()} == before
     out = vpn.sync_all(db)
-    assert out == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "errors": 0}
+    assert out == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "errors": 0, "paused": 0, "resumed": 0}
     # counters restarted at zero on the node: the monthly totals keep what was counted before
     k = next(iter(before))
     wg.peers[k].update(rx=100, tx=100)
