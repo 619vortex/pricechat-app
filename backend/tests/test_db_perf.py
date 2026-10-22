@@ -97,3 +97,17 @@ def test_price_snapshot_only_groups_recent_snapshots(db: Session) -> None:
     assert len(grouped) == 1 and "taken_at >" in grouped[0]
     assert pokemon.snapshot(db, utcnow() + timedelta(minutes=10)) == 0  # 10 minutes later: blocked
     assert db.query(PokemonPriceSnapshot).count() == 2
+
+
+def test_engine_pool_fits_the_request_threads_and_jobs(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from sqlalchemy.pool import QueuePool
+
+    from app.db.session import POOL_OVERFLOW, POOL_SIZE, build_engine
+
+    e = build_engine(f"sqlite:///{(tmp_path / 'p.db').as_posix()}")
+    assert isinstance(e.pool, QueuePool) and e.pool.size() == POOL_SIZE and e.pool._max_overflow == POOL_OVERFLOW
+    assert POOL_SIZE + POOL_OVERFLOW >= 40  # anyio's default worker threads for sync routes
+    e.dispose()
+    small = build_engine(f"sqlite:///{(tmp_path / 'q.db').as_posix()}", pool_size=2)  # callers still decide
+    assert small.pool.size() == 2
+    small.dispose()
