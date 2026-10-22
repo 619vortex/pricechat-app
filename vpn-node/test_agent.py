@@ -322,3 +322,151 @@ def test_parse_dump_prefers_v4_when_v6_listed_first():
 def test_bad_pool6_refused(cfg, wg, bad):
     with pytest.raises(ValueError):
         A.Agent({**cfg, "POOL6": bad}, runner=wg)
+
+
+# ---- install.sh: syntax + rendered templates (via the --print-config dry run) ----
+import re as _re  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _find_bash():
+    for p in (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe"):
+        if os.path.exists(p):
+            return p
+    found = shutil.which("bash")
+    # On Windows, System32\bash.exe is the WSL launcher, not a usable bash.
+    if found and "system32" not in found.lower():
+        return found
+    return None
+
+
+BASH = _find_bash()
+needs_bash = pytest.mark.skipif(BASH is None, reason="bash not available")
+
+
+def _bash(*args, stdin=None):
+    env = {k: v for k, v in os.environ.items() if k not in ("POOL", "POOL6", "DNS", "PUBLIC_IP", "WAN_IF")}
+    return subprocess.run([BASH, *args], cwd=HERE, capture_output=True, text=True, timeout=60,
+                          input=stdin, env=env)
+
+
+def _render(*flags) -> dict:
+    res = _bash("install.sh", "--print-config", *flags)
+    assert res.returncode == 0, res.stderr
+    files, cur = {}, None
+    for line in res.stdout.splitlines():
+        m = _re.fullmatch(r"##### (\S+) #####", line)
+        if m:
+            cur = m.group(1)
+            files[cur] = ""
+        elif cur:
+            files[cur] += line + "\n"
+    return files
+
+
+@needs_bash
+def test_install_sh_syntax():
+    res = _bash("-n", "install.sh")
+    assert res.returncode == 0, res.stderr
+
+
+@needs_bash
+def test_install_sh_lf_endings():
+    with open(os.path.join(HERE, "install.sh"), "rb") as f:
+        assert b"\r\n" not in f.read()
+
+
+@needs_bash
+@pytest.mark.parametrize("flags", [(), ("--adblock",)])
+def test_nftables_hardening_rules(flags):
+    nft = _render(*flags)["/etc/nftables.conf"]
+    # IPv6 from clients is answered with an ICMP unreachable, never forwarded.
+    assert _re.search(r'iifname "wg0" meta nfproto ipv6 fib daddr type != local reject with icmpx type no-route', nft)
+    assert _re.search(r"chain forward \{[^}]*meta nfproto ipv6 reject", nft)
+    # Peers cannot reach each other or the node's own services.
+    assert 'iifname "wg0" oifname "wg0" reject' in nft
+    assert 'iifname "wg0" reject with icmpx type admin-prohibited' in nft
+    # No outbound SMTP abuse; MSS clamped; metadata/private ranges unreachable.
+    assert 'iifname "wg0" tcp dport 25 reject' in nft
+    assert "tcp option maxseg size set rt mtu" in nft
+    assert "169.254.0.0/16" in nft
+    assert 'oifname "eth0" ip saddr 10.66.0.0/16 masquerade' in nft
+    # The isolation/25/v6 rules come before the catch-all accept for client traffic.
+    fwd = nft[nft.index("chain forward"):nft.index("chain output")]
+    accept = fwd.index('oifname "eth0" ip saddr 10.66.0.0/16 accept')
+    for rule in ("client isolation", "smtp 25 blocked", "kiwi: v6 reject"):
+        assert fwd.index(rule) < accept
+    # No logging of any kind in the firewall.
+    for line in nft.splitlines():
+        if not line.strip().startswith("#"):
+            assert not _re.search(r"(^|\s)log(\s|$)", line), line
+
+
+@needs_bash
+def test_default_is_public_dns_without_resolver():
+    files = _render()
+    env = files["/etc/kiwi-vpn/agent.env"]
+    assert "DNS=1.1.1.1,1.0.0.1\n" in env and "ADBLOCK=0\n" in env
+    assert "dport 53" not in files["/etc/nftables.conf"]
+    assert not any("unbound" in path or "blocklist" in path for path in files)
+    sysctl = files["/etc/sysctl.d/99-kiwi-vpn.conf"]
+    assert "net.ipv4.ip_forward = 1" in sysctl and "net.ipv6.conf.all.forwarding = 0" in sysctl
+    assert 'APT::Periodic::Unattended-Upgrade "1";' in files["/etc/apt/apt.conf.d/20auto-upgrades"]
+    assert "Address = 10.66.0.1/16, fd66:66::1/64" in files["/etc/wireguard/wg0.conf"]
+
+
+@needs_bash
+def test_adblock_resolver_config():
+    files = _render("--adblock")
+    env = files["/etc/kiwi-vpn/agent.env"]
+    assert "DNS=10.66.0.1\n" in env and "ADBLOCK=1\n" in env
+    nft = files["/etc/nftables.conf"]
+    for proto in ("udp", "tcp"):
+        assert f'iifname "wg0" ip saddr 10.66.0.0/16 ip daddr 10.66.0.1 {proto} dport 53 accept' in nft
+    # DNS accepts come before the "tunnel to host" reject.
+    assert nft.index("dport 53") < nft.index("tunnel to host")
+    ub = files["/etc/unbound/unbound.conf.d/kiwi-vpn.conf"]
+    for must in ("interface: 10.66.0.1\n", "port: 53\n", "access-control: 0.0.0.0/0 refuse",
+                 "access-control: 10.66.0.0/16 allow", "verbosity: 0\n", "log-queries: no\n",
+                 "log-replies: no\n", "log-local-actions: no\n", "log-servfail: no\n",
+                 'include: "/etc/unbound/kiwi-vpn-blocklist.conf"'):
+        assert must in ub, must
+    assert _re.findall(r"^\s*interface:", ub, _re.M) == ["  interface:"]  # only the tunnel address
+    upd = files["/usr/local/sbin/kiwi-vpn-blocklist-update"]
+    assert "--proto '=https'" in upd and "always_nxdomain" in upd
+    assert "unbound-checkconf" in upd and "MIN_BYTES" in upd and "MAX_BYTES" in upd
+    assert '.prev' in upd  # previous list kept/restored on failure
+    assert "OnCalendar=daily" in files["/etc/systemd/system/kiwi-vpn-blocklist.timer"]
+
+
+@needs_bash
+def test_generated_scripts_parse():
+    files = _render("--adblock")
+    for path in ("/usr/local/bin/kiwi-vpn-doctor", "/usr/local/sbin/kiwi-vpn-blocklist-update"):
+        res = _bash("-n", stdin=files[path])
+        assert res.returncode == 0, (path, res.stderr)
+    doctor = files["/usr/local/bin/kiwi-vpn-doctor"]
+    assert "/v1/health" in doctor and "latest-handshakes" in doctor
+    # Never reads keys, endpoints (client IPs) or the full dump.
+    assert not _re.search(r"wg show \S+ (endpoints|dump|public-key|private-key|allowed-ips)", doctor)
+    assert "wg show \"$WG_IF\" peers" in doctor  # peers are only counted
+
+
+@needs_bash
+def test_update_refuses_setting_changes():
+    res = _bash("install.sh", "--update", "--adblock")
+    assert res.returncode != 0 and "--update never changes settings" in res.stderr
+
+
+@needs_bash
+def test_blocklist_conversion():
+    awk = _re.search(r"awk '(\{ sub.*?)' \"\$tmp/hosts\"", _render("--adblock")["/usr/local/sbin/kiwi-vpn-blocklist-update"], _re.S).group(1)
+    hosts = ("# StevenBlack\r\n127.0.0.1 localhost\r\n0.0.0.0 0.0.0.0\r\n0.0.0.0 Ads.Example.com # c\r\n"
+             "0.0.0.0 bad..name\r\n0.0.0.0 t_rack.example.co.uk\r\n::1 ip6-localhost\r\n"
+             "0.0.0.0 localhost.localdomain\r\n0.0.0.0 -bad.com\r\n0.0.0.0 ads.example.com\r\n")
+    res = _bash("-c", 'awk "$1" | sort -u', "_", awk, stdin=hosts)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.split() == ["ads.example.com", "t_rack.example.co.uk"]
