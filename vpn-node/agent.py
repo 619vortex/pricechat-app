@@ -273,9 +273,10 @@ class Agent:
 
 def make_handler(agent: Agent):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "kiwi-vpn-agent"
-        sys_version = ""
         timeout = 15
+
+        def version_string(self):
+            return "kiwi-vpn-agent"
 
         def log_message(self, *args):  # never log client addresses or paths
             pass
