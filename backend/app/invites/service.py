@@ -126,12 +126,17 @@ async def start_login(db: Session, settings: Settings, name: str, phone: str) ->
     if not name:
         raise InviteError("Give the account a short name.")
     api_id, api_hash = api(db, settings)
-    old = RT.pending.pop(name, None)
-    if old:
-        await old.gateway.stop()
+    for k, p in list(RT.pending.items()):  # abandoned logins: their connections are closed, not kept forever
+        if k == name or p.expires_at < utcnow():
+            RT.pending.pop(k, None)
+            await _quiet_stop(p.gateway)
     g = RT.factory(api_id, api_hash)
-    await g.start()
-    code_hash = await g.send_code(phone.strip())
+    try:
+        await g.start()
+        code_hash = await g.send_code(phone.strip())
+    except BaseException:
+        await _quiet_stop(g)
+        raise
     RT.pending[name] = Pending(g, phone.strip(), code_hash)
 
 
@@ -190,17 +195,52 @@ def disconnect(db: Session, account_id: int) -> None:
     db.commit()
 
 
+async def _quiet_stop(g: Any) -> None:
+    try:
+        await g.stop()
+    except Exception as exc:  # noqa: BLE001 - a failed disconnect never hides the real outcome
+        log.warning("Invite Bot: disconnect failed (%s)", type(exc).__name__)
+
+
 async def _open(db: Session, settings: Settings, a: InviteAccount) -> Any:
+    """Connects with the account's session (decrypted only here, in memory, never logged). Raises gw.RateLimited /
+    gw.AccountGone for account-level problems (callers hand them to `_account_problem`), InviteError otherwise."""
     if not a.session_enc:
         raise InviteError(f"{a.name} isn't connected.")
     api_id, api_hash = api(db, settings)
     g = RT.factory(api_id, api_hash, _dec(a.session_enc))
-    if not await g.start():
-        await g.stop()
-        a.status, a.last_error = "error", "Session no longer authorised: log in again."
-        db.commit()
-        raise InviteError(f"{a.name}: the Telegram session is no longer authorised. Log in again.")
+    try:
+        ok = await g.start()
+    except BaseException:
+        await _quiet_stop(g)
+        raise
+    if not ok:
+        await _quiet_stop(g)
+        raise gw.AccountGone("the Telegram session is no longer authorised: log in again")
     return g
+
+
+async def _account_problem(db: Session, settings: Settings, a: InviteAccount, exc: Exception) -> str:
+    """Telegram restricted the account (FloodWait, PeerFlood, banned...): it's paused until then and, while it is, no
+    account sends. A dead session (AuthKeyUnregistered, revoked...): its credentials are wiped. The owner is told once."""
+    from app import alerts
+
+    if isinstance(exc, gw.RateLimited):
+        until = utcnow() + timedelta(seconds=max(exc.seconds + 60, 3600))
+        if a.halted_until is None or a.halted_until < until:
+            a.halted_until = until
+        a.halt_reason = str(exc)[:200]
+        key = f"invites.paused.{a.id}"
+        text = (f"Invite Bot: Telegram limited {a.name} ({exc}). Nothing is sent from any account until "
+                f"{a.halted_until:%Y-%m-%d %H:%M} UTC.")
+    else:
+        a.session_enc, a.status, a.last_error = None, "error", str(exc)[:300]  # dead credentials are not kept
+        key = f"invites.account.{a.id}"
+        text = f"Invite Bot: {a.name} can't be used any more ({exc}). Log it in again in Invite Bot."
+    db.commit()
+    log.warning("%s", text)
+    await alerts.notify_owner(db, key, text, settings=settings, open_=True)
+    return text
 
 
 async def account_groups(db: Session, settings: Settings, account_id: int) -> list[dict[str, Any]]:
@@ -209,11 +249,16 @@ async def account_groups(db: Session, settings: Settings, account_id: int) -> li
     if a is None:
         raise InviteError("Not found.")
     async with RT.lock(a.id):
-        g = await _open(db, settings, a)
+        try:
+            g = await _open(db, settings, a)
+        except (gw.RateLimited, gw.AccountGone) as exc:
+            raise InviteError(await _account_problem(db, settings, a, exc)) from exc
         try:
             found = await g.groups()
+        except (gw.RateLimited, gw.AccountGone) as exc:
+            raise InviteError(await _account_problem(db, settings, a, exc)) from exc
         finally:
-            await g.stop()
+            await _quiet_stop(g)
     approved = {x.chat_id for x in db.scalars(select(InviteGroup).where(InviteGroup.account_id == a.id))}
     return [{"chat_id": x.chat_id, "title": x.title, "username": x.username, "approved": x.chat_id in approved} for x in found]
 
@@ -281,30 +326,18 @@ async def poll(db: Session, settings: Settings) -> dict[str, int]:
     except InviteError:
         return out
     for a in db.scalars(select(InviteAccount).where(InviteAccount.status == "connected", InviteAccount.session_enc.is_not(None))).all():
+        if halted(a):  # Telegram asked this account to wait: no reads either until then (never hammer)
+            continue
         lock = RT.lock(a.id)
         if lock.locked():  # a send is using this session: try next time
             continue
         async with lock:
+            g = None
             try:
                 g = await _open(db, settings, a)
-            except InviteError as exc:
-                log.warning("%s", exc)
-                continue
-            try:
                 since = a.last_poll_at or (utcnow() - timedelta(hours=1))
                 started = utcnow()
-                for grp in db.scalars(select(InviteGroup).where(InviteGroup.account_id == a.id)).all():
-                    first = grp.last_message_id == 0
-                    msgs = await g.group_messages(grp.chat_id, grp.last_message_id, 50 if first else 300)
-                    for m in sorted(msgs, key=lambda m: m.id):
-                        grp.last_message_id = max(grp.last_message_id, m.id)
-                        if m.is_bot:
-                            continue
-                        seen(db, m.sender_id, m.username, grp.id, m.at)
-                        out["messages"] += 1
-                        if not first and has_keyword(s, m.text) and consent(db, m.sender_id, a.id, m.username, "keyword"):
-                            out["opt_ins"] += 1  # only keywords written after the group was approved count
-                    db.commit()  # this group's batch is saved before the next Telegram read: no write held open across it
+                # the inbox first: a "stop" is never left unread behind slow or broken group reads
                 for m in sorted(await g.private_messages(since, 100), key=lambda m: m.at):
                     contacted = db.scalar(select(InviteSend).where(InviteSend.user_id == m.sender_id, InviteSend.method.in_(("dm", "personal")),
                                                                    InviteSend.status.in_(("sent", "opened"))).order_by(InviteSend.id.desc()))
@@ -315,14 +348,37 @@ async def poll(db: Session, settings: Settings) -> dict[str, int]:
                         out["opt_outs"] += 1
                     elif contacted is None and consent(db, m.sender_id, a.id, m.username, "dm"):
                         out["opt_ins"] += 1
+                db.commit()  # saved before the next Telegram read: no write held open across it
+                for grp in db.scalars(select(InviteGroup).where(InviteGroup.account_id == a.id)).all():
+                    first = grp.last_message_id == 0
+                    try:
+                        msgs = await g.group_messages(grp.chat_id, grp.last_message_id, 50 if first else 300)
+                    except gw.NotAllowed as exc:  # left / kicked from this one group: the others are still read
+                        log.warning("Invite Bot poll %s: can't read %s (%s)", a.name, grp.title, exc)
+                        continue
+                    for m in sorted(msgs, key=lambda m: m.id):
+                        grp.last_message_id = max(grp.last_message_id, m.id)
+                        if m.is_bot:
+                            continue
+                        seen(db, m.sender_id, m.username, grp.id, m.at)
+                        out["messages"] += 1
+                        if not first and has_keyword(s, m.text) and consent(db, m.sender_id, a.id, m.username, "keyword"):
+                            out["opt_ins"] += 1  # only keywords written after the group was approved count
+                    db.commit()  # this group's batch is saved before the next Telegram read: no write held open across it
                 a.last_poll_at, a.last_error = started, None
                 out["accounts"] += 1
+            except InviteError as exc:
+                log.warning("%s", exc)
+            except (gw.RateLimited, gw.AccountGone) as exc:  # the account stops (paused / credentials wiped); owner told once
+                db.commit()  # what was read is kept
+                await _account_problem(db, settings, a, exc)
             except Exception as exc:  # noqa: BLE001 - one account's problem doesn't stop the others
                 a.last_error = str(exc)[:300]
                 log.warning("Invite Bot poll %s: %s", a.name, exc)
             finally:
-                await g.stop()
-                db.commit()
+                db.commit()  # before the disconnect: no write held across a network call
+                if g is not None:
+                    await _quiet_stop(g)
     cutoff = utcnow() - timedelta(days=s.retention_days)
     db.query(InviteMember).filter(InviteMember.last_active_at < cutoff).delete()
     db.commit()
@@ -337,9 +393,18 @@ def _day_start() -> datetime:
     return n.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def sent_today(db: Session, account_id: int) -> int:
-    return db.scalar(select(func.count()).select_from(InviteSend).where(InviteSend.account_id == account_id, InviteSend.status.in_(("sent", "opened")),
-                                                                        InviteSend.at >= _day_start())) or 0  # bot sends + personal ones
+ATTEMPTS = ("sending", "sent", "opened", "failed")  # every one of these reached (or may have reached) Telegram
+BOT = ("dm", "group")  # sent by the bot itself (not "personal": the owner sends those in the Telegram app)
+
+
+def sent_today(db: Session, account_id: int, up_to_id: int | None = None) -> int:
+    """Invitations this account attempted today: bot DMs, group posts and personal ones. Failed attempts count too:
+    Telegram saw them (a run of privacy-restricted recipients is exactly what gets an account PEER_FLOODed)."""
+    q = select(func.count()).select_from(InviteSend).where(InviteSend.account_id == account_id, InviteSend.method.in_(("dm", "group", "personal")),
+                                                          InviteSend.status.in_(ATTEMPTS), InviteSend.at >= _day_start())
+    if up_to_id is not None:
+        q = q.where(InviteSend.id <= up_to_id)
+    return db.scalar(q) or 0
 
 
 def queue(db: Session, account_id: int) -> list[InviteConsent]:
@@ -389,6 +454,107 @@ def halted(a: InviteAccount) -> bool:
     return bool(a.halted_until and a.halted_until > utcnow())
 
 
+def _spacing(s: InviteSettings) -> float:
+    """The least time between two bot sends of one account, whatever starts them (a run, a click, Auto): the interval
+    setting minus its jitter."""
+    return 0.0 if RT.pace is not None else 0.85 * min(MAX_GAP, max(MIN_GAP, s.dm_interval_seconds))
+
+
+def _refusal(db: Session, s: InviteSettings, a: InviteAccount, row: InviteSend) -> str | None:
+    """Why the just-committed claim `row` may NOT go out. Claims are committed one at a time (SQLite's single writer,
+    Postgres' unique ids), so 'an earlier claim' is a total order: of two racing sends the earlier one wins."""
+    earlier = InviteSend.id < row.id
+    if any(halted(x) for x in db.scalars(select(InviteAccount))):
+        return "paused"
+    if a.status != "connected" or not a.session_enc:
+        return "disconnected"
+    if row.user_id is not None:
+        c = db.get(InviteConsent, row.user_id)
+        if c is None or c.revoked_at is not None or c.account_id != a.id or c.kind not in ("dm", "keyword"):
+            return "no_consent"  # said no / was skipped since the queue was read
+        if db.scalar(select(InviteSend.id).where(InviteSend.user_id == row.user_id, InviteSend.method.in_(("dm", "personal", "skip")), earlier).limit(1)):
+            return "already"  # invited (any account, any way, even a send whose outcome is unknown), or skipped
+    if row.group_id is not None and db.scalar(select(InviteSend.id).where(
+            InviteSend.group_id == row.group_id, InviteSend.method == "group", InviteSend.status.in_(("sending", "sent")), earlier,
+            InviteSend.at >= row.at - timedelta(days=s.group_post_interval_days)).limit(1)):
+        return "already"
+    if sent_today(db, a.id, up_to_id=row.id) > s.daily_limit:
+        return "limit"
+    last = db.scalar(select(func.max(InviteSend.at)).where(InviteSend.account_id == a.id, InviteSend.method.in_(BOT),
+                                                          InviteSend.status.in_(ATTEMPTS), earlier))
+    if last is not None and (row.at - last).total_seconds() < _spacing(s):
+        return "too_soon"
+    return None
+
+
+def _claim(db: Session, s: InviteSettings, a: InviteAccount, kind: str, target: Any) -> tuple[InviteSend | None, str]:
+    """Reserves one bot send and COMMITS it before Telegram is called: a crash, timeout or lost commit after the send can
+    never lead to a second message (the "sending" row already marks them contacted), and the daily limit, pacing and
+    once-per-person rules hold for every path (runs, Auto, one-click) even when they race."""
+    group = target if kind == "group" else None
+    row = InviteSend(account_id=a.id, method=kind, user_id=target.user_id if kind == "dm" else None, group_id=group.id if group else None,
+                     status="sending", at=utcnow())
+    before = group.last_post_at if group else None
+    db.add(row)
+    if group is not None:
+        group.last_post_at = row.at  # a failed post also waits the full interval: never retried every few minutes
+    db.commit()
+    reason = _refusal(db, s, a, row)
+    if reason is None:
+        return row, ""
+    db.delete(row)
+    if group is not None:
+        group.last_post_at = before
+    db.commit()
+    return None, reason
+
+
+async def _send_one(db: Session, settings: Settings, s: InviteSettings, a: InviteAccount, kind: str, target: Any) -> tuple[str, str]:
+    """One bot invitation (a DM to someone who asked, or a group post) through the single gate. Never holds a database
+    write across a Telegram call. Returns (outcome, detail); outcome: sent | failed | halted | paused | limit | too_soon |
+    already | no_consent | disconnected | busy | account."""
+    lock = RT.lock(a.id)
+    if lock.locked():
+        return "busy", f"{a.name} is busy with another send or check"
+    async with lock:
+        row, reason = _claim(db, s, a, kind, target)
+        if row is None:
+            return reason, reason
+        try:
+            g = await _open(db, settings, a)
+        except (gw.RateLimited, gw.AccountGone) as exc:
+            db.delete(row)  # nothing was sent
+            db.commit()
+            return "halted", await _account_problem(db, settings, a, exc)
+        except Exception as exc:  # noqa: BLE001 - couldn't connect: nothing was sent, they stay in the queue
+            db.delete(row)
+            db.commit()
+            return "account", f"{a.name}: {exc}"
+        try:
+            if kind == "dm":  # by @username (a fresh session can't address a bare id), checked to still be the same person
+                await g.send(target.username or target.user_id, text_for(s, kind), expect_id=target.user_id)
+            else:
+                await g.send(target.chat_id, text_for(s, kind))
+        except (gw.RateLimited, gw.AccountGone) as exc:  # refused by Telegram: not delivered, they stay in the queue
+            db.delete(row)
+            db.commit()
+            return "halted", await _account_problem(db, settings, a, exc)
+        except Exception as exc:  # noqa: BLE001 - blocked, privacy, timeout...: it MAY have landed, so never retried
+            row.status, row.error = "failed", f"{type(exc).__name__}: {exc}"[:300]
+            if kind == "dm":
+                opt_out(db, target.user_id, f"not delivered: {type(exc).__name__}", a.id)
+            elif isinstance(exc, gw.NotAllowed):
+                target.allow_posts = False  # no longer permitted there: stop posting
+            db.commit()
+            return "failed", str(exc) or type(exc).__name__
+        else:
+            row.status = "sent"
+            db.commit()
+            return "sent", ""
+        finally:
+            await _quiet_stop(g)
+
+
 def _record(db: Session, a: InviteAccount, method: str, status: str, user_id: int | None = None, group: InviteGroup | None = None,
             error: str | None = None) -> None:
     db.add(InviteSend(account_id=a.id, method=method, user_id=user_id, group_id=group.id if group else None, status=status,
@@ -426,51 +592,46 @@ async def send_approved(db: Session, settings: Settings, dry_run: bool = False, 
             totals["skipped_limit"] += len(work)
             _note(f"{a.name}: daily limit ({s.daily_limit}) reached")
             continue
-        async with RT.lock(a.id):
-            g = None if dry_run else await _open(db, settings, a)
-            try:
-                for kind, target in work:
-                    if RT.stop:
-                        _note("Stopped by you.")
-                        return totals
-                    if left <= 0:
-                        totals["skipped_limit"] += 1
-                        continue
-                    label = (f"@{target.username}" if target.username else f"user {target.user_id}") if kind == "dm" else target.title
-                    if dry_run:
-                        _note(f"[dry run] {a.name} would invite {label}")
-                        left -= 1
-                        continue
-                    try:
-                        await g.send(target.username or target.user_id if kind == "dm" else target.chat_id, text_for(s, kind))
-                    except gw.RateLimited as exc:
-                        a.halted_until = utcnow() + timedelta(seconds=max(exc.seconds, 3600))
-                        a.halt_reason = str(exc)[:200]
-                        db.commit()
-                        _note(f"STOPPED: {a.name}: {exc}. Nothing more is sent from any account.")
-                        return totals
-                    except (gw.Unreachable, gw.NotAllowed, Exception) as exc:  # noqa: BLE001 - recorded, never retried
-                        if kind == "dm":
-                            opt_out(db, target.user_id, f"not delivered: {type(exc).__name__}", a.id)
-                        elif isinstance(exc, gw.NotAllowed):
-                            target.allow_posts = False  # no longer permitted there: stop posting
-                        _record(db, a, kind, "failed", user_id=target.user_id if kind == "dm" else None, group=target if kind == "group" else None, error=str(exc))
-                        totals["failed"] += 1
-                        _note(f"{a.name}: couldn't invite {label} ({exc})")
-                        continue
-                    _record(db, a, kind, "sent", user_id=target.user_id if kind == "dm" else None, group=target if kind == "group" else None)
-                    totals["dm_sent" if kind == "dm" else "group_sent"] += 1
-                    left -= 1
-                    _note(f"{a.name}: invited {label}")
-                    wait = gap(s)
-                    if wait >= 30:
-                        _note(f"next invitation in {int(wait // 60)} min {int(wait % 60)} s")
-                    if not await _wait(wait):
-                        _note("Stopped by you.")
-                        return totals
-            finally:
-                if g is not None:
-                    await g.stop()
+        # one connection per invitation and none held during the waits: the monitor keeps reading this account's
+        # inbox between sends, so a "no" written mid-run is honoured (every send re-checks it in `_claim`)
+        for i, (kind, target) in enumerate(work):
+            if RT.stop:
+                _note("Stopped by you.")
+                return totals
+            label = (f"@{target.username}" if target.username else f"user {target.user_id}") if kind == "dm" else target.title
+            if dry_run:
+                if left <= 0:
+                    totals["skipped_limit"] += 1
+                    continue
+                _note(f"[dry run] {a.name} would invite {label}")
+                left -= 1
+                continue
+            outcome, detail = await _send_one(db, settings, s, a, kind, target)
+            if outcome in ("halted", "paused"):
+                _note(f"STOPPED: {detail if outcome == 'halted' else 'an account is paused'}. Nothing more is sent from any account.")
+                return totals
+            if outcome == "limit":
+                totals["skipped_limit"] += len(work) - i
+                _note(f"{a.name}: daily limit ({s.daily_limit}) reached")
+                break
+            if outcome in ("disconnected", "busy", "account"):
+                _note(f"{a.name}: {detail}: skipped for now")
+                break
+            if outcome in ("already", "no_consent"):
+                continue  # handled meanwhile (another account, a click, a "no", a skip)
+            if outcome == "sent":
+                totals["dm_sent" if kind == "dm" else "group_sent"] += 1
+                _note(f"{a.name}: invited {label}")
+            elif outcome == "failed":
+                totals["failed"] += 1
+                _note(f"{a.name}: couldn't invite {label} ({detail})")
+            # after a send, a failure or a "too soon": the full gap (failures hit Telegram too; never back-to-back)
+            wait = gap(s)
+            if wait >= 30:
+                _note(f"next invitation in {int(wait // 60)} min {int(wait % 60)} s")
+            if not await _wait(wait):
+                _note("Stopped by you.")
+                return totals
     return totals
 
 
@@ -508,8 +669,8 @@ def maybe_auto_send(db: Session, settings: Settings) -> bool:
     """Auto mode: after each check, start sending if someone is waiting (same rules, pace and limits as a manual send).
     Never while a run is going, an account is paused, or Auto is off."""
     s = settings_row(db)
-    if not s.auto_send or RT.run.get("state") == "running" or any(halted(a) for a in db.scalars(select(InviteAccount))):
-        return False
+    if not s.auto_send or not s.monitoring or RT.run.get("state") == "running" or any(halted(a) for a in db.scalars(select(InviteAccount))):
+        return False  # monitoring off: inboxes aren't read, so a "no" could be missed: Auto doesn't send blind
     if not has_work(db):
         return False
     start_run(db.get_bind(), settings, False, trigger="auto")
@@ -657,23 +818,19 @@ async def one_send(db: Session, settings: Settings, account_id: int, user_id: in
         raise InviteError("Already invited (by one of your accounts).")
     eligible = {c.user_id: c for c in queue(db, a.id)}
     if user_id in eligible:
-        c = eligible[user_id]
-        async with RT.lock(a.id):
-            g = await _open(db, settings, a)
-            try:
-                await g.send(c.username or c.user_id, text_for(s, "dm"))
-            except gw.RateLimited as exc:
-                a.halted_until, a.halt_reason = utcnow() + timedelta(seconds=max(exc.seconds, 3600)), str(exc)[:200]
-                db.commit()
-                raise InviteError(f"Telegram asked {a.name} to slow down: everything is paused.") from exc
-            except Exception as exc:  # noqa: BLE001
-                opt_out(db, user_id, f"not delivered: {type(exc).__name__}", a.id)
-                _record(db, a, "dm", "failed", user_id=user_id, error=str(exc))
-                raise InviteError(f"Couldn't deliver ({type(exc).__name__}). They won't be suggested again.") from exc
-            finally:
-                await g.stop()
-        _record(db, a, "dm", "sent", user_id=user_id)
-        return {"status": "sent", "mode": "auto"}
+        outcome, detail = await _send_one(db, settings, s, a, "dm", eligible[user_id])
+        if outcome == "sent":
+            return {"status": "sent", "mode": "auto"}
+        raise InviteError({
+            "failed": f"Couldn't deliver ({detail}). They won't be suggested again.",
+            "halted": f"Telegram asked {a.name} to slow down: everything is paused. ({detail})",
+            "paused": "Paused: Telegram asked an account to slow down. Nothing is sent until the pause ends.",
+            "limit": f"{a.name} reached today's limit ({s.daily_limit}).",
+            "too_soon": f"Too soon after {a.name}'s last invitation: wait for the interval ({s.dm_interval_seconds} s) and try again.",
+            "busy": f"{a.name} is busy with another send or check: try again in a moment.",
+            "already": "Already invited (by one of your accounts).",
+            "no_consent": "They opted out or were skipped meanwhile: not sent.",
+        }.get(outcome, detail))
     m = db.get(InviteMember, user_id)
     if m is None or not m.username or db.get(InviteConsent, user_id) is not None or user_id in gw.SERVICE_IDS:
         raise InviteError("This person can't be invited (opted out, already handled, or no public username).")

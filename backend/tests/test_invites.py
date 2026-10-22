@@ -59,7 +59,7 @@ def factory(world: FakeTG):  # type: ignore[no-untyped-def]
         async def private_messages(self, since, limit):  # type: ignore[no-untyped-def]
             return [m for m in world.private if m.at > since]
 
-        async def send(self, peer, text: str) -> None:  # type: ignore[no-untyped-def]
+        async def send(self, peer, text: str, expect_id=None) -> None:  # type: ignore[no-untyped-def]
             if peer in world.fail:
                 raise world.fail[peer]
             world.sent.append((self.session_str, peer, text))
