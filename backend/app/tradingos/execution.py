@@ -33,6 +33,7 @@ from app.tradingos import market, risk, signals
 logger = logging.getLogger(__name__)
 INTENT_TTL = timedelta(minutes=5)
 OPEN_STATES = ("OPENING", "OPEN")
+HELD_STATES = OPEN_STATES + ("PROTECTION_FAILED",)
 
 
 class TradeError(Exception):
@@ -209,8 +210,27 @@ def wants(acc: TrAccount, sig: TsSignal) -> bool:
 
 
 def open_count(db: Session, acc: TrAccount) -> int:
+    """Open bot positions, including one whose stop couldn't be placed (PROTECTION_FAILED): it still holds real exposure, so it
+    counts against the position cap and blocks a mode / account switch that would orphan it."""
     return int(db.scalar(select(func.count()).select_from(TrPosition).where(
-        TrPosition.account_id == acc.id, TrPosition.status.in_(OPEN_STATES))) or 0)
+        TrPosition.account_id == acc.id, TrPosition.status.in_(HELD_STATES))) or 0)
+
+
+def day_loss_basis(db: Session, acc: TrAccount) -> float:
+    """What the daily loss limit is checked against: today's realized P&L (UTC day, net of fees) plus, for the open bot positions,
+    what they already realized (partial closes) and their unrealized LOSS at the current mark. Unrealized gains don't count: a
+    paper profit that may vanish must not extend the limit. A coin without a price right now is left out (never invented)."""
+    total = daily_pnl(db, acc)
+    for p in db.scalars(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.mode == acc.mode,
+                                                 TrPosition.status.in_(HELD_STATES), TrPosition.size > 0)):
+        total += p.realized_pnl or 0.0
+        if p.entry_px:
+            try:
+                mark = market.data().market(p.coin).mark
+            except Exception:  # noqa: BLE001
+                continue
+            total += min(0.0, (mark - p.entry_px) * p.size * (1 if p.side == "LONG" else -1))
+    return total
 
 
 # ---------------------------------------------------------------- ENTER: preview → confirm
@@ -280,7 +300,7 @@ def _plan(db: Session, member: Member, sig: TsSignal, ex: Any = None) -> tuple[r
                            target=sig.target, sig_lev_hi=sig.lev_hi, market_max_lev=m.max_leverage, sz_decimals=m.sz_decimals,
                            equity=ex.equity(), max_leverage=acc.max_leverage, max_loss_usd=acc.max_loss_per_trade_usd,
                            max_allocation_pct=acc.max_allocation_pct, max_positions=acc.max_positions, open_positions=open_count(db, acc),
-                           daily_pnl=daily_pnl(db, acc), daily_loss_limit=acc.daily_loss_limit_usd,
+                           daily_pnl=day_loss_basis(db, acc), daily_loss_limit=acc.daily_loss_limit_usd,
                            allowed=[c.strip().upper() for c in acc.allowed_coins.split(",") if c.strip()], paused=acc.paused,
                            global_paused=signals.settings(db).paused,
                            min_bump=acc.max_allocation_pct == DEFAULT_ALLOCATION_PCT,  # default limits: the bot sizes up to the minimum
@@ -300,7 +320,7 @@ def _portfolio_checks(db: Session, acc: TrAccount, sig: TsSignal, m: Any, plan: 
     cfg = risk.v2_settings(s.strategies)
     if "max_spread_bps" not in ((s.strategies or {}).get("risk_v2") or {}):
         cfg["max_spread_bps"] = s.max_spread_bps  # the scanner's own spread limit unless the owner set one for entries
-    rows = db.scalars(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.status.in_(OPEN_STATES)))
+    rows = db.scalars(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.status.in_(HELD_STATES)))
     opened = [{"side": p.side, "notional": abs(p.size * (p.entry_px or 0)), "margin": abs(p.size * (p.entry_px or 0)) / max(1, p.leverage)}
               for p in rows]
     try:
@@ -377,7 +397,7 @@ def _still_allowed(db: Session, acc: TrAccount, sig: TsSignal) -> None:
     cap = min(acc.max_positions, risk.HARD_MAX_POSITIONS)
     if open_count(db, acc) >= cap:
         raise TradeError(f"You have {cap} bot positions open already (your limit). Nothing was sent.")
-    if daily_pnl(db, acc) <= -abs(acc.daily_loss_limit_usd):
+    if day_loss_basis(db, acc) <= -abs(acc.daily_loss_limit_usd):
         raise TradeError("Your daily loss limit was reached since the preview. Nothing was sent.")
 
 
@@ -418,6 +438,19 @@ def open_position(db: Session, acc: TrAccount, sig: TsSignal, plan: risk.Plan, v
     long = sig.side == "LONG"
     m = market.data().market(sig.coin)  # before any row: a 429 or a missing API-wallet key leaves no ghost OPENING row
     ex = ex or executor(db, acc, sig.coin)
+    # the preview's checks again, under the account's row lock (released by the commit below, before any exchange call): two
+    # entries racing (two tabs, AUTO and a manual ENTER, a 1h and a 15m signal in one coin) must not both pass and double the
+    # exposure on Hyperliquid's one netted position per coin, or open one more position than the member's limit
+    db.execute(select(TrAccount.id).where(TrAccount.id == acc.id).with_for_update())
+    if db.scalar(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.coin == sig.coin, TrPosition.signal_id != sig.id,
+                                             TrPosition.status.in_(HELD_STATES)).limit(1)):
+        db.rollback()
+        raise TradeError(f"You already have a bot position in {sig.coin}. Nothing was sent.")
+    cap = min(acc.max_positions, risk.HARD_MAX_POSITIONS)
+    if (db.scalar(select(func.count()).select_from(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.signal_id != sig.id,
+                                                                     TrPosition.status.in_(HELD_STATES))) or 0) >= cap:
+        db.rollback()
+        raise TradeError(f"You have {cap} bot positions open already (your limit). Nothing was sent.")
     # an earlier attempt at this signal that never filled (FAILED, no entry price) is retried in place, not a second row
     pos = db.scalar(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.signal_id == sig.id, TrPosition.status == "FAILED",
                                              TrPosition.entry_px.is_(None), TrPosition.size <= 0).with_for_update())
@@ -464,13 +497,14 @@ def open_position(db: Session, acc: TrAccount, sig: TsSignal, plan: risk.Plan, v
         signals.audit(db, f"account:{acc.id}", "entry_not_filled", sig, status=res.status, error=res.error, mode=acc.mode)
         db.commit()
         raise TradeError(f"Not filled ({res.error or res.status}). No position was opened.")
-    pos.size, pos.entry_px = res.filled, res.avg_px
-    pos.fees = round((res.avg_px or plan.entry) * res.filled * risk.TAKER_FEE, 6)
+    fill_px = res.avg_px or plan.entry  # Hyperliquid always reports avgPx; never let its absence crash before the stop is placed
+    pos.size, pos.entry_px = res.filled, fill_px
+    pos.fees = round(fill_px * res.filled * risk.TAKER_FEE, 6)
     from app.tradingos import brain
 
-    brain.log(db, "position", f"{pos.coin} {pos.side} opened: {res.filled:g} @ {res.avg_px:g} ({pos.mode})", member_id=acc.member_id,
+    brain.log(db, "position", f"{pos.coin} {pos.side} opened: {res.filled:g} @ {fill_px:g} ({pos.mode})", member_id=acc.member_id,
               signal_id=sig.id, coin=pos.coin, source="paper" if pos.mode == "PAPER" else f"hyperliquid:exchange {pos.mode.lower()}",
-              data={"position": pos.id, "mode": pos.mode, "via": via, "size": res.filled, "entry": res.avg_px, "leverage": plan.leverage,
+              data={"position": pos.id, "mode": pos.mode, "via": via, "size": res.filled, "entry": fill_px, "leverage": plan.leverage,
                     "stop": plan.stop, "tp1": plan.tp1, "tp2": plan.tp2, "max_loss_usd": plan.max_loss_usd})
     db.commit()  # the fill (size, price, order ids) is on record before protection is tried: a crash there can't lose it
     protect(db, acc, pos, ex, m.sz_decimals)
@@ -498,10 +532,12 @@ def _adopt(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, plan: risk.Pla
     return True
 
 
-def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: int) -> None:
-    """Exchange-side stop for the whole filled size, TP1 for half, TP2 for the rest. If the stop can't be placed: close now."""
+def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: int, tag: str = "") -> None:
+    """Exchange-side stop for the whole filled size, TP1 for half, TP2 for the rest. If the stop can't be placed: close now.
+    `tag` (a recovery run) gives the orders fresh client order ids: an id is never sent or recorded twice."""
     long = pos.side == "LONG"
-    sl_cl = xch.cloid_for(acc.id, pos.signal_id, "sl")
+    extra = [tag] if tag else []
+    sl_cl = xch.cloid_for(acc.id, pos.signal_id, "sl", *extra)
     try:
         sl = ex.trigger(pos.coin, not long, pos.size, risk.round_px(pos.stop, sz_decimals), "sl", sl_cl)
     except Exception as e:  # noqa: BLE001 - a timeout / HTTP error: an unconfirmed stop is an unplaced stop
@@ -515,7 +551,7 @@ def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: 
     for kind, size, px in (("tp1", half, pos.tp1), ("tp2", rest, pos.tp2)):
         if size <= 0:
             continue
-        cl = xch.cloid_for(acc.id, pos.signal_id, kind)
+        cl = xch.cloid_for(acc.id, pos.signal_id, kind, *extra)
         try:
             r = ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "tp", cl)
         except Exception as e:  # noqa: BLE001
@@ -527,7 +563,8 @@ def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: 
 def emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: int, why: str) -> None:
     """The tested emergency policy: no unprotected position. Close it at market (reduce-only) and stop new entries."""
     long = pos.side == "LONG"
-    cl = xch.cloid_for(acc.id, pos.signal_id, "emergency")
+    n = _closes(db, pos)  # a retry (reconciliation) gets a fresh id: client order ids are unique, on Hyperliquid and here
+    cl = xch.cloid_for(acc.id, pos.signal_id, "emergency", *([pos.id, n] if n else []))
     try:
         try:
             mark = ref_px(pos, ex)
@@ -538,12 +575,38 @@ def emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
         _order(db, pos, "close", not long, pos.size, px, True, res, cl)
         if res.status in ("FILLED", "PARTIAL"):
             _settle(pos, res.avg_px or mark, "emergency_close", res.filled)
+        else:
+            why += f"; emergency close not filled: {res.error or res.status}"
     except Exception as e:  # noqa: BLE001
         why += f"; emergency close failed too: {type(e).__name__}"
     pos.status = "PROTECTION_FAILED" if pos.status != "CLOSED" else "CLOSED"
     pos.error = why
+    if pos.status == "CLOSED":
+        _drop_leftovers(db, pos, ex)
     acc.paused, acc.paused_reason = True, f"Protection failed on {pos.coin}: {why}"
     signals.audit(db, f"account:{acc.id}", "protection_failed", db.get(TsSignal, pos.signal_id), error=why, mode=acc.mode)
+
+
+def _closes(db: Session, pos: TrPosition) -> int:
+    return int(db.scalar(select(func.count()).select_from(TrOrder).where(TrOrder.position_id == pos.id, TrOrder.kind == "close")) or 0)
+
+
+def _drop_leftovers(db: Session, pos: TrPosition, ex: Any) -> None:
+    """The position is flat: cancel its protective orders that are resting, or that may be (a stop whose placement timed out can
+    still have landed). A stale reduce-only stop or target would otherwise act on the next position in this coin."""
+    for o in db.scalars(select(TrOrder).where(TrOrder.position_id == pos.id, TrOrder.kind.in_(("sl", "tp1", "tp2")),
+                                              TrOrder.status.in_(("RESTING", "ERROR")))):
+        try:
+            if o.status == "RESTING" and o.oid is not None:
+                ex.cancel(pos.coin, o.oid)
+            elif o.status == "ERROR" and hasattr(ex, "cancel_by_cloid"):
+                ex.cancel_by_cloid(pos.coin, o.cloid)
+            else:
+                continue
+            o.status = "CANCELLED"
+        except Exception as e:  # noqa: BLE001 - reduce-only: it can't open a position, but the member should check
+            pos.error = ((pos.error + "; ") if pos.error else "") + (f"a leftover {o.kind} order couldn't be cancelled ({type(e).__name__}): "
+                                                                     "check Hyperliquid's open orders")
 
 
 def _settle(pos: TrPosition, px: float, reason: str, size: float | None = None) -> None:
@@ -698,9 +761,16 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
     """Resize the stop and targets to what's left. The new stop goes in first; the old one is only cancelled once the new
     one rests (until then the old reduce-only stop still covers the smaller position)."""
     long = pos.side == "LONG"
+
+    def place(kind: str, size: float, px: float, cl: str) -> xch.Result:
+        try:  # a raise here would roll back the partial close that just filled (and was booked): recorded as an ERROR instead
+            return ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "sl" if kind == "sl" else "tp", cl)
+        except Exception as e:  # noqa: BLE001
+            return xch.Result("ERROR", error=f"{type(e).__name__}: {str(e)[:200]}")
+
     old_sl = _resting(db, pos, "sl")
     cl = xch.cloid_for(acc.id, pos.signal_id, "sl", pos.id, _seq(db, pos))
-    sl = ex.trigger(pos.coin, not long, pos.size, risk.round_px(pos.stop, sz_decimals), "sl", cl)
+    sl = place("sl", pos.size, pos.stop, cl)
     _order(db, pos, "sl", not long, pos.size, pos.stop, True, sl, cl)
     if sl.status == "RESTING":
         _cancel(ex, pos, old_sl)
@@ -712,7 +782,7 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
         if size <= 0:
             continue
         cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
-        _order(db, pos, kind, not long, size, px, True, ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "tp", cl), cl)
+        _order(db, pos, kind, not long, size, px, True, place(kind, size, px, cl), cl)
 
 
 def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | None = None, tp1: float | None = None,
@@ -804,6 +874,10 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
 def track_paper(db: Session) -> int:
     """Paper positions: stop / TP1 / TP2 on real 1-minute candles (stop first within a candle: the conservative case)."""
     changed = 0
+    cutoff = utcnow() - STALE_OPENING
+    for pos in db.scalars(select(TrPosition).where(TrPosition.mode == "PAPER", TrPosition.status == "OPENING")).all():
+        if (_aware(pos.updated_at) or utcnow()) <= cutoff:  # an interrupted paper entry: open if it filled (stops are simulated here)
+            pos.status = "OPEN" if pos.size > 0 and pos.entry_px else "FAILED"
     for pos in db.scalars(select(TrPosition).where(TrPosition.mode == "PAPER", TrPosition.status == "OPEN")):
         try:
             cs = market.data().candles(pos.coin, "1m", 15)
@@ -829,25 +903,55 @@ def track_paper(db: Session) -> int:
 
 
 RECONCILED = ("OPEN", "PROTECTION_FAILED")
+# + an entry whose process died between sending the order and placing its stop (a deploy restart, a crash): recovered once stale
+TO_RECONCILE = RECONCILED + ("OPENING",)
+STALE_OPENING = timedelta(minutes=3)  # far beyond an entry's own exchange calls (each times out after xch.SDK_TIMEOUT)
+EMERGENCY_RETRIES = 10  # reduce-only close attempts on a position without a stop (one per reconciliation) before it's left to the member
 
 
 def reconcile(db: Session, acc: TrAccount, ex: Any = None, mode: str | None = None) -> int:
     """Testnet / live: positions the exchange no longer holds are closed with P&L from the exchange's own fills. Every network
     with open positions is checked, whatever mode the account is in now (a mode change never orphans a position)."""
     modes = [mode] if mode else sorted({m for (m,) in db.execute(select(TrPosition.mode).where(
-        TrPosition.account_id == acc.id, TrPosition.status.in_(RECONCILED), TrPosition.mode != "PAPER")).all()})
+        TrPosition.account_id == acc.id, TrPosition.status.in_(TO_RECONCILE), TrPosition.mode != "PAPER")).all()})
     return sum(_reconcile(db, acc, m, ex or executor(db, acc, "BTC", m)) for m in modes if m != "PAPER")
 
 
+def _held(st: Any) -> dict[str, dict[str, Any]]:
+    """{coin: Hyperliquid's position} for every non-zero position. An answer without its position list raises: read as "holds
+    nothing", it would close every bot position here and cancel their stop-losses on the exchange."""
+    aps = st.get("assetPositions") if isinstance(st, dict) else None
+    if not isinstance(aps, list):
+        raise xch.ExchangeError("Unexpected account answer from Hyperliquid: nothing reconciled.")
+    out: dict[str, dict[str, Any]] = {}
+    for p in aps:
+        q = p["position"]
+        if float(q["szi"]) != 0:
+            out[q["coin"]] = q
+    return out
+
+
+def _on_side(pos: TrPosition, held: dict[str, dict[str, Any]]) -> float:
+    """How much of this position Hyperliquid holds: its size on the position's side (the other side is not this position)."""
+    q = held.get(pos.coin)
+    if q is None:
+        return 0.0
+    szi = float(q["szi"])
+    return abs(szi) if (szi > 0) == (pos.side == "LONG") else 0.0
+
+
 def _reconcile(db: Session, acc: TrAccount, mode: str, ex: Any) -> int:
-    st = ex.state()
-    held = {p["position"]["coin"]: float(p["position"]["szi"]) for p in st.get("assetPositions", [])}
+    held = _held(ex.state())
+    _recover_opening(db, acc, mode, ex, held)
     n = 0
-    for pos in db.scalars(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.status.in_(RECONCILED), TrPosition.mode == mode)):
-        now_held = abs(held.get(pos.coin, 0.0))
+    for pos in db.scalars(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.status.in_(RECONCILED),
+                                                   TrPosition.mode == mode)).all():
+        now_held = _on_side(pos, held)
         if now_held > 0:
             if now_held + 1e-12 < pos.size and pos.status == "OPEN":  # TP1 (or part of the position) was taken on the exchange
                 pos.size, pos.tp1_done = now_held, True
+            elif pos.status == "PROTECTION_FAILED":
+                _retry_emergency(db, acc, pos, ex, now_held)
             continue
         _book_from_fills(db, pos, ex)
         pos.status, pos.closed_at, pos.size = "CLOSED", utcnow(), 0.0
@@ -857,27 +961,96 @@ def _reconcile(db: Session, acc: TrAccount, mode: str, ex: Any) -> int:
         brain.log(db, "position", f"{pos.coin} {pos.side} closed on Hyperliquid (stop / take-profit / manual) · net ${pos.realized_pnl:+,.2f}",
                   member_id=acc.member_id, signal_id=pos.signal_id, coin=pos.coin, source=f"hyperliquid:info {mode.lower()} fills",
                   data={"position": pos.id, "mode": pos.mode, "reason": "exchange", "exit": pos.exit_px, "net_pnl": pos.realized_pnl, "fees": pos.fees})
-        for o in db.scalars(select(TrOrder).where(TrOrder.position_id == pos.id, TrOrder.status == "RESTING")):
-            try:  # leftover take-profit / stop orders of this position only
-                ex.cancel(pos.coin, o.oid)
-            except Exception:  # noqa: BLE001 - already gone on the exchange
-                pass
-            o.status = "CANCELLED"
+        _drop_leftovers(db, pos, ex)  # this position's own leftover take-profit / stop orders only
         n += 1
     db.commit()
     return n
 
 
+def _retry_emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, now_held: float) -> None:
+    """A position without a confirmed stop whose emergency close didn't go through (timeout, a refusal, a partial fill) is
+    still open on Hyperliquid: the emergency policy closes it, so the close is tried again, a bounded number of times."""
+    if _closes(db, pos) >= EMERGENCY_RETRIES or _resting(db, pos, "sl"):  # a confirmed resting stop: it is protected
+        return
+    if now_held + 1e-12 < pos.size:
+        pos.size = now_held
+    try:
+        szd = market.data().market(pos.coin).sz_decimals
+    except Exception:  # noqa: BLE001 - next reconciliation
+        return
+    emergency(db, acc, pos, ex, szd, "still open without a confirmed stop-loss: closed again by reconciliation")
+    if pos.status == "CLOSED":
+        try:
+            _book_from_fills(db, pos, ex)
+        except Exception:  # noqa: BLE001 - the estimate stays
+            pass
+    db.commit()
+
+
+def _recover_opening(db: Session, acc: TrAccount, mode: str, ex: Any, held: dict[str, dict[str, Any]]) -> None:
+    """OPENING rows left behind by an interrupted entry (the process stopped after the order, before the stop). If Hyperliquid
+    holds the position, it's this entry's: booked and protected now (or closed by the emergency policy). Otherwise it never
+    filled (FAILED) or was already closed on Hyperliquid (CLOSED from the fills)."""
+    cutoff = utcnow() - STALE_OPENING
+    for pos in db.scalars(select(TrPosition).where(TrPosition.account_id == acc.id, TrPosition.mode == mode,
+                                                   TrPosition.status == "OPENING")).all():
+        if (_aware(pos.updated_at) or utcnow()) > cutoff:
+            continue  # may still be in flight
+        sig = db.get(TsSignal, pos.signal_id)
+        now_held = _on_side(pos, held)
+        twin = db.scalar(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.coin == pos.coin, TrPosition.mode == mode,
+                                                     TrPosition.status.in_(RECONCILED), TrPosition.id != pos.id).limit(1))
+        if now_held > 0 and twin is None:
+            try:
+                szd = market.data().market(pos.coin).sz_decimals
+            except Exception:  # noqa: BLE001 - next reconciliation
+                continue
+            pos.size = now_held
+            pos.entry_px = pos.entry_px or float(held[pos.coin].get("entryPx") or 0) or pos.stop
+            pos.fees = round(pos.entry_px * pos.size * risk.TAKER_FEE, 6)
+            pos.error = "Recovered by reconciliation: the entry filled but was interrupted before its stop-loss was placed."
+            signals.audit(db, f"account:{acc.id}", "entry_recovered", sig, size=pos.size, mode=mode)
+            db.commit()  # on record before protection is tried
+            protect(db, acc, pos, ex, szd, tag=f"r{_seq(db, pos)}")
+            if sig is not None:
+                _record_participation(db, acc, sig, pos.via)
+        elif pos.size > 0 and pos.entry_px and twin is None:  # it filled and is already gone (closed on Hyperliquid)
+            _book_from_fills(db, pos, ex)
+            pos.status, pos.closed_at, pos.size, pos.close_reason = "CLOSED", utcnow(), 0.0, "exchange"
+            _drop_leftovers(db, pos, ex)
+        else:
+            pos.status, pos.size = "FAILED", 0.0
+            pos.error = "The entry was interrupted and Hyperliquid holds no such position: nothing was opened."
+            signals.audit(db, f"account:{acc.id}", "entry_not_confirmed", sig, mode=mode)
+        db.commit()
+
+
 def _book_from_fills(db: Session, pos: TrPosition, ex: Any) -> None:
-    """Net P&L, fees and exit price from the exchange's own fills of this position's orders (replacing the estimates)."""
+    """Net P&L, fees and exit price from the exchange's own fills (replacing the estimates): this position's orders, plus the
+    fills that closed it some other way while it was open (a close or a stop the member placed on Hyperliquid, a liquidation),
+    which would otherwise book a loss as zero and leave the daily loss limit blind to it. Hyperliquid nets one position per coin
+    and the bot never enters a coin the account already holds, so until the coin is flat again every fill in it is this position's."""
     oids = {o.oid for o in db.scalars(select(TrOrder).where(TrOrder.position_id == pos.id)) if o.oid}
-    fills = [f for f in ex.fills_since(int((_aware(pos.created_at) or utcnow()).timestamp() * 1000)) if f.get("oid") in oids]
+    sign = 1 if pos.side == "LONG" else -1
+    fills, started, flat = [], False, False
+    for f in sorted(ex.fills_since(int((_aware(pos.created_at) or utcnow()).timestamp() * 1000)), key=lambda f: f.get("time") or 0):
+        if f.get("coin", pos.coin) != pos.coin:
+            continue
+        mine = f.get("oid") in oids
+        if not mine:
+            if not started or flat:
+                continue
+            if float(f.get("startPosition") or 0) * sign <= 0:  # flat again: from here on a later position in this coin, not ours
+                flat = True
+                continue
+        started = True
+        fills.append(f)
     if not fills:
         return
     closed_pnl = sum(float(f.get("closedPnl") or 0) for f in fills)
     fees = sum(float(f.get("fee") or 0) for f in fills)
     pos.realized_pnl, pos.fees = round(closed_pnl - fees, 6), round(fees, 6)
-    exits = [f for f in fills if f.get("dir", "").startswith("Close")]
+    exits = [f for f in fills if str(f.get("dir", "")).startswith("Close") or "Liquidat" in str(f.get("dir", ""))]
     if exits:
         pos.exit_px = float(exits[-1]["px"])
 
