@@ -141,3 +141,20 @@ async def test_ollama_null_or_non_object_replies_are_provider_errors() -> None:
     for _ in range(3):
         with pytest.raises(ProviderResponseError):  # never AttributeError -> a 500 / a crashed job
             await p.chat([])
+
+
+# --- conversation history ----------------------------------------------------------------------------
+
+
+def test_history_sent_to_the_model_is_char_bounded(db: Session, agent_config: AgentConfig) -> None:
+    from app.memory.conversation import HISTORY_CHAR_BUDGET, SqlConversationMemory, TurnContext
+    from app.providers.base import ChatResult
+
+    memory = SqlConversationMemory(db, agent_config.id, "long", window=20)
+    for i in range(6):  # six 8,000-char questions with 3,000-char answers: ~66k chars in the window
+        memory.record_exchange(f"q{i} " + "x" * 8000, ChatResult(f"a{i} " + "y" * 3000, "m", "fake"), TurnContext(), [])
+
+    history = memory.recent()
+    assert sum(len(m.content) for m in history) <= HISTORY_CHAR_BUDGET
+    assert history[0].role == "user" and history[-1].content.startswith("a5")  # newest kept, starts on a user turn
+    assert len(SqlConversationMemory(db, agent_config.id, "long", window=4, char_budget=10**6).recent()) == 4
