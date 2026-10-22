@@ -427,6 +427,45 @@ def test_suspended_xp_and_banned_members(mc: TestClient, db: Session) -> None:
     assert "suspended" in google_sign_in(mc).headers["location"]  # cannot sign back in
 
 
+def test_losing_an_award_race_keeps_the_callers_other_work(db: Session) -> None:
+    """A duplicate caught by the unique constraint (a parallel award, or a long ref stored truncated) is refused alone:
+    the caller's earlier, uncommitted awards and changes in the same transaction survive."""
+    m = new_member(db)
+    long_ref = "content:" + "x" * 140
+    assert ledger.award(db, m, "website.content_view", long_ref + "-a", commit=False).awarded
+    m.display_name = "kept"
+    second = ledger.award(db, m, "website.content_view", long_ref + "-b", commit=False, occurred_at=utcnow() + timedelta(minutes=1))
+    assert not second.awarded and second.refused == "duplicate"  # the same activity once stored (refs are kept to 128 chars)
+    db.commit()
+    db.expire_all()
+    assert db.scalar(select(func.count()).select_from(ReputationEvent).where(
+        ReputationEvent.member_id == m.id, ReputationEvent.event_type == "website.content_view")) == 1
+    assert db.get(Member, m.id).display_name == "kept"
+
+
+def test_a_constraint_collision_rolls_back_only_the_award(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    m = new_member(db)
+    assert ledger.award(db, m, "website.content_view", "content:a", commit=False).awarded
+    db.commit()
+    real_scalar = db.scalar
+
+    def scalar(stmt, *a, **k):  # type: ignore[no-untyped-def]
+        if "reputation_events.source_ref =" in str(stmt):
+            return None  # the duplicate check misses: a parallel request wrote the row after it
+        return real_scalar(stmt, *a, **k)
+
+    m.display_name = "kept"
+    assert ledger.award(db, m, "website.login", "day:x", commit=False).awarded
+    monkeypatch.setattr(db, "scalar", scalar)
+    r = ledger.award(db, m, "website.content_view", "content:a", commit=False, occurred_at=utcnow() + timedelta(minutes=1))
+    monkeypatch.undo()
+    assert not r.awarded and r.refused == "duplicate"
+    db.commit()
+    db.expire_all()
+    assert db.scalar(select(ReputationEvent.id).where(ReputationEvent.member_id == m.id, ReputationEvent.source_ref == "day:x"))
+    assert db.get(Member, m.id).display_name == "kept"
+
+
 def test_burst_of_refused_attempts_raises_one_flag(db: Session) -> None:
     m = new_member(db)
     ledger.award(db, m, "website.content_view", "content:same")

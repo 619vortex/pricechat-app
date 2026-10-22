@@ -127,6 +127,7 @@ def award(
         return AwardResult(False, 0, "suspended")
     if rule.min_member_age_hours and utcnow() - member.created_at < timedelta(hours=rule.min_member_age_hours):
         return AwardResult(False, 0, "too_new")
+    source_ref = source_ref[:128]  # as stored: the duplicate check must compare what the unique constraint compares
     if db.scalar(select(ReputationEvent.id).where(ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type,
                                                  ReputationEvent.source_ref == source_ref)):
         return _refuse(db, member, rule, "duplicate", day)
@@ -172,15 +173,14 @@ def award(
 
     event = ReputationEvent(
         member_id=member.id, event_type=event_type, xp=amount, category=rule.category, source=(source or rule.verification_source)[:16],
-        source_ref=source_ref[:128], reason=(reason or rule.label)[:256], occurred_at=when, day=day, actor=actor[:64],
+        source_ref=source_ref, reason=(reason or rule.label)[:256], occurred_at=when, day=day, actor=actor[:64],
     )
-    db.add(event)
-    if claim_key:
-        db.add(XPClaim(claim_hash=claim_hash(event_type, claim_key)))
-    try:
-        db.flush()
+    try:  # a savepoint: losing a race to a parallel award must not undo the caller's other, uncommitted work
+        with db.begin_nested():
+            db.add(event)
+            if claim_key:
+                db.add(XPClaim(claim_hash=claim_hash(event_type, claim_key)))
     except IntegrityError:
-        db.rollback()
         return AwardResult(False, 0, "duplicate")
     recalc(db, member)
     from app.members.badges import evaluate_auto_badges

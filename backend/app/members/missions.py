@@ -252,11 +252,10 @@ def _row(db: Session, member: Member, mission: Mission, period: str) -> MemberMi
                                                MemberMission.period == period))
     if mm is None:
         mm = MemberMission(member_id=member.id, mission_id=mission.id, period=period, status="in_progress", progress=0)
-        db.add(mm)
-        try:
-            db.flush()
+        try:  # a savepoint: a parallel request creating the same row must not undo the caller's uncommitted work
+            with db.begin_nested():
+                db.add(mm)
         except IntegrityError:
-            db.rollback()
             mm = db.scalar(select(MemberMission).where(MemberMission.member_id == member.id, MemberMission.mission_id == mission.id,
                                                        MemberMission.period == period))
             assert mm is not None
