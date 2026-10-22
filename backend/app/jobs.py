@@ -601,6 +601,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
     # --- Pokémon Vintage Market Cap ------------------------------------------------------------------------------
     async def pokemon_snapshot(ctx: JobContext) -> dict[str, Any]:
+        import asyncio
+
         from sqlalchemy import func as sa_func
 
         from app.models.pokemon import PokemonPopulation, PokemonSale
@@ -608,7 +610,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         if not (ctx.db.scalar(select(sa_func.count()).select_from(PokemonSale)) or ctx.db.scalar(select(sa_func.count()).select_from(PokemonPopulation))):
             raise JobSkipped("No Pokémon sales or population data yet (Pokémon › Data sources)")
-        return {"snapshots": pokemon.snapshot(ctx.db, ctx.now)}
+        return {"snapshots": await asyncio.to_thread(pokemon.snapshot, ctx.db, ctx.now)}  # off the event loop: the API keeps answering
 
     async def pokemon_sync(ctx: JobContext) -> dict[str, Any]:
         """Licensed provider syncs (eBay listings / sold items if granted, PriceCharting reference prices). Each provider on its own."""
@@ -658,11 +660,17 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
     async def pokemon_warm(ctx: JobContext) -> dict[str, Any]:
         """Keep the market's PSA 10 rows (the homepage) computed, so no visitor waits for the ~50k-card build."""
+        import asyncio
+
         from app.pokemon import market
 
-        rows = market.base_rows(ctx.db, market.DEFAULT_GRADE, ctx.now)
-        market.market(ctx.db, market.DEFAULT_GRADE, None, "", 100, 0, ctx.now, view="top100")  # the homepage's default view
-        return {"rows": len(rows)}
+        def warm() -> int:
+            rows = market.base_rows(ctx.db, market.DEFAULT_GRADE, ctx.now)
+            market.market(ctx.db, market.DEFAULT_GRADE, None, "", 100, 0, ctx.now, view="top100")  # the homepage's default view
+            return len(rows)
+
+        # seconds of CPU: in a worker thread, so the event loop (every API request, the job timeout) keeps running meanwhile
+        return {"rows": await asyncio.to_thread(warm)}
 
     async def pokemon_market_expire(ctx: JobContext) -> dict[str, Any]:
         """Card Marketplace: testnet payments waiting for confirmations are checked again (read-only chain calls, only when
@@ -810,10 +818,12 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         from app.pokemon import top100
         from app.providers.pokemon import PROVIDERS
 
+        import asyncio
+
         improved = None
         if PROVIDERS["scrydex"](s).status()[0]:
             improved = await top100.improve(ctx.db, s, transport=getattr(runtime, "pokemon_transport", None))
-        return {"improve": improved, **top100.record(ctx.db, ctx.now)}
+        return {"improve": improved, **await asyncio.to_thread(top100.record, ctx.db, ctx.now)}  # may rebuild the 50k rows: off the loop
 
     async def pokemon_sales(ctx: JobContext) -> dict[str, Any]:
         """Weekly: the last 10 days of Scrydex sold listings for the Top 100 and its nearest candidates -> verified sales."""
@@ -845,9 +855,11 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
     async def system_retention(ctx: JobContext) -> dict[str, Any]:
         """Delete rows past their retention window from tables that only grow (app/retention.py)."""
+        import asyncio
+
         from app import retention
 
-        return retention.run(ctx.db, ctx.now)
+        return await asyncio.to_thread(retention.run, ctx.db, ctx.now)
 
     specs += [
         JobSpec("system.alerts", "Owner alerts", "Every 10 min: tells the owner on Telegram (Settings › Background jobs › Owner alerts) when a Brand Manager TikTok account is expired or disconnected while AUTO is on; failing jobs are reported as they happen",

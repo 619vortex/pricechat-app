@@ -487,10 +487,12 @@ def set_excluded(db: Session, sale_id: int, excluded: bool) -> PokemonSale | Non
 def snapshot(db: Session, now: datetime | None = None) -> int:
     """Record today's estimate for every card + grade with data. At most one snapshot per combination per ~hour."""
     now = now or utcnow()
-    latest = dict(((s.card_id, s.grading_company, s.grade), s.taken_at) for s in db.scalars(
-        select(PokemonPriceSnapshot).order_by(PokemonPriceSnapshot.taken_at)))
+    # the newest snapshot per combination only (the table keeps every day's history: never load all of it)
+    latest = {(cid, comp, grade): at for cid, comp, grade, at in db.execute(
+        select(PokemonPriceSnapshot.card_id, PokemonPriceSnapshot.grading_company, PokemonPriceSnapshot.grade, func.max(PokemonPriceSnapshot.taken_at))
+        .group_by(PokemonPriceSnapshot.card_id, PokemonPriceSnapshot.grading_company, PokemonPriceSnapshot.grade))}
     n = 0
-    own = [c.id for c in db.scalars(select(PokemonCard)) if (c.external_ids or {}).get("source") != "scrydex-catalog"]
+    own = [cid for cid, x in db.execute(select(PokemonCard.id, PokemonCard.external_ids)) if (x or {}).get("source") != "scrydex-catalog"]
     for key, v in valuations(db, own, now).items():
         last = latest.get(key)
         if last is not None and now - (last if last.tzinfo else last.replace(tzinfo=timezone.utc)) < MIN_SNAPSHOT_GAP:
