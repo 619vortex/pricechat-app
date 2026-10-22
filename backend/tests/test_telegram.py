@@ -113,10 +113,10 @@ async def test_wrong_token_is_auth_error(fake_telegram: FakeTelegram) -> None:
 
 async def test_client_writes_only_what_is_intended() -> None:
     """The bot reads authorised chats. Its only writes: Trading OS replies / signal cards (send_message, send_photo,
-    edit_caption, answer_callback), the sign-in confirmation and the private group's access management. It can never
-    forward or delete messages."""
-    assert not any(hasattr(TelegramBotClient, m) for m in ("forward_message", "delete_message", "deleteMessage", "sendMessage"))
-    assert all(hasattr(TelegramBotClient, m) for m in ("send_message", "send_photo", "edit_caption", "answer_callback"))
+    edit_caption, answer_callback), the sign-in confirmation, the private group's access management, and deleting its own
+    main-chat messages (delete_message, tradingos.autodelete). It can never forward messages."""
+    assert not any(hasattr(TelegramBotClient, m) for m in ("forward_message", "deleteMessage", "sendMessage"))
+    assert all(hasattr(TelegramBotClient, m) for m in ("send_message", "send_photo", "edit_caption", "answer_callback", "delete_message"))
 
 
 # --- ingestion: allow-list, dedup, failures ---------------------------------------------------------
