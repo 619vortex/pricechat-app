@@ -22,6 +22,7 @@ import { PassportPlay } from "./play";
 import { WatchEarn } from "./watch";
 import { XFeedSection } from "./xfeed";
 import { VipStatus } from "./crew";
+import { VpnStatus } from "./vpn";
 import { RankRewards, useRewards } from "./rewards";
 import "./rewards.css";
 
@@ -230,6 +231,9 @@ export function ProfilePage() {
 
         {/* 4a. VIP Trading Bot: one compact line (locked / you qualify / unlocked), never a big banner above your Passport */}
         {botOpen && <VipStatus level={rank.current.level} />}
+
+        {/* 4a'. Kiwi VPN: the same compact line (hidden until the owner opens it) */}
+        <VpnStatus />
 
         {/* 4b. Track record: the member's own Hyperliquid PnL and the bot's (Hyperliquid's numbers, for transparency) */}
         <TrackRecord />
