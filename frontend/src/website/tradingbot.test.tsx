@@ -57,7 +57,7 @@ describe("Earn: the trading bot funnel", () => {
     expect(screen.getByLabelText("Done").textContent).toContain("✓ Kiwi Rank 3");
     expect(screen.queryByLabelText(/^Step 1:/)).toBeNull();  // done steps disappear
     const ref = screen.getByRole("link", { name: /open hyperliquid/i });
-    expect(ref.getAttribute("href")).toBe("https://app.hyperliquid.xyz/join/BANTER");
+    expect(ref.getAttribute("href")).toBe("/api/r/site_trading_bot?src=web");
     expect(container.textContent).toMatch(/may earn a referral fee/i);
     expect(container.textContent).toMatch(/you can lose money/i);
     expect(container.querySelectorAll("input").length).toBe(0);  // nothing to type: never a seed phrase, key or password

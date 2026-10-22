@@ -216,7 +216,7 @@ describe("Connect Hyperliquid", () => {
     await flush();
     const dlg = screen.getByRole("dialog", { name: "Connect Hyperliquid" });
     expect(dlg.textContent).toMatch(/NOT VERIFIED/); expect(dlg.textContent).toMatch(/Opening the link alone doesn't count/);
-    expect(within(dlg).getByRole("link", { name: /Open Hyperliquid/ }).getAttribute("href")).toBe("https://app.hyperliquid.xyz/join/BANTER");
+    expect(within(dlg).getByRole("link", { name: /Open Hyperliquid/ }).getAttribute("href")).toBe("/api/r/site_earn?src=web");
     fireEvent.click(within(dlg).getByRole("button", { name: "RETRY VERIFICATION" }));
     await flush();
     expect(calls.some((c) => c.key === "POST /api/members/trading/connection/recheck")).toBe(true);

@@ -138,7 +138,7 @@ def test_one_auto_accounts_exchange_surprise_does_not_skip_the_others(db: Sessio
 
 def test_the_footer_is_dropped_never_sliced_into_the_html() -> None:
     tg = FakeTG()
-    foot = "\n\n📢 Bot channel: @botpricechat\n🎁 Trade on Hyperliquid · 4% off fees with our link: https://app.hyperliquid.xyz/join/PRICECHAT"
+    foot = "\n\n📢 Bot channel: @botpricechat\n🎁 Trade on Hyperliquid · 4% off fees with our link: https://api.pricechat.live/api/r/footer?src=tg"
     c = bot._Footed(tg, foot)
     png = b"\x89PNG\r\n\x1a\n"
     near = "x" * 1000 + "<b>a &amp; b</b>"

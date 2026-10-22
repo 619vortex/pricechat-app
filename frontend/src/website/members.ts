@@ -382,3 +382,7 @@ export interface ReferralInfo {
   enabled: boolean;
   qualifying: string[]; // labels of what the invited friend must do first
 }
+
+/** The Hyperliquid referral link as the website shows it: /api/r/site_<page> counts the click (no IP / user agent stored),
+ *  then 302s to the owner's current link. No link set → "" (nothing to show). */
+export const trackedRef = (url: string | null | undefined, page: string): string => (url ? `/api/r/site_${page}?src=web` : "");

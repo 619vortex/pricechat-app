@@ -242,15 +242,22 @@ def referral_url(db: Session) -> str | None:
     return url if url.startswith("https://") else None
 
 
-def referral_line(db: Session) -> str:
+def tracked_url(db: Session, placement: str) -> str | None:
+    """The referral link as shown: /api/r/{placement} counts the click, then 302s to referral_url (clicks.py). None when unset."""
+    from app.tradingbot.clicks import tracked_url as _tracked
+
+    return _tracked(placement) if referral_url(db) else None
+
+
+def referral_line(db: Session, placement: str = "footer") -> str:
     """The sign-up line under replies, cards and announcements (Hyperliquid gives referred traders 4% off fees), or ''."""
-    url = referral_url(db)
+    url = tracked_url(db, placement)
     return f"🎁 4% off Hyperliquid fees: {url}" if url else ""
 
 
-def signup_block(db: Session) -> str:
+def signup_block(db: Session, placement: str = "help") -> str:
     """The sign-up pitch at the top of /start and /help."""
-    url = referral_url(db)
+    url = tracked_url(db, placement)
     if not url:
         return ""
     return f"🎁 <b>4% off Hyperliquid fees</b> with our link (the bot trades there): {url}\n\n"
@@ -262,8 +269,8 @@ def footer(db: Session) -> str:
     return CHANNEL_FOOTER + (f"\n{ref}" if ref else "")
 
 
-def with_referral(db: Session, text: str) -> str:
-    ref = referral_line(db)
+def with_referral(db: Session, text: str, placement: str = "footer") -> str:
+    ref = referral_line(db, placement)
     return f"{text}\n{ref}" if ref else text
 
 
@@ -331,9 +338,9 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
             except Exception:  # noqa: BLE001 - never blocks the welcome
                 db.rollback()
         text_, btns = onboarding(db, starter)
-        ref = referral_url(db)
+        ref = tracked_url(db, "start")
         if ref:  # the Hyperliquid sign-up: pitched first, and a button of its own
-            text_ = signup_block(db) + text_
+            text_ = signup_block(db, "start") + text_
             btns = [*(btns or []), [{"text": "🎁 Sign up on Hyperliquid · 4% off fees", "url": ref}]]
         await client.send_message(chat_id, text_, btns, html=True)
         return
@@ -375,8 +382,8 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
     m = member_for(db, user_id)
     if cmd in ("/start", "/help"):
         if cmd == "/start" and m is None:
-            return f"{signup_block(db)}Link your Kiwi Passport: {SITE}/passport → Connect Telegram.\n\n{HELP}"
-        return signup_block(db) + HELP
+            return f"{signup_block(db, 'start')}Link your Kiwi Passport: {SITE}/passport → Connect Telegram.\n\n{HELP}"
+        return signup_block(db, cmd.lstrip("/")) + HELP
     if cmd == "/markets":
         if args and args[0] in ("WEEKLY", "WEEK", "7D"):
             from app.tradingos import weekly
@@ -870,8 +877,8 @@ async def publish(db: Session, client: Any, sig: TsSignal, actor: str) -> TsSign
     if sig.status == "PENDING_REVIEW":
         sig.status = "WAITING"
     try:
-        msg = await client.send_photo(s.publish_chat, png, with_referral(db, signals.card(sig, signals.participation(db, sig))),
-                                      buttons(sig, referral_url(db)))
+        msg = await client.send_photo(s.publish_chat, png, with_referral(db, signals.card(sig, signals.participation(db, sig)), "card"),
+                                      buttons(sig, tracked_url(db, "card")))
     except Exception as e:  # noqa: BLE001
         sig.tg_error = f"{type(e).__name__}: {str(e)[:200]}"
         signals.audit(db, actor, "publish_failed", sig, error=sig.tg_error)
@@ -893,8 +900,8 @@ async def refresh(db: Session, client: Any, sig: TsSignal) -> None:
     if not (sig.tg_chat and sig.tg_message_id):
         return
     try:
-        await client.edit_caption(sig.tg_chat, sig.tg_message_id, with_referral(db, signals.card(sig, signals.participation(db, sig))),
-                                  buttons(sig, referral_url(db)))
+        await client.edit_caption(sig.tg_chat, sig.tg_message_id, with_referral(db, signals.card(sig, signals.participation(db, sig)), "card"),
+                                  buttons(sig, tracked_url(db, "card")))
     except Exception as e:  # noqa: BLE001 - "message is not modified" and friends: the card stays as it was
         logger.info("card update skipped for #%s: %s", sig.number, e)
 

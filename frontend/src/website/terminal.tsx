@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MemberApiError, memberApi } from "./members";
+import { MemberApiError, memberApi, trackedRef } from "./members";
 import { reducedMotion } from "./motion";
 import { playSound } from "./sound";
 import { walletError } from "./wallet";
@@ -569,7 +569,7 @@ export function ConnectDialog({ onClose, onChanged }: { onClose: () => void; onC
               <li>
                 <b>Join Hyperliquid with our referral</b>
                 <span>New to Hyperliquid? Sign up through our link. Already have an account? Use it as it is: we check the referral in a moment.</span>
-                <a className="kt-btn" href={c.referral.url} target="_blank" rel="noopener noreferrer">Open Hyperliquid ↗</a>
+                <a className="kt-btn" href={trackedRef(c.referral.url, "earn")} target="_blank" rel="noopener noreferrer">Open Hyperliquid ↗</a>
               </li>
               <li>
                 <b>Create your API key</b>
@@ -606,7 +606,7 @@ export function ConnectDialog({ onClose, onChanged }: { onClose: () => void; onC
               {ref === "EXISTING_ACCOUNT" && <p className="kt-explain">This Hyperliquid account is already linked to another referral ({c.referral.code_seen}).
                 Hyperliquid doesn't allow changing an existing referral, so nobody (including us) can switch it. You can connect a different account.</p>}
               {ref !== "VERIFIED" && <p className="kt-row-btns">
-                {ref !== "EXISTING_ACCOUNT" && <a className="kt-btn" href={c.referral.url} target="_blank" rel="noopener noreferrer">Open Hyperliquid ↗</a>}
+                {ref !== "EXISTING_ACCOUNT" && <a className="kt-btn" href={trackedRef(c.referral.url, "earn")} target="_blank" rel="noopener noreferrer">Open Hyperliquid ↗</a>}
                 <button className="kt-btn" disabled={busy !== null} onClick={() => void recheck()}>{busy === "recheck" ? "Checking…" : "RETRY VERIFICATION"}</button></p>}
               {!c.eligible && ref === "VERIFIED" && c.deposit.status !== "verified" && <p className="kt-explain">Deposit: ${c.deposit.usd.toFixed(2)} of the ${c.deposit.min_usd.toFixed(0)} minimum
                 on Hyperliquid. <button className="kt-inline" disabled={busy !== null} onClick={() => void recheck()}>Check again</button></p>}
