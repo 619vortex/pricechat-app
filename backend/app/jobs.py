@@ -883,7 +883,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 600, system_alerts, initial_delay_seconds=240, timeout_seconds=60),
         JobSpec("system.backup", "Nightly database backup", "Daily: a consistent copy of the whole database, integrity-checked, gzip-compressed into the private storage bucket (separate from the server's volume); the newest 14 are kept",
                 86400, system_backup, initial_delay_seconds=900, timeout_seconds=1800),
-        JobSpec("system.retention", "Data retention", "Daily: deletes old rows from tables that only grow (Brand Manager log and metrics, referral clicks, skipped /signal ideas, finished price alerts, activity log), at most 5,000 per table a run; anything still in use or counted in all-time stats is kept (app/retention.py)",
+        JobSpec("system.retention", "Data retention", "Daily: deletes old rows from tables that only grow (Brand Manager log and metrics, referral clicks, skipped /signal ideas, finished price alerts, activity log, expired member sessions, read notifications, card-scan records, Pokémon sync run logs, Exchange oracle history thinned to a day's last, usage tallies), at most 5,000 per table a run; anything still in use or counted in all-time stats is kept (app/retention.py)",
                 86400, system_retention, initial_delay_seconds=1500, timeout_seconds=600),
         JobSpec("pokemon.sales", "Pokémon verified sales (Scrydex sold listings)", "Weekly: completed sales of the Top 100 and nearby cards, each matched to the exact card + grade (~150 credits)",
                 7 * 86400, pokemon_sales, initial_delay_seconds=2400, timeout_seconds=900),
