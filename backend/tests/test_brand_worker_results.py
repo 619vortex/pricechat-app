@@ -86,3 +86,28 @@ def test_a_wall_clock_slot_means_the_brands_time_zone(client: TestClient, db: Se
     db.refresh(v)
     assert v.slot_at == datetime(2026, 11, 2, 18, 0, tzinfo=timezone.utc)
     assert client.patch(f"{P}/videos/{v.id}", json={"slot_at": "tomorrow"}).status_code == 400
+
+
+def test_a_manual_video_is_claimed_behind_a_long_queue_left_by_stop_auto(client: TestClient, db: Session) -> None:
+    from datetime import timedelta
+
+    from app.brand_manager import queue
+    from app.db.base import utcnow
+
+    b = brands.ensure_default(db)
+    a = brands.automation(db, b)
+    a.running = False  # STOP AUTO: its planned videos stay queued until START
+    for i in range(25):
+        v = BmVideo(brand_id=b.id, category=TOPIC.category, template=TOPIC.template, topic=f"planned {i}", topic_key=f"p{i}",
+                    brief=TOPIC.brief, status="queued", stages={}, generation=1, slot_at=utcnow() + timedelta(hours=i))
+        db.add(v)
+        db.flush()
+        queue.enqueue_render(db, v)
+    mine = BmVideo(brand_id=b.id, category=TOPIC.category, template=TOPIC.template, topic="made by hand", topic_key="m",
+                   brief=TOPIC.brief, status="queued", stages={}, generation=1)
+    db.add(mine)
+    db.flush()
+    queue.enqueue_render(db, mine, manual=True)
+    db.commit()
+    job = client.post(f"{P}/worker/claim", json={}, headers=_worker(client)).json()
+    assert job["video_id"] == mine.id

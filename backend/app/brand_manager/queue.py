@@ -176,13 +176,16 @@ def claim(db: Session, settings: Any, w: BmWorker, info: dict[str, Any] | None, 
         w.info = {k: info[k] for k in list(info)[:20]}
     expire_leases(db, now)
     db.commit()
+    autos = {a.brand_id: a for a in db.scalars(select(BmAutomation))}
+    stopped = [b for b, a in autos.items() if a.emergency_stop]
+    # STOP AUTO leaves its planned jobs queued (they wait for START): scan past them, so a manual video made meanwhile
+    # (no slot, so sorted last) is still found behind a long stopped queue
     candidates = db.execute(select(BmJob, BmVideo).join(BmVideo, BmVideo.id == BmJob.video_id)
-                            .where(BmJob.status == "queued", (BmJob.run_after.is_(None)) | (BmJob.run_after <= now))
-                            .order_by(BmVideo.slot_at.is_(None), BmVideo.slot_at, BmJob.id).limit(20)).all()
+                            .where(BmJob.status == "queued", (BmJob.run_after.is_(None)) | (BmJob.run_after <= now),
+                                   BmVideo.brand_id.not_in(stopped))
+                            .order_by(BmVideo.slot_at.is_(None), BmVideo.slot_at, BmJob.id).limit(500)).all()
     for job, v in candidates:
-        a = db.scalar(select(BmAutomation).where(BmAutomation.brand_id == v.brand_id))
-        if a is not None and a.emergency_stop:
-            continue
+        a = autos.get(v.brand_id)
         if not (a is not None and a.running) and not (job.payload or {}).get("manual"):
             continue  # STOP AUTO: nothing new starts (a manual Regenerate still runs)
         lease = now + timedelta(seconds=settings.bm_lease_seconds)
