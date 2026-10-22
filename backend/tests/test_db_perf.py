@@ -177,3 +177,17 @@ def test_verify_job_awards_in_a_batch_same_results_far_fewer_queries(db: Session
     assert _ledger_of(db, batched) == expected
     assert sql_first * 3 < sql_plain and sql_first < 8 * awarded  # was ~27 statements per award
     assert rerun * 5 < rerun_plain and rerun <= 30  # capped past activity is not retried every run
+
+
+def test_file_sqlite_runs_in_wal_with_normal_sync(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Readers never wait for the single writer (WAL), and a commit doesn't fsync while holding the write lock."""
+    from sqlalchemy import text
+
+    from app.db.session import build_engine
+
+    e = build_engine(f"sqlite:///{(tmp_path / 'w.db').as_posix()}")
+    with e.connect() as c:
+        assert c.execute(text("PRAGMA journal_mode")).scalar() == "wal"
+        assert c.execute(text("PRAGMA synchronous")).scalar() == 1  # NORMAL
+        assert c.execute(text("PRAGMA busy_timeout")).scalar() == 15000
+    e.dispose()
