@@ -229,9 +229,10 @@ def ranks(db: Session) -> list[Rank]:
     return list(db.scalars(select(Rank).order_by(Rank.level)))
 
 
-def rank_for(db: Session, xp: int) -> Rank:
-    """The highest rank whose threshold the Kiwi Rank Score has reached. Premium XP never counts."""
-    all_ranks = ranks(db)
+def rank_for(db: Session, xp: int, all_ranks: list[Rank] | None = None) -> Rank:
+    """The highest rank whose threshold the Kiwi Rank Score has reached. Premium XP never counts. Lists of members pass
+    `all_ranks` (from `ranks`) so the table is read once, not once per row."""
+    all_ranks = all_ranks or ranks(db)
     current = all_ranks[0]
     for r in all_ranks:
         if xp >= r.min_xp:

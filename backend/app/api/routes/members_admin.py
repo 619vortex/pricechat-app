@@ -47,12 +47,12 @@ def _log(db: Session, member: Member | None, action: str, details: dict[str, Any
     ActivityLogger(db).log("member_admin_action", summary, actor=ACTOR, details={"action": action})
 
 
-def _row(db: Session, m: Member) -> dict[str, Any]:
+def _row(db: Session, m: Member, all_ranks: list[Rank] | None = None) -> dict[str, Any]:
     platforms = list(db.scalars(select(LinkedIdentity.platform).where(LinkedIdentity.member_id == m.id)))
     flags = db.scalar(select(func.count()).select_from(ModerationFlag).where(ModerationFlag.member_id == m.id,
                                                                              ModerationFlag.status == "open")) or 0
     return {"id": m.public_id, "username": m.username, "display_name": m.display_name, "xp": m.xp_total, "bonus_xp": m.bonus_xp,
-            "rank_level": m.rank_level, "rank": ledger.rank_for(db, m.rank_score).name, "linked": sorted(platforms),
+            "rank_level": m.rank_level, "rank": ledger.rank_for(db, m.rank_score, all_ranks).name, "linked": sorted(platforms),
             "rank_score": m.rank_score, "legacy_points": m.legacy_points,
             "last_active_at": m.last_active_at.isoformat() if m.last_active_at else None, "joined_at": m.created_at.isoformat(),
             "status": m.status, "xp_suspended": m.xp_suspended, "open_flags": int(flags), "leaderboard_opt_out": m.leaderboard_opt_out,
@@ -115,7 +115,8 @@ def members(db: DbSession, q: str = "", filter: Literal["all", "flagged", "suspe
         stmt = stmt.where(Member.status == "banned")
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(stmt.order_by(Member.xp_total.desc(), Member.created_at).limit(limit).offset(offset))
-    return {"total": int(total), "members": [_row(db, m) for m in rows]}
+    all_ranks = ledger.ranks(db)
+    return {"total": int(total), "members": [_row(db, m, all_ranks) for m in rows]}
 
 
 @router.get("/members-admin/members/{public_id}")

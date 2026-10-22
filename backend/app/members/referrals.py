@@ -187,7 +187,14 @@ def sweep(db: Session) -> int:
     """Retry referrals that waited (daily limit, minimum age). Uses the invited member's ledger as it is."""
     settings = program(db)
     done = 0
-    for ref in list(db.scalars(select(Referral).where(Referral.status == "joined", Referral.referred_id.is_not(None)))):
+    qualifying = (ReputationEvent.member_id == Referral.referred_id,
+                  ReputationEvent.event_type.in_(settings.referral_qualifying_events or []),
+                  ReputationEvent.created_at >= Referral.created_at, ReputationEvent.reverses_id.is_(None),
+                  ReputationEvent.reversed_at.is_(None))
+    # only referrals whose friend did a qualifying action: the ones that never did cost nothing, however many pile up
+    waiting = select(Referral).where(Referral.status == "joined", Referral.referred_id.is_not(None),
+                                     select(ReputationEvent.id).where(*qualifying).exists())
+    for ref in list(db.scalars(waiting)):
         ev = db.scalar(select(ReputationEvent).where(
             ReputationEvent.member_id == ref.referred_id, ReputationEvent.event_type.in_(settings.referral_qualifying_events or []),
             ReputationEvent.created_at >= ref.created_at, ReputationEvent.reverses_id.is_(None), ReputationEvent.reversed_at.is_(None))

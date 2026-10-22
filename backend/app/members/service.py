@@ -390,16 +390,8 @@ def leaderboard(db: Session, period: str, limit: int = 50) -> list[dict[str, Any
         stmt = stmt.where(ReputationEvent.occurred_at >= since)
     rows = db.execute(stmt.group_by(Member.id).having(xp_sum > 0).order_by(xp_sum.desc(), Member.created_at).limit(limit)).all()
     all_ranks = ledger.ranks(db)
-
-    def rank_of(xp: int) -> Rank:
-        cur = all_ranks[0]
-        for r in all_ranks:
-            if xp >= r.min_xp:
-                cur = r
-        return cur
-
     return [{"position": i + 1, "username": m.username, "display_name": m.display_name, "xp": int(x),
-             "rank": rank_out(rank_of(m.rank_score))} for i, (m, x) in enumerate(rows)]
+             "rank": rank_out(ledger.rank_for(db, m.rank_score, all_ranks))} for i, (m, x) in enumerate(rows)]
 
 
 def leaderboard_v2(db: Session, period: str, metric: str, limit: int = 50) -> dict[str, Any]:
@@ -428,14 +420,7 @@ def leaderboard_v2(db: Session, period: str, metric: str, limit: int = 50) -> di
             stmt = stmt.where(ReputationEvent.occurred_at >= since)
         rows = [(m, int(v)) for m, v in db.execute(stmt.group_by(Member.id).having(xp_sum > 0).order_by(xp_sum.desc(), Member.created_at).limit(limit))]
     all_ranks = ledger.ranks(db)
-
-    def rank_of(score: int) -> Rank:
-        cur = all_ranks[0]
-        for r in all_ranks:
-            if score >= r.min_xp:
-                cur = r
-        return cur
-
     return {"note": note, "rows": [{"position": i + 1, "username": m.username, "value": int(v), "rank_score": m.rank_score,
-                                    "xp": m.xp_total, "legacy_points": m.legacy_points, "rank": rank_out(rank_of(m.rank_score))}
+                                    "xp": m.xp_total, "legacy_points": m.legacy_points,
+                                    "rank": rank_out(ledger.rank_for(db, m.rank_score, all_ranks))}
                                    for i, (m, v) in enumerate(rows)]}
