@@ -5,6 +5,7 @@ import { refreshSession } from "../../../website/members";
 import { ago, cardName, money } from "./api";
 import { VaultItemPage } from "./VaultItem";
 import { VaultStore } from "./VaultStore";
+import { PageHeadProvider, type PageHead } from "../mx";
 
 /** TEST FIXTURES only: a fake Vault API with made-up listings. */
 const calls: { method: string; url: string; body?: string }[] = [];
@@ -71,6 +72,22 @@ describe("Vault storefront", () => {
     expect(calls.at(-1)?.url).toContain("sort=price_asc");
   });
 
+  it("searches a typed price bound once, after typing pauses", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/members/vault/home": HOME,
+            "/api/members/vault/listings": { items: [card(1)], total: 1, page: 1, per_page: 24, pages: 1 } });
+    render(<MemoryRouter initialEntries={["/pokemon/vault"]}><Routes><Route path="/pokemon/vault" element={<VaultStore />} /></Routes></MemoryRouter>);
+    await flush();
+    const before = calls.filter((c) => c.url.startsWith("/api/members/vault/listings")).length;
+    const input = screen.getByPlaceholderText("$ min");
+    for (const v of ["1", "15", "150", "1500"]) fireEvent.change(input, { target: { value: v } });
+    expect((input as HTMLInputElement).value).toBe("1500");
+    await act(async () => { await new Promise((r) => setTimeout(r, 600)); });
+    await flush();
+    const searches = calls.filter((c) => c.url.startsWith("/api/members/vault/listings")).slice(before);
+    expect(searches).toHaveLength(1);
+    expect(searches[0].url).toContain("min_price=1500");
+  });
+
   it("explains an empty store instead of showing fake cards", async () => {
     serve({ "/api/members/session": { signed_in: false, member: null }, "/api/members/vault/home": { ...HOME, count: 0 },
             "/api/members/vault/listings": { items: [], total: 0, page: 1, per_page: 24, pages: 1 } });
@@ -108,6 +125,19 @@ describe("Vault card page", () => {
     expect(JSON.parse(sent?.body ?? "{}")).toEqual({ contact: "@ash_tg", note: "" });
     expect(screen.getByText(/Request sent/)).toBeTruthy();
     expect(screen.getByText(/Nothing has been charged and the card is not reserved/)).toBeTruthy();
+  });
+
+  it("names the page after the card for search and sharing, with its photo", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/members/vault/listings/1": detail() });
+    refreshSession();
+    const heads: (PageHead | null)[] = [];
+    render(<MemoryRouter initialEntries={["/pokemon/vault/1"]}><PageHeadProvider value={(h) => heads.push(h)}>
+      <Routes><Route path="/pokemon/vault/:id" element={<VaultItemPage />} /></Routes></PageHeadProvider></MemoryRouter>);
+    await flush(6);
+    const head = heads.filter(Boolean).at(-1)!;
+    expect(head.title).toBe("Lugia · Neo Genesis (Gold, Silver, to a New World...) · $899.99 · Price Chat Vault");
+    expect(head.image).toBe("https://i.ebayimg.test/1/s-l1600.jpg");
+    expect(head.description).toContain("Ungraded 2000 Japanese Pokémon card");
   });
 
   it("pauses requests on a sold-out or unconfirmed listing", async () => {

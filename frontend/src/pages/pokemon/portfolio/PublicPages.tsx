@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { RankKiwi } from "../../../website/RankKiwi";
 import { openLogin } from "../../../website/emailLogin";
 import { DASH, num, usd } from "../format";
+import { usePageHead } from "../mx";
 import { portfolioApi, type Comment, type ExploreRow, type Holding, type PublicPortfolio } from "./api";
 import { CompositionBars, GradeBadge, HoldingSheet, HoldingTile, PortfolioFrame, ValueCell, errorText, useMember } from "./shared";
 
@@ -18,6 +19,8 @@ export function PublicPortfolioPage() {
     void portfolioApi.publicPortfolio(username, sort).then(setP).catch((e) => { setP(null); setErr(errorText(e)); });
   }, [username, sort]);
   useEffect(() => { if (member !== undefined) load(); }, [load, member]);
+  usePageHead(p ? { title: `${p.username}'s Pokémon Card Collection · Price Chat`,
+                    description: `${p.username}'s Pokémon portfolio on Price Chat: ${num(p.cards)} cards, ${num(p.unique_cards)} unique, ${num(p.graded)} graded.${p.bio ? ` ${p.bio}` : ""}` } : null);
   const crumbs: [string, string | null][] = [["Markets", "/pokemon"], ["Collectors", "/pokemon/portfolios"], [username, null]];
   if (p === undefined) return <PortfolioFrame crumbs={crumbs}><p className="pf-muted">Loading…</p></PortfolioFrame>;
   if (p === null) return <PortfolioFrame crumbs={crumbs}><section className="pf-empty"><h1>Portfolio not available</h1><p>{err}</p><Link className="pf-btn" to="/pokemon/portfolios">Explore collectors</Link></section></PortfolioFrame>;
@@ -102,7 +105,9 @@ function Comments({ username, owner, enabled, signedIn }: { username: string; ow
       <p className={c.deleted ? "pf-muted" : ""}>{c.deleted ? "Comment deleted." : c.body}</p>
       <div className="pf-comment-actions">
         {!reply && signedIn && enabled && !c.deleted && <button type="button" className="pf-link" onClick={() => setReplyTo(c.id)}>Reply</button>}
-        {c.can_delete && <button type="button" className="pf-link" onClick={() => void portfolioApi.deleteComment(c.id).then(load)}>Delete</button>}
+        {c.can_delete && <button type="button" className="pf-link" onClick={() => {
+          if (window.confirm("Delete this comment?")) void portfolioApi.deleteComment(c.id).then(load).catch((e) => setErr(errorText(e)));
+        }}>Delete</button>}
         {signedIn && !c.deleted && !c.can_delete && <ReportLink target="comment" id={c.id} />}
       </div>
       {c.replies && c.replies.length > 0 && <ul>{c.replies.map((r) => one(r, true))}</ul>}
@@ -131,6 +136,7 @@ export function ExplorePage() {
   const [tab, setTab] = useState("top");
   const [data, setData] = useState<{ rows: unknown[]; note?: string } | null>(null);
   const [open, setOpen] = useState<Holding | null>(null);
+  usePageHead({ title: "Explore Pokémon Card Collectors · Price Chat", description: "Public Pokémon card portfolios from the Price Chat community: top collections, most cards, most valuable cards and featured collectors." });
   useEffect(() => {
     setData(null);
     void portfolioApi.explore(tab).then(setData).catch(() => setData({ rows: [] }));

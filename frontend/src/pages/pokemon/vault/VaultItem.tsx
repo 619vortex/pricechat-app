@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { openLogin } from "../../../website/emailLogin";
 import { MemberApiError, useSession } from "../../../website/members";
 import { AVAILABILITY, REQUEST_STATUS, ago, cardName, money, vaultApi, type VaultDetail, type VaultRequest } from "./api";
+import { usePageHead } from "../mx";
 import { VaultShell } from "./VaultStore";
 
 export function VaultItemPage() {
@@ -17,6 +18,11 @@ export function VaultItemPage() {
     setError(null);
     vaultApi.listing(id).then(setC).catch((e: unknown) => setError(e instanceof MemberApiError && e.status === 404 ? "missing" : (e as Error).message));
   }, [id, member?.username]);
+  usePageHead(c && c.id === id ? {
+    title: `${cardName(c)}${c.set_name ? ` · ${c.set_name}` : ""}${c.price !== null ? ` · ${money(c.price, c.currency)}` : ""} · Price Chat Vault`,
+    description: `${c.title}. ${c.condition ?? "Ungraded"} ${c.year ? `${c.year} ` : ""}Japanese Pokémon card in the Price Chat Vault: the seller's own photos and price, re-checked every few hours.`,
+    image: c.images[0] ?? null,
+  } : null);
 
   if (error === "missing") {
     return <VaultShell><div className="vt-empty"><h2>This card isn't in the Vault</h2><p>It may have sold or been removed by the seller.</p><Link className="vt-btn" to="/pokemon/vault">Back to the store</Link></div></VaultShell>;
@@ -169,6 +175,7 @@ export function VaultRequestsPage() {
     vaultApi.myRequests().then((r) => setRows(r.requests)).catch((e: Error) => setErr(e.message));
   }, [member]);
   const withdraw = async (id: number) => {
+    if (!window.confirm("Withdraw this request? We'll stop looking into this card for you.")) return;
     try {
       const r = await vaultApi.withdraw(id);
       setRows((xs) => xs?.map((x) => (x.id === id ? { ...x, status: r.status } : x)) ?? null);
@@ -181,7 +188,7 @@ export function VaultRequestsPage() {
       <h1 className="vt-h1">My requests</h1>
       {member === null && <div className="vt-empty"><p>Sign in to see the cards you asked about.</p><button className="vt-btn" onClick={openLogin}>Sign in</button></div>}
       {err && <p className="vt-error" role="alert">{err}</p>}
-      {member && rows === null && !err && <p className="vt-muted">Loading…</p>}
+      {(member === undefined || (member && rows === null)) && !err && <p className="vt-muted">Loading…</p>}
       {rows && rows.length === 0 && <div className="vt-empty"><p>You haven't requested any cards yet.</p><Link className="vt-btn" to="/pokemon/vault">Browse the Vault</Link></div>}
       {rows && rows.length > 0 && (
         <ul className="vt-reqs">
@@ -190,7 +197,7 @@ export function VaultRequestsPage() {
               {r.listing?.image ? <img src={r.listing.image} alt="" referrerPolicy="no-referrer" /> : <span className="vt-noimg" />}
               <div>
                 <Link to={`/pokemon/vault/${r.listing_id}`}>{r.listing?.title ?? "Card"}</Link>
-                <p className="vt-muted">Asked {new Date(r.created_at).toLocaleDateString()} at {money(r.price, r.currency)} · <b>{REQUEST_STATUS[r.status]}</b>
+                <p className="vt-muted">Asked {new Date(r.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} at {money(r.price, r.currency)} · <b>{REQUEST_STATUS[r.status]}</b>
                   {r.listing && r.listing.availability !== "available" ? ` · ${AVAILABILITY[r.listing.availability]}` : ""}</p>
               </div>
               {(r.status === "new" || r.status === "contacted") && <button className="vt-link" onClick={() => void withdraw(r.id)}>Withdraw</button>}
