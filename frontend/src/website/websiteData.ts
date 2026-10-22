@@ -58,6 +58,8 @@ export const site = {
     joinTitle: "Your Kiwi starts here.",
     joinLines: ["Join Price Chat.", "Participate.", "Earn your rank."],
     joinCta: "Join Price Chat",
+    // what a first-time visitor gets, in one line under the call to action (signed-out visitors only)
+    joinNote: "Free, no password. Earn Kiwi XP for watching, reading and chatting, and every rank unlocks a reward.",
   },
 
   // Our story: where we come from, told forward. No dispute, no claims about anyone: we were part of something, we

@@ -73,7 +73,7 @@ describe("Rank rewards on the Passport", () => {
     tap(container, "warrior");  // another Kiwi switches the popover
     expect(pop(container)!.textContent).toContain("VORTEX REALM");
     expect(pop(container)!.querySelector(".rw-pill")!.textContent).toBe("🔒 Locked");
-    expect(pop(container)!.textContent).toContain("400 XP to go");
+    expect(pop(container)!.textContent).toContain("Unlocks at Warrior Kiwi: 400 XP to go");
     expect(pop(container)!.querySelector(".rw-btn")).toBeNull();  // no action for a locked reward
     tap(container, "warrior");  // the same Kiwi again closes it
     expect(pop(container)).toBeNull();
@@ -146,6 +146,7 @@ describe("Rank rewards on the Passport", () => {
       tap(container, k);
       expect(pop(container)!.textContent).toContain("Exclusive reward — To Be Announced");
       expect(pop(container)!.querySelector(".rw-pill")!.textContent).toBe("Coming later");
+      expect(pop(container)!.textContent).toContain("still being prepared");  // never a bare label
     }
   });
 });
@@ -184,6 +185,9 @@ describe("Vortex Realm tab", () => {
     await settle();
     expect(container.textContent).toContain("It unlocks at Warrior Kiwi (900 XP)");
     expect(container.textContent).toContain("500 / 900 XP");
+    expect(container.textContent).toContain("400 XP to go");
+    // back to the Passport tab on the same page (no reload) to earn XP
+    expect(screen.getByRole("link", { name: "See how to earn XP" }).getAttribute("href")).toBe("#passport");
     expect(container.querySelector("iframe")).toBeNull();
     expect(screen.queryByText("▶ Play")).toBeNull();
   });

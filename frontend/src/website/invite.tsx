@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { memberApi, type ReferralInfo } from "./members";
+import type { Crew } from "./crew";
 import { burst, pop } from "./fx";
 import "./play.css";
 
@@ -93,13 +94,31 @@ export function InviteModal({ onClose }: { onClose: () => void }) {
       <div className="iv-card">
         <div className="iv-head">
           <h2 className="site-display iv-title" id="invite-title">👥 Invite friends</h2>
-          <button type="button" className="site-textbutton iv-close" onClick={onClose} aria-label="Close">✕</button>
+          <button type="button" className="site-textbutton iv-close" onClick={onClose} aria-label="Close" autoFocus>✕</button>
         </div>
         {info === undefined ? <p className="site-empty">Loading…</p>
           : info === null ? <p className="pp-problem">Your invite link isn't available right now.</p>
           : !info.enabled ? <p className="site-note">Invites are switched off for now.</p>
           : <InvitePanel info={info} />}
+        <TelegramInvite />
       </div>
+    </div>
+  );
+}
+
+/** The Telegram crew invite (a personal bot link shared through Telegram's own share sheet): paid by the server once a
+ *  friend joins the Price Chat Telegram as a new member and stays. Shown only while the program is on. */
+function TelegramInvite() {
+  const [c, setC] = useState<Crew | null>(null);
+  useEffect(() => { void memberApi<Crew>("/members/me/crew").then(setC).catch(() => undefined); }, []);
+  if (!c?.enabled) return null;
+  return (
+    <div className="iv-tg">
+      <p className="iv-lede">Or invite them to the Price Chat Telegram: <strong>+{c.reward_xp} XP</strong> for each new member who joins
+        {c.bonus_xp > 0 && !c.bonus_paid ? <>, and <strong>+{c.bonus_xp} XP</strong> bonus at {c.bonus_at} friends</> : null}.</p>
+      <a className="crew-tg" href={c.share_url} target="_blank" rel="noopener noreferrer">Invite via Telegram</a>
+      <p className="iv-fine">{c.verified} joined{c.pending > 0 ? ` · ${c.pending} waiting` : ""}. A friend counts once they're still in the
+        Telegram after {c.hold_hours} hours; existing members and your own account don't count.</p>
     </div>
   );
 }

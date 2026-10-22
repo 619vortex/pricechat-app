@@ -181,7 +181,10 @@ function RewardPopover({ c, state, knight, profile, reload, onProfileSaved, onCl
       </div>
       <span className={`rw-pill is-${state}`}>{state === "locked" ? "🔒 " : state === "unlocked" || state === "done" ? "✓ " : ""}{STATE_LABEL[state]}</span>
       {reward.description && reward.kind !== "tba" && <p className="rw-desc">{reward.description}</p>}
-      {!c.reached && reward.kind !== "tba" && <p className="rw-fine">{fmt(c.xp_to_reach)} XP to go</p>}
+      {!c.reached && reward.kind !== "tba" && <p className="rw-fine">Unlocks at {rank.name}: {fmt(c.xp_to_reach)} XP to go</p>}
+      {/* never a bare "Paused" / "Coming later": say why it can't be used and what happens next */}
+      {state === "off" && <p className="rw-fine">Paused for now by the Price Chat team. It'll be back here as soon as it reopens.</p>}
+      {state === "tba" && <p className="rw-fine">This reward is still being prepared. It's announced here first.</p>}
       {state !== "off" && c.reached && (
         <div className="rw-act">
           <RewardAction c={c} knight={knight} profile={profile} open={custom} toggle={() => setCustom((v) => !v)} reload={reload} onProfileSaved={onProfileSaved} />

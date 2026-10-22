@@ -88,7 +88,7 @@ export function TelegramBar({ t, row = false }: { t: TelegramActivity | null | u
         <span className="tgb-track" role="progressbar" aria-label="Telegram XP today" aria-valuemin={0} aria-valuemax={cap} aria-valuenow={today}>
           <i style={{ width: `${(today / cap) * 100}%` }} />
         </span>
-        <small>{t.messages_today} today · {today} / {cap} XP</small>
+        <small>{t.messages_today} today · {today} / {cap} XP{today >= cap ? " · max for today ✓" : ""}</small>
       </span>
       <span className="tgb-count" aria-live="polite"><span key={shown} className="tgb-num">{shown.toLocaleString("en-GB")}</span><small>messages</small></span>
       {gained && glow && <span className="tgb-conv" aria-hidden>{gained.m} 💬 → 🥝</span>}

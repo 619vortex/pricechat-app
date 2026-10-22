@@ -46,11 +46,14 @@ function RealmLocked({ s }: { s: Status }) {
           <RankKiwi art={r.current.art} rankKey={r.current.key} size={56} />
           <div>
             <b>{r.current.name}</b> · {r.score.toLocaleString("en-GB")} / {s.needs.min_xp.toLocaleString("en-GB")} XP
-            <div className="rw-bar"><i style={{ width: `${pct}%` }} /></div>
+            <div className="rw-bar" role="progressbar" aria-label={`Progress towards ${s.needs.name}`} aria-valuemin={0}
+                 aria-valuemax={s.needs.min_xp} aria-valuenow={Math.min(r.score, s.needs.min_xp)}><i style={{ width: `${pct}%` }} /></div>
+            <small>{Math.max(0, s.needs.min_xp - r.score).toLocaleString("en-GB")} XP to go</small>
           </div>
         </div>
       )}
-      <a className="site-button" href="/passport">See how to earn XP</a>
+      {/* the Passport tab on this same page: no reload, straight to today's missions */}
+      <a className="site-button" href="#passport">See how to earn XP</a>
     </section>
   );
 }
