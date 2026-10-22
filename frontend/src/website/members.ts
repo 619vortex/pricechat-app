@@ -291,7 +291,7 @@ export async function memberApi<T>(path: string, init: RequestInit = {}): Promis
     }
     throw new MemberApiError(r.status, message);
   }
-  return (await r.json()) as T;
+  return r.status === 204 ? (undefined as T) : ((await r.json()) as T);  // 204 No Content (e.g. a delete) has no body
 }
 
 // One session request per page load, shared by the header and the page.

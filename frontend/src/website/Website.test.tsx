@@ -143,6 +143,15 @@ describe("content archive", () => {
 });
 
 describe("brand and community", () => {
+  it("sells the Kiwi VPN member perk next to the sign-up: three points, linking to /vpn", async () => {
+    serve({ "/api/website/home": baseHome() });
+    const { container } = await renderSite(<Website />);
+    const perk = container.querySelector("#community .site-vpnperk")!;
+    expect(perk.querySelector("h3")!.textContent).toContain("Kiwi VPN");
+    expect([...perk.querySelectorAll("li b")].map((b) => b.textContent)).toEqual(["No traffic logs", "WireGuard speed", "Free with Kiwi Rank"]);
+    expect(perk.querySelector("a")!.getAttribute("href")).toBe("/vpn");
+  });
+
   it("renders YouTube, X and Telegram in that order, with handles and real links", async () => {
     serve({ "/api/website/home": baseHome({ links: { telegram: "https://t.me/thepricechat", x: "https://x.com/pricechat", youtube: "https://www.youtube.com/@pricechat" } }) });
     const { container } = await renderSite(<Website />);

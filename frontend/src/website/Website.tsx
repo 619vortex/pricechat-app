@@ -249,6 +249,9 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
   const onGive = typeof location !== "undefined" && location.pathname.startsWith("/giveaway");
   const onBot = typeof location !== "undefined" && (location.pathname.startsWith("/earn") || location.pathname.startsWith("/trading-bot"));
   const showBot = !!home?.trading_bot || onBot;  // the tab appears once the owner opens the funnel
+  const onVpn = typeof location !== "undefined" && location.pathname.startsWith("/vpn");
+  const member = useSession();
+  const showVpn = !!member || onVpn;  // Kiwi VPN is a member perk: signed-in members only
   return (
     <header className={`site-header${scrolled || open ? " is-solid" : ""}${open ? " is-open" : ""}`}>
       <div className="site-header-inner">
@@ -268,6 +271,11 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
           {showBot && (
             <a href="/earn" className={`site-link site-link-bot${onBot ? " is-current" : ""}`} aria-current={onBot ? "page" : undefined}>
               Earn
+            </a>
+          )}
+          {showVpn && (
+            <a href="/vpn" className={`site-link site-link-vpn${onVpn ? " is-current" : ""}`} aria-current={onVpn ? "page" : undefined}>
+              VPN
             </a>
           )}
         </nav>
@@ -294,6 +302,11 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
           {showBot && (
             <a href="/earn" onClick={() => setOpen(false)}>
               💰 Earn
+            </a>
+          )}
+          {showVpn && (
+            <a href="/vpn" onClick={() => setOpen(false)}>
+              🛡️ Kiwi VPN
             </a>
           )}
           <a href="/giveaway" onClick={() => setOpen(false)}>
@@ -674,7 +687,32 @@ function Community({ links, growth }: { links: HomeData["links"]; growth?: HomeD
         </ul>
       </div>
       <JoinCta signedIn={!!member} />
+      <VpnPerk />
     </section>
+  );
+}
+
+const VPN_POINTS: [string, string][] = [
+  ["No traffic logs", "We never record what you do or where you go."],
+  ["WireGuard speed", "The modern VPN protocol: fast, and easy on your battery."],
+  ["Free with Kiwi Rank", "No subscription. Rank up in the community and it's yours."],
+];
+
+/** A member perk, sold briefly next to the sign-up: Kiwi VPN's three selling points and a link to /vpn. */
+function VpnPerk() {
+  return (
+    <div className="site-wrap">
+      <aside className="site-vpnperk site-reveal" aria-labelledby="vpnperk-title">
+        <div className="site-vpnperk-head">
+          <p className="site-eyebrow">Member perk</p>
+          <h3 className="site-display" id="vpnperk-title"><span aria-hidden>🛡️ </span>Kiwi VPN</h3>
+        </div>
+        <ul className="site-vpnperk-points">
+          {VPN_POINTS.map(([title, line]) => <li key={title}><b>{title}</b><span>{line}</span></li>)}
+        </ul>
+        <a className="site-more site-link" href="/vpn">Get Kiwi VPN <span aria-hidden>→</span></a>
+      </aside>
+    </div>
   );
 }
 
