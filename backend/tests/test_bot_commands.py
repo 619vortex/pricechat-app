@@ -268,6 +268,10 @@ def test_signal_without_a_full_setup_still_suggests_the_best_one() -> None:
     mom = signals.watch_setup(a(price=100, macd_hist=-0.5))  # no trend, no levels: momentum decides, ATR falls back to 1.5%
     assert mom and mom.side == "SHORT" and mom.stop == 102.25
     assert signals.watch_setup(a(price=100)) and signals.watch_setup(a()) is None  # only no price at all means WAIT
+    wild = signals.watch_setup(a(price=1.0, atr=0.5, macd_hist=-0.1))  # ATR half the price: a 1.5 ATR short would target below zero
+    assert wild is None or min(*wild.entry, wild.stop, wild.target) > 0
+    assert signals.watch_setup(a(price=1.0, atr=0.8, macd_hist=-0.1)) is None  # nothing sensible fits: WAIT, never a negative target
+    assert "WAIT" in bot.signal_text(SimpleNamespace(tag="$NEWUSD", label="DEX", change_24h=None), "1d", a(price=1.0, atr=0.8, macd_hist=-0.1), [])
     listing = SimpleNamespace(tag="$XUSD", label="Hyperliquid Perpetual", change_24h=1.0)
     text = bot.signal_text(listing, "1h", a(price=110, ema20=105, ema50=100, atr=2, support=95, resistance=112), [])
     assert "WATCH · LONG idea" in text and "Wait for" in text and "Not a full signal: RSI 74" in text

@@ -92,7 +92,7 @@ def _plan(side: str, at: float, atr: float, level: float | None, idea: str, scor
 def watch_setup(a: Analysis) -> Watch | None:
     """Every plan the chart allows (trend pullback, range edges, a breakout at the level being pressed, plain momentum),
     each scored on trend, RSI, MACD, distance from the price and room to the next level; the most promising wins. Shown on
-    request as a WATCH idea: never published, never traded. None only without a price."""
+    request as a WATCH idea: never published, never traded. None without a price, or when every plan needs a price below zero."""
     i = a.indicators
     px, e20, e50 = i.get("price"), i.get("ema20"), i.get("ema50")
     if not px:
@@ -115,6 +115,10 @@ def watch_setup(a: Analysis) -> Watch | None:
         plans.append(_plan("SHORT", res - 0.25 * atr, atr, res, "sell the range high (resistance)", 2))
     mom_down = hist < 0 if hist is not None else (rsi if rsi is not None else 50) < 50
     plans.append(_plan("SHORT", px, atr, res, "momentum points down", 1) if mom_down else _plan("LONG", px, atr, sup, "momentum points up", 1))
+    # a wild chart (ATR a third of the price, e.g. a new DEX token on 1d) can put a short's target or a long's stop below zero
+    plans = [w for w in plans if min(*w.entry, w.stop, w.target) > 0]
+    if not plans:
+        return None
     for w in plans:
         long = w.side == "LONG"
         mid = sum(w.entry) / 2
