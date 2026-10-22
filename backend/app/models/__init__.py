@@ -100,3 +100,4 @@ from app.models.tradingos import KbConfig, KbEvent, TsAudit, TsDecision, TsIdea,
 from app.models.trading import TrAccount, TrIntent, TrOrder, TrPosition  # noqa: E402
 from app.models.workers import WkAssignment, WkAudit, WkCredit, WkJoin, WkLink, WkReport, WkReview, WkRole, WkSettings, WkSubmission  # noqa: E402,F401
 from app.models.rewards import ArenaRun, BeginnerContent, RankReward, RewardAudit, RewardClaim, RewardSettings  # noqa: E402,F401
+from app.models.alerts import OwnerAlert, OwnerAlertSettings  # noqa: E402,F401

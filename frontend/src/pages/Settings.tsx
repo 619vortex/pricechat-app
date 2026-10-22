@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { ActionLimit, ActionMode, SafetySettings as SafetySettingsData } from "../api/types";
 import { JobsCard } from "../components/JobsCard";
+import { OwnerAlertsCard } from "../components/OwnerAlertsCard";
 import { ModelStatusCard } from "../components/ModelStatusCard";
 import { RoutingCard } from "../components/RoutingCard";
 import { PsaConnectionCard } from "./pokemon/psa";
@@ -35,7 +36,7 @@ export function SettingsPage() {
         { key: "psa", label: "PSA (Pokémon grading)", more: true },
       ]} />
       {tab === "safety" && (!data ? (error ? <ErrorBanner message={error} /> : <Loading />) : <SafetySettings data={data} run={run} />)}
-      {tab === "jobs" && <JobsCard />}
+      {tab === "jobs" && <><OwnerAlertsCard /><JobsCard /></>}
       {tab === "ai" && (
         <>
           <ModelStatusCard editable />
