@@ -259,6 +259,26 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         return await riskteam.write_memos(ctx.db, runtime.router(ctx.db))
 
+    async def tradingos_ideas(ctx: JobContext) -> dict[str, Any]:
+        """/signal track record: grade the plans /signal showed on the candles that followed (record.py)."""
+        import asyncio
+
+        from app.tradingos import market, record
+
+        return await asyncio.to_thread(record.grade_all, ctx.db, market.data())
+
+    async def tradingos_brief(ctx: JobContext) -> dict[str, Any]:
+        """The daily brief in the signal group, once a day at the configured UTC hour (bot.daily_brief)."""
+        from app.tradingos import bot
+
+        if not s.telegram_configured:
+            raise JobSkipped("Telegram is not configured")
+        client = make_client(s, runtime.telegram.transport)
+        try:
+            return {"brief": await bot.daily_brief(ctx.db, client)}
+        finally:
+            await client.aclose()
+
     _kiwis_shown: dict[int, int] = {}  # signal id -> the entry count its Telegram card shows
 
     async def tradingos_track(ctx: JobContext) -> dict[str, Any]:
@@ -388,6 +408,10 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 300, tradingos_shadow, initial_delay_seconds=120, timeout_seconds=180),
         JobSpec("tradingos.riskteam", "Trading OS: AI Risk Team memos", "The Chief Risk Officer explains each kitchen risk decision (memo only)",
                 60, tradingos_riskteam, initial_delay_seconds=100, timeout_seconds=300),
+        JobSpec("tradingos.ideas", "Trading OS: /signal track record", "Grade the plans /signal showed on real candles (filled, target, stop, expired)",
+                900, tradingos_ideas, initial_delay_seconds=110, timeout_seconds=300),
+        JobSpec("tradingos.brief", "Trading OS: daily brief", "Once a day at the set UTC hour: market overview, the most promising setup with its chart and the track record, in the signal group",
+                300, tradingos_brief, initial_delay_seconds=130, timeout_seconds=300),
         JobSpec("tradingos.track", "Trading OS: signal tracking", "Follow open signals on real prices and update their Telegram cards", 60,
                 tradingos_track, initial_delay_seconds=60, timeout_seconds=300),
         JobSpec("telegram.ingest", "Telegram ingestion", "Fetch new messages from authorised chats (read-only) and answer bot commands; each run keeps listening for TELEGRAM_LISTEN_SECONDS so replies come within about a second", s.job_telegram_ingest_seconds, telegram_ingest, initial_delay_seconds=5, timeout_seconds=s.telegram_listen_seconds + 60),

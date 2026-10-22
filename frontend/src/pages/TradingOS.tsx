@@ -6,7 +6,7 @@ import { Advanced, ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat
 /** Admin → Trading OS (Phase 1-2): real Hyperliquid market data, the deterministic scanner, signal review and publishing
  *  to the Telegram signal group, model performance, execution (accounts, positions, orders, the LIVE allowlist) and the audit log. */
 
-interface Settings { scanner_enabled: boolean; auto_publish: boolean; paused: boolean; publish_chat: string; main_chat: string; chart_routing: string; timeframe: string; universe_size: number;
+interface Settings { scanner_enabled: boolean; auto_publish: boolean; paused: boolean; publish_chat: string; main_chat: string; chart_routing: string; brief_enabled: boolean; brief_hour: number; timeframe: string; universe_size: number;
   min_volume_usd: number; max_spread_bps: number; max_open_signals: number; min_rr: number; strategies: Record<string, unknown>; allowed_coins: string }
 interface Overview { settings: Settings; exchange: { ok: boolean; markets?: number; error?: string }; counts: Record<string, number>;
   stats: { label: string; total: number; open: number; closed: number; win_rate: number | null; avg_gain: number | null; avg_loss: number | null; net_return: number; max_drawdown: number };
@@ -182,10 +182,10 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
       onSaved();
     } catch (e) { setErr(e); }
   }
-  const check = (k: "scanner_enabled" | "auto_publish" | "trend_pullback_v1" | "intraday_15m_v1" | "intraday_live", label: string, hint: string) => (
+  const check = (k: "scanner_enabled" | "auto_publish" | "brief_enabled" | "trend_pullback_v1" | "intraday_15m_v1" | "intraday_live", label: string, hint: string) => (
     <label className="tba-check"><input type="checkbox" checked={v[k]} onChange={(e) => set(k, e.target.checked)} /><span><b>{label}</b><small className="muted">{hint}</small></span></label>
   );
-  const num = (k: "universe_size" | "min_volume_usd" | "max_spread_bps" | "max_open_signals" | "min_rr", label: string) => (
+  const num = (k: "brief_hour" | "universe_size" | "min_volume_usd" | "max_spread_bps" | "max_open_signals" | "min_rr", label: string) => (
     <label className="tba-field"><span>{label}</span><input type="number" value={v[k]} onChange={(e) => set(k, Number(e.target.value))} /></label>
   );
   return (
@@ -197,10 +197,12 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
         {check("intraday_15m_v1", "15-minute Kiwi Kitchen signals", "Faster signals on BTC and ETH, checked every 45 seconds. Off: the Kitchen only shows what it would do on the Earn page.")}
         <h3 className="tos-h">Posting</h3>
         {check("auto_publish", "Post signals without asking me", "Off: each new signal waits here for you to press Publish. On: posted to Telegram straight away.")}
+        {check("brief_enabled", "Daily brief in the signal group", "Once a day: market overview, the most promising setup with its chart, and how /signal ideas played out.")}
         <div className="tba-grid">
           <label className="tba-field"><span>Signal group on Telegram</span><input value={v.publish_chat} onChange={(e) => set("publish_chat", e.target.value)} /></label>
           <label className="tba-field"><span>Main chat: also announce open / close (empty = off)</span><input value={v.main_chat ?? ""} placeholder="@thepricechat" onChange={(e) => set("main_chat", e.target.value)} /></label>
           {num("max_open_signals", "Most signals open at once")}
+          {num("brief_hour", "Daily brief hour (UTC, 0-23)")}
           <label className="tba-field"><span>/chart asked in the main chat</span>
             <select className="input" value={v.chart_routing ?? "anywhere"} onChange={(e) => set("chart_routing", e.target.value)}>
               <option value="anywhere">Answer in the main chat (as before)</option>

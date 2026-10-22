@@ -48,7 +48,7 @@ def overview(db: DbSession) -> dict[str, Any]:
     db.commit()
     counts = {st: int(db.scalar(select(func.count()).select_from(TsSignal).where(TsSignal.status == st)) or 0)
               for st in signals.STATUS_LABEL}
-    return {"settings": {k: getattr(s, k) for k in ("scanner_enabled", "auto_publish", "paused", "publish_chat", "main_chat", "chart_routing", "timeframe", "universe_size",
+    return {"settings": {k: getattr(s, k) for k in ("scanner_enabled", "auto_publish", "paused", "publish_chat", "main_chat", "chart_routing", "brief_enabled", "brief_hour", "timeframe", "universe_size",
                                                      "min_volume_usd", "max_spread_bps", "max_open_signals", "min_rr", "strategies", "allowed_coins")},
             "exchange": exchange, "counts": counts, "stats": signals.stats(db),
             "execution": "ENTER → private preview → confirm. PAPER by default; TESTNET with an approved API wallet; LIVE only for the "
@@ -220,6 +220,8 @@ class SettingsIn(StrictInput):
     publish_chat: str | None = Field(None, max_length=64)
     main_chat: str | None = Field(None, max_length=64)  # "" turns the main-chat notices off
     chart_routing: str | None = Field(None, pattern=r"^(anywhere|bot_chat)$")  # /chart asked in the main chat: answer there, or in Bot Chat
+    brief_enabled: bool | None = None  # the daily brief in the signal group
+    brief_hour: int | None = Field(None, ge=0, le=23)  # UTC
     timeframe: str | None = Field(None, pattern=r"^(15m|1h|4h)$")
     universe_size: int | None = Field(None, ge=1, le=60)
     min_volume_usd: float | None = Field(None, ge=0)

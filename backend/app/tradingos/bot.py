@@ -41,6 +41,7 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 /signal · the most promising setup right now (top markets)
 /signal DOGE · the best setup on one coin, even without a full signal
 /signals · the bot's open signals
+/record · how /signal ideas played out (hit rate, R)
 
 💡 <b>Community ideas</b>
 /idea BTC long tp 72000 inv 64000 why · /ideas (members' views, never traded)
@@ -94,7 +95,7 @@ def _pct(x: float) -> str:
 
 
 # ---------------------------------------------------------------- commands (private chats and groups)
-PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/idea", "/ideas"}  # groups too
+PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/record", "/idea", "/ideas"}  # groups too
 MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator"}
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
 PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close"}  # account: DMs only
@@ -409,6 +410,10 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
         if not open_:
             return "No open signals: they're only posted when every rule passes. /signal BTC shows the best setup now."
         return "\n\n".join(esc(signals.card(x)) for x in open_)
+    if cmd == "/record":  # the /signal track record (record.py): public, no user data
+        from app.tradingos import record
+
+        return record.record_table(db)
     if cmd == "/connect":
         return ("<b>Connect Hyperliquid</b> (2 minutes)\n"
                 f"1. {SITE}/earn → <b>Connect Hyperliquid API</b>\n"
@@ -434,7 +439,7 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
             a = await _md(signals.analyze, md, listing.symbol, tf, st.min_volume_usd, st.max_spread_bps, st.min_rr)
             candles = await _md(md.candles, a.coin, tf, 200)
         a.indicators = {**signals.chart_indicators(candles, tf), **a.indicators}  # short histories still get a read
-        return await _send_signal(client, chat_id, reply_to, listing, tf, a, candles)
+        return await _send_signal(db, client, chat_id, reply_to, listing, tf, a, candles)
     # ---- the private trading service: a linked Kiwi Passport at the required rank
     if m is None:
         return f"Link your Kiwi Passport first: {SITE}/passport → Connect Telegram."
@@ -543,9 +548,9 @@ def signal_text(listing: Any, tf: str, a: Any, candles: list[Any]) -> str:
 SCAN_TOP = 15  # /signal without a coin: how many of the most traded Hyperliquid markets are compared
 
 
-async def _best_signal(db: Session, client: Any, chat_id: int | str, reply_to: int | None, md: Any, tf: str) -> str | None:
-    """/signal alone: every top market analyzed, the most promising plan wins (a setup that passes every rule beats any
-    WATCH idea; then by score). Analysis on request, never published or traded."""
+async def best_signal(db: Session, md: Any, tf: str, chat_type: str = "group") -> tuple[str, bytes | None]:
+    """The most promising plan across the top markets (a setup that passes every rule beats any WATCH idea; then by score):
+    its text and chart. /signal alone and the daily brief. Analysis on request, never published or traded."""
     st = signals.settings(db)
     gate = asyncio.Semaphore(4)
 
@@ -561,29 +566,98 @@ async def _best_signal(db: Session, client: Any, chat_id: int | str, reply_to: i
     coins = [m.coin for m in await _md(md.top, SCAN_TOP, st.min_volume_usd)]
     got = [g for g in await asyncio.gather(*(one(c) for c in coins)) if g]
     if not got:
-        return "Couldn't read the markets right now. Try /signal BTC."
+        return "Couldn't read the markets right now. Try /signal BTC.", None
     a, _ = max(got, key=lambda g: g[1].score)
     listing = await _md(venues.resolve, tickers.symbol_args([a.coin])[0], md, venues.client())
     candles = await _md(md.candles, a.coin, tf, 200)
     a.indicators = {**signals.chart_indicators(candles, tf), **a.indicators}
     lead = f"🏆 <b>Most promising now</b> · best of the {len(coins)} most traded markets"
-    return await _send_signal(client, chat_id, reply_to, listing, tf, a, candles, lead)
+    return await signal_post(db, listing, tf, a, candles, lead, chat_type)
 
 
-async def _send_signal(client: Any, chat_id: int | str, reply_to: int | None, listing: Any, tf: str, a: Any, candles: list[Any],
-                       lead: str = "") -> str | None:
+def _chat_type(chat_id: int | str) -> str:
+    return "private" if isinstance(chat_id, int) and chat_id > 0 else "group"  # Telegram groups have negative ids (or @names)
+
+
+async def _best_signal(db: Session, client: Any, chat_id: int | str, reply_to: int | None, md: Any, tf: str) -> str | None:
+    text, png = await best_signal(db, md, tf, _chat_type(chat_id))
+    if png is None:
+        return text
+    await client.send_photo(chat_id, png, text, reply_to=reply_to, html=True)
+    return None
+
+
+async def signal_post(db: Session, listing: Any, tf: str, a: Any, candles: list[Any], lead: str = "",
+                      chat_type: str = "group") -> tuple[str, bytes | None]:
+    """/signal's reply: text (+ the track-record line) and the chart when there's a plan. The plan is logged for grading."""
+    from app.tradingos import record
     from app.tradingos.market import INTERVALS
 
     text = (f"{lead}\n\n" if lead else "") + signal_text(listing, tf, a, candles)
     plan = signals.best_plan(a)
-    if plan is None or len(candles) < 2:
-        return text
+    if plan is None:
+        return text, None
+    try:  # the record never blocks a reply
+        line = record.record_line(db, record.log_plan(db, listing, tf, plan, chat_type).family)
+        text += f"\n{line}" if line else ""
+    except Exception:  # noqa: BLE001
+        logger.exception("signal idea not logged")
+        db.rollback()
+    if len(candles) < 2:
+        return text, None
     title = f"{listing.tag} · {readout.tf_label(tf)} · {plan.side} {'setup' if plan.full else 'idea'}"
     png = await asyncio.to_thread(chart.render_study, candles, title, listing.label, show=min(120, len(candles)),
                                   interval_ms=INTERVALS[tf] * 1000, levels=(a.indicators.get("support"), a.indicators.get("resistance")),
                                   plan=plan, change=listing.change_24h, source=listing.label)
+    return text, png
+
+
+async def _send_signal(db: Session, client: Any, chat_id: int | str, reply_to: int | None, listing: Any, tf: str, a: Any,
+                       candles: list[Any]) -> str | None:
+    text, png = await signal_post(db, listing, tf, a, candles, chat_type=_chat_type(chat_id))
+    if png is None:
+        return text
     await client.send_photo(chat_id, png, text, reply_to=reply_to, html=True)
     return None
+
+
+BRIEF_WINDOW = 3  # hours after brief_hour it may still go out (a deploy or restart at 08:00 doesn't lose the day)
+
+
+async def daily_brief(db: Session, client: Any, md: Any = None, now: Any = None) -> str:
+    """tradingos.brief: once a day at brief_hour (UTC) in publish_chat: the market overview, then the most promising /signal
+    setup with its chart and the track-record line. The date is saved before sending: at most once a day across restarts."""
+    s = signals.settings(db)
+    chat = (s.publish_chat or "").strip()
+    now = now or utcnow()
+    today = now.date().isoformat()
+    if not s.brief_enabled or not chat:
+        return "off"
+    if s.brief_sent_on == today:
+        return "already sent today"
+    if not s.brief_hour <= now.hour < s.brief_hour + BRIEF_WINDOW:
+        return f"waiting for {s.brief_hour:02d}:00 UTC"
+    md = md or market.data()
+    digest = await _md(markets_digest, md)
+    text, png = await best_signal(db, md, s.timeframe, "brief")
+    signals.settings(db).brief_sent_on = today
+    db.commit()
+    try:
+        await client.send_message(chat, f"☀️ <b>Daily brief</b> · {now:%a %d %b}\n\n{digest}", html=True)
+    except Exception:
+        signals.settings(db).brief_sent_on = None  # nothing went out: the next run tries again
+        db.commit()
+        raise
+    foot = _Footed(client, footer(db))
+    try:
+        if png is None:
+            await foot.send_message(chat, text, html=True)
+        else:
+            await foot.send_photo(chat, png, text, html=True)
+    except Exception as e:  # noqa: BLE001 - the overview went out: not retried (no duplicates)
+        logger.info("daily brief setup skipped: %s", e)
+        return "sent (overview only)"
+    return "sent"
 
 
 async def _chart(db: Session, client: Any, chat_id: int | str, md: Any, args: list[str], reply_to: int | None, note: str | None = None) -> str | None:
@@ -1092,14 +1166,14 @@ async def announce(db: Session, client: Any, sig: TsSignal, before: str) -> bool
 MENU_PRIVATE = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
                 ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
                 ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
-                ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("status", "Your account"),
+                ("record", "How /signal ideas played out"), ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("status", "Your account"),
                 ("positions", "Your Hyperliquid positions"), ("pnl", "Your Hyperliquid P&L"), ("trades", "Your bot trades and results"),
                 ("risk", "Your mode and limits"), ("pause", "STOP NEW TRADES"), ("close", "Close a bot position"), ("connect", "Connect Hyperliquid"),
                 ("help", "All commands")]
 MENU_GROUP = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
               ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
               ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
-              ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("help", "All commands")]
+              ("record", "How /signal ideas played out"), ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("help", "All commands")]
 _menu_set = False
 
 
