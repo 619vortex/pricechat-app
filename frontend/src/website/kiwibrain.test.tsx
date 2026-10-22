@@ -10,6 +10,7 @@ vi.mock("lightweight-charts", () => {
 });
 
 import { KiwiBrainPage } from "./kiwibrain";
+import { fmt } from "./brain/api";
 import { group } from "./brain/livebrain";
 import { moodOf } from "./brain/mood";
 import { simulate } from "./brain/simulator";
@@ -139,5 +140,12 @@ describe("Kiwi Brain 2.0", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "Sign in" }), { status: 401 })));
     render(<KiwiBrainPage />);
     await waitFor(() => expect(screen.getByText(/sign in first/)).toBeTruthy());
+  });
+});
+
+describe("Kiwi Brain money formatting", () => {
+  it("profits and losses are always signed; amounts use a real minus sign", () => {
+    expect(fmt.pnl(4.2)).toBe("+$4.20"); expect(fmt.pnl(-3.1)).toBe("−$3.10"); expect(fmt.pnl(0)).toBe("$0.00"); expect(fmt.pnl(null)).toBe("—");
+    expect(fmt.usd(-3.1)).toBe("−$3.10");
   });
 });
