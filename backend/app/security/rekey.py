@@ -40,6 +40,7 @@ BATCH = 200
 SEALING_MODULES = {
     "app/security/secrets.py", "app/invites/service.py", "app/members/auth.py", "app/members/rewards.py",
     "app/members/x_actions.py", "app/tradingbot/service.py", "app/market/service.py", "app/tradingos/exchange.py",
+    "app/vpn/service.py",
 }
 
 # how each site wraps protect()'s bytes into a text column
@@ -55,6 +56,7 @@ def columns() -> list[tuple[Any, str, tuple[Callable[[str], bytes], Callable[[by
     from app.models.rewards import RewardSettings
     from app.models.trading import TrAccount
     from app.models.tradingbot import TbApplication
+    from app.models.vpn import VpnServer
 
     return [
         (InviteAccount, "session_enc", _B64),  # Telethon sessions (invites/service.py)
@@ -66,6 +68,7 @@ def columns() -> list[tuple[Any, str, tuple[Callable[[str], bytes], Callable[[by
         (MarketRedemption, "address_enc", _LATIN1),  # shipping addresses (market/service.py)
         (TrAccount, "testnet_agent_key", _B64),  # Hyperliquid API-wallet keys (tradingos/exchange.py enc)
         (TrAccount, "mainnet_agent_key", _B64),
+        (VpnServer, "agent_token_enc", _B64),  # Kiwi VPN node agent tokens (vpn/service.py)
     ]
 
 
