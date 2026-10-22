@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false, true
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
+from app.db.base import Base, IdMixin, TimestampMixin, UTCDateTime, utcnow
 
 
 class TsSettings(IdMixin, TimestampMixin, Base):
@@ -324,3 +324,53 @@ class TsAutoDelete(IdMixin, Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     delete_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+
+
+class TsAssistConvo(IdMixin, Base):
+    """One /help <trade> check (tradingos/assist.py): the parsed trade and its FACTS. Replies to its answers are follow-ups
+    for 30 minutes, from the asker only."""
+
+    __tablename__ = "ts_assist_convos"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    coin: Mapped[str] = mapped_column(String(32), nullable=False)
+    side: Mapped[str] = mapped_column(String(5), nullable=False)  # long | short
+    trade: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)  # what the parser read (re-priced for follow-ups)
+    facts: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    followups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
+
+
+class TsAssistJob(IdMixin, Base):
+    """One turn of a check: the bot's message (placeholder → Vortex's answer, or the fallback) and the job Vortex claims.
+    status: pending · claimed · answered · expired · failed · fallback (Vortex wasn't around: answered by the bot at once)."""
+
+    __tablename__ = "ts_assist_jobs"
+    __table_args__ = (Index("ix_ts_assist_jobs_status", "status"), Index("ix_ts_assist_jobs_msg", "chat_id", "message_id"),
+                      Index("ix_ts_assist_jobs_user", "tg_user_id", "created_at"))
+
+    public_id: Mapped[str] = mapped_column(String(24), unique=True, nullable=False)  # "j_…": what Vortex sees
+    convo_id: Mapped[int] = mapped_column(ForeignKey("ts_assist_convos.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)  # assess | followup
+    status: Mapped[str] = mapped_column(String(10), nullable=False)
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message_id: Mapped[int | None] = mapped_column(BigInteger)  # the bot's message
+    reply_to: Mapped[int | None] = mapped_column(BigInteger)  # the asker's message
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    facts: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    fallback: Mapped[str] = mapped_column(Text, nullable=False)  # the bot's own assessment (Telegram HTML)
+    answer: Mapped[str | None] = mapped_column(Text)  # what the asker got, as plain text (follow-up history)
+    claims: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    lease_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
+
+
+class TsAssistState(IdMixin, Base):
+    """One row: when Vortex last asked for work (its long-poll), so the bot knows whether to wait for it."""
+
+    __tablename__ = "ts_assist_state"
+
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

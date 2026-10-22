@@ -10,7 +10,9 @@ interface Settings { scanner_enabled: boolean; auto_publish: boolean; paused: bo
   min_volume_usd: number; max_spread_bps: number; max_open_signals: number; min_rr: number; strategies: Record<string, unknown>; allowed_coins: string }
 interface Overview { settings: Settings; exchange: { ok: boolean; markets?: number; error?: string }; counts: Record<string, number>;
   stats: { label: string; total: number; open: number; closed: number; win_rate: number | null; avg_gain: number | null; avg_loss: number | null; net_return: number; max_drawdown: number };
-  execution: string }
+  execution: string; vortex_assist?: VortexCfg }
+interface VortexCfg { on: boolean | null; enabled: boolean; token_set: boolean; daily_public: number; daily_ranked: number; min_rank: number;
+  last_seen: string | null; online: boolean; pending: number }
 interface Sig { id: number; number: number; coin: string; side: string; status: string; status_label: string; entry: number[]; stop: number; target: number; rr: number;
   leverage: number[]; reason: string; created_at: string; published_at: string | null; last_price: number | null; model_pnl_pct: number | null;
   participation: Record<string, number>; card: string; tg_error: string | null; timeframe: string }
@@ -43,6 +45,7 @@ export function TradingOSPage() {
       {tab === "execution" && <Execution />}
       {tab === "markets" && <Markets />}
       {tab === "settings" && ov.data && <SettingsForm s={ov.data.settings} onSaved={() => void ov.reload()} />}
+      {tab === "settings" && ov.data?.vortex_assist && <VortexAssist v={ov.data.vortex_assist} onSaved={() => void ov.reload()} />}
       {tab === "audit" && <Audit />}
     </div>
   );
@@ -254,6 +257,65 @@ function SettingsForm({ s, onSaved }: { s: Settings; onSaved: () => void }) {
           </div>
         </Advanced>
         <div className="btn-group"><button className="btn btn-primary" onClick={() => void save()}>Save</button>{ok && <Badge tone="good">Saved</Badge>}</div>
+        {err ? <ApiErrorBanner error={err} /> : null}
+      </div>
+    </Card>
+  );
+}
+
+/** Vortex trade checks (/help <trade> in the bot): on/off, daily limits, the boost rank, the worker token (write-only) and
+ *  when Vortex last asked for work. */
+function VortexAssist({ v, onSaved }: { v: VortexCfg; onSaved: () => void }) {
+  const [f, setF] = useState({ vortex_on: v.enabled, vortex_daily_public: v.daily_public, vortex_daily_ranked: v.daily_ranked, vortex_min_rank: v.min_rank });
+  const [tok, setTok] = useState("");
+  const [err, setErr] = useState<unknown>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const set = (k: keyof typeof f, val: unknown) => { setF({ ...f, [k]: val }); setOk(null); };
+  async function call(path: string, method: string, body?: unknown, done = "Saved"): Promise<boolean> {
+    setErr(null);
+    try {
+      await request(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+      setOk(done);
+      onSaved();
+      return true;
+    } catch (e) { setErr(e); return false; }
+  }
+  function generate() {
+    const b = new Uint8Array(24);
+    crypto.getRandomValues(b);
+    setTok("vx_" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join(""));
+  }
+  const num = (k: "vortex_daily_public" | "vortex_daily_ranked" | "vortex_min_rank", label: string) => (
+    <label className="tba-field"><span>{label}</span><input type="number" min={0} value={f[k]} onChange={(e) => set(k, Number(e.target.value))} /></label>
+  );
+  return (
+    <Card title="Vortex trade checks (/help <trade>)">
+      <div className="tba-settings">
+        <p className="muted">
+          Vortex {v.online ? <Badge tone="good">online</Badge> : <Badge tone="neutral">away</Badge>} · last seen {relativeTime(v.last_seen)}
+          {v.pending ? ` · ${v.pending} waiting` : ""}. While Vortex is away the bot answers with its own assessment.
+        </p>
+        <label className="tba-check"><input type="checkbox" checked={f.vortex_on} onChange={(e) => set("vortex_on", e.target.checked)} />
+          <span><b>Answer "/help &lt;trade&gt;" with a risk check</b><small className="muted">In groups and private chats. /help alone still lists the commands.</small></span></label>
+        <div className="tba-grid">
+          {num("vortex_daily_public", "Checks a day per Telegram user")}
+          {num("vortex_daily_ranked", "Checks a day with a linked Kiwi Passport at the rank below")}
+          {num("vortex_min_rank", "Kiwi Rank for the higher limit")}
+        </div>
+        <div className="btn-group"><button className="btn btn-primary" onClick={() => void call("/tradingos/admin/settings", "PUT", f)}>Save</button></div>
+        <h3 className="tos-h">Vortex's token</h3>
+        <p className="muted">{v.token_set ? "A token is set. It's never shown again: set a new one to replace it." : "No token yet: Vortex can't connect."}
+          {" "}Put the same value in Vortex's .env as VORTEX_ASSIST_TOKEN.</p>
+        <div className="tba-grid">
+          <label className="tba-field"><span>New token (at least 24 characters)</span>
+            <input value={tok} autoComplete="off" spellCheck={false} onChange={(e) => setTok(e.target.value.trim())} /></label>
+        </div>
+        <div className="btn-group">
+          <button className="btn" onClick={generate}>Generate</button>
+          <button className="btn btn-primary" disabled={tok.length < 24} onClick={() => void call("/tradingos/admin/vortex-token", "PUT", { token: tok }, "Token saved").then((done) => { if (done) setTok(""); })}>Save token</button>
+          {v.token_set && <button className="btn" onClick={() => void call("/tradingos/admin/vortex-token", "DELETE", undefined, "Token cleared")}>Clear token</button>}
+          {ok && <Badge tone="good">{ok}</Badge>}
+        </div>
         {err ? <ApiErrorBanner error={err} /> : null}
       </div>
     </Card>
