@@ -181,8 +181,11 @@ export function GiveawayPage() {
   const stage = useRef<HTMLDivElement>(null);
   const xpEl = useRef<HTMLSpanElement>(null);
 
+  const [shelfErr, setShelfErr] = useState(false);
   const load = useCallback(() => {
-    void memberApi<Shelf>("/members/packs").then(setShelf).catch(() => setShelf(null));
+    if (member === undefined) return;  // wait for the session: the shelf is loaded once, with the member's own numbers
+    setShelfErr(false);
+    void memberApi<Shelf>("/members/packs").then(setShelf).catch(() => setShelfErr(true));
     if (member) void memberApi<Binder>("/members/packs/binder").then(setBinder).catch(() => setBinder(null));
     if (member) void memberApi<Play>("/members/play").then(setPlay).catch(() => setPlay(null));
   }, [member]);
@@ -333,6 +336,13 @@ export function GiveawayPage() {
             </div>
           )}
         </header>
+
+        {!shelf && (shelfErr ? (
+          <div className="site-empty" role="alert">
+            <p>Couldn't load the packs right now.</p>
+            <button type="button" className="site-button" onClick={load}>Try again</button>
+          </div>
+        ) : <p className="site-empty">Loading the packs…</p>)}
 
         {shelf && (
           <div className="gw-shelf" role="listbox" aria-label="Choose a pack">

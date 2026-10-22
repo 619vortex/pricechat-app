@@ -60,7 +60,11 @@ export function WorkerTab() {
   const [reports, setReports] = useState<{ items: Report[]; pages: number } | null>(null);
   const [rpage, setRpage] = useState(1);
   const load = useCallback(() => memberApi<Me>(`/members/workers/me?page=${page}`).then(setMe).catch((e) => setErr(e instanceof Error ? e.message : "Unavailable")), [page]);
-  useEffect(() => { void load(); const id = window.setInterval(() => void load(), 60_000); return () => window.clearInterval(id); }, [load]);
+  useEffect(() => {  // refreshed every minute while the tab is on screen (a background tab asks nothing)
+    void load();
+    const id = window.setInterval(() => { if (document.visibilityState !== "hidden") void load(); }, 60_000);
+    return () => window.clearInterval(id);
+  }, [load]);
   useEffect(() => { void memberApi<{ items: Report[]; pages: number }>(`/members/workers/reports?page=${rpage}`).then(setReports).catch(() => undefined); }, [rpage, me?.today?.status]);
   if (!me) return <p className="site-empty">{err ?? "Loading your work…"}</p>;
   if (!me.roles.includes("WORKER")) return null;

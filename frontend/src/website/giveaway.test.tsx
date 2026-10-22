@@ -50,6 +50,18 @@ describe("Pack Giveaway", () => {
     expect(warning).toContain("don't win real cards or prizes");
     expect(screen.getByRole("button", { name: "Sign in to open packs" })).toBeTruthy();
     expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(calls.filter((c) => c === "GET /api/members/packs")).toHaveLength(1);  // loaded once, after the session is known
+  });
+
+  it("says when the packs couldn't load, with Try again (never a blank page)", async () => {
+    serve({ ...site, "/api/members/session": { signed_in: false, member: null } });  // packs: 404
+    render(<MemoryRouter><GiveawayPage /></MemoryRouter>);
+    await flush();
+    expect(screen.getByRole("alert").textContent).toContain("Couldn't load the packs");
+    routes["/api/members/packs"] = shelf(null);
+    await act(async () => screen.getByRole("button", { name: "Try again" }).click());
+    await flush();
+    expect(screen.getAllByRole("option")).toHaveLength(2);
   });
 
   it("opens a pack: rip, then the cards flip one by one with sounds; a holo shines, the ultra gets the fanfare; then XP", async () => {
