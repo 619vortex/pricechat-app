@@ -2,10 +2,11 @@
 
 Plain CREATE INDEX inside the migration transaction (env.py runs every migration in one transaction, so Postgres'
 CREATE INDEX CONCURRENTLY is not available here); each table is read once to build its index.
+telegram_messages by author is 0089's ix_telegram_messages_author (author_id, chat_id, sent_at), not repeated here.
 ex_orders / perp_orders: the account index gains updated_at, so maker.prune's dead-quote delete is an index range.
 
 Revision ID: 0090_perf_indexes
-Revises: 0087_vpn_adblock
+Revises: 0089_workers_checks
 """
 
 from collections.abc import Sequence
@@ -14,12 +15,11 @@ from alembic import op
 
 
 revision: str = '0090_perf_indexes'
-down_revision: str | None = '0087_vpn_adblock'
+down_revision: str | None = '0089_workers_checks'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 INDEXES = [  # (name, table, columns)
-    ("ix_telegram_messages_author_sent", "telegram_messages", ["author_id", "sent_at"]),
     ("ix_telegram_messages_source_sent", "telegram_messages", ["source_id", "sent_at"]),
     ("ix_social_posts_own_posted", "social_posts", ["platform", "is_own", "posted_at"]),
     ("ix_member_missions_status", "member_missions", ["status"]),

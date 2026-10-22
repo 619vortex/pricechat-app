@@ -125,9 +125,9 @@ def test_perf_indexes_upgrade_and_downgrade(tmp_path: Path) -> None:
         assert indexes(conn, "ex_orders")["ix_ex_orders_account"] == ["account_id", "status", "updated_at"]
         config = alembic_config()
         config.attributes["connection"] = conn
-        command.downgrade(config, "0087_vpn_adblock")
-        assert "ix_telegram_messages_author_sent" not in indexes(conn, "telegram_messages")
+        command.downgrade(config, "0089_workers_checks")
+        assert "ix_telegram_messages_source_sent" not in indexes(conn, "telegram_messages")
         assert indexes(conn, "perp_orders")["ix_perp_orders_account"] == ["account_id", "status"]
         command.upgrade(config, "head")
-        assert "ix_telegram_messages_author_sent" in indexes(conn, "telegram_messages")
+        assert "ix_telegram_messages_source_sent" in indexes(conn, "telegram_messages")
     engine.dispose()

@@ -21,8 +21,7 @@ from app.models.tradingbot import TbEvent
 from app.models.tradingos import TsBookSnapshot, TsDecision, TsLiquidation, TsOiSnapshot, TsSignalIdea
 
 PERF_INDEXES: tuple[Index, ...] = (
-    # members.verify (verified XP, discussion missions), /members/me Telegram activity, crew /start lookups
-    Index("ix_telegram_messages_author_sent", TelegramMessage.author_id, TelegramMessage.sent_at),
+    # (telegram_messages by author_id, for members.verify and /members/me: 0089's ix_telegram_messages_author)
     # trading bot page: the bot's latest signal posts in a source
     Index("ix_telegram_messages_source_sent", TelegramMessage.source_id, TelegramMessage.sent_at),
     # Read & Earn / X feed / missions: Price Chat's own X posts by date (x.own, members.verify, /members/me/x-feed)
