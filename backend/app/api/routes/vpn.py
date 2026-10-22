@@ -71,6 +71,7 @@ class SettingsUpdate(StrictInput):
     enabled: bool | None = None
     min_rank: str | None = Field(None, min_length=1, max_length=16)
     max_devices: int | None = Field(None, ge=1, le=service.MAX_DEVICES_LIMIT)
+    monthly_cap_gb: int | None = Field(None, ge=0, le=service.MAX_CAP_GB)  # per member per month, 0 = unlimited
 
 
 @router.put("/vpn/admin/settings")

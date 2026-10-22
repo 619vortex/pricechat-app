@@ -522,7 +522,7 @@ async def vpn_command(db: Session, client: Any, chat_id: int, user_id: int, word
         if server is None:
             if not online:
                 return "No Kiwi VPN server is online right now. Try again later."
-            server = min(online, key=lambda s: s["load"])
+            server = next((s for s in online if s.get("recommended")), None) or min(online, key=lambda s: (s["load"], s["id"]))
         if LIMITS["vpn_device"].hit(str(m.id)) is not None:
             return "Too many new devices. Please wait a few minutes."
         try:
@@ -554,8 +554,12 @@ async def vpn_command(db: Session, client: Any, chat_id: int, user_id: int, word
             lines.append("No devices yet.")
         lines.append(f"{len(view['devices'])} of {view['max_devices']} devices.")
         if view["servers"]:
-            lines.append("Servers: " + ", ".join(f"{s['id']} {esc(s['name'])}{'' if s['online'] else ' (offline)'}" for s in view["servers"]))
-        lines.append("/vpn add phone (least busy server) · /vpn add laptop 2 (server 2)\n/vpn delete 3 · Get the free WireGuard app, "
+            lines.append("Servers: " + ", ".join(f"{s['id']} {esc(s['name'])}{'' if s['online'] else ' (offline)'}{' (recommended)' if s.get('recommended') else ''}"
+                                               for s in view["servers"]))
+        use = view.get("usage") or {}
+        if use.get("paused_until"):
+            lines.append(f"⏸ Paused: you've used this month's data. It resumes on {use['paused_until'][:10]} (UTC).")
+        lines.append("/vpn add phone (recommended server) · /vpn add laptop 2 (server 2)\n/vpn delete 3 · Get the free WireGuard app, "
                      "then import the file I send.")
     return "\n".join(lines)
 
