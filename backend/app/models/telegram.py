@@ -34,6 +34,7 @@ class TelegramMessage(IdMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("chat_id", "message_id"),
         Index("ix_telegram_messages_chat_sent", "chat_id", "sent_at"),
+        Index("ix_telegram_messages_author", "author_id", "chat_id", "sent_at"),  # one member's messages (worker engagement)
     )
 
     source_id: Mapped[int] = mapped_column(

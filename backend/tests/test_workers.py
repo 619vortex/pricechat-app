@@ -137,7 +137,7 @@ def test_existing_members_bots_and_double_credit_are_refused(db: Session) -> Non
     assert db.scalar(select(WkCredit).where(WkCredit.tg_user_id == 303)).worker_id == w2.id  # one worker, ever
 
 
-def test_in_the_group_but_join_unseen_waits_for_a_manager_and_joins_are_idempotent(db: Session) -> None:
+def test_in_the_group_but_join_unseen_closes_after_a_week_and_joins_are_idempotent(db: Session) -> None:
     w, _, _ = setup(db)
     q = kiwi(db, 1, "404")  # a Passport member whose linked Telegram is id 404, @quiet_one
     li = db.scalar(select(LinkedIdentity).where(LinkedIdentity.member_id == q.id, LinkedIdentity.platform == "telegram"))
@@ -147,7 +147,12 @@ def test_in_the_group_but_join_unseen_waits_for_a_manager_and_joins_are_idempote
     assert s.tg_user_id == 404  # resolved through a Passport-linked Telegram account
     run(db, {404})
     db.refresh(s)
-    assert s.status == "SUBMITTED" and "manager can review" in s.evidence["note"]
+    assert s.status == "SUBMITTED" and "can't be verified" in s.evidence["note"]
+    s.created_at = utcnow() - timedelta(days=8)  # nothing can change it any more: it closes instead of waiting forever
+    db.commit()
+    run(db, {404})
+    db.refresh(s)
+    assert s.status == "REJECTED" and "never saw them join" in s.reject_reason
     join(db, 505, "twice", key="k1")
     join(db, 505, "twice", key="k1")
     assert len(db.scalars(select(WkJoin).where(WkJoin.tg_user_id == 505)).all()) == 1
@@ -248,3 +253,75 @@ def test_rows_stuck_in_submitted_do_not_starve_newer_submissions(db: Session) ->
     db.refresh(fresh)
     assert fresh.status == "VERIFIED"
     assert all(s.status == "SUBMITTED" for s in stuck)
+
+
+
+class CountingBot(Bot):
+    def __init__(self, inside: set[int]) -> None:
+        super().__init__(inside)
+        self.asked: list[int] = []
+
+    async def get_chat_member(self, chat: Any, uid: int) -> dict[str, Any]:
+        self.asked.append(uid)
+        return await super().get_chat_member(chat, uid)
+
+
+def test_still_member_check_rotates_through_every_recent_invite(db: Session) -> None:
+    w, _, _ = setup(db)
+    now = utcnow()
+    rows = [WkSubmission(worker_id=w.id, job_type="TELEGRAM_INVITES", tg_user_id=9000 + i, source="form", status="VERIFIED",
+                         verified_at=now - timedelta(days=1), joined_at=now - timedelta(days=1), evidence={}) for i in range(45)]
+    db.add_all(rows)
+    db.commit()
+    bot = CountingBot(set())
+    asyncio.run(wk.verify(db, bot))
+    asyncio.run(wk.verify(db, bot))  # 40 per run: the second run must reach the 5 the first one didn't
+    assert set(bot.asked) == {r.tg_user_id for r in rows}
+    assert all(r.still_member is False and r.member_checked_at is not None for r in rows)
+
+
+def test_engagement_is_counted_per_person_since_their_join_in_one_query(db: Session) -> None:
+    from sqlalchemy import event
+
+    w, _, _ = setup(db)
+    db.add(TelegramSource(chat_id=CHAT, display_name="PC", chat_type="supergroup", username="thepricechat"))
+    db.flush()
+    src = db.scalar(select(TelegramSource.id))
+    now = utcnow()
+    early = WkSubmission(worker_id=w.id, job_type="TELEGRAM_INVITES", tg_user_id=7101, source="form", status="VERIFIED",
+                         verified_at=now - timedelta(days=5), joined_at=now - timedelta(days=5), evidence={})
+    late = WkSubmission(worker_id=w.id, job_type="TELEGRAM_INVITES", tg_user_id=7102, source="form", status="APPROVED",
+                        verified_at=now - timedelta(hours=1), joined_at=now - timedelta(hours=2), evidence={})
+    db.add_all([early, late])
+    msgs = [(7101, 4 * 24 * 60, "hello all"), (7101, 60, "still here"), (7102, 3 * 60, "before my join"), (7102, 30, "hi"),
+            (7102, 20, "/start"), (7103, 10, "not invited")]
+    for n, (author, minutes_ago, text) in enumerate(msgs, 1):
+        db.add(TelegramMessage(source_id=src, chat_id=CHAT, message_id=n, author_id=author, sent_at=now - timedelta(minutes=minutes_ago), text=text))
+    db.commit()
+
+    selects: list[str] = []
+    listener = lambda *a: selects.append(a[2]) if "telegram_messages" in a[2] else None  # noqa: E731
+    event.listen(db.get_bind(), "before_cursor_execute", listener)
+    try:
+        assert wk.refresh_engagement(db) == 2
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", listener)
+    assert (early.engagement, late.engagement) == (2, 1)  # 7102's message before joining and the command don't count
+    assert len(selects) == 1
+
+
+def test_a_form_submission_racing_a_link_join_does_not_fail_the_update(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    w, w2, _ = setup(db)
+    real = wk.active_assignment
+
+    def racing(db_: Session, member_id: int, job_type: str = "TELEGRAM_INVITES"):  # type: ignore[no-untyped-def]
+        # w2's form submission of the same @username commits between _attributed's check and its insert
+        db_.add(WkSubmission(worker_id=w2.id, job_type="TELEGRAM_INVITES", username="racer_one", source="form", evidence={}))
+        db_.flush()
+        return real(db_, member_id, job_type)
+
+    monkeypatch.setattr(wk, "active_assignment", racing)
+    row = wk._attributed(db, w.id, 7201, "racer_one", "bot_start", {})
+    db.commit()
+    assert row is not None and row.username is None and row.tg_user_id == 7201  # the numeric id still decides the credit
+    assert db.scalar(select(WkSubmission.worker_id).where(WkSubmission.username == "racer_one")) == w2.id
