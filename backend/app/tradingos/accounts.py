@@ -40,7 +40,7 @@ def pos_out(p: TrPosition) -> dict[str, Any]:
     return {"id": p.id, "signal_id": p.signal_id, "mode": p.mode, "coin": p.coin, "side": p.side, "status": p.status, "size": p.size,
             "entry_px": p.entry_px, "leverage": p.leverage, "stop": p.stop, "tp1": p.tp1, "tp2": p.tp2, "tp1_done": p.tp1_done,
             "max_loss_usd": p.max_loss_usd, "via": p.via, "exit_px": p.exit_px, "realized_pnl": round(p.realized_pnl, 4), "fees": round(p.fees, 4),
-            "close_reason": p.close_reason, "error": p.error, "opened_at": _iso(p.created_at), "closed_at": _iso(p.closed_at)}
+            "close_reason": None if execution.closing(p) else p.close_reason, "error": p.error, "opened_at": _iso(p.created_at), "closed_at": _iso(p.closed_at)}
 
 
 def state(db: Session, member: Member) -> dict[str, Any]:

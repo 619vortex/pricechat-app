@@ -16,10 +16,11 @@ Safety rules enforced here:
 
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -592,6 +593,39 @@ def _mine(db: Session, member: Member, pos_id: int) -> tuple[TrAccount, TrPositi
     return acc, pos
 
 
+CLOSE_LEASE = "closing:"  # in close_reason while a close is under way (an open position has none): "closing:<unix time>"
+CLOSE_LEASE_SECONDS = 180  # a close cut off midway (a crash) frees the position after this long
+
+
+def closing(pos: TrPosition) -> bool:
+    return (pos.close_reason or "").startswith(CLOSE_LEASE)
+
+
+def _claim_close(db: Session, pos: TrPosition) -> str:
+    """Claim the position for one close (a close from Telegram and one from the website can't both run) with one atomic
+    UPDATE, committed at once: the exchange calls that follow never run inside a write transaction (on SQLite that would
+    hold the database's only write lock for every other writer)."""
+    now = int(time.time())
+    lease, stale = f"{CLOSE_LEASE}{now}", f"{CLOSE_LEASE}{now - CLOSE_LEASE_SECONDS}"
+    won = db.execute(update(TrPosition).where(
+        TrPosition.id == pos.id, TrPosition.status.in_(CLOSABLE), TrPosition.size > 0,
+        or_(TrPosition.close_reason.is_(None), ~TrPosition.close_reason.like(f"{CLOSE_LEASE}%"), TrPosition.close_reason < stale),
+    ).values(close_reason=lease).execution_options(synchronize_session=False)).rowcount
+    db.commit()
+    if won != 1:
+        raise TradeError("This position is already being closed.")
+    db.refresh(pos)  # its size/status as of the claim (another close may have just finished)
+    return lease
+
+
+def _release_close(db: Session, pos: TrPosition, lease: str) -> None:
+    """Drop the claim (unless the close booked its own close reason)."""
+    db.execute(update(TrPosition).where(TrPosition.id == pos.id, TrPosition.close_reason == lease)
+               .values(close_reason=None).execution_options(synchronize_session=False))
+    db.commit()
+    db.refresh(pos)
+
+
 def _seq(db: Session, pos: TrPosition) -> int:
     return int(db.scalar(select(func.count()).select_from(TrOrder).where(TrOrder.position_id == pos.id)) or 0)
 
@@ -621,6 +655,19 @@ def close_position(db: Session, member: Member, pos_id: int, ex: Any = None, fra
     acc, pos = _mine(db, member, pos_id)
     if pos.status == "PROTECTION_FAILED" and fraction < 1:
         raise TradeError("This position has no confirmed stop-loss: close 100%.")
+    lease = _claim_close(db, pos)
+    try:
+        return _close(db, member, acc, pos, ex, fraction)
+    except BaseException:
+        db.rollback()  # what was booked is committed; anything half-done is not
+        raise
+    finally:
+        _release_close(db, pos, lease)
+
+
+def _close(db: Session, member: Member, acc: TrAccount, pos: TrPosition, ex: Any, fraction: float) -> TrPosition:
+    """close_position, once the position is claimed. Every exchange call runs outside a write transaction: each answer is
+    committed before the next call."""
     m = market.data().market(pos.coin)
     try:
         ex = ex or executor(db, acc, pos.coin, pos.mode)
@@ -649,6 +696,7 @@ def close_position(db: Session, member: Member, pos_id: int, ex: Any = None, fra
                 return pos
         raise TradeError(f"Close not filled ({res.error or res.status}). The position and its stop-loss are unchanged.")
     _settle(pos, res.avg_px or mark, "manual_close", res.filled)
+    db.commit()  # the fill is booked before the stop and targets are touched
     if pos.status == "CLOSED":
         left = _cancel(ex, pos, _resting(db, pos, "sl", "tp1", "tp2"))
         if left:
@@ -702,6 +750,7 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
     cl = xch.cloid_for(acc.id, pos.signal_id, "sl", pos.id, _seq(db, pos))
     sl = ex.trigger(pos.coin, not long, pos.size, risk.round_px(pos.stop, sz_decimals), "sl", cl)
     _order(db, pos, "sl", not long, pos.size, pos.stop, True, sl, cl)
+    db.commit()  # each order is on record before the next exchange call (and no write lock is held during it)
     if sl.status == "RESTING":
         _cancel(ex, pos, old_sl)
     else:
@@ -713,6 +762,7 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
             continue
         cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
         _order(db, pos, kind, not long, size, px, True, ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "tp", cl), cl)
+        db.commit()
 
 
 def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | None = None, tp1: float | None = None,
@@ -722,6 +772,8 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
     acc, pos = _mine(db, member, pos_id)
     if pos.status != "OPEN":
         raise TradeError("This position has no confirmed stop-loss: close it instead.")
+    if closing(pos) and not dry_run:
+        raise TradeError("This position is being closed right now.")
     long = pos.side == "LONG"
     m = market.data().market(pos.coin)
     ex = ex or executor(db, acc, pos.coin, pos.mode)
@@ -769,6 +821,7 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
             cl = xch.cloid_for(acc.id, pos.signal_id, "sl", pos.id, _seq(db, pos))
             r = ex.trigger(pos.coin, not long, pos.size, stop, "sl", cl)
             _order(db, pos, "sl", not long, pos.size, stop, True, r, cl)
+            db.commit()  # on record before the next exchange call, which then runs without holding the write lock
             if r.status != "RESTING":
                 raise TradeError(f"Hyperliquid refused the new stop ({r.error or r.status}). Your previous stop-loss is unchanged.")
             _cancel(ex, pos, old)
@@ -783,6 +836,7 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
             cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
             r = ex.trigger(pos.coin, not long, size, val, "tp", cl)
             _order(db, pos, kind, not long, size, val, True, r, cl)
+            db.commit()
             if r.status != "RESTING":
                 raise TradeError(f"Hyperliquid refused the new {kind.upper()} ({r.error or r.status}). The previous one is unchanged.")
             _cancel(ex, pos, old)
