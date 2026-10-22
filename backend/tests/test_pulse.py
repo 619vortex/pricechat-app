@@ -1,6 +1,8 @@
 """Market Pulse: one combined, budget-checked X search; spam / gaming filtered; duplicates collapsed; tabs; cooldown; the
 X budget guard is respected; posts never become sales. X payloads are TEST FIXTURES."""
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -9,12 +11,13 @@ from sqlalchemy.orm import Session
 from app.models.pokemon import PokemonPulsePost, PokemonSale
 from app.pokemon import pulse
 
+DAY = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()  # yesterday: always inside pulse.KEEP_DAYS
 USERS = [{"id": "u1", "username": "VintageSlabs", "name": "Vintage Slabs", "profile_image_url": "https://pbs.test/a.jpg", "verified": False},
          {"id": "u2", "username": "spammer", "name": "Free Stuff"}, {"id": "u3", "username": "gamer", "name": "Gamer"}]  # TEST FIXTURES
 
 
 def tweet(i: str, text: str, author: str = "u1", likes: int = 0, media: bool = False) -> dict:  # type: ignore[type-arg]
-    t = {"id": i, "text": text, "author_id": author, "created_at": f"2026-10-08T0{i[-1]}:00:00.000Z", "lang": "en",
+    t = {"id": i, "text": text, "author_id": author, "created_at": f"{DAY}T0{i[-1]}:00:00.000Z", "lang": "en",
          "public_metrics": {"like_count": likes, "retweet_count": 1, "reply_count": 0, "quote_count": 0}}
     if media:
         t["attachments"] = {"media_keys": ["m1"]}
