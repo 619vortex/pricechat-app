@@ -97,7 +97,7 @@ describe("Earn › Arbitrage", () => {
     expect(screen.getByTitle("Graduation Run").textContent).toBe("🍰");
   });
 
-  it("Lunch Bot's scoreboard: PAPER, per-strategy cards with win rate, P&L, trades, best / worst, a cumulative line and the gap", () => {
+  it("Lunch Bot's scoreboard: PAPER, per-strategy cards with win rate, P&L, trades, best / worst, a cumulative line (gap stat hidden for now)", () => {
     const series = (cum: number[]): SeriesPoint[] => cum.map((c, i) => ({ day: `2026-10-${String(i + 1).padStart(2, "0")}`, trades: 1, wins: 0, pnl_sol: 0, cumulative: c }));
     const st = (pnl: number, wr: number, best: number, worst: number) => ({ trades: 12, wins: 5, win_rate: wr, pnl_sol: pnl, avg_pnl_sol: null, best_sol: best,
       worst_sol: worst, by_exit: {}, open: 0, open_value_sol: 0, open_cost_sol: 0 });
@@ -115,8 +115,7 @@ describe("Earn › Arbitrage", () => {
     const line = screen.getByRole("img", { name: /Graduation Run: \+0\.080 SOL over 30 days/ });
     expect(line.getAttribute("class")).toContain("is-up");
     expect(screen.getByRole("img", { name: /Starter: −0\.050 SOL/ }).getAttribute("class")).toContain("is-down");
-    expect(board.textContent).toMatch(/median \+0\.4% over the last 7 days \(6\), −0\.8% all time \(40; avg −1\.2%\)/);
-    expect(board.textContent).toContain("about 1.55%");
+    expect(board.textContent).not.toContain("median");  // SHOW_GAP_STAT is off until the pool data is trusted
   });
 
   it("the P&L line is an inline SVG polyline scaled to include zero, and says so when there's nothing to draw", () => {
