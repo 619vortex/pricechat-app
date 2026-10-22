@@ -9,7 +9,9 @@
 
 import asyncio
 import logging
+import statistics
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -23,6 +25,11 @@ from app.models.routing import ScheduledJob
 from app.services.activity import ActivityLogger, redact_text
 
 logger = logging.getLogger(__name__)
+
+# Slow-run detection (read by the ops watchdog, app/observability.py): a successful run taking > SLOW_FACTOR x the job's
+# median of its last DURATION_HISTORY successful runs (at least SLOW_MIN_SAMPLES of them, and >= SLOW_MIN_MS so a 20 ms
+# job taking 80 ms is not news), SLOW_RUNS times in a row. In memory only: a restart re-learns the median.
+DURATION_HISTORY, SLOW_MIN_SAMPLES, SLOW_FACTOR, SLOW_RUNS, SLOW_MIN_MS = 20, 5, 3.0, 3, 2000.0
 
 
 class JobSkipped(Exception):
@@ -84,6 +91,25 @@ class Scheduler:
         self._running: set[asyncio.Task[JobOutcome]] = set()
         # request_run() for a job while it runs (a stage chaining itself: "more may be waiting"): applied when it finishes
         self._chained: dict[str, datetime] = {}
+        self.last_tick_at: datetime | None = None  # the loop's last pass (deep health: is the scheduler alive?)
+        self.durations: dict[str, deque[float]] = {}  # recent successful run times (ms) per job
+        self.slow: dict[str, dict[str, float]] = {}  # job -> {"streak", "last_ms", "median_ms"} while its runs are slow
+
+    def note_duration(self, name: str, duration_ms: float) -> None:
+        """Remember a successful run's time and keep the slow-run streak (SLOW_FACTOR x the recent median)."""
+        hist = self.durations.setdefault(name, deque(maxlen=DURATION_HISTORY))
+        if len(hist) >= SLOW_MIN_SAMPLES:
+            median = statistics.median(hist)
+            if duration_ms >= SLOW_MIN_MS and duration_ms > SLOW_FACTOR * median:
+                prev = self.slow.get(name, {}).get("streak", 0)
+                self.slow[name] = {"streak": prev + 1, "last_ms": duration_ms, "median_ms": median}
+            else:
+                self.slow.pop(name, None)
+        hist.append(duration_ms)
+
+    def slow_jobs(self) -> dict[str, dict[str, float]]:
+        """Jobs whose last SLOW_RUNS (or more) successful runs were all slow."""
+        return {n: v for n, v in self.slow.items() if v["streak"] >= SLOW_RUNS}
 
     # --- state ------------------------------------------------------------------------
 
@@ -202,6 +228,8 @@ class Scheduler:
                 logger.warning("Job %s failed: %s", name, error, exc_info=not _expected(exc))
 
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        if status == "success":
+            self.note_duration(name, duration_ms)
         previous, failures = await asyncio.to_thread(self._record, spec, status, result, error, duration_ms, trigger)
         if self.alert is not None and status in ("success", "failed"):
             try:
@@ -284,6 +312,7 @@ class Scheduler:
         while True:
             try:
                 await self.tick()
+                self.last_tick_at = utcnow()
             except Exception:  # noqa: BLE001
                 logger.exception("Scheduler tick failed")
             await asyncio.sleep(self.tick_seconds)
