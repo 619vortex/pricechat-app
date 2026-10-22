@@ -76,6 +76,8 @@ describe("header account link", () => {
     expect(login.textContent).toBe("Login");
     expect(login.getAttribute("href")).toBe("/website/join");
     expect(container.querySelector(".site-joincta .site-button")!.textContent).toBe("Join Price Chat");
+    // a first-time visitor reads what joining gets them, right by the button
+    expect(container.querySelector(".site-joincta-note")!.textContent).toContain("every rank unlocks a reward");
   });
 
   it("shows the member's Kiwi, username and rank when signed in", async () => {
@@ -87,6 +89,7 @@ describe("header account link", () => {
     expect(chip.textContent).toContain("Scout Kiwi");
     expect(chip.querySelector("img")!.getAttribute("src")).toBe("/brand/kiwi.webp");
     expect(container.querySelector(".site-login")).toBeNull();
+    expect(container.querySelector(".site-joincta-note")).toBeNull();  // members aren't sold what they have
   });
 
   it("puts the community call to action after the story, just before the footer", async () => {

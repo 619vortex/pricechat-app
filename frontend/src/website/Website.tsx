@@ -797,7 +797,7 @@ const LADDER: { key: string; name: string; size: number; art: import("./members"
 
 /** The community sign-up: one identity, verified participation, a Kiwi that grows with you. */
 function JoinCta({ signedIn }: { signedIn: boolean }) {
-  const { joinTitle, joinLines, joinCta } = site.community;
+  const { joinTitle, joinLines, joinCta, joinNote } = site.community;
   return (
     <div className="site-wrap">
       <div className="site-joincta site-reveal">
@@ -816,6 +816,7 @@ function JoinCta({ signedIn }: { signedIn: boolean }) {
               <span key={l}>{l}</span>
             ))}
           </p>
+          {!signedIn && <p className="site-joincta-note">{joinNote}</p>}
         </div>
         <div className="site-joincta-actions">
           <a className="site-button" href={signedIn ? "/passport" : "/website/join"}

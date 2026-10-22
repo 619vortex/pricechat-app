@@ -845,6 +845,7 @@ a:hover .site-worth-subject { background-size: 100% 1.5px; }
 .site-joincta-text h3 { font-size: clamp(30px, 3.4vw, 48px); line-height: 0.95; }
 .site-joincta-text p { margin-top: 12px; color: var(--site-soft); font-size: 17px; }
 .site-joincta-text p span + span::before { content: " "; }
+.site-joincta-text .site-joincta-note { margin-top: 8px; color: var(--site-muted); font-size: 15px; line-height: 1.45; }
 .site-joincta-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .site-vpnperk {
   display: grid;
