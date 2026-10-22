@@ -19,6 +19,7 @@ from app.vault import cards, service
 from app.vault.sync import sync_ebay_seller
 
 router = APIRouter(tags=["vault"])
+MAX_PRICE = 100_000_000  # dollars: a bound for price inputs (inf / 1e300 would overflow the cents conversion)
 Sort = Literal["featured", "newest", "price_asc", "price_desc", "year_asc", "year_desc"]
 
 
@@ -44,7 +45,7 @@ def vault_home(db: DbSession, runtime: Runtime) -> dict[str, Any]:
 @router.get("/members/vault/listings")
 def vault_browse(db: DbSession, runtime: Runtime, q: str = Query("", max_length=80), pokemon: str | None = Query(None, max_length=60),
                  set_name: str | None = Query(None, alias="set", max_length=80), year: int | None = Query(None, ge=1990, le=2100),
-                 min_price: float | None = Query(None, ge=0), max_price: float | None = Query(None, ge=0), sort: Sort = "featured",
+                 min_price: float | None = Query(None, ge=0, le=MAX_PRICE), max_price: float | None = Query(None, ge=0, le=MAX_PRICE), sort: Sort = "featured",
                  sold: bool = False, page: int = Query(1, ge=1, le=500)) -> dict[str, Any]:
     return service.browse(db, runtime.settings, q=q, pokemon=pokemon, set_name=set_name, year=year, min_price=_cents(min_price),
                           max_price=_cents(max_price), sort=sort, include_ended=sold, page=page)
@@ -232,7 +233,7 @@ class CardStatusIn(StrictInput):
     field: Literal["acquisition", "custody", "nft"]
     status: str = Field(..., max_length=20)
     note: str = Field("", max_length=2000)
-    acquisition_cost: float | None = Field(None, ge=0)
+    acquisition_cost: float | None = Field(None, ge=0, le=MAX_PRICE)
     acquisition_currency: str | None = Field(None, min_length=3, max_length=3)
     acquisition_ref: str | None = Field(None, max_length=80)
     custody_location: str | None = Field(None, max_length=120)

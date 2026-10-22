@@ -295,3 +295,8 @@ def test_paper_exchange_is_retired(client: TestClient, db: Session) -> None:
     r = client.get("/api/members/exchange/markets")
     assert r.status_code == 410 and "/pokemon" in r.json()["detail"]
     assert client.get("/api/members/exchange/perps").status_code == 410
+
+
+def test_absurd_price_filters_are_refused_not_a_server_error(client: TestClient) -> None:
+    for q in ("min_price=inf", "max_price=1e300", "min_price=nan"):
+        assert client.get(f"/api/members/vault/listings?{q}").status_code == 422, q
