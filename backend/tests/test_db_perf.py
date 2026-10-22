@@ -229,3 +229,27 @@ def test_market_lists_value_every_listing_with_one_pricer(db: Session) -> None:
     with statements(db) as sql:
         market.home(db, None, __import__("app.config.settings", fromlist=["get_settings"]).get_settings())
     assert len(sql) < 40, len(sql)
+
+
+def test_member_missions_read_progress_and_rules_once(db: Session) -> None:
+    """The missions list reads the member's progress rows and the XP rules once, not once per mission."""
+    from app.members import missions
+    from app.models.members import MemberMission, Mission
+
+    m = _member(db, "missionfan")
+    now = utcnow()
+    for i in range(12):
+        db.add(Mission(key=f"perf-{i}", kind="manual", cadence=("daily", "weekly", "once")[i % 3], title=f"Mission {i}", description="d",
+                       platform="website", xp=5, verification="verified", status="active", priority=i))
+    db.commit()
+    ms = db.scalars(select(Mission).where(Mission.key.like("perf-%")).order_by(Mission.id)).all()
+    for mi in ms[:6]:
+        db.add(MemberMission(member_id=m.id, mission_id=mi.id, period=missions.period_for(mi.cadence, now),
+                             status="completed" if mi.priority % 2 else "pending", progress=1))
+    db.commit()
+    with statements(db) as sql:
+        out = {x["key"]: x for x in missions.for_member(db, m)}
+    assert [out[f"perf-{i}"]["status"] for i in range(12)] == ["pending", "completed"] * 3 + ["available"] * 6
+    assert len([x for x in out.values()]) >= 12
+    assert sum("FROM member_missions" in q for q in sql) <= 3, sum("FROM member_missions" in q for q in sql)
+    assert sum("FROM xp_rules" in q for q in sql) <= 2
