@@ -382,3 +382,33 @@ def test_admin_missions_create_pause_and_guardrails(mc: TestClient, db: Session)
     assert actions.count("mission_changed") == 2 and "mission_created" in actions
     listing = mc.get("/api/members-admin/missions").json()
     assert listing["mission_daily_cap"] == 30 and {"completed", "xp_issued", "pending", "verification_label"} <= set(listing["missions"][0])
+
+
+def test_a_parallel_mission_row_keeps_the_callers_work(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two requests creating the same member-mission row: the loser reuses the winner's row, and nothing else the caller
+    did in the transaction (here an XP award) is rolled back with it."""
+    m = member(db)
+    missions.generate(db)
+    mission = db.scalar(select(Mission).where(Mission.key == "daily:visit"))
+    period = missions.period_for(mission.cadence)
+    first = missions._row(db, m, mission, period)
+    db.commit()
+    m.display_name = "kept"
+    db.flush()
+    assert ledger.award(db, m, "website.login", "day:race", commit=False).awarded
+    real_scalar = db.scalar
+
+    def scalar(stmt, *a, **k):  # type: ignore[no-untyped-def]
+        if "member_missions" in str(stmt) and not getattr(scalar, "missed", False):
+            scalar.missed = True  # type: ignore[attr-defined]
+            return None  # the lookup misses: a parallel request created the row after it
+        return real_scalar(stmt, *a, **k)
+
+    monkeypatch.setattr(db, "scalar", scalar)
+    again = missions._row(db, m, mission, period)
+    monkeypatch.undo()
+    assert getattr(scalar, "missed", False) and again.id == first.id
+    db.commit()
+    db.expire_all()
+    assert db.scalar(select(ReputationEvent.id).where(ReputationEvent.member_id == m.id, ReputationEvent.source_ref == "day:race"))
+    assert db.get(Member, m.id).display_name == "kept"

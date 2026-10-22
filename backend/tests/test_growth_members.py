@@ -106,6 +106,7 @@ def test_self_referral_and_repeat_referrals_are_refused(db: Session) -> None:
     db.expire_all()
     assert db.get(Referral, ref2.id).status == "rejected" and db.get(Referral, ref2.id).reason == "already_claimed"
     assert len(events(db, inviter, "referral.qualified")) == 1
+    assert events(db, again, "referral.welcome") == []  # a rejected referral never pays the welcome bonus either
 
 
 def test_referral_daily_limit_waits_and_same_browser_pattern_is_flagged(db: Session) -> None:
@@ -121,6 +122,7 @@ def test_referral_daily_limit_waits_and_same_browser_pattern_is_flagged(db: Sess
     db.expire_all()
     statuses = sorted(r.status for r in db.scalars(select(Referral).where(Referral.referrer_id == inviter.id)))
     assert statuses == ["joined", "joined", "qualified"]  # the others wait for tomorrow's sweep
+    assert sum(len(events(db, f, "referral.welcome")) for f in friends) == 1  # and so do their welcome bonuses
     from app.models.members import ModerationFlag
 
     assert db.scalar(select(ModerationFlag.kind).where(ModerationFlag.member_id == inviter.id)) == "referral_pattern"
@@ -160,6 +162,48 @@ def test_referral_leaderboard_counts_qualified_invites(mc: TestClient, db: Sessi
     rows = mc.get("/api/members/leaderboard", params={"metric": "referrals"}).json()["rows"]
     assert [(r["username"], r["value"]) for r in rows] == [("bravo", 2), ("alpha", 1)]
     assert leaderboard.position(db, b, "all", "referrals") == {"position": 1, "value": 2}
+    with _statements(db) as sql:
+        leaderboard.board(db, "all", "referrals", 50, None)
+    assert sum("FROM ranks" in q for q in sql) <= 2  # the catalog check + one read for all rows, not one per row
+
+
+class _statements:
+    """Collect the SQL a block runs."""
+
+    def __init__(self, db: Session) -> None:
+        self.engine, self.sql = db.get_bind(), []
+
+    def _on(self, _conn, _cursor, statement, *_a):  # type: ignore[no-untyped-def]
+        self.sql.append(statement)
+
+    def __enter__(self) -> list[str]:
+        from sqlalchemy import event
+
+        event.listen(self.engine, "before_cursor_execute", self._on)
+        return self.sql
+
+    def __exit__(self, *_a) -> None:  # type: ignore[no-untyped-def]
+        from sqlalchemy import event
+
+        event.remove(self.engine, "before_cursor_execute", self._on)
+
+
+def test_referral_sweep_skips_friends_who_never_did_anything(db: Session) -> None:
+    inviter = new_member(db, "patient")
+    code = referrals.code_for(db, inviter)
+    idle = [new_member(db, f"idle{i}") for i in range(15)]
+    for f in idle:
+        referrals.attribute(db, f, code, browser=None, browser_member=None)
+    db.commit()
+    with _statements(db) as sql:
+        assert referrals.sweep(db) == 0
+    assert sum("FROM reputation_events" in q for q in sql) <= 1  # one query, not one per waiting referral
+    referrals.program(db).referral_daily_limit = 0  # a friend acts while the inviter is at today's limit...
+    _link(db, idle[0], "telegram", "31337")
+    db.expire_all()
+    assert db.scalar(select(Referral.status).where(Referral.referred_id == idle[0].id)) == "joined"
+    referrals.program(db).referral_daily_limit = 5  # ...and the next sweep pays it
+    assert referrals.sweep(db) == 1
 
 
 # --- Telegram announcement channel ---------------------------------------------------------------------------------

@@ -11,13 +11,13 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
 from app.members import xp as ledger
 from app.models.enums import Platform
-from app.models.members import LinkedIdentity, Member
+from app.models.members import LinkedIdentity, Member, ReputationEvent
 from app.models.social import SocialPost
 from app.models.social_intel import SocialProfile
 from app.models.telegram import TelegramMessage, TelegramSource
@@ -68,23 +68,37 @@ def daily_breakdown(msgs: list[TelegramMessage]) -> dict[str, dict[str, Any]]:
     return days
 
 
+def _paid_refs(db: Session, member: Member, event_types: tuple[str, ...], since: datetime) -> set[tuple[str, str]]:
+    """(event type, source ref) already in the member's ledger since `since`: the job re-reads LOOKBACK days of activity
+    every run, and what was paid is skipped here instead of being sent to the ledger (and refused) again."""
+    return {(t, r) for t, r in db.execute(select(ReputationEvent.event_type, ReputationEvent.source_ref).where(
+        ReputationEvent.member_id == member.id, ReputationEvent.event_type.in_(event_types),
+        ReputationEvent.day >= ledger.day_of(since)))}
+
+
 def telegram_participation(db: Session) -> dict[str, int]:
     """telegram.first_participation (+3, once a day) and telegram.discussion (+1 per further real message, capped)."""
     out = {"members": 0, "awarded": 0, "flags": 0}
+    since = utcnow() - LOOKBACK
     for ident, member in _identities(db, "telegram"):
         out["members"] += 1
-        for day, info in daily_breakdown(telegram_messages(db, ident, utcnow() - LOOKBACK)).items():
+        paid = _paid_refs(db, member, ("telegram.active_day", "telegram.first_participation", "telegram.discussion"), since)
+        for day, info in daily_breakdown(telegram_messages(db, ident, since)).items():
             repeats = max(info["texts"].values(), default=0)
             if repeats >= REPEAT_FLAG_AT:
                 if ledger.raise_flag(db, member, "repeated_messages", f"Sent the same Telegram message {repeats} times on {day}",
                                      {"day": day, "count": repeats}):
                     out["flags"] += 1
                 continue  # a spamming day earns nothing
-            if len(info["eligible"]) >= 3:  # sustained participation: an active community day (+2)
+            if len(info["eligible"]) >= 3 and ("telegram.active_day", f"tg-day:{day}") not in paid:  # an active community day (+2)
                 r = ledger.award(db, member, "telegram.active_day", f"tg-day:{day}", occurred_at=info["eligible"][2].sent_at,
                                  reason=f"Active community day on {day}", commit=False)
                 out["awarded"] += int(r.awarded)
             for i, m in enumerate(info["eligible"]):
+                if i == 0 and ("telegram.first_participation", f"tg-first:{day}") in paid:
+                    continue
+                if i > 0 and ("telegram.discussion", f"tg-msg:{m.chat_id}:{m.message_id}") in paid:
+                    continue
                 if i == 0:
                     r = ledger.award(db, member, "telegram.first_participation", f"tg-first:{day}", occurred_at=m.sent_at,
                                      reason=f"Took part in the Price Chat Telegram on {day}", commit=False)
@@ -109,12 +123,16 @@ def telegram_message_xp(db: Session) -> dict[str, int]:
 
     ensure_catalog(db)  # the rule exists before the first message pays
     out = {"members": 0, "awarded": 0}
+    since = utcnow() - LOOKBACK
     for ident, member in _identities(db, "telegram"):
         out["members"] += 1
-        for info in daily_breakdown(telegram_messages(db, ident, utcnow() - LOOKBACK)).values():
+        paid = _paid_refs(db, member, ("telegram.message",), since)
+        for info in daily_breakdown(telegram_messages(db, ident, since)).values():
             if max(info["texts"].values(), default=0) >= REPEAT_FLAG_AT:
                 continue
             for m in info["each"]:
+                if ("telegram.message", f"tg-each:{m.chat_id}:{m.message_id}") in paid:
+                    continue
                 r = ledger.award(db, member, "telegram.message", f"tg-each:{m.chat_id}:{m.message_id}", occurred_at=m.sent_at,
                                  reason="Sent a message in the Price Chat Telegram", source="tgchat", commit=False)
                 out["awarded"] += int(r.awarded)
@@ -146,8 +164,10 @@ def x_interactions(db: Session) -> dict[str, int]:
         if profile is None or profile.is_self:
             continue
         since = max(ident.verified_at, utcnow() - LOOKBACK)
+        paid = _paid_refs(db, member, ("x.reply_pricechat", "x.mention_pricechat"), since)
         for p in db.scalars(select(SocialPost).where(SocialPost.platform == Platform.X, SocialPost.author_profile_id == profile.id,
-                                                    SocialPost.is_own.is_(False))):
+                                                    SocialPost.is_own.is_(False),
+                                                    func.coalesce(SocialPost.posted_at, SocialPost.created_at) >= since)):
             when = p.posted_at or p.created_at
             if when < since or not p.external_id:
                 continue
@@ -163,6 +183,8 @@ def x_interactions(db: Session) -> dict[str, int]:
             elif "mention" in (p.source_kinds or []):
                 kind, reason = "x.mention_pricechat", "Mentioned Price Chat on X"
             else:
+                continue
+            if (kind, f"x-post:{p.external_id}") in paid:
                 continue
             r = ledger.award(db, member, kind, f"x-post:{p.external_id}", occurred_at=when, reason=reason, commit=False)
             out["awarded"] += int(r.awarded)

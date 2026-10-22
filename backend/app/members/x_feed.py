@@ -36,6 +36,7 @@ FEED_DAYS = 14  # how far back the feed reaches
 MIN_CHARS = 15  # what's left after mentions and links: "yo", "GM" or a bare link isn't worth featuring
 SHOWN, READ, LIKE_OPENED = "x_view", "x_read", "x_like_open"
 CLOCK_SLACK = 1
+START_WINDOW = timedelta(hours=6)  # how long a post shown here stays "open" for reading
 
 _LEAD = re.compile(r"^(?:@\w+\s+)+")
 _LINK = re.compile(r"https?://t\.co/\w+")
@@ -166,7 +167,8 @@ def read(db: Session, member: Member, post_id: str) -> dict[str, Any]:
     if p.external_id in _done(db, member):
         return {"ok": True, "code": "already", "xp": 0, "message": "Already read."}
     started = db.scalar(select(MemberAction).where(MemberAction.member_id == member.id, MemberAction.kind == SHOWN,
-                                                   MemberAction.target == target, MemberAction.day == ledger.day_of(utcnow())))
+                                                   MemberAction.target == target, MemberAction.created_at >= utcnow() - START_WINDOW)
+                        .order_by(MemberAction.created_at.desc()).limit(1))  # not "today": reading across 00:00 UTC counts
     if started is None:
         return {"ok": False, "code": "not_started", "xp": 0, "message": "Open the post here first."}
     at = started.created_at if started.created_at.tzinfo else started.created_at.replace(tzinfo=timezone.utc)

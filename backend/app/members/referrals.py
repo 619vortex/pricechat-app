@@ -167,13 +167,13 @@ def qualify(db: Session, ref: Referral, event_type: str) -> bool:
     claim = f"{ident.platform}:{ident.platform_user_id}" if ident else f"member:{referred.id}"
     r1 = ledger.award(db, referrer, REFERRER_RULE, f"referral:{ref.id}", reason="A friend you invited joined Price Chat",
                       claim_key=claim, commit=False)
-    r2 = ledger.award(db, referred, WELCOME_RULE, f"referral:{ref.id}", reason="Welcome bonus: joined through a friend's invite",
-                      commit=False)
     if not r1.awarded and r1.refused not in ("rule_off", "zero"):
         if r1.refused in ("already_claimed", "duplicate", "max_reached"):
             ref.status, ref.reason = "rejected", r1.refused  # this person was already counted once
         db.flush()
-        return False
+        return False  # the welcome bonus waits too: it is paid only together with a referral that qualifies
+    r2 = ledger.award(db, referred, WELCOME_RULE, f"referral:{ref.id}", reason="Welcome bonus: joined through a friend's invite",
+                      commit=False)
     ref.status, ref.qualified_at, ref.qualifying_event_type = "qualified", utcnow(), event_type
     ref.referrer_xp, ref.referrer_event_id = r1.xp, r1.event.id if r1.event else None
     ref.welcome_xp, ref.welcome_event_id = r2.xp, r2.event.id if r2.event else None
@@ -187,7 +187,14 @@ def sweep(db: Session) -> int:
     """Retry referrals that waited (daily limit, minimum age). Uses the invited member's ledger as it is."""
     settings = program(db)
     done = 0
-    for ref in list(db.scalars(select(Referral).where(Referral.status == "joined", Referral.referred_id.is_not(None)))):
+    qualifying = (ReputationEvent.member_id == Referral.referred_id,
+                  ReputationEvent.event_type.in_(settings.referral_qualifying_events or []),
+                  ReputationEvent.created_at >= Referral.created_at, ReputationEvent.reverses_id.is_(None),
+                  ReputationEvent.reversed_at.is_(None))
+    # only referrals whose friend did a qualifying action: the ones that never did cost nothing, however many pile up
+    waiting = select(Referral).where(Referral.status == "joined", Referral.referred_id.is_not(None),
+                                     select(ReputationEvent.id).where(*qualifying).exists())
+    for ref in list(db.scalars(waiting)):
         ev = db.scalar(select(ReputationEvent).where(
             ReputationEvent.member_id == ref.referred_id, ReputationEvent.event_type.in_(settings.referral_qualifying_events or []),
             ReputationEvent.created_at >= ref.created_at, ReputationEvent.reverses_id.is_(None), ReputationEvent.reversed_at.is_(None))

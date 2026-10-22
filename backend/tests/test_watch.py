@@ -132,3 +132,26 @@ def test_api_requires_a_member_and_a_real_public_video(mc: TestClient, db: Sessi
     r = mc.put("/api/members-admin/reputation", json={"watch_seconds": 45})
     assert r.status_code == 200 and r.json()["settings"]["watch_seconds"] == 45
     assert mc.put("/api/members-admin/reputation", json={"watch_seconds": 1}).status_code == 422
+
+
+def test_a_video_playing_across_midnight_utc_still_counts(db: Session) -> None:
+    """Watch pressed at 23:59:50 UTC and completed after midnight: the start is recent, so it counts (not "not started")."""
+    from app.members import xp as ledger
+
+    mem = member(db)
+    short(db, "v1")
+    missions.generate(db)
+    watch.start(db, mem, "v1")
+    a = db.scalar(select(MemberAction).where(MemberAction.member_id == mem.id, MemberAction.kind == watch.WATCH_KIND))
+    a.day, a.created_at = ledger.day_of(utcnow() - timedelta(days=1)), utcnow() - timedelta(seconds=40)  # yesterday's date
+    db.commit()
+    assert watch.complete(db, mem, "v1", 31)["code"] == "paid"
+
+
+def test_a_stale_watch_start_does_not_count(db: Session) -> None:
+    mem = member(db)
+    short(db, "v1")
+    missions.generate(db)
+    watch.start(db, mem, "v1")
+    _rewind(db, mem.id, "v1", int(watch.START_WINDOW.total_seconds()) + 60)
+    assert watch.complete(db, mem, "v1", 31)["code"] == "not_started"

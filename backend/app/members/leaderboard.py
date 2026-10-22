@@ -88,8 +88,10 @@ def board(db: Session, period: str, metric: str, limit: int, me: Member | None) 
         sub = _referral_values(period)
         rows = db.execute(select(Member, sub.c.v).join(sub, sub.c.mid == Member.id).where(_visible())
                           .order_by(sub.c.v.desc(), Member.created_at).limit(limit)).all()
+        all_ranks = ledger.ranks(db)
         out = {"note": "", "rows": [{"position": i + 1, "username": m.username, "value": int(v), "rank_score": m.rank_score,
-                                     "xp": m.xp_total, "legacy_points": m.legacy_points, "rank": service.rank_out(ledger.rank_for(db, m.rank_score))}
+                                     "xp": m.xp_total, "legacy_points": m.legacy_points,
+                                     "rank": service.rank_out(ledger.rank_for(db, m.rank_score, all_ranks))}
                                     for i, (m, v) in enumerate(rows)]}
     else:
         out = service.leaderboard_v2(db, period, metric, limit)
