@@ -6,6 +6,8 @@ While the funnel is closed (Admin → Trading Bot Access → not public yet), on
 """
 
 import hashlib
+import threading
+import time
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -242,6 +244,33 @@ def kitchen_state(response: Response, db: DbSession) -> dict[str, Any]:
     return kitchen.snapshot(db)
 
 
+KITCHEN_STREAMS_PER_MEMBER = 3  # open live Kitchen views (tabs) per member; each polls the database every 2 s
+_STREAM_TTL = 660.0  # streams end after 600 s: an older slot was never released (e.g. the stream never started) and is dropped
+_streams: dict[int, list[float]] = {}
+_streams_lock = threading.Lock()
+
+
+def _stream_slot(member_id: int) -> float | None:
+    """Take a stream slot for this member (its start time), or None when they already have the maximum open."""
+    now = time.monotonic()
+    with _streams_lock:
+        live = [t for t in _streams.get(member_id, []) if now - t < _STREAM_TTL]
+        if len(live) >= KITCHEN_STREAMS_PER_MEMBER:
+            _streams[member_id] = live
+            return None
+        _streams[member_id] = [*live, now]
+        return now
+
+
+def _stream_release(member_id: int, slot: float) -> None:
+    with _streams_lock:
+        live = _streams.get(member_id, [])
+        if slot in live:
+            live.remove(slot)
+        if not live:
+            _streams.pop(member_id, None)
+
+
 @router.get("/members/trading-bot/kitchen/stream")
 async def kitchen_stream(request: Request, db: DbSession, pc_session: SessionToken = None, after: int | None = Query(None, ge=0),
                          once: bool = Query(False)) -> Any:
@@ -259,7 +288,7 @@ async def kitchen_stream(request: Request, db: DbSession, pc_session: SessionTok
     from app.models.tradingos import KbEvent
     from app.tradingos import kitchen
 
-    _require(db, pc_session)
+    member_id = _require(db, pc_session).id
     factory = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
     resend = request.headers.get("last-event-id", "")
     last = int(resend) if resend.isascii() and resend.isdigit() and len(resend) <= 18 else after  # "²".isdigit() is True too
@@ -268,6 +297,9 @@ async def kitchen_stream(request: Request, db: DbSession, pc_session: SessionTok
     # the request's session (get_db) is only closed after the response has been SENT: without this, every open stream kept
     # a pooled DB connection checked out for up to 10 minutes (each read below uses its own short session)
     db.close()
+    slot = _stream_slot(member_id)
+    if slot is None:  # the browser falls back to reading the snapshot
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"At most {KITCHEN_STREAMS_PER_MEMBER} live Kitchen views at once.")
 
     def read(after_id: int) -> list[dict[str, Any]]:
         with factory() as s:
@@ -275,18 +307,21 @@ async def kitchen_stream(request: Request, db: DbSession, pc_session: SessionTok
 
     async def events() -> Any:
         nonlocal last
-        yield "retry: 5000\n\n"
-        started = beat = time.monotonic()
-        while True:
-            for e in await asyncio.to_thread(read, last):
-                last = e["id"]
-                yield f"id: {e['id']}\nevent: kitchen\ndata: {json.dumps(e, default=str)}\n\n"
-            if once or time.monotonic() - started > 600 or await request.is_disconnected():
-                return
-            if time.monotonic() - beat > 15:
-                beat = time.monotonic()
-                yield ": ping\n\n"
-            await asyncio.sleep(2)
+        try:
+            yield "retry: 5000\n\n"
+            started = beat = time.monotonic()
+            while True:
+                for e in await asyncio.to_thread(read, last):
+                    last = e["id"]
+                    yield f"id: {e['id']}\nevent: kitchen\ndata: {json.dumps(e, default=str)}\n\n"
+                if once or time.monotonic() - started > 600 or await request.is_disconnected():
+                    return
+                if time.monotonic() - beat > 15:
+                    beat = time.monotonic()
+                    yield ": ping\n\n"
+                await asyncio.sleep(2)
+        finally:
+            _stream_release(member_id, slot)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
