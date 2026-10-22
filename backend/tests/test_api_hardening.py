@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.security import body_limit, rate_limit
@@ -86,3 +87,25 @@ def test_highly_compressed_huge_png_is_refused_before_decoding() -> None:
     ok = io.BytesIO()
     Image.new("RGB", (900, 1200), "white").save(ok, "PNG")
     assert photos.process(ok.getvalue())[2:4] == (900, 1200)
+
+
+# --- streaming responses don't hold the request's DB connection ---------------------------------------------------------
+
+
+def test_kitchen_stream_releases_the_request_connection(client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.db.session import engine
+    from app.tradingos import kitchen
+    from tests.test_burner import signed_in
+
+    signed_in(client, db)
+    db.close()
+    seen: list[int] = []
+
+    def events_after(s: Session, after_id: int) -> list[dict[str, object]]:
+        s.execute(text("SELECT 1"))
+        seen.append(engine.pool.checkedout())  # this read's own session + anything else still checked out
+        return []
+
+    monkeypatch.setattr(kitchen, "events_after", events_after)
+    r = client.get("/api/members/trading-bot/kitchen/stream?after=0&once=true", headers={"last-event-id": "\u00b2".encode("latin-1")})  # "²": not a 500
+    assert r.status_code == 200 and seen and seen[0] == 1  # only the read's own session: the request's one was released

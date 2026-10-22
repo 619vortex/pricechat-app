@@ -262,9 +262,12 @@ async def kitchen_stream(request: Request, db: DbSession, pc_session: SessionTok
     _require(db, pc_session)
     factory = sessionmaker(bind=db.get_bind(), autoflush=False, expire_on_commit=False)
     resend = request.headers.get("last-event-id", "")
-    last = int(resend) if resend.isdigit() else after
+    last = int(resend) if resend.isascii() and resend.isdigit() and len(resend) <= 18 else after  # "²".isdigit() is True too
     if last is None:  # a fresh connection starts from now (the snapshot already gave the current state)
         last = db.scalar(select(func.max(KbEvent.id)).where(KbEvent.source == kitchen.SOURCE)) or 0
+    # the request's session (get_db) is only closed after the response has been SENT: without this, every open stream kept
+    # a pooled DB connection checked out for up to 10 minutes (each read below uses its own short session)
+    db.close()
 
     def read(after_id: int) -> list[dict[str, Any]]:
         with factory() as s:

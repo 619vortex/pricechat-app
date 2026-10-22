@@ -155,6 +155,7 @@ def realm_file(name: str, request: Request, db: DbSession, pc_session: SessionTo
     """The game's files, only for players who've unlocked it. Stored gzipped and sent as-is (Content-Encoding: gzip)."""
     if not realm.allowed(db, _current(db, pc_session), _staff(db, pc_admin)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Vortex Realm unlocks at Warrior Kiwi.")
+    db.close()  # get_db closes only after the response is sent: don't hold a pooled connection while the game (MBs) streams out
     path = realm.game_file(name)
     if path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
