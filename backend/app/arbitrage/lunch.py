@@ -17,6 +17,7 @@ Costs are assumptions, shown on the page: `CURVE_FEE` per curve trade, `POOL_FEE
 transaction (network + priority fee). A real bot would also face failed transactions and other bots buying first; paper
 entries are at the price the scanner saw, up to a minute after the move."""
 
+import asyncio
 import base64
 import logging
 import struct
@@ -273,6 +274,30 @@ def _close(t: ArbLunchTrade, now: datetime, exit_sol: float, reason: str, **deta
     t.detail = {**(t.detail or {}), **detail}
 
 
+# DB work runs in a worker thread (asyncio.to_thread) so the scheduler, the live feed and its poller keep running. Each helper is
+# one step's whole use of the session, awaited one at a time: the session is never used from two threads at once.
+
+
+def _count_launches(db: Session, now: datetime, n: int) -> None:
+    _day(db, now).launches_seen += n
+
+
+def _load(db: Session, mints: list[str]) -> tuple[list[ArbLunchTrade], set[tuple[str, str]]]:
+    """Open trades, and every (mint, strategy) ever traded among the candidates: one query, not one per candidate."""
+    opened = list(db.scalars(select(ArbLunchTrade).where(ArbLunchTrade.status == "open")))
+    owned = {(m, s) for m, s in db.execute(select(ArbLunchTrade.mint, ArbLunchTrade.strategy).where(ArbLunchTrade.mint.in_(mints)))} if mints else set()
+    return opened, owned
+
+
+def _save_entries(db: Session, now: datetime, trades: list[ArbLunchTrade], stream_new: int) -> None:
+    db.add_all(trades)
+    if trades or stream_new:
+        day = _day(db, now)
+        day.entries += len(trades)
+        day.launches_seen += stream_new  # launches the stream added since the last run
+    db.commit()
+
+
 async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stream: bool = False, stream_key: str | None = None) -> dict[str, Any]:
     """One run. With `stream`, PumpPortal's live feed (lunch_stream.py) is kept running alongside: it adds launches the moment
     they're created and records the exact moment (and price) a launch meets the Starter rule."""
@@ -290,7 +315,6 @@ async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stre
         if not blocked:
             try:
                 fresh = await _pump(client, limit=50, sort="created_timestamp", order="DESC")
-                day = _day(db, now)
                 for c in fresh:
                     at = _launch_time(c)
                     if (c.get("mint") in _seen or c.get("quote_mint", SOL_QUOTE) != SOL_QUOTE or c.get("complete") or not at
@@ -301,8 +325,8 @@ async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stre
                     first = Curve(int(vtr), int(vsr), 0, 0, False)
                     _watch[c["mint"]] = Watch(c["mint"], c["bonding_curve"], str(c.get("symbol") or "?")[:40], str(c.get("name") or "")[:120],
                                               c.get("image_uri"), at, now, first.mc_sol)
-                    day.launches_seen += 1
                     out["new"] += 1
+                await asyncio.to_thread(_count_launches, db, now, out["new"])
                 if _state["runs"] % GRAD_SCAN_EVERY == 0:
                     out["near_graduation"] = await _scan_near(client)
             except Blocked:
@@ -310,31 +334,33 @@ async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stre
                 out["pump_rate_limited"] = True
             except httpx.HTTPError as exc:  # 403, 5xx, a timeout: open trades are still priced and closed below
                 out["pump_error"] = type(exc).__name__
-        open_trades = list(db.scalars(select(ArbLunchTrade).where(ArbLunchTrade.status == "open")))
-        addresses = list({w.curve for w in _watch.values()} | {n.curve for n in _near.values()} | {t.bonding_curve for t in open_trades})
+        # the candidates are fixed here: a launch the live feed adds while this run awaits is left to the next run
+        watched, near = list(_watch.items()), list(_near.items())
+        open_trades, owned = await asyncio.to_thread(_load, db, list({m for m, _ in watched} | {m for m, _ in near}))
+        addresses = list({w.curve for _, w in watched} | {n.curve for _, n in near} | {t.bonding_curve for t in open_trades})
         state = await curves(client, rpc, addresses) if addresses else {}
-        taken = {(t.mint, t.strategy) for t in open_trades}
+        taken = {(t.mint, t.strategy) for t in open_trades} | owned
         count = {s: sum(1 for t in open_trades if t.strategy == s) for s in STRATEGIES}
+        entries: list[ArbLunchTrade] = []
 
         def enter(strategy: str, mint: str, curve: str, symbol: str, name: str, image: str | None, launched_at: datetime, c: Curve,
                   signal: dict[str, Any]) -> None:
             tokens = buy_tokens(c, SIZE_SOL)
             value = sell_sol(c, tokens) - TX_COST_SOL
-            db.add(ArbLunchTrade(strategy=strategy, mint=mint, bonding_curve=curve, symbol=symbol, name=name, image_uri=image, launched_at=launched_at,
-                                 status="open", opened_at=now, entry_sol=round(SIZE_SOL + TX_COST_SOL, 6), tokens=tokens, entry_price=c.price,
-                                 entry_mc_sol=round(c.mc_sol, 2), last_price=c.price, last_value_sol=round(value, 6), peak_value_sol=round(value, 6),
-                                 last_checked_at=now, detail={"signal": signal}))
+            entries.append(ArbLunchTrade(strategy=strategy, mint=mint, bonding_curve=curve, symbol=symbol, name=name, image_uri=image, launched_at=launched_at,
+                                         status="open", opened_at=now, entry_sol=round(SIZE_SOL + TX_COST_SOL, 6), tokens=tokens, entry_price=c.price,
+                                         entry_mc_sol=round(c.mc_sol, 2), last_price=c.price, last_value_sol=round(value, 6), peak_value_sol=round(value, 6),
+                                         last_checked_at=now, detail={"signal": signal}))
             taken.add((mint, strategy))
             count[strategy] += 1
-            _day(db, now).entries += 1
             out["entered"] += 1
 
         def traded(mint: str, strategy: str) -> bool:
-            return (mint, strategy) in taken or bool(db.scalar(select(func.count(ArbLunchTrade.id)).where(
-                ArbLunchTrade.mint == mint, ArbLunchTrade.strategy == strategy)))
+            return (mint, strategy) in taken  # open trades, this run's entries and every earlier trade of the candidates
 
+        # no await from here to the save: the in-memory watchlist and the entries change together
         # 🥗 Starter entries: early momentum on new launches
-        for m, w in list(_watch.items()):
+        for m, w in watched:
             c = state.get(w.curve)
             trig = _triggers.pop(m, None)
             if trig and count["starter"] < MAX_OPEN and not (c is not None and c.complete):  # met live: entered at that moment's price
@@ -361,7 +387,7 @@ async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stre
                     "real_sol": round(real_sol, 3), "growth_pct": round(growth * 100, 1),
                     "minutes_after_launch": round((now - w.launched_at).total_seconds() / 60, 1)})
         # 🍰 Graduation Run entries: a nearly full curve that's still filling
-        for m, n in list(_near.items()):
+        for m, n in near:
             c = state.get(n.curve)
             if c is None:
                 continue
@@ -374,11 +400,12 @@ async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stre
             if GRAD_MIN_PROGRESS <= c.progress <= GRAD_MAX_PROGRESS and not traded(m, "graduation"):
                 enter("graduation", m, n.curve, n.symbol, n.name, n.image, n.launched_at, c, {
                     "progress_pct": round(c.progress * 100, 1), "rise_pts": round((c.progress - prev) * 100, 1), "real_sol": round(c.rsr / LAMPORTS, 2)})
-        if _stream_new:
-            _day(db, now).launches_seen += _stream_new  # launches the stream added since the last run
-            out["new_from_stream"], _stream_new = _stream_new, 0
-        db.commit()  # entries saved before any GeckoTerminal call: the in-memory watchlist they came from is already updated
-        # exits, each by its strategy's rules
+        stream_new, _stream_new = _stream_new, 0
+        if stream_new:
+            out["new_from_stream"] = stream_new
+        # entries saved before any GeckoTerminal call: the in-memory watchlist they came from is already updated
+        await asyncio.to_thread(_save_entries, db, now, entries, stream_new)
+        # exits, each by its strategy's rules (attribute changes only: no SQL until the commit below)
         for t in open_trades:
             rules = STRATEGIES.get(t.strategy, STRATEGIES["starter"])
             c = state.get(t.bonding_curve)
@@ -411,7 +438,7 @@ async def tick(db: Session, now: datetime, rpc: str, transport: Any = None, stre
             if reason:
                 _close(t, now, value, reason)
                 out["closed"] += 1
-        db.commit()
+        await asyncio.to_thread(db.commit)
         if not blocked and _state["runs"] % GRADUATION_EVERY == 1 and not _late(deadline):
             try:
                 out["graduations"] = await measure_graduations(db, client, now, deadline=deadline)
@@ -446,10 +473,10 @@ async def measure_graduations(db: Session, client: httpx.AsyncClient, now: datet
     first one-minute open of their PumpSwap pool (GeckoTerminal). At most `tries` lookups, and none after `deadline`."""
     done = await _pump(client, limit=20, sort="created_timestamp", order="DESC", complete="true")
     mints = [c["mint"] for c in done if c.get("mint")]
-    known = set(db.scalars(select(ArbLunchGraduation.mint).where(ArbLunchGraduation.mint.in_(mints)))) if mints else set()
-    priced = 0
+    known = await asyncio.to_thread(_known_graduations, db, mints) if mints else set()
+    rows: list[ArbLunchGraduation] = []
     for c in done:
-        if priced >= per_run or tries <= 0 or _late(deadline):
+        if len(rows) >= per_run or tries <= 0 or _late(deadline):
             break
         if not c.get("mint") or c.get("quote_mint", SOL_QUOTE) != SOL_QUOTE or c["mint"] in known:
             continue
@@ -466,12 +493,20 @@ async def measure_graduations(db: Session, client: httpx.AsyncClient, now: datet
         gap = (first / curve_price - 1) * 100 if first else None
         if gap is not None and abs(gap) > MAX_PLAUSIBLE_GAP_PCT:
             gap = None  # the pool is seeded at the curve's price: a first candle this far off is bad candle data, kept out of the stats
-        db.add(ArbLunchGraduation(mint=c["mint"], symbol=str(c.get("symbol") or "?")[:40], curve_price=curve_price, pool_price=first,
-                                  gap_pct=round(gap, 3) if gap is not None else None, pool_address=pools["pumpswap"], pool_dex="pumpswap",
-                                  completed_at=None, priced_at=now))  # pump.fun's list has no completion time
-        priced += 1
+        rows.append(ArbLunchGraduation(mint=c["mint"], symbol=str(c.get("symbol") or "?")[:40], curve_price=curve_price, pool_price=first,
+                                       gap_pct=round(gap, 3) if gap is not None else None, pool_address=pools["pumpswap"], pool_dex="pumpswap",
+                                       completed_at=None, priced_at=now))  # pump.fun's list has no completion time
+    await asyncio.to_thread(_save_graduations, db, rows)
+    return len(rows)
+
+
+def _known_graduations(db: Session, mints: list[str]) -> set[str]:
+    return set(db.scalars(select(ArbLunchGraduation.mint).where(ArbLunchGraduation.mint.in_(mints))))
+
+
+def _save_graduations(db: Session, rows: list[ArbLunchGraduation]) -> None:
+    db.add_all(rows)
     db.commit()
-    return priced
 
 
 # --- the page ---------------------------------------------------------------------------------------------------------------

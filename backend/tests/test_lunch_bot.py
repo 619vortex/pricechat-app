@@ -396,3 +396,26 @@ def test_the_live_feed_prunes_stale_launches_and_stops_with_the_bot() -> None:
 
     assert asyncio.run(go()) == (True, True)
     assert lunch_stream._task is None and lunch_stream._poller is None and lunch_stream.stop() is False
+
+
+def test_one_ownership_query_for_any_number_of_candidates(db: Session) -> None:
+    from sqlalchemy import event
+
+    f = Fake()
+    f.launches = [launch(f"m{i}") for i in range(6)]
+    f.accounts = {f"curve-m{i}": grown(0.3) for i in range(6)}
+    run(db, f, NOW)
+    db.add(ArbLunchTrade(strategy="starter", mint="m0", bonding_curve="curve-m0", symbol="M0", name="m0", launched_at=NOW, status="closed",
+                         opened_at=NOW, entry_sol=0.101, tokens=1.0, entry_price=1.0, entry_mc_sol=1.0))  # traded before: never entered twice
+    db.commit()
+    f.accounts = {f"curve-m{i}": grown(6.0) for i in range(6)}  # all six meet the rule
+    seen: list[str] = []
+    listen = lambda *a: seen.append(a[2])  # noqa: E731 - (conn, cursor, statement, ...)
+    event.listen(db.get_bind(), "before_cursor_execute", listen)
+    try:
+        out = run(db, f, NOW + timedelta(seconds=60))
+    finally:
+        event.remove(db.get_bind(), "before_cursor_execute", listen)
+    trade_selects = [s for s in seen if s.lstrip().upper().startswith("SELECT") and "arb_lunch_trades" in s]
+    assert out["entered"] == 5 and len(trade_selects) == 2  # the open trades + ONE ownership query, not one per candidate
+    assert db.scalar(select(ArbLunchDay)).entries == 5
