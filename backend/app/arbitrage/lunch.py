@@ -222,8 +222,12 @@ async def pool_price(client: httpx.AsyncClient, mint: str, deadline: float | Non
     run is out of time)."""
     if _late(deadline):
         return None
-    pool = (await pools_of(client, mint)).get("pumpswap")
-    price = await candle(client, pool, "last") if pool and not _late(deadline) else None
+    try:
+        pool = (await pools_of(client, mint)).get("pumpswap")
+        price = await candle(client, pool, "last") if pool and not _late(deadline) else None
+    except (httpx.HTTPError, ValueError, LookupError, TypeError, AttributeError) as exc:  # GeckoTerminal down or garbled: not priced yet
+        logger.info("lunch pool price failed (%s)", type(exc).__name__)  # (raising here lost every exit of the run)
+        return None
     return {"pool": pool, "price": price} if price else None
 
 
