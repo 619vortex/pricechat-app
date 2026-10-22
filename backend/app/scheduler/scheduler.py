@@ -82,6 +82,8 @@ class Scheduler:
         self._loop_task: asyncio.Task[None] | None = None
         self.started_at: datetime | None = None  # when the loop started (the public health check's grace period)
         self._running: set[asyncio.Task[JobOutcome]] = set()
+        # request_run() for a job while it runs (a stage chaining itself: "more may be waiting"): applied when it finishes
+        self._chained: dict[str, datetime] = {}
 
     # --- state ------------------------------------------------------------------------
 
@@ -132,6 +134,9 @@ class Scheduler:
         if name not in self.specs or name in self.disabled:
             return
         soon = utcnow() + timedelta(seconds=delay_seconds)
+        if self._active == name:  # its row is rewritten when this run ends: remember the request until then
+            self._chained[name] = min(soon, self._chained.get(name, soon))
+            return
         with self.session_factory() as db:
             row = db.get(ScheduledJob, name)
             if row is not None and row.enabled and (row.next_run_at is None or row.next_run_at > soon):
@@ -207,6 +212,7 @@ class Scheduler:
 
         usage.flush(self.session_factory)  # model-call / request tallies from this job (own short transaction)
         now = utcnow()
+        chained = self._chained.pop(spec.name, None)
         with self.session_factory() as db:
             row = db.get(ScheduledJob, spec.name)
             assert row is not None
@@ -226,6 +232,8 @@ class Scheduler:
                 row.consecutive_failures = 0
                 row.last_error = error if status == "skipped" else None
                 row.next_run_at = now + timedelta(seconds=spec.interval_seconds)
+                if chained is not None and row.enabled:
+                    row.next_run_at = min(row.next_run_at, max(chained, now))
             failures = row.consecutive_failures
             db.commit()
 
