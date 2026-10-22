@@ -106,6 +106,7 @@ def test_self_referral_and_repeat_referrals_are_refused(db: Session) -> None:
     db.expire_all()
     assert db.get(Referral, ref2.id).status == "rejected" and db.get(Referral, ref2.id).reason == "already_claimed"
     assert len(events(db, inviter, "referral.qualified")) == 1
+    assert events(db, again, "referral.welcome") == []  # a rejected referral never pays the welcome bonus either
 
 
 def test_referral_daily_limit_waits_and_same_browser_pattern_is_flagged(db: Session) -> None:
@@ -121,6 +122,7 @@ def test_referral_daily_limit_waits_and_same_browser_pattern_is_flagged(db: Sess
     db.expire_all()
     statuses = sorted(r.status for r in db.scalars(select(Referral).where(Referral.referrer_id == inviter.id)))
     assert statuses == ["joined", "joined", "qualified"]  # the others wait for tomorrow's sweep
+    assert sum(len(events(db, f, "referral.welcome")) for f in friends) == 1  # and so do their welcome bonuses
     from app.models.members import ModerationFlag
 
     assert db.scalar(select(ModerationFlag.kind).where(ModerationFlag.member_id == inviter.id)) == "referral_pattern"
