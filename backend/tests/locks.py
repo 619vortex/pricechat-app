@@ -4,6 +4,7 @@ On SQLite a write transaction holds the database's single write lock: every othe
 So nothing may be awaiting a network answer while one is open."""
 
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -11,7 +12,15 @@ import httpx
 from sqlalchemy.engine import make_url
 
 
+_probe = threading.Lock()  # calls made from a thread pool must not see each other's probe as the lock
+
+
 def write_lock_held() -> bool:
+    with _probe:
+        return _held()
+
+
+def _held() -> bool:
     from app.config.settings import get_settings
 
     c = sqlite3.connect(make_url(get_settings().database_url).database, timeout=0)

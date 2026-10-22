@@ -378,3 +378,13 @@ def test_price_takes_several_coins_one_line_each(db: Session, md: FakeMD, ex: Fa
     assert [l.split("  ")[0] for l in lines] == ["<b>$BTC</b>", "<b>$SOL</b>", "<b>ZZQQXNOPE</b>"] and lines[2].endswith("not found")
     asyncio.run(bot.handle_command(db, tg, 1, 9, "/price kas bybit"))  # an exchange word: still one coin
     assert tg.sent[-1][2].startswith("<b>$KAS</b>  ") and "\n<b>" not in tg.sent[-1][2].split("\n\n📢")[0]
+
+
+def test_bot_commands_hold_no_write_lock_while_exchanges_answer(db: Session, md: FakeMD, ex: FakeExchanges) -> None:
+    from tests.locks import http_calls_under_write_lock
+
+    tg = FakeTG()
+    with http_calls_under_write_lock() as held:
+        asyncio.run(bot.handle_command(db, tg, 1, 9, "/price btc $SOL zzqqxnope"))
+        asyncio.run(bot.handle_command(db, tg, 1, 9, "/scan kas"))
+    assert held == []

@@ -320,6 +320,7 @@ def _whole_lines(text: str, limit: int) -> str:
 async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, text: str, group: bool = False, reply_to: int | None = None,
                          chat_username: str | None = None, author: str | None = None) -> None:
     client = _Footed(client, footer(db))
+    db.commit()  # (a first run creates settings rows): no write transaction waits on Telegram or an exchange below
     parts = text.strip().split()
     cmd = parts[0].split("@")[0].lower()
     # market commands keep the words as typed (a Solana contract address is case-sensitive); the parsers ignore case
@@ -358,6 +359,7 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
     if cmd == "/help" and len(parts) > 1 and await _trade_check(db, client, chat_id, user_id, text, reply_to):
         return
     s = signals.settings(db)
+    db.commit()
     bot_chat = (s.publish_chat or "").strip()
     redirect = (group and cmd in HEAVY and s.chart_routing == "bot_chat" and _is_main_chat(db, chat_id, chat_username)
                 and bot_chat.lower() not in ("", str(chat_id), "@" + (chat_username or "").lower()))
