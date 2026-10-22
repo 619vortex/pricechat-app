@@ -224,7 +224,7 @@ def test_long_reports_go_to_a_second_message_instead_of_being_cut(db: Session, m
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/chart BTC 1h cvd", group=True, reply_to=1))
     photo, msg = tg.sent[-2], tg.sent[-1]
     assert photo[0] == "photo" and msg[0] == "msg"
-    assert len(photo[2]) <= 1024 and photo[2].endswith("/join/BANTER") and "note 0" not in photo[2]
+    assert len(photo[2]) <= 1024 and photo[2].endswith("/api/r/footer?src=tg") and "note 0" not in photo[2]
     assert "<b>$BTCUSD</b> 1H · chart details" in msg[2] and "note 11" in msg[2]  # everything, nothing truncated
     assert "&lt;&amp;&gt;" in msg[2]  # HTML-escaped
 
