@@ -191,3 +191,10 @@ def test_timestamps_are_utc_aware(client: TestClient) -> None:
     client.post("/api/knowledge", json={"content": "tz check"})
     for stamp in (client.get("/api/knowledge").json()[0]["created_at"], client.get("/api/activity").json()[0]["created_at"]):
         assert stamp.endswith("Z") or stamp.endswith("+00:00"), stamp
+
+
+def test_content_patch_with_null_required_fields_is_not_a_500(client: TestClient) -> None:
+    created = client.post("/api/content", json={"body": "gm", "title": "Morning", "target_platform": "x"}).json()
+    resp = client.patch(f"/api/content/{created['id']}", json={"body": None, "status": None, "title": None})
+    assert resp.status_code == 200
+    assert (resp.json()["body"], resp.json()["title"]) == ("gm", None)  # optional fields can still be cleared
