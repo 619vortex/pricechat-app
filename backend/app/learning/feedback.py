@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.community.vectors import from_blob, normalise, to_blob
@@ -31,7 +31,7 @@ from app.models.enums import (
     ReviewStatus,
     SocialOpportunityStatus,
 )
-from app.models.memory import Memory
+from app.models.memory import Memory, MemoryEmbedding
 from app.models.social_intel import FeedbackEvent, SocialOpportunity
 from app.providers.base import EmbeddingProvider
 from app.providers.errors import ProviderError
@@ -119,7 +119,8 @@ def _apply(kind: FeedbackTarget, target: Any, decision: FeedbackDecision, edits:
         if not changes:
             raise FeedbackError(f"Nothing to edit; editable fields: {', '.join(allowed)}")
         for k, v in changes.items():
-            setattr(target, k, v[:4000])
+            # Cut to the column's own size (e.g. a memory title is 256 chars); Postgres rejects anything longer.
+            setattr(target, k, v[: getattr(type(target).__table__.c[k].type, "length", None) or 4000])
         return "edited " + ", ".join(changes)
 
     if kind == FeedbackTarget.MEMORY:
@@ -170,6 +171,22 @@ def _apply(kind: FeedbackTarget, target: Any, decision: FeedbackDecision, edits:
     return decision.value.replace("_", " ")
 
 
+async def _reindex_memory(db: Session, memory: Memory, embedder: EmbeddingProvider | None) -> None:
+    """An edited memory's vector still describes the old text. Drop it, then re-embed now if possible;
+    otherwise the knowledge.reindex backfill (which only picks memories without a vector) embeds it later."""
+    from app.memory.embeddings import EmbeddingIndex
+    from app.memory.records import MemoryRecord
+
+    db.execute(delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == memory.id))
+    db.flush()
+    if embedder is None:
+        return
+    try:
+        await EmbeddingIndex(db, memory.agent_id, embedder).index([MemoryRecord.from_row(memory)])
+    except ProviderError as exc:
+        logger.info("Edited memory %s will be re-embedded by the next reindex: %s", memory.id, exc)
+
+
 async def record_feedback(
     db: Session,
     kind: FeedbackTarget,
@@ -185,6 +202,8 @@ async def record_feedback(
         raise LookupError(f"{kind.value} {target_id} not found")
     effect = _apply(kind, target, decision, edits)
     feats, label, text = features_for(db, kind, target)
+    if kind == FeedbackTarget.MEMORY and decision == FeedbackDecision.EDIT:
+        await _reindex_memory(db, target, embedder)
 
     vector, model = None, None
     if embedder is not None:

@@ -360,8 +360,12 @@ async def verify(db: Session, bot: Any, limit: int = 200) -> dict[str, int]:
     s = settings(db)
     cid = community_chat_id(db)
     now = utcnow()
-    for row in db.scalars(select(WkSubmission).where(WkSubmission.status == "SUBMITTED").order_by(WkSubmission.id).limit(limit)).all():
+    # Least recently checked first: rows can stay SUBMITTED for good (in the group but no join seen), and in id order
+    # `limit` of those would starve every newer submission.
+    for row in db.scalars(select(WkSubmission).where(WkSubmission.status == "SUBMITTED")
+                          .order_by(WkSubmission.updated_at, WkSubmission.id).limit(limit)).all():
         out["checked"] += 1
+        row.updated_at = now
         _resolve(db, row)
         ev = dict(row.evidence or {})
         if row.tg_user_id is None:
