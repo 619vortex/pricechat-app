@@ -53,6 +53,9 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 /status · /connect · /positions · /pnl · /trades
 /risk · /auto · /pause · /resume · /close
 
+🛡 <b>Kiwi VPN</b> (DM me)
+/vpn · your VPN devices · /vpn add phone
+
 Coins: BTC · $BTC · BTCUSDT · a contract address, plus binance bybit okx hl spot perp dex
 Timeframes: 1m 5m 15m 30m 1h 4h 1d · Not financial advice."""
 CLOSED = ("TARGET_HIT", "STOP_HIT", "CLOSED", "EXPIRED", "CANCELLED")
@@ -101,7 +104,7 @@ def _pct(x: float) -> str:
 PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/record", "/idea", "/ideas"}  # groups too
 MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator"}
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
-PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close"} | alerts.COMMANDS  # DMs only
+PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close", "/vpn"} | alerts.COMMANDS  # DMs only
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
 HEADLINE = ("BTC", "ETH", "SOL", "HYPE")
 
@@ -359,6 +362,8 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
     try:
         if cmd in ("/idea", "/ideas"):
             reply = await _idea_command(db, chat_id, user_id, cmd, parts[1:], author)
+        elif cmd == "/vpn":  # device names keep the case they were typed in
+            reply = await vpn_command(db, client, chat_id, user_id, parts[1:])
         elif redirect:  # the chart goes to Bot Chat; the main chat gets one short line pointing there
             reply = await _command(db, client, bot_chat, user_id, cmd, args, None)
             if reply is None:
@@ -487,6 +492,72 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
             return "No P&L history on Hyperliquid yet."
         return "<b>Your Hyperliquid P&amp;L</b>\n\n" + "\n".join(f"{k}: ${v['pnl']:+,.2f}" for k, v in pn.items())
     return await _trading_command(db, client, chat_id, m, cmd, args)
+
+
+async def vpn_command(db: Session, client: Any, chat_id: int, user_id: int, words: list[str]) -> str | None:
+    """/vpn in the member's private chat: their Kiwi VPN devices. `/vpn add <name> [server]` creates one and sends its
+    WireGuard config as a .conf document (shown once, never stored); `/vpn delete <id>` removes one."""
+    from app.security.rate_limit import LIMITS
+    from app.vpn import service as vpn
+
+    if int(chat_id) != int(user_id):  # never in a group, even if a caller forgets to check
+        return "Account commands work privately."
+    m = member_for(db, user_id)
+    if m is None:
+        return f"Link your Kiwi Passport first: {SITE}/passport → Connect Telegram."
+    view = await asyncio.to_thread(vpn.overview, db, m)
+    sub = words[0].lower() if words else ""
+    if sub in ("add", "new", "create"):
+        if not view["eligible"]:
+            return esc(view["reason"] or "Kiwi VPN isn't available.")
+        rest = words[1:]
+        online = [s for s in view["servers"] if s["online"]]
+        server = None
+        if len(rest) > 1:  # "/vpn add laptop frankfurt" or "/vpn add laptop 2": the last word picks the server
+            key = rest[-1].lower().lstrip("#")
+            server = next((s for s in view["servers"] if key in (str(s["id"]), s["name"].lower(), s["region"].lower(),
+                                                                   s["country_code"].lower())), None)
+            if server is not None:
+                rest = rest[:-1]
+        if server is None:
+            if not online:
+                return "No Kiwi VPN server is online right now. Try again later."
+            server = min(online, key=lambda s: s["load"])
+        if LIMITS["vpn_device"].hit(str(m.id)) is not None:
+            return "Too many new devices. Please wait a few minutes."
+        try:
+            dev, config, filename = await asyncio.to_thread(vpn.create_device, db, m, " ".join(rest) or "phone", server["id"])
+        except vpn.VpnError as e:
+            return esc(str(e))
+        await client.send_document(chat_id, config.encode(), filename, html=True,
+                                   caption=(f"🛡 <b>{esc(dev.name)}</b> · {esc(server['name'])}\nImport this file in the free WireGuard app. "
+                                            "It's shown once and holds your private key: keep it to yourself. Lost it? /vpn delete "
+                                            f"{dev.id}, then add a new one."))
+        return None
+    if sub in ("delete", "remove", "del"):
+        if len(words) < 2 or not words[1].lstrip("#").isdigit():
+            return "Usage: /vpn delete 3 (the number from /vpn)"
+        try:
+            await asyncio.to_thread(vpn.delete_device, db, m, int(words[1].lstrip("#")))
+        except vpn.VpnError as e:
+            return esc(str(e))
+        return "Device deleted."
+    lines = ["🛡 <b>Kiwi VPN</b>"]
+    if not view["eligible"]:
+        lines.append(esc(view["reason"] or "Kiwi VPN isn't available."))
+    names = {s["id"]: s["name"] for s in view["servers"]}
+    for d in view["devices"]:
+        seen = d["last_handshake"][:16].replace("T", " ") + " UTC" if d["last_handshake"] else "never connected"
+        lines.append(f"#{d['id']} <b>{esc(d['name'])}</b> · {esc(names.get(d['server_id'], '?'))} · {seen}")
+    if view["eligible"]:
+        if not view["devices"]:
+            lines.append("No devices yet.")
+        lines.append(f"{len(view['devices'])} of {view['max_devices']} devices.")
+        if view["servers"]:
+            lines.append("Servers: " + ", ".join(f"{s['id']} {esc(s['name'])}{'' if s['online'] else ' (offline)'}" for s in view["servers"]))
+        lines.append("/vpn add phone (least busy server) · /vpn add laptop 2 (server 2)\n/vpn delete 3 · Get the free WireGuard app, "
+                     "then import the file I send.")
+    return "\n".join(lines)
 
 
 def _is_tf(word: str) -> bool:
@@ -1187,7 +1258,7 @@ MENU_PRIVATE = [("markets", "Market overview · /markets weekly"), ("price", "Pr
                 ("record", "How /signal ideas played out"), ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("status", "Your account"),
                 ("positions", "Your Hyperliquid positions"), ("pnl", "Your Hyperliquid P&L"), ("trades", "Your bot trades and results"),
                 ("risk", "Your mode and limits"), ("pause", "STOP NEW TRADES"), ("close", "Close a bot position"), ("connect", "Connect Hyperliquid"),
-                ("help", "All commands")]
+                ("vpn", "Kiwi VPN: your devices and configs"), ("help", "All commands")]
 MENU_GROUP = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
               ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
               ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),

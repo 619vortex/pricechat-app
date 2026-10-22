@@ -120,6 +120,25 @@ class TelegramBotClient:
             raise TelegramRequestError(str(body.get("description") or "sendPhoto failed"))
         return _sent(body["result"])
 
+    async def send_document(self, chat_id: int | str, content: bytes, filename: str, caption: str = "", html: bool = False,
+                            mime: str = "text/plain") -> dict[str, Any]:
+        """A small generated file (Kiwi VPN: a member's WireGuard .conf, only ever in their private chat with the bot)."""
+        data: dict[str, Any] = {"chat_id": str(chat_id), "caption": caption[:1024]}
+        if html:
+            data["parse_mode"] = "HTML"
+        url = f"{self.api_base}/bot{self._token}/sendDocument"
+        try:
+            response = await self._client.post(url, data=data, files={"document": (filename, content, mime)})
+        except httpx.TransportError as exc:
+            raise TelegramUnavailableError(f"Cannot reach Telegram ({type(exc).__name__})") from None
+        try:
+            body = response.json()
+        except ValueError:
+            raise TelegramUnavailableError(f"Telegram returned a non-JSON response (HTTP {response.status_code})") from None
+        if not body.get("ok"):
+            raise TelegramRequestError(str(body.get("description") or "sendDocument failed"))
+        return _sent(body["result"])
+
     async def delete_message(self, chat_id: int | str, message_id: int) -> None:
         """Only the bot's own messages (tradingos.autodelete: the main chat's, after a few minutes)."""
         await self._call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
