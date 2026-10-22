@@ -45,7 +45,8 @@ function ClicksCard() {
   );
 }
 
-const usd = (x: number | null | undefined, d = 2) => (x == null ? "—" : `$${x.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+const usd = (x: number | null | undefined, d = 2) => (x == null ? "—"
+  : `${x < 0 ? "−" : ""}$${Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`);
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const explorer = (a: string) => `https://app.hyperliquid.xyz/explorer/address/${a}`;
 
@@ -75,19 +76,22 @@ export function AffiliateAdminPage() {
   const r = useApi(() => request<Report>(`/tradingbot/admin/affiliate${force.current ? "?refresh=true" : ""}`).finally(() => { force.current = false; }), 120_000);
   const refreshNow = () => { force.current = true; void r.reload(); };
   const [busy, setBusy] = useState(false);
+  const [snapErr, setSnapErr] = useState<unknown>(null);
   const [q, setQ] = useState("");
   const d = r.data;
   const rows = (d?.referrals ?? []).filter((x) => !q || x.address.includes(q.toLowerCase()) || (x.member && `${x.member.username} ${x.member.display_name} ${x.member.telegram ?? ""}`.toLowerCase().includes(q.toLowerCase())));
   async function snap() {
     setBusy(true);
-    try { await request("/tradingbot/admin/affiliate/snapshot", { method: "POST" }); refreshNow(); } finally { setBusy(false); }
+    setSnapErr(null);
+    try { await request("/tradingbot/admin/affiliate/snapshot", { method: "POST" }); refreshNow(); } catch (e) { setSnapErr(e); } finally { setBusy(false); }
   }
   return (
     <div className="stack">
       <PageHeader title="Hyperliquid Affiliate" subtitle="Our referral wallet on Hyperliquid, every referred account, and which Kiwi Passport member it is. Owner only."
         actions={<><button className="btn" onClick={refreshNow} disabled={r.loading}>Refresh from Hyperliquid</button>
-          <button className="btn" onClick={() => void snap()} disabled={busy}>Save snapshot now</button></>} />
+          <button className="btn" onClick={() => void snap()} disabled={busy}>{busy ? "Saving…" : "Save snapshot now"}</button></>} />
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
+      {snapErr ? <ApiErrorBanner error={snapErr} /> : null}
       {r.loading && !d ? <Loading /> : null}
       {d && <>
         <div className="stats">
@@ -144,7 +148,7 @@ export function AffiliateAdminPage() {
                 <td className="mono"><a href={explorer(x.address)} target="_blank" rel="noreferrer">{short(x.address)}</a> <span className="muted small">({x.via})</span></td>
                 <td>{x.our_check ? <Badge tone={x.our_check === "verified" ? "good" : x.our_check === "not_referred" ? "bad" : "warn"}>{x.our_check}</Badge> : "—"}
                   {x.code_seen && <span className="muted small"> code {x.code_seen}</span>}</td></tr>)}</tbody></table></div>}
-            <p className="muted small">Members whose Hyperliquid account Hyperliquid doesn't list under BANTER: they joined without the link, used another code, or traded from a different wallet.</p>
+            <p className="muted small">Members whose Hyperliquid account Hyperliquid doesn't list under {d.master.code}: they joined without the link, used another code, or traded from a different wallet.</p>
           </Card>
           <Card title={`Clicked the referral link, no wallet yet (${d.clicked_no_wallet.length})`}>
             {!d.clicked_no_wallet.length ? <Empty>None.</Empty> : <div className="table-wrap"><table className="table">

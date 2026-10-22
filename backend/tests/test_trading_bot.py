@@ -3,6 +3,7 @@
 import asyncio
 import secrets
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -464,6 +465,7 @@ def test_track_record_is_hyperliquids_own_numbers(tb: Any) -> None:
     assert r["bot_username"] == "cryptopricechatbot" and r["bot_wallet"] == addr(0xB07)
     t = client.get("/api/members/trading-bot/track-record").json()
     assert t["configured"] and t["pnl"]["all"]["pnl"] == 250.5 and t["pnl"]["30d"]["pnl"] == -12
+    assert datetime.fromisoformat(t["as_of"]).tzinfo is not None  # when Hyperliquid was read (the numbers are cached up to 5 minutes)
     member(db, client, 4)
     assert client.get("/api/members/me/pnl").json()["mine"] is None  # no wallet yet
     prove(client, ADDR_KEY)

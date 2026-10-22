@@ -78,7 +78,7 @@ function Table({ title, rows }: { title: string; rows: ReturnType<typeof groupBy
   return (
     <div className="kbpf-tbl"><h4>{title}</h4>
       <table><thead><tr><th /><th>Trades</th><th>Net</th><th>Win</th><th>Avg / trade (90% range)</th></tr></thead>
-        <tbody>{rows.map((r) => <tr key={r.k}><td>{r.k}</td><td>{r.n}</td><td className={r.net >= 0 ? "is-up" : "is-down"}>{fmt.usd(r.net)}</td>
+        <tbody>{rows.map((r) => <tr key={r.k}><td>{r.k}</td><td>{r.n}</td><td className={r.net >= 0 ? "is-up" : "is-down"}>{fmt.pnl(r.net)}</td>
           <td>{r.win != null ? `${fmt.n(r.win, 0)}%` : "—"}</td>
           <td>{fmt.usd(r.avg)} {r.ci ? <small>({fmt.usd(r.ci[0])} to {fmt.usd(r.ci[1])})</small> : <small className="is-warn">too few to judge</small>}</td></tr>)}</tbody></table></div>
   );
@@ -105,11 +105,11 @@ export function Performance({ o }: { o: Overview }) {
           <select value={period} onChange={(e) => setPeriod(e.target.value)} aria-label="Period"><option value="all">All time</option><option value="7">7 days</option><option value="30">30 days</option></select>
           <label className="kb-check"><input type="checkbox" checked={manual} onChange={(e) => setManual(e.target.checked)} /> include manual setups</label>
         </header>
-        <p className="kb-src">{perf.data?.label} {mode === "PAPER" ? "Paper results are simulated fills on real prices." : ""} Unrealized P&L of open positions: {fmt.usd(o.exposure.unrealized)} (not included below).</p>
+        <p className="kb-src">{perf.data?.label} {mode === "PAPER" ? "Paper results are simulated fills on real prices." : ""} Unrealized P&L of open positions: {fmt.pnl(o.exposure.unrealized)} (not included below).</p>
         {perf.err && <p className="kb-warn">{perf.err}</p>}
         {s.n === 0 ? <p className="kb-empty">No closed {mode.toLowerCase()} trades{coin !== "ALL" ? ` on ${coin}` : ""} yet. Nothing to chart.</p> : (
           <div className="kbpf-kpis">
-            {[["Net P&L", fmt.usd(s.net), s.net >= 0 ? "is-up" : "is-down"], ["Trades", String(s.n), ""], ["Win rate", s.win != null ? `${fmt.n(s.win, 1)}%` : "—", ""],
+            {[["Net P&L", fmt.pnl(s.net), s.net >= 0 ? "is-up" : "is-down"], ["Trades", String(s.n), ""], ["Win rate", s.win != null ? `${fmt.n(s.win, 1)}%` : "—", ""],
               ["Profit factor", s.pf != null ? fmt.n(s.pf, 2) : "—", ""], ["Avg winner", fmt.usd(s.avgW), "is-up"], ["Avg loser", fmt.usd(s.avgL), "is-down"],
               ["Max drawdown", fmt.usd(-s.dd), "is-down"], ["Fees", fmt.usd(-s.fees), ""], ["Funding", mode === "LIVE" ? fmt.usd(-s.funding, 4) : "n/a", ""],
               ["Entry slippage", s.slip.length ? `${fmt.n(s.slip.reduce((a, b) => a + b, 0) / s.slip.length, 1)} bps avg` : "—", ""],

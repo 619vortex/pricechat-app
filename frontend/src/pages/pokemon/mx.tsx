@@ -23,6 +23,21 @@ export function usePublicMarket(): boolean {
   return useContext(PublicCtx);
 }
 
+/** A public page's own title / description / share image (the website adds the canonical URL of the page's path). */
+export interface PageHead { title: string; description?: string; image?: string | null }
+const HeadCtx = createContext<((h: PageHead | null) => void) | null>(null);
+export const PageHeadProvider = HeadCtx.Provider;
+/** Sets this page's head on the public website; a no-op in the dashboard (no provider). `null` = not known yet. */
+export function usePageHead(h: PageHead | null): void {
+  const set = useContext(HeadCtx);
+  const title = h?.title, description = h?.description, image = h?.image;
+  useEffect(() => {
+    if (!set || !title) return;
+    set({ title, description, image });
+    return () => set(null);
+  }, [set, title, description, image]);
+}
+
 // --- watchlist (shared across views) -------------------------------------------------------------------------------
 
 const WatchCtx = createContext<{ ids: Set<number>; toggle: (id: number) => Promise<void> }>({ ids: new Set(), toggle: async () => {} });
@@ -163,10 +178,21 @@ export function MarketShell({ crumbs, children, compact = false }: { crumbs?: [s
 }
 
 /** The thin stats strip above everything (CoinGecko's global bar). PSA 10 totals; "—" when unknown. */
+let statsOnce: { at: number; p: Promise<MarketResp | null> } | null = null;
+/** Tests only: forget the cached totals. */
+export function resetGlobalStats(): void {
+  statsOnce = null;
+}
+
 function GlobalStats() {
   const [m, setM] = useState<MarketResp | null>(null);
   useEffect(() => {
-    void marketApi.market({ grade: "PSA 10", limit: 1, era: "all" }).then(setM).catch(() => setM(null));
+    // every market page mounts its own shell: share one request for the totals across page changes (refreshed after 5 minutes)
+    if (!statsOnce || Date.now() - statsOnce.at > 300_000)
+      statsOnce = { at: Date.now(), p: marketApi.market({ grade: "PSA 10", limit: 1, era: "all" }).catch(() => { statsOnce = null; return null; }) };
+    let live = true;
+    void statsOnce.p.then((r) => { if (live) setM(r); });
+    return () => { live = false; };
   }, []);
   const h = m?.hero;
   return (
@@ -278,14 +304,15 @@ export function Tags({ card }: { card: PCard }) {
 }
 
 /** Thumbnail, name (link), "Base Set · 1999 · 4/102" and edition / language chips. `inline` = one line (rankings table). */
-export function CardCell({ card, extra, inline = false }: { card: PCard; extra?: ReactNode; inline?: boolean }) {
+export function CardCell({ card, extra, inline = false, to }: { card: PCard; extra?: ReactNode; inline?: boolean; to?: string }) {
+  const href = to ?? `/pokemon/cards/${card.id}`;
   const meta = `${card.set_name} · ${card.year}${card.card_number ? ` · ${card.card_number}` : ""}`;
   if (inline)
     return (
       <span className="mx-cardcell is-inline" title={`${card.name} · ${meta}`}>
         <Thumb card={card} />
         <span className="mx-cardtext">
-          <Link to={`/pokemon/cards/${card.id}`} className="mx-cardname">{card.name}</Link>
+          <Link to={href} className="mx-cardname">{card.name}</Link>
           <span className="mx-cardsub">
             <span className="mx-cardmeta">{meta}</span>
             <Tags card={card} />
@@ -298,7 +325,7 @@ export function CardCell({ card, extra, inline = false }: { card: PCard; extra?:
     <span className="mx-cardcell">
       <Thumb card={card} />
       <span className="mx-cardtext">
-        <Link to={`/pokemon/cards/${card.id}`} className="mx-cardname" title={card.name}>{card.name}</Link>
+        <Link to={href} className="mx-cardname" title={card.name}>{card.name}</Link>
         <span className="mx-cardsub">
           <span>{card.set_name} · {card.year}{card.card_number ? ` · ${card.card_number}` : ""}</span>
           <Tags card={card} />

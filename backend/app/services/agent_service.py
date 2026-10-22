@@ -10,10 +10,11 @@ from app.community.context import CommunityContextProvider
 from app.community.tuning import CommunityTuning
 from app.db.seed import DEFAULT_AGENT_SLUG, seed_defaults
 from app.memory.conversation import SqlConversationMemory
-from app.memory.embeddings import EmbeddingIndex
+from app.memory.embeddings import EmbeddingIndex, QueryEmbeddingCache
 from app.memory.retrieval.hybrid import HybridRetriever
 from app.memory.store import APPROVED_ONLY, MemoryStore, clean_text
 from app.models.agent import AgentConfig
+from app.providers.base import EmbeddingProvider
 from app.providers.errors import ProviderError, ProviderUnavailableError
 from app.services.activity import ActivityLogger
 from app.services.brand_service import brand_data, get_brand, goal_data, list_goals
@@ -27,9 +28,12 @@ def get_agent_config(db: Session) -> AgentConfig:
     return config or seed_defaults(db)
 
 
-def build_retriever(db: Session, runtime: AppRuntime, agent_id: int, approved_only: bool = True) -> HybridRetriever:
+def build_retriever(
+    db: Session, runtime: AppRuntime, agent_id: int, approved_only: bool = True, embedder: EmbeddingProvider | None = None
+) -> HybridRetriever:
     store = MemoryStore(db, agent_id)
-    index = EmbeddingIndex(db, agent_id, runtime.embedder) if runtime.embedder else None
+    embedder = embedder or runtime.embedder
+    index = EmbeddingIndex(db, agent_id, embedder) if embedder else None
     return HybridRetriever(
         store,
         index,
@@ -49,6 +53,7 @@ def build_agent(db: Session, runtime: AppRuntime, conversation_id: str = DEFAULT
         temperature=config.temperature,
     )
     settings = runtime.settings
+    embedder = QueryEmbeddingCache(runtime.embedder) if runtime.embedder else None  # memory + community share one query vector
     return PriceChatAgent(
         agent_id=config.id,
         profile=profile,
@@ -56,11 +61,11 @@ def build_agent(db: Session, runtime: AppRuntime, conversation_id: str = DEFAULT
         goals=goal_data(list_goals(db, config.id, enabled_only=True)),
         provider=runtime.provider,
         conversation=SqlConversationMemory(db, config.id, conversation_id, settings.conversation_window),
-        retriever=build_retriever(db, runtime, config.id),
+        retriever=build_retriever(db, runtime, config.id, embedder=embedder),
         activity=ActivityLogger(db, config.id),
         recall_limit=settings.memory_recall_limit,
         memory_char_budget=settings.memory_prompt_char_budget,
-        community=CommunityContextProvider(db, runtime.embedder, CommunityTuning.from_settings(settings)),
+        community=CommunityContextProvider(db, embedder, CommunityTuning.from_settings(settings)),
     )
 
 

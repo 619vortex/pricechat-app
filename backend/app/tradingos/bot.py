@@ -355,6 +355,8 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         what = "Alerts are set" if cmd in alerts.COMMANDS else "Account commands work"
         await client.send_message(chat_id, f"{what} privately: t.me/{name}", reply_to=reply_to)
         return
+    if cmd == "/help" and len(parts) > 1 and await _trade_check(db, client, chat_id, user_id, text, reply_to):
+        return
     s = signals.settings(db)
     bot_chat = (s.publish_chat or "").strip()
     redirect = (group and cmd in HEAVY and s.chart_routing == "bot_chat" and _is_main_chat(db, chat_id, chat_username)
@@ -381,6 +383,27 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         reply = "Something went wrong, try again in a moment."
     if reply:
         await client.send_message(chat_id, reply, html=True, reply_to=reply_to)
+
+
+async def _trade_check(db: Session, client: Any, chat_id: int, user_id: int, text: str, reply_to: int | None) -> bool:
+    """'/help <trade>': Vortex's risk check (assist.py), groups and private chats. False when it's switched off (then /help
+    answers as always)."""
+    from app.tradingos import assist
+
+    if not assist.config(db)["enabled"]:
+        return False
+    try:
+        reply = await assist.start(db, client, chat_id, user_id, text, reply_to)
+    except market.MarketError as e:
+        db.rollback()
+        reply = f"Couldn't read the market data right now: {esc(str(e))}"
+    except Exception:  # noqa: BLE001 - a command must never break the ingestion loop
+        logger.exception("trade check failed")
+        db.rollback()
+        reply = "Something went wrong, try again in a moment."
+    if reply:
+        await client.send_message(chat_id, reply, html=True, reply_to=reply_to)
+    return True
 
 
 async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: str, args: list[str], reply_to: int | None = None) -> str | None:

@@ -107,16 +107,20 @@ export function CrewCard() {
 
 /** A compact VIP Trading Bot status: locked (with the rank to reach), qualified, or unlocked. Never a big banner. */
 export function VipStatus({ level }: { level: number }) {
-  const [s, setS] = useState<{ rules: { min_rank_level: number }; rank?: { ok: boolean }; flow?: { first_trade: boolean }; access?: { bot: boolean } } | null>(null);
+  const [s, setS] = useState<{ rules: { min_rank_level: number }; rank?: { ok: boolean; required?: { name: string }; remaining?: number };
+    flow?: { first_trade: boolean }; access?: { bot: boolean } } | null>(null);
   useEffect(() => { void memberApi<NonNullable<typeof s>>("/members/trading-bot").then(setS).catch(() => undefined); }, []);
   if (!s) return null;
   const min = s.rules.min_rank_level;
   const state = s.flow?.first_trade || s.access?.bot ? "open" : (s.rank?.ok ?? level >= min) ? "ready" : "locked";
+  // locked: the rank by the server's own name (it follows the owner's setting) and how much XP is left
+  const need = `Kiwi Rank ${min}${s.rank?.required?.name ? ` (${s.rank.required.name})` : ""}`;
+  const left = s.rank?.remaining ? ` · ${s.rank.remaining.toLocaleString("en-GB")} XP to go` : "";
   return (
-    <a className={`pp-vip is-${state}`} href="/earn" aria-label="VIP Trading Bot">
+    <a className={`pp-vip is-${state}`} href="/earn">
       <span className="pp-vip-icon" aria-hidden>{state === "locked" ? "🔒" : "✓"}</span>
       <span className="pp-vip-text"><b>VIP Trading Bot</b>
-        <small>{state === "open" ? "Unlocked: open your trading terminal" : state === "ready" ? "You qualify: finish the setup" : `Unlocks at Kiwi Rank ${min}${min === 4 ? " (Scout Kiwi)" : ""}`}</small></span>
+        <small>{state === "open" ? "Unlocked: open your trading terminal" : state === "ready" ? "You qualify: finish the setup" : `Unlocks at ${need}${left}`}</small></span>
       <span className="pp-vip-go">{state === "open" ? "Open →" : state === "ready" ? "Continue →" : "View requirements →"}</span>
     </a>
   );

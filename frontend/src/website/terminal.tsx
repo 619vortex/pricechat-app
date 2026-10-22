@@ -195,11 +195,11 @@ function CloseDialog({ p, onDone, onClose }: { p: Pos; onDone: (a: Account) => v
   return (
     <Modal label="Close position" onClose={onClose}>
       <h3>CLOSE POSITION</h3>
-      <p className="tt-dl-line"><b className={`tt-side is-${p.side.toLowerCase()}`}>{p.coin} {p.side}</b> · {qty(p.size)} {p.coin} ({usd(p.size_usd)}) · {p.mode}</p>
+      <p className="tt-dl-line"><b className={`tt-side is-${p.side.toLowerCase()}`}>{p.coin} {p.side}</b> · {qty(p.size)} {p.coin} ({usd(p.size_usd)}) · {p.mode === "LIVE" ? "LIVE · real money" : NOT_LIVE[p.mode]}</p>
       <p className="tt-dl-line">Current price <b>{px(p.mark)}</b> · entry {px(p.entry_px)} · P&L <Live value={p.upnl}>{usd(p.upnl, true)}</Live></p>
       {res ? (
         <div className="tt-result" role="status">
-          {res.status === "CLOSED" ? <p><b>Closed ✓</b> Hyperliquid filled {qty(res.filled ?? 0)} {p.coin} at {px(res.avg_px)}.</p>
+          {res.status === "CLOSED" ? <p><b>Closed ✓</b> {p.mode === "PAPER" ? "Simulated fill:" : "Hyperliquid filled"} {qty(res.filled ?? 0)} {p.coin} at {px(res.avg_px)}.</p>
             : <p><b>Partly closed.</b> Filled {qty(res.filled ?? 0)} {p.coin} at {px(res.avg_px)}. Still open: {qty(res.remaining)} {p.coin}, with the
               stop-loss and targets resized to it.</p>}
           {res.note && <p className="tt-warn">{res.note}</p>}
@@ -217,6 +217,7 @@ function CloseDialog({ p, onDone, onClose }: { p: Pos; onDone: (a: Account) => v
             <div><dt>Est. execution impact</dt><dd>≈ {usd(notional * (SLIPPAGE + TAKER_FEE))}</dd></div>
             <div><dt>Worst accepted price</dt><dd>{px(price * (p.side === "LONG" ? 1 - 3 * SLIPPAGE : 1 + 3 * SLIPPAGE))}</dd></div>
           </dl>
+          {p.mode === "PAPER" && <p className="kt-explain">Practice position: the close is simulated at the market price. No order reaches Hyperliquid.</p>}
           <p className="tb-sub">A reduce-only market order (it can only shrink this position, never open the other side). Market orders can fill
             worse than the current price (slippage), and pay the taker fee. {frac < 1 ? "The stop-loss and targets are resized to what's left." : "Its stop-loss and targets are cancelled after the fill."}</p>
           {err && <p className="site-error" role="alert">{err}</p>}
@@ -262,6 +263,8 @@ function CloseAllDialog({ positions, onDone, onClose }: { positions: Pos[]; onDo
         <>
           <p className="tt-dl-line">This closes <b>{positions.length}</b> bot position{positions.length === 1 ? "" : "s"} (≈ <b>{usd(exposure)}</b> exposure) at
             market: {positions.map((p) => `${p.coin} ${p.side}`).join(", ")}.</p>
+          {positions.every((p) => p.mode === "PAPER") && <p className="kt-explain">These are practice positions: the closes are simulated, no order reaches Hyperliquid.</p>}
+          {positions.some((p) => p.mode === "LIVE") && <p className="kt-warn">Includes LIVE positions: real orders on your Hyperliquid account.</p>}
           <p className="tb-sub">Reduce-only market orders, one per position: they can't open reverse positions. Each one is checked against
             Hyperliquid's answer; anything not filled is reported, never shown as closed. Your other Hyperliquid positions aren't touched.</p>
           <label className="tt-check"><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> I understand market orders can
@@ -433,10 +436,11 @@ function PositionRow({ p, onClose, onAdjust }: { p: Pos; onClose: () => void; on
         <span className="kt-c" data-l="Size">{usd(p.size_usd)}</span>
         <span className="kt-c" data-l="Entry">{px(p.entry_px)}</span>
         <span className="kt-c" data-l="Mark"><Live value={p.mark}>{px(p.mark)}</Live></span>
-        <span className="kt-c kt-pnl" data-l="P&L"><Live value={p.upnl}>{usd(p.upnl, true)}</Live><small className={tone(p.upnl_pct)}>{pct(p.upnl_pct)}</small></span>
+        <span className="kt-c kt-pnl" data-l="P&L"><Live value={p.upnl}>{usd(p.upnl, true)}</Live><small className={tone(p.upnl_pct)}
+          title="Return on the margin this position uses (ROE)">{pct(p.upnl_pct)}{p.upnl_pct != null ? " ROE" : ""}</small></span>
         <span className="kt-c" data-l="Liq. Price">{px(p.liq_px)}</span>
       </button>
-      <span className="kt-c kt-close"><button className="kt-close-btn" onClick={onClose}>CLOSE</button></span>
+      <span className="kt-c kt-close"><button className="kt-close-btn" aria-label={`Close ${p.coin} ${p.side} position`} onClick={onClose}>CLOSE</button></span>
       {p.warnings.map((w) => <p key={w} className="kt-warn" role="alert">⚠ {w}</p>)}
       {open && (
         <div className="kt-more">
@@ -672,8 +676,9 @@ function DepositDialog({ c, onClose }: { c: Conn; onClose: () => void }) {
   );
 }
 
-function SettingsDialog({ a, conn, busy, err, run, put, onClose }: {
+function SettingsDialog({ a, conn, busy, err, run, put, onClose, onAskAuto }: {
   a: Account; conn: Connection; busy: string | null; err: string | null; run: Run; put: (b: Record<string, unknown>, ok?: string) => Promise<unknown>; onClose: () => void;
+  onAskAuto: (hours: number) => void;  // AUTO is only ever turned on through its confirmation (limits + real-money warning)
 }) {
   const [draft, setDraft] = useState<Limits>(a.limits);
   const [hours, setHours] = useState(24);
@@ -692,7 +697,7 @@ function SettingsDialog({ a, conn, busy, err, run, put, onClose }: {
           <select aria-label="AUTO duration" value={hours} onChange={(e) => setHours(Number(e.target.value))}>
             {AUTO_DURATIONS.map((h) => <option key={h} value={h}>{autoLabel(h)}</option>)}
           </select>
-          <button className="kt-btn is-go" disabled={busy !== null} onClick={() => void put({ auto_enabled: true, auto_hours: hours }, "AUTO on ✓")}>Turn AUTO on</button>
+          <button className="kt-btn is-go" disabled={busy !== null} onClick={() => onAskAuto(hours)}>Turn AUTO on…</button>
         </div>
       )}
       <p className="tb-sub">AUTO enters each new signal within your limits below. Every trade still gets an exchange-side stop-loss.</p>
@@ -736,6 +741,7 @@ interface Plan { entry: number; size: number; notional: number; leverage: number
 export function TradingTerminal({ conn, after }: { conn: Connection; after?: ReactNode }) {
   const [t, setT] = useState<Terminal | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);  // when the numbers on screen were last read
   const [sigs, setSigs] = useState<Sig[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -757,6 +763,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
   const load = useCallback(async () => {
     try {
       setT(await memberApi<Terminal>("/members/trading/terminal"));
+      setLoadedAt(Date.now());
       setLoadErr(null);
     } catch (e) { setLoadErr(errText(e)); }
   }, []);
@@ -838,7 +845,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
     setPv(null);
     if (out) {
       if (out.position.status === "OPEN") { setNote(`Filled: ${out.position.coin} ${out.position.side} ✓ stop-loss and take profit placed`); playSound("cash"); }
-      else setErr(`${out.position.status.replace("_", " ")}: ${out.position.error ?? ""}`);
+      else setErr(`${out.position.status.replace(/_/g, " ")}${out.position.error ? `: ${out.position.error}` : ""}`);
     }
   }
   // LIVE: is Kiwi's permission still listed on Hyperliquid? (revoked / expired / wallet changed → new entries are blocked)
@@ -866,7 +873,8 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
             <span className={`kt-online${t?.global_paused ? " is-off" : ""}`}><i aria-hidden />{t?.global_paused ? "Paused" : "Online"}</span>
           </div>
           <div className="kt-head-right">
-            {mode !== "LIVE" && <button className={`kt-mode is-${mode.toLowerCase()}`} onClick={() => setConnect(true)}>{NOT_LIVE[mode]}</button>}
+            {mode !== "LIVE" ? <button className={`kt-mode is-${mode.toLowerCase()}`} onClick={() => setConnect(true)}>{NOT_LIVE[mode]}</button>
+              : <span className="kt-mode is-live" title="Trades on this account use real money on Hyperliquid">LIVE · REAL MONEY</span>}
             {paused && <button className="kt-paused" onClick={() => setSettings(true)}>NEW TRADES PAUSED</button>}
             <button className={`kt-api${mode === "LIVE" && !authBad ? " is-on" : ""}`} onClick={() => setConnect(true)}>
               🔑 {mode === "LIVE" && !authBad ? "API connected" : "Add Hyperliquid API"}</button>
@@ -932,7 +940,8 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
         )}
       </section>
 
-      {loadErr && <p className="site-error" role="alert">{loadErr}</p>}
+      {loadErr && <p className="site-error" role="alert">{loadErr}{loadedAt
+        ? ` Balances and positions below are from ${new Date(loadedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })} and may be out of date.` : ""}</p>}
       {err && <p className="site-error" role="alert">{err}</p>}
       {note && <p className="tb-toast" role="status">{note}</p>}
 
@@ -994,7 +1003,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
         <details className="kt-section kt-hist">
           <summary><h2>HISTORY</h2><span>{hist.length} closed</span></summary>
           <table className="kt-htable">
-            <thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Closed</th></tr></thead>
+            <thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Exit</th><th title="After trading fees">Net P&L</th><th>Closed</th></tr></thead>
             <tbody>
               {hist.map((h) => (
                 <tr key={h.id}>
@@ -1015,10 +1024,12 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
       {pv && (
         <Modal label="Confirm trade" onClose={cancelPreview}>
           <h3 className={`kt-confirm-title is-${pv.sig.side.toLowerCase()}`}>{pv.sig.coin} {pv.sig.side}</h3>
-          {pv.mode !== "LIVE" && <p className={`kt-mode is-${pv.mode.toLowerCase()}`}>{NOT_LIVE[pv.mode]}</p>}
+          <p className={`kt-mode is-${pv.mode.toLowerCase()}`}>{pv.mode === "LIVE" ? "LIVE · REAL MONEY" : NOT_LIVE[pv.mode]}</p>
           <dl className="kt-confirm">
-            <div><dt>Position size</dt><dd>{usd(pv.plan.notional)}</dd></div>
+            <div><dt>Entry (market)</dt><dd>≈ ${px(pv.plan.entry)}</dd></div>
+            <div><dt>Position size</dt><dd>{usd(pv.plan.notional)} <small>({qty(pv.plan.size)} {pv.sig.coin})</small></dd></div>
             <div><dt>Leverage</dt><dd>{pv.plan.leverage}x</dd></div>
+            <div><dt>Margin used</dt><dd>{usd(pv.plan.margin)}</dd></div>
             <div><dt>Stop loss</dt><dd>${px(pv.plan.stop)}</dd></div>
             <div><dt>Take profit</dt><dd>${px(pv.plan.tp1)} · ${px(pv.plan.tp2)}</dd></div>
           </dl>
@@ -1050,7 +1061,8 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
         </Modal>
       )}
       {deposit && cx?.wallet && <DepositDialog c={cx} onClose={() => { setDeposit(false); void load(); void loadConn(); }} />}
-      {settings && a && <SettingsDialog a={a} conn={conn} busy={busy} err={err} run={run} put={put} onClose={() => setSettings(false)} />}
+      {settings && a && <SettingsDialog a={a} conn={conn} busy={busy} err={err} run={run} put={put} onClose={() => setSettings(false)}
+                                        onAskAuto={(h) => { setAutoHours(h); setSettings(false); setAutoAsk(true); }} />}
     </div>
   );
 }

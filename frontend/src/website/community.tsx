@@ -74,6 +74,11 @@ export function JoinPage() {
             <span>Earn XP. Level up.</span>
             <span>Connect your socials later for missions.</span>
           </p>
+          <ul className="site-join-perks" aria-label="What you get">
+            <li><span aria-hidden>▶</span> Watch Price Chat videos and read our posts for Kiwi XP</li>
+            <li><span aria-hidden>🥝</span> Grow your Kiwi from The Egg to Mythic: every rank has a reward</li>
+            <li><span aria-hidden>🎁</span> Free virtual Pokémon packs, a daily streak and the leaderboard</li>
+          </ul>
         </div>
         <div className="site-join-box">
           {invited && (
@@ -172,12 +177,16 @@ export function LeaderboardPage() {
   const [metric, setMetric] = useState<Metric>("score");
   const [data, setData] = useState<Board | null>(null);
   const [invite, setInvite] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const mine = useReferrals();
+  const viewer = useSession();
   useEffect(() => {
     setData(null);
+    setFailed(false);
     void memberApi<Board>(`/members/leaderboard?period=${period}&metric=${metric}&limit=100`)
-      .then(setData).catch(() => setData({ rows: [], note: "", me: null }));
-  }, [period, metric]);
+      .then(setData).catch(() => setFailed(true));  // never "nobody here yet" when the board just didn't load
+  }, [period, metric, attempt]);
   const unit = metric === "referrals" ? "referrals" : "XP";
   const moves = useStandingMoves(`pc-lb:${period}:${metric}`, data?.rows ?? null);
   const me = data?.me ?? null;
@@ -227,11 +236,18 @@ export function LeaderboardPage() {
         </div>
       )}
       {data?.note && <p className="site-note lb-note">{data.note}</p>}
-      {data === null ? (
+      {failed ? (
+        <div className="site-empty" role="alert">
+          <p>Couldn't load the leaderboard right now.</p>
+          <button type="button" className="site-button" onClick={() => setAttempt((n) => n + 1)}>Try again</button>
+        </div>
+      ) : data === null ? (
         <p className="site-empty">Loading…</p>
       ) : data.rows.length === 0 ? (
         <p className="site-empty">
-          {metric === "referrals" ? "No qualified invites yet. Be the first." : <>Nobody here yet. <a className="site-link" href="/website/join">Join Price Chat</a> and be the first.</>}
+          {metric === "referrals" ? "No qualified invites yet. Be the first."
+            : viewer ? <>Nobody here yet. <a className="site-link" href="/passport">Earn your first XP</a> and be the first.</>
+            : <>Nobody here yet. <a className="site-link" href="/website/join">Join Price Chat</a> and be the first.</>}
         </p>
       ) : (
         <>
@@ -296,7 +312,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ]],
       ["What we never do", [
         "We never ask for or see your social media passwords.",
-        "We don't keep access tokens from Google, X or Telegram after confirming who you are, and we don't post, like or message anything on your behalf.",
+        "We don't keep access tokens from Google or Telegram after confirming who you are. If you connect X, its token is kept encrypted so you can reply to or repost Price Chat's posts from your Kiwi Passport: we only post on X when you press Reply or Repost yourself, and we never like or message anything on your behalf.",
         "We don't infer sensitive characteristics or build hidden behaviour profiles. XP is never given because an AI “thinks” something about you.",
         "We don't know who watches our videos: YouTube doesn't tell channels that.",
       ]],

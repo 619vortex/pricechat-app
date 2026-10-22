@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useSearchParams } from "react-router-dom";
-import { MarketShell } from "../mx";
+import { MarketShell, usePageHead } from "../mx";
 import { AVAILABILITY, SORTS, ago, cardName, money, vaultApi, type VaultCard, type VaultFilters, type VaultHome } from "./api";
 
 /** The Vault is a tab of the Pokémon Market: the market's frame (stats, tabs), then the Vault's own strip + nav. */
@@ -76,6 +76,7 @@ export function VaultStore() {
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
   };
+  usePageHead({ title: "Price Chat Vault · Vintage Japanese Pokémon Cards", description: "Hand-picked 1996–2002 Japanese Pokémon cards (Base, Jungle, Fossil, Rocket Gang, Gym, Neo, e-Card) with the seller's real photos and prices." });
   const active = FILTER_KEYS.filter((k) => k !== "sort" && filters[k]).length;
   const seller = home?.sources[0];
 
@@ -122,10 +123,10 @@ export function VaultStore() {
               </select>
             </label>
             <label>Min price
-              <input inputMode="decimal" value={filters.min_price ?? ""} placeholder="$ min" onChange={(e) => set("min_price", e.target.value.replace(/[^\d.]/g, ""))} />
+              <PriceInput value={filters.min_price ?? ""} placeholder="$ min" onCommit={(v) => set("min_price", v)} />
             </label>
             <label>Max price
-              <input inputMode="decimal" value={filters.max_price ?? ""} placeholder="$ max" onChange={(e) => set("max_price", e.target.value.replace(/[^\d.]/g, ""))} />
+              <PriceInput value={filters.max_price ?? ""} placeholder="$ max" onCommit={(v) => set("max_price", v)} />
             </label>
             <label className="vt-check"><input type="checkbox" checked={filters.sold === "true"} onChange={(e) => set("sold", e.target.checked ? "true" : "")} /> Show recently sold</label>
             {active > 0 && <button type="button" className="vt-link" onClick={() => { setQ(""); setParams(new URLSearchParams(filters.sort ? { sort: filters.sort } : {}), { replace: true }); }}>Clear filters</button>}
@@ -155,6 +156,21 @@ export function VaultStore() {
       )}
     </VaultShell>
   );
+}
+
+/** A price bound that applies once typing pauses: "1500" is one search, not four. */
+function PriceInput({ value, placeholder, onCommit }: { value: string; placeholder: string; onCommit: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  const commit = useRef(onCommit);
+  commit.current = onCommit; // the latest filters, not the ones from when typing started
+  useEffect(() => setV(value), [value]);
+  useEffect(() => {
+    if (v === value) return;
+    const t = window.setTimeout(() => commit.current(v), 500);
+    return () => window.clearTimeout(t);
+  }, [v]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <input inputMode="decimal" value={v} placeholder={placeholder} onChange={(e) => setV(e.target.value.replace(/[^\d.]/g, ""))}
+                onKeyDown={(e) => { if (e.key === "Enter" && v !== value) onCommit(v); }} />;
 }
 
 export function CardTile({ c }: { c: VaultCard }) {

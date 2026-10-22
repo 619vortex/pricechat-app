@@ -40,7 +40,7 @@ export function StatusBar({ o, onChanged, onAsk, onControl }: { o: Overview; onC
         <span className="kbs-cell" title={h.monitoring.label}><Dot s={h.monitoring.state} /><small>Monitoring</small><b>{h.monitoring.state === "ok" ? "OK · 60s" : h.monitoring.state.toUpperCase()}</b></span>
         <span className="kbs-cell"><Dot s={h.protection.state} /><small>Positions</small>
           <b>{h.protection.open} open{h.protection.open ? ` · ${h.protection.state === "ok" ? "🛡 stops on" : h.protection.state}` : ""}</b></span>
-        <span className="kbs-cell"><small>Unrealized</small><b className={upnl == null ? "" : upnl >= 0 ? "is-up" : "is-down"}>{fmt.usd(upnl)}</b></span>
+        <span className="kbs-cell"><small>Unrealized</small><b className={upnl == null ? "" : upnl >= 0 ? "is-up" : "is-down"}>{fmt.pnl(upnl)}</b></span>
         <span className="kbs-cell" title="Loss if every stop-loss is hit, as % of equity"><small>Risk at stops</small>
           <b>{fmt.usd(o.exposure.loss_at_stop)}{o.exposure.loss_at_stop_pct != null ? ` · ${o.exposure.loss_at_stop_pct}%` : ""}</b></span>
         <span className="kbs-cell"><small>Last evaluation</small><b>{fmt.ago(h.engine.last_evaluation_at)}</b></span>
@@ -56,7 +56,7 @@ export function StatusBar({ o, onChanged, onAsk, onControl }: { o: Overview; onC
       </div>
       {err && <p className="kbs-err" role="alert">{err}</p>}
       {ask && (
-        <div className="kb-dialog" role="dialog" aria-modal="true" aria-label="Pause new trades">
+        <div className="kb-dialog" role="dialog" aria-modal="true" aria-label="Pause new trades" onKeyDown={(e) => { if (e.key === "Escape") setAsk(false); }}>
           <div className="kb-dialog-in">
             <h3>Pause all new trades?</h3>
             <p>No new entries (manual or AUTO) until you resume. Open positions keep their stop-loss and take-profit orders on the exchange:

@@ -157,6 +157,12 @@ describe("Kiwi Passport V3", () => {
     expect(container.querySelector(".pp-mcard-done")!.textContent).not.toMatch(/caught up/i);  // never next to more things to do
     expect(container.querySelector(".pp-easy-title")!.textContent).toBe("Keep earning XP");
     expect(container.querySelector<HTMLAnchorElement>(".pp-quick-card[href='/giveaway']")).toBeTruthy();
+    // no Watch & Earn section on the page (no videos): "Watch a short" still goes somewhere that pays, never nowhere
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const watch = [...container.querySelectorAll<HTMLButtonElement>("button.pp-quick-card")].find((b) => b.textContent!.includes("Watch a short"))!;
+    await act(async () => watch.click());
+    expect(assign).toHaveBeenCalledWith("/content");
   });
 
   it("shows ONE mission at a time with one big button, and an honest today count", async () => {
@@ -404,6 +410,41 @@ describe("Kiwi Passport V3", () => {
   });
 });
 
+describe("Kiwi Passport: loading, errors and live XP", () => {
+  it("offers Try again when the Passport couldn't load, instead of a dead end", async () => {
+    serveV3({ ...base(v3()), "/api/members/me": undefined });  // 404
+    const { container } = await show(<ProfilePage />);
+    expect(container.textContent).toContain("Could not load your passport.");
+    routes["/api/members/me"] = v3();
+    await act(async () => screen.getByRole("button", { name: "Try again" }).click());
+    for (let i = 0; i < 3; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
+    expect(container.querySelector(".pp-xp-big")!.textContent).toBe("42 XP");
+  });
+
+  it("doesn't announce XP twice: XP already shown by a Passport reload isn't 'just arrived' 15 seconds later", async () => {
+    vi.useFakeTimers();
+    try {
+      serveV3(base(v3()));
+      const { container } = render(<ProfilePage />);
+      for (let i = 0; i < 4; i++) await act(async () => vi.advanceTimersByTimeAsync(0));
+      // the member changes a setting: the Passport reloads, and by then a mission had paid +8 (shown by the play area)
+      routes["/api/members/me"] = v3({ member: { ...v3().member, xp: 50 } });
+      routes["/api/members/session"] = { signed_in: true, member: { id: "m1", username: "Kiwi123", xp: 50, rank: egg } };
+      const box = screen.getByRole("checkbox", { name: "Show me on the public leaderboard" });
+      await act(async () => box.click());
+      for (let i = 0; i < 4; i++) await act(async () => vi.advanceTimersByTimeAsync(0));
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(container.querySelector(".pp-live")).toBeNull();
+      // XP that really arrives in the background (e.g. Telegram messages) is still announced
+      routes["/api/members/session"] = { signed_in: true, member: { id: "m1", username: "Kiwi123", xp: 53, rank: egg } };
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(container.querySelector(".pp-live")!.textContent).toContain("+3 XP just arrived");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("community reputation", () => {
   it("keeps legacy Telegram reputation behind Details", async () => {
     const rep = { price_chat_xp: 342, price_chat_weight: 1, price_chat_points: 342, combot_counts: true,
@@ -477,6 +518,19 @@ describe("Kiwi Passport: Telegram chat bar, honest daily status, compact VIP", (
     expect(calls.some((c) => c.startsWith("POST"))).toBe(false);  // opening the Passport never pays or sends anything
   });
 
+  it("still lets members invite friends to the Telegram (it pays XP): inside Invite friends, not a card of its own", async () => {
+    serveV3({ ...base(v3()), "/api/members/me/crew": crew });
+    const { container } = await show(<ProfilePage />);
+    expect(calls).not.toContain("GET /api/members/me/crew");  // asked only when the member opens Invite friends
+    await act(async () => screen.getByText("👥 Invite friends").click());
+    for (let i = 0; i < 2; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
+    const tg = screen.getByRole("dialog").querySelector(".iv-tg")!;
+    expect(tg.querySelector("a")!.getAttribute("href")).toBe(crew.share_url);
+    expect(tg.textContent).toContain("+100 XP for each new member who joins, and +500 XP bonus at 5 friends");
+    expect(tg.textContent).toContain("3 joined · 1 waiting");
+    expect(container.querySelector(".crew")).toBeNull();
+  });
+
   it("shows Telegram chat as a Daily Missions row next to the others, never as a separate box", async () => {
     const p = v3({ telegram: { username: "kiwi", messages_today: 4, eligible_today: 3, xp_today: 12, daily_cap: 50, active_days_7d: 2,
                               last_verified_at: null, next: "", note: "", messages_total: 120, xp_total: 300 } });
@@ -515,11 +569,12 @@ describe("Kiwi Passport: Telegram chat bar, honest daily status, compact VIP", (
   it("shows the VIP Trading Bot as one compact line, not a banner above the Passport", async () => {
     serveV3({ ...base(v3()), "/api/website/home": { sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
               links: { telegram: null, x: null, youtube: null }, site_url: null, trading_bot: true },
-              "/api/members/trading-bot": { rules: { min_rank_level: 3 }, rank: { ok: false } } });
+              "/api/members/trading-bot": { rules: { min_rank_level: 3 }, rank: { ok: false, required: { name: "Kiwi" }, remaining: 108 } } });
     const { container } = await show(<ProfilePage />);
     const vip = container.querySelector<HTMLAnchorElement>(".pp-vip")!;
     {
-      expect(vip.textContent).toMatch(/Unlocks at Kiwi Rank 3.*View requirements/);
+      expect(vip.textContent).toMatch(/Unlocks at Kiwi Rank 3 \(Kiwi\) · 108 XP to go.*View requirements/);
+      expect(vip.getAttribute("aria-label")).toBeNull();  // screen readers hear the status too, not just "VIP Trading Bot"
       expect(container.querySelector(".pp-vipbot")).toBeNull();
       expect(vip.compareDocumentPosition(container.querySelector(".pp-a")!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();  // below the Kiwi card
     }

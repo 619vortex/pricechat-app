@@ -41,9 +41,12 @@ const NOT_IN_PLAY = new Set(["link_x", "link_telegram", "link_google", "open_sho
 const needsConnecting = (m: MissionView) => m.cta?.action === "link" || m.status === "unavailable";
 
 /** Everything the member can act on now, easiest first: XP tasks, then support-only ones. */
-/** Scroll to an easy task section (Watch & Earn / Read & Earn) below the main card. */
-function goTo(id: string): void {
-  document.getElementById(id)?.closest("section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+/** Scroll to an easy task section (Watch & Earn / Read & Earn) below the main card. When that section isn't on the page
+ *  (no videos to show, the feed couldn't load), go to `fallback` instead: a card never does nothing. */
+export function goTo(id: string, fallback?: string): void {
+  const section = document.getElementById(id)?.closest("section");
+  if (section) section.scrollIntoView?.({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+  else if (fallback) location.assign(fallback);
 }
 
 export function missionQueue(p: Passport): MissionView[] {
@@ -410,8 +413,9 @@ export function PassportPlay({ p, ranks, reload, extra, rewardFrom, onEditName, 
 
 // --- quick XP: consistent mission cards with the real configured rewards ------------------------------------------------
 
-const QUICK: { key: string; icon: string; title: string; rule: string; to: string; extra?: string }[] = [
-  { key: "watch", icon: "▶", title: "Watch a short", rule: "website.content_view", to: "we-title", extra: "watch.combo" },
+const QUICK: { key: string; icon: string; title: string; rule: string; to: string; extra?: string; fallback?: string }[] = [
+  // no Watch & Earn on the page: every video opened from the website's archive counts the same XP
+  { key: "watch", icon: "▶", title: "Watch a short", rule: "website.content_view", to: "we-title", extra: "watch.combo", fallback: "/content" },
   { key: "read", icon: "📖", title: "Read a post", rule: "website.x_post_read", to: "xf-title" },
   { key: "pack", icon: "🃏", title: "Open a pack", rule: "pack.open", to: "/giveaway" },
 ];
@@ -439,7 +443,7 @@ function QuickXP({ p, rules }: { p: Passport; rules: XPRuleInfo[] }) {
         return (
           <li key={q.key}>
             {q.to.startsWith("/") ? <a className={`pp-quick-card${done ? " is-done" : ""}`} href={q.to}>{inner}</a>
-              : <button type="button" className={`pp-quick-card${done ? " is-done" : ""}`} onClick={() => goTo(q.to)}>{inner}</button>}
+              : <button type="button" className={`pp-quick-card${done ? " is-done" : ""}`} onClick={() => goTo(q.to, q.fallback)}>{inner}</button>}
           </li>
         );
       })}

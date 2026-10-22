@@ -56,8 +56,9 @@ export function MarketHome() {
   const grade = sp.get("grade") ?? "PSA 10";
   const sort = (sp.get("sort") as SortKey | null) ?? "rank";
   const dir = (sp.get("dir") as "asc" | "desc" | null) ?? (DEFAULT_DESC[sort] === false ? "asc" : "desc");
-  const per = Number(sp.get("per") ?? 100);
-  const page = Math.max(1, Number(sp.get("page") ?? 1));
+  // a hand-edited or stale URL (?per=abc, ?page=-2) falls back to the defaults instead of asking for page NaN
+  const per = PER.some(([v]) => v === sp.get("per")) ? Number(sp.get("per")) : 100;
+  const page = Math.max(1, Math.floor(Number(sp.get("page"))) || 1);
   const q: MarketQuery = {
     grade, sort, dir, limit: per, offset: (page - 1) * per, q: sp.get("q") ?? undefined, set: sp.get("set") ?? undefined,
     year: sp.get("year") ?? undefined, edition: sp.get("edition") ?? undefined, language: sp.get("language") ?? undefined, era: "all",
@@ -68,6 +69,7 @@ export function MarketHome() {
   const key = JSON.stringify(q);
   const [data, setData] = useState<MarketResp | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [retry, setRetry] = useState(0);
   const [filterText, setFilterText] = useState(sp.get("q") ?? "");
   const [showHighlights, setShowHighlights] = useState(readHighlights);
   const [showFilters, setShowFilters] = useState(false);
@@ -86,7 +88,7 @@ export function MarketHome() {
     let live = true;
     marketApi.market(q).then((d) => { if (live) { setData(d); setError(null); } }).catch((e) => live && setError(e));
     return () => { live = false; };
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key, retry]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // "Trending" needs recent verified sales or watchlist stars; when there are none, the panel shows the highest prices instead
     if (!data || data.sections.trending.length) return;
@@ -181,7 +183,10 @@ export function MarketHome() {
         </button>
         {pulseMobile && <MarketPulse />}
       </div>
-      {!data ? <Skeleton rows={10} boxes={showHighlights} /> : (
+      {!data ? (error ? (
+        <p className="mx-banner" role="status">The market couldn't be loaded.{" "}
+          <button type="button" className="mx-clear" onClick={() => { setError(null); setRetry((n) => n + 1); }}>Try again</button></p>
+      ) : <Skeleton rows={10} boxes={showHighlights} />) : (
         <>
           {showHighlights && (
             <section className="mx-highlights" aria-label="Highlights">

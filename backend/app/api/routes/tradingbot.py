@@ -6,6 +6,7 @@ While the funnel is closed (Admin → Trading Bot Access → not public yet), on
 """
 
 import hashlib
+from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -338,6 +339,7 @@ def my_wallet_verify(payload: VerifyIn, db: DbSession, pc_session: SessionToken 
 
 
 _pnl_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_pnl_at: dict[str, str] = {}  # when each cached PnL was read from Hyperliquid (UTC ISO), so pages can say "as of"
 
 
 def _pnl(address: str, client: Any = None) -> dict[str, Any] | None:
@@ -354,6 +356,8 @@ def _pnl(address: str, client: Any = None) -> dict[str, Any] | None:
     except HyperliquidError:
         out = None
     _pnl_cache[address] = (time.monotonic(), out)
+    if out is not None:
+        _pnl_at[address] = datetime.now(UTC).isoformat(timespec="seconds")
     return out
 
 
@@ -385,7 +389,9 @@ def bot_track_record(db: DbSession) -> dict[str, Any]:
     s = service.settings(db)
     if not s.bot_wallet:
         return {"configured": False}
-    return {"configured": True, "address": service.evm.checksum(s.bot_wallet), "bot": s.bot_username, "pnl": _pnl(s.bot_wallet)}
+    pnl = _pnl(s.bot_wallet)
+    return {"configured": True, "address": service.evm.checksum(s.bot_wallet), "bot": s.bot_username, "pnl": pnl,
+            "as_of": _pnl_at.get(s.bot_wallet) if pnl is not None else None}  # cached up to 5 minutes: the page says when it was read
 
 
 @router.get("/members/me/pnl")

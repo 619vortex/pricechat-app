@@ -4,7 +4,8 @@ export interface PnlWindow { pnl: number; value: number | null; series: number[]
 export type Pnl = Partial<Record<"24h" | "7d" | "30d" | "all", PnlWindow>>;
 
 export const money = (n: number, sign = false) =>
-  `${sign ? (n > 0 ? "+" : n < 0 ? "−" : "") : n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) >= 1000 ? 0 : 2 })}`;
+  `${sign ? (n > 0 ? "+" : n < 0 ? "−" : "") : n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", Math.abs(n) >= 1000
+    ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;  // "$12.50", never "$12.5"
 
 function Spark({ series }: { series: number[] }) {
   if (series.length < 2) return null;

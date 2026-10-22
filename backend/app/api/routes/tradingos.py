@@ -15,7 +15,7 @@ from app.api.schemas import StrictInput
 from app.arbitrage import funding_alerts
 from app.models.tradingos import TsAudit, TsSignal
 from app.security import admin_auth
-from app.tradingos import autodelete, bot, market, risk, signals
+from app.tradingos import assist, autodelete, bot, market, risk, signals
 
 router = APIRouter(tags=["trading-os"])
 
@@ -53,6 +53,7 @@ def overview(db: DbSession) -> dict[str, Any]:
     return {"settings": {k: getattr(s, k) for k in ("scanner_enabled", "auto_publish", "paused", "publish_chat", "main_chat", "chart_routing", "brief_enabled", "brief_hour", "timeframe", "universe_size",
                                                      "min_volume_usd", "max_spread_bps", "max_open_signals", "min_rr", "strategies", "allowed_coins")},
             "funding_alerts": funding_alerts.config(db), "autodelete": autodelete.config(db),
+            "vortex_assist": {**assist.config(db), "pending": assist.pending_count(db), "online": assist.online(db)},
             "exchange": exchange, "counts": counts, "stats": signals.stats(db),
             "execution": "ENTER → private preview → confirm. PAPER by default; TESTNET with an approved API wallet; LIVE only for the "
                          "allowlist after the pre-live checks"}
@@ -240,6 +241,13 @@ class SettingsIn(StrictInput):
     funding_alerts_on: bool | None = None  # Earn › Funding Arb alerts to the publish chat (tradingos.funding_alerts)
     funding_alert_min_apr: float | None = Field(None, ge=1, le=1000)  # net spread APR %, after estimated fees
     main_chat_autodelete_min: int | None = Field(None, ge=0, le=1440)  # delete the bot's main-chat messages after N minutes (0 = keep)
+    vortex_on: bool | None = None  # Vortex trade checks (/help <trade>)
+    vortex_daily_public: int | None = Field(None, ge=0, le=100)  # checks a day per Telegram user
+    vortex_daily_ranked: int | None = Field(None, ge=0, le=500)  # ... with a linked Kiwi Passport at vortex_min_rank or above
+    vortex_min_rank: int | None = Field(None, ge=1, le=50)
+
+
+VORTEX_KEYS = {"vortex_on": "on", "vortex_daily_public": "daily_public", "vortex_daily_ranked": "daily_ranked", "vortex_min_rank": "min_rank"}
 
 
 @router.put("/tradingos/admin/settings")
@@ -256,9 +264,37 @@ def put_settings(payload: SettingsIn, request: Request, db: DbSession) -> dict[s
         s.strategies = {**s.strategies, "autodelete": {"minutes": v.pop("main_chat_autodelete_min")}}
     if "risk_v2_mode" in v:
         s.strategies = {**s.strategies, "risk_v2": {**((s.strategies or {}).get("risk_v2") or {}), "mode": v.pop("risk_v2_mode")}}
+    vx = {VORTEX_KEYS[k]: v.pop(k) for k in list(v) if k in VORTEX_KEYS}
+    if vx:
+        s.strategies = {**s.strategies, "vortex_assist": {**((s.strategies or {}).get("vortex_assist") or {}), **vx}}
     for k, val in v.items():
         setattr(s, k, val.strip() if isinstance(val, str) else val)
     signals.audit(db, _actor(db, request), "settings", None, **{k: str(val) for k, val in payload.model_dump(exclude_none=True).items()})
+    db.commit()
+    return overview(db)
+
+
+class VortexTokenIn(StrictInput):
+    token: str = Field(..., min_length=24, max_length=200, pattern=r"^[A-Za-z0-9_\-.~]+$")
+
+
+@router.put("/tradingos/admin/vortex-token")
+def set_vortex_token(payload: VortexTokenIn, request: Request, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """Write-only: the bearer Vortex uses on /api/vortex/* (kept in the encrypted secret store, never shown again)."""
+    from app.security.credentials import secret_store
+
+    secret_store(runtime.settings).set("vortex_assist_token", payload.token)
+    signals.audit(db, _actor(db, request), "vortex_token_set", None)
+    db.commit()
+    return overview(db)
+
+
+@router.delete("/tradingos/admin/vortex-token")
+def clear_vortex_token(request: Request, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    from app.security.credentials import secret_store
+
+    secret_store(runtime.settings).delete("vortex_assist_token")
+    signals.audit(db, _actor(db, request), "vortex_token_cleared", None)
     db.commit()
     return overview(db)
 

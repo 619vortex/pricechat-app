@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { Badge, Card, relativeTime } from "../components/ui";
 
@@ -19,12 +19,27 @@ const MOODS: { key: string; emoji: string; label: string; hint: string; activity
 
 const px = (c: number | null | undefined) => (c == null ? "—" : (c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
+/** A slider that saves once, when it's let go (not one request per step), and is never disabled mid-drag by its own save. */
+function Slider({ label, value, show, min, max, step, onCommit }: {
+  label: string; value: number; show: (v: number) => string; min: number; max: number; step: number; onCommit: (v: number) => void;
+}) {
+  const [v, setV] = useState(value);
+  const dirty = useRef(false);
+  useEffect(() => { if (!dirty.current) setV(value); }, [value]);  // a refresh never yanks the knob out of the owner's hand
+  const commit = () => { if (!dirty.current) return; dirty.current = false; if (v !== value) onCommit(v); };
+  return (
+    <label>{label} <b>{show(v)}</b>
+      <input type="range" min={min} max={max} step={step} value={v} onChange={(e) => { dirty.current = true; setV(Number(e.target.value)); }}
+             onPointerUp={commit} onKeyUp={commit} onBlur={commit} /></label>
+  );
+}
+
 export function ExchangeAutoCard() {
   const [st, setSt] = useState<AutoStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const load = useCallback(() => api.exAuto().then((s) => { setSt(s); setErr(null); }).catch((e) => setErr(e instanceof Error ? e.message : "Couldn't load")), []);
-  useEffect(() => { void load(); const t = window.setInterval(load, 10_000); return () => window.clearInterval(t); }, [load]);
+  useEffect(() => { void load(); const t = window.setInterval(() => { if (!document.hidden) void load(); }, 10_000); return () => window.clearInterval(t); }, [load]);
 
   async function set(body: Partial<AutoConfig>) {
     setBusy(true);
@@ -59,12 +74,9 @@ export function ExchangeAutoCard() {
           </div>
 
           <div className="xa-row">
-            <label>Trades per minute, per market <b>{c.activity}</b>
-              <input type="range" min={0.5} max={12} step={0.5} value={c.activity} disabled={busy} onChange={(e) => void set({ activity: Number(e.target.value) })} /></label>
-            <label>Max swing from the real price <b>±{c.swing_pct}%</b>
-              <input type="range" min={0.3} max={4} step={0.1} value={c.swing_pct} disabled={busy} onChange={(e) => void set({ swing_pct: Number(e.target.value) })} /></label>
-            <label>Max trade size <b>{px(c.max_trade_value)} USDT</b>
-              <input type="range" min={1000} max={200000} step={1000} value={c.max_trade_value} disabled={busy} onChange={(e) => void set({ max_trade_value: Number(e.target.value) })} /></label>
+            <Slider label="Trades per minute, per market" value={c.activity} show={(v) => String(v)} min={0.5} max={12} step={0.5} onCommit={(v) => void set({ activity: v })} />
+            <Slider label="Max swing from the real price" value={c.swing_pct} show={(v) => `±${v}%`} min={0.3} max={4} step={0.1} onCommit={(v) => void set({ swing_pct: v })} />
+            <Slider label="Max trade size" value={c.max_trade_value} show={(v) => `${px(v)} USDT`} min={1000} max={200000} step={1000} onCommit={(v) => void set({ max_trade_value: v })} />
           </div>
           <div className="btn-group" style={{ margin: "8px 0" }}>
             <label className="small"><input type="checkbox" checked={c.spot} disabled={busy} onChange={(e) => void set({ spot: e.target.checked })} /> Spot</label>

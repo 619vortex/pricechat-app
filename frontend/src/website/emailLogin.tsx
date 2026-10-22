@@ -217,16 +217,20 @@ export function LoginHost() {
     document.addEventListener("keydown", esc);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // keyboard and screen-reader users land in the dialog, and go back to what opened it (e.g. Login) when it closes
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    box.current?.focus();
     return () => {
       document.removeEventListener("keydown", esc);
       document.body.style.overflow = prev;
+      opener?.focus?.();
     };
   }, [open]);
   if (!open) return null;
   // a portal: the header may be a containing block (backdrop filter), the popup must cover the whole page
   return createPortal(
     <div className="lg-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
-      <div className="lg-dialog" role="dialog" aria-modal="true" aria-labelledby="lg-title" ref={box}>
+      <div className="lg-dialog" role="dialog" aria-modal="true" aria-labelledby="lg-title" ref={box} tabIndex={-1}>
         <button type="button" className="lg-close" aria-label="Close" onClick={() => setOpen(false)}>×</button>
         <LoginPanel available={available} onDone={({ created }) => { setOpen(false); location.assign(`/passport?welcome=${created ? "new" : "back"}`); }} />
       </div>
@@ -248,11 +252,11 @@ export function LoginPanel({ available, onDone }: {
     <div className="lg-panel">
       <img className="lg-kiwi" src="/brand/kiwi.webp" alt="" width={56} height={56} />
       <h2 className="lg-title" id="lg-title">Welcome to Price Chat</h2>
-      <p className="lg-sub">Join the Kiwi community. Earn XP. Level up.</p>
+      <p className="lg-sub">Free to join. Earn XP for watching, reading and chatting, and rank up your Kiwi to unlock rewards.</p>
       <SocialSignIn onTelegramDone={telegramDone} />
       <WalletSignIn />
       {available && <><p className="lg-or"><span>or with your email</span></p><EmailLogin onDone={onDone} autoFocus={false} /></>}
-      <p className="lg-fine">No password. Signing in only proves the account is yours: Price Chat never posts or messages for you.{" "}
+      <p className="lg-fine">No password. Signing in only proves the account is yours: Price Chat never posts or messages for you unless you press a button to.{" "}
         <a className="site-link" href="/website/privacy">Privacy</a></p>
     </div>
   );

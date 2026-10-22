@@ -70,7 +70,9 @@ export const fmt = {
   n: (x: unknown, d = 2) => (typeof x === "number" && Number.isFinite(x) ? x.toLocaleString("en-US", { maximumFractionDigits: d }) : "—"),
   px: (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? (Math.abs(x) >= 1000 ? fmt.n(x, 1) : Math.abs(x) >= 1 ? fmt.n(x, 4) : fmt.n(x, 6)) : "—"),
   usd: (x: number | null | undefined, d = 2) => (x == null || !Number.isFinite(x) ? "—"
-    : `${x < 0 ? "-" : ""}$${Math.abs(x).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d })}`),
+    : `${x < 0 ? "−" : ""}$${Math.abs(x).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d })}`),
+  /** a profit or loss: always signed ("+$4.20" / "−$3.10"), so a gain never reads like a balance */
+  pnl: (x: number | null | undefined, d = 2) => (x == null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${fmt.usd(x, d)}`),
   big: (x: number | null | undefined) => (x == null ? "—" : Math.abs(x) >= 1e9 ? `$${(x / 1e9).toFixed(2)}B` : Math.abs(x) >= 1e6 ? `$${(x / 1e6).toFixed(1)}M`
     : Math.abs(x) >= 1e3 ? `$${(x / 1e3).toFixed(1)}k` : `$${x.toFixed(0)}`),
   pct: (x: number | null | undefined, d = 2) => (x == null || !Number.isFinite(x) ? "—" : `${x >= 0 ? "+" : ""}${x.toFixed(d)}%`),

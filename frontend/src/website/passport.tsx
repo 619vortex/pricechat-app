@@ -80,14 +80,18 @@ export function ProfilePage() {
       return next;
     } catch (e) {
       if (!(e instanceof MemberApiError && e.status === 401)) setError("Could not load your passport.");
+      else if (!loaded.current) location.replace("/website/join");  // the session ended: sign in again, never "Loading…" forever
       return null;
     }
   }, []);
+  const loaded = useRef(false);
+  useEffect(() => { if (p) loaded.current = true; }, [p]);
 
   const [live, setLive] = useState<string | null>(null);  // "💬 +3 XP from your Telegram messages"
   const lastXp = useRef<number | null>(null);
   useEffect(() => {
-    if (p) lastXp.current = lastXp.current ?? p.member.xp;
+    // every fresh Passport is the new baseline: XP a mission or Watch & Earn already celebrated isn't announced again
+    if (p) lastXp.current = p.member.xp;
   }, [p]);
   useEffect(() => {
     const id = window.setInterval(async () => {
@@ -110,7 +114,8 @@ export function ProfilePage() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  useEffect(() => {
+  const start = useCallback(() => {
+    setError(null);
     memberApi<{ signed_in: boolean }>("/members/session")
       .then((s) => {
         if (!s.signed_in) {
@@ -123,6 +128,7 @@ export function ProfilePage() {
     void memberApi<{ rules: XPRuleInfo[] }>("/members/rules").then((r) => setRules(r.rules)).catch(() => undefined);
     void memberApi<{ ranks: Rank[] }>("/members/ranks").then((r) => setRanks(r.ranks)).catch(() => undefined);
   }, [load]);
+  useEffect(start, [start]);
 
   async function act(fn: () => Promise<unknown>, ok?: string) {
     setError(null);
@@ -139,7 +145,12 @@ export function ProfilePage() {
   if (!p)
     return (
       <SitePage title="Kiwi Passport" description="Your Price Chat identity." path="/profile">
-        {error ? <p className="site-error">{error}</p> : <p className="site-empty">Loading your passport…</p>}
+        {error ? (
+          <div className="site-empty" role="alert">
+            <p className="site-error">{error}</p>
+            <button type="button" className="site-button" onClick={start}>Try again</button>
+          </div>
+        ) : <p className="site-empty">Loading your passport…</p>}
       </SitePage>
     );
 
@@ -464,14 +475,19 @@ function ConnectedAccounts({ p, act, linkError }: {
 
 function RecentXP({ recent }: { recent: XPEvent[] }) {
   const [all, setAll] = useState<XPEvent[] | null>(null);
+  const [more, setMore] = useState<"idle" | "busy" | "error">("idle");
   const rows = all ?? recent.slice(0, 10);
+  const loadAll = () => {
+    setMore("busy");
+    memberApi<{ events: XPEvent[] }>("/members/me/xp?limit=500").then((r) => { setAll(r.events); setMore("idle"); }).catch(() => setMore("error"));
+  };
   return (
     <section className="pp-section site-reveal pp-recent" aria-labelledby="xp-title">
       <SectionTitle id="xp-title" title="Recent XP" note="Every award shows where it came from." />
       {rows.length === 0 ? <p className="site-note">No XP yet.</p> : <ul className="site-xp-list">{rows.map((e) => <XPRow key={e.id} e={e} />)}</ul>}
       {all === null && recent.length > 0 && (
-        <button className="site-textbutton" onClick={() => void memberApi<{ events: XPEvent[] }>("/members/me/xp?limit=500").then((r) => setAll(r.events))}>
-          See your full XP ledger
+        <button className="site-textbutton" disabled={more === "busy"} onClick={loadAll}>
+          {more === "busy" ? "Loading your ledger…" : more === "error" ? "Couldn't load it. Try again" : "See your full XP ledger"}
         </button>
       )}
     </section>
