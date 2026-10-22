@@ -57,3 +57,44 @@ async def test_feedback_edit_with_embedder_down_leaves_it_for_the_backfill(db: S
     assert await index.backfill() == 1  # the backfill only sees memories without a vector: the stale one would be skipped
     row = db.scalar(select(MemoryEmbedding).where(MemoryEmbedding.memory_id == mem.id))
     assert row is not None and row.content_hash == content_hash(embedding_text(MemoryRecord.from_row(mem)))
+
+
+# --- AI gate ---------------------------------------------------------------------------------------
+
+
+async def test_gate_waiting_count_survives_failures_and_cancelled_waiters() -> None:
+    import asyncio
+
+    import pytest
+
+    from app.ai.gate import AIGate
+
+    gate = AIGate(max_wait_seconds=5)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def failing_job() -> None:
+        async with gate.background("a"):
+            started.set()
+            await release.wait()
+            raise RuntimeError("model said no")
+
+    async def queued_job() -> None:
+        async with gate.background("b"):
+            pass
+
+    a = asyncio.create_task(failing_job())
+    await started.wait()
+    b = asyncio.create_task(queued_job())
+    c = asyncio.create_task(queued_job())
+    await asyncio.sleep(0)
+    assert gate.status()["background_waiting"] == 2
+
+    c.cancel()  # a job timeout while queued behind "a"
+    await asyncio.gather(c, return_exceptions=True)
+    assert gate.status()["background_waiting"] == 1
+
+    release.set()  # "a" fails: that must not take "b" off the queue count
+    with pytest.raises(RuntimeError):
+        await a
+    await b
+    assert gate.waiting == 0 and gate.status()["background_task"] is None

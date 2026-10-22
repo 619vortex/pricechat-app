@@ -47,6 +47,7 @@ class AIGate:
         self._ensure()
         assert self._idle is not None and self._bg is not None
         self.waiting += 1
+        waiting = True
         try:
             async with self._bg:
                 try:
@@ -55,15 +56,15 @@ class AIGate:
                 except TimeoutError:
                     pass
                 self.waiting -= 1
+                waiting = False
                 self.background_task, self.background_started = task, time.monotonic()
                 try:
                     yield
                 finally:
                     self.background_task, self.background_started = None, None
-        except BaseException:
-            if self.background_task is None and self.waiting > 0:
+        finally:
+            if waiting:  # cancelled (e.g. a job timeout) while still queued
                 self.waiting -= 1
-            raise
 
     def status(self) -> dict[str, object]:
         return {
