@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { okToSaveLimits } from "../riskLimits";
 import { STRAT, fmt, post, usePoll, type ConfigState, type Impact, type KiwiConfig, type Overview } from "./api";
 
 /* CONTROL ROOM: Teach Your Kiwi (versioned filters on the published signals, applied to AUTO entries) and the account's risk
@@ -107,7 +108,7 @@ export function ControlRoom({ o, open, onClose, onChanged }: { o: Overview; open
               <label>Allowed pairs (empty = any)<input value={lim.allowed_coins} onChange={(e) => setLim({ ...lim, allowed_coins: e.target.value.toUpperCase() })} /></label>
               <p className="kb-src">Loss at your stops now: {fmt.usd(o.exposure.loss_at_stop)}. New entries: {o.paused ? "PAUSED" : "allowed"}. Mode: {o.mode}{o.mode !== "LIVE" ? " (live is enabled from the terminal with its checks)" : ""}.</p>
               <button className="kb-btn" disabled={busy || JSON.stringify(lim) === JSON.stringify(o.limits)}
-                onClick={() => void run(() => post("/members/trading/settings", { max_leverage: lim.max_leverage, max_loss_per_trade_usd: lim.max_loss_per_trade_usd,
+                onClick={() => okToSaveLimits(o.mode, o.limits, lim) && void run(() => post("/members/trading/settings", { max_leverage: lim.max_leverage, max_loss_per_trade_usd: lim.max_loss_per_trade_usd,
                   max_positions: lim.max_positions, daily_loss_limit_usd: lim.daily_loss_limit_usd, allowed_coins: lim.allowed_coins }, "PUT"), "Risk limits saved.")}>Save limits</button>
             </div>
           </section>

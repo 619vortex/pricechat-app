@@ -157,6 +157,27 @@ describe("Kiwi trading bot", () => {
     expect(calls.some((c) => c.key.includes("/close"))).toBe(false);
   });
 
+  it("LIVE: raising leverage or max loss asks first; lowering them saves straight away", async () => {
+    await open({ [T]: term(), [S]: { items: [] }, "PUT /api/members/trading/settings": account() });
+    fireEvent.click(screen.getByRole("button", { name: "Trading settings" }));
+    const dlg = screen.getByRole("dialog", { name: "Trading settings" });
+    const field = (l: string) => within(dlg).getByText(l).parentElement!.querySelector("input")!;
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    fireEvent.change(field("Max leverage"), { target: { value: "5" } });
+    fireEvent.change(field("Max loss per trade"), { target: { value: "20" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save limits" }));
+    await flush();
+    expect(String((ask.mock.calls[0] as unknown[])[0])).toMatch(/real money[\s\S]*Max leverage 3x → 5x[\s\S]*Max loss per trade \$5\.00 → \$20\.00/);
+    expect(calls.some((c) => c.key.startsWith("PUT"))).toBe(false);  // declined: nothing saved
+    fireEvent.change(field("Max leverage"), { target: { value: "2" } });
+    fireEvent.change(field("Max loss per trade"), { target: { value: "4" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Save limits" }));
+    await flush();
+    expect(ask).toHaveBeenCalledTimes(1);  // less risk: no question
+    expect(calls.find((c) => c.key === "PUT /api/members/trading/settings")!.body).toMatchObject({ max_leverage: 2, max_loss_per_trade_usd: 4 });
+  });
+
   it("always says how fresh the exchange numbers are, and warns when they're stale", async () => {
     await open({ [T]: term(), [S]: { items: [] } });
     expect(screen.getByText(/^Synced with Hyperliquid \d+s ago$/)).toBeTruthy();  // age_s 2 at load, plus the time since

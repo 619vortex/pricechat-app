@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MemberApiError, memberApi, trackedRef } from "./members";
 import { reducedMotion } from "./motion";
+import { okToSaveLimits } from "./riskLimits";
 import { playSound } from "./sound";
 import { walletError } from "./wallet";
 import { site } from "./websiteData";
@@ -728,7 +729,10 @@ function SettingsDialog({ a, conn, busy, err, run, put, onClose, onAskAuto }: {
           <input type="number" inputMode="decimal" value={draft[k] as number} min={a.caps[k]?.[0]} max={a.caps[k]?.[1]}
                  onChange={(e) => setDraft({ ...draft, [k]: Number(e.target.value) })} /><small>{unit}</small></label>
       ))}
-      <button className="kt-btn" disabled={busy !== null} onClick={() => void put({ ...draft }, "Limits saved ✓")}>Save limits</button>
+      <button className="kt-btn" disabled={busy !== null} onClick={() => {
+        if (!okToSaveLimits(a.mode, a.limits, draft)) return;
+        void put({ ...draft }, "Limits saved ✓");
+      }}>Save limits</button>
       <h4>Connection</h4>
       {(["LIVE", "TESTNET"] as Network[]).filter((n) => a.agents[n].approved).map((n) => (
         <div key={n} className="td-row"><span>{n === "LIVE" ? "Trading authorization" : "Test wallet"} ✓ {a.agents[n].address?.slice(0, 8)}…</span>
