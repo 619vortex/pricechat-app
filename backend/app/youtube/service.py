@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
@@ -437,6 +437,9 @@ async def sync(db: Session, settings: Settings, rt: YouTubeRuntime) -> SyncRepor
 
     # 2. one short write
     new_items: list[ContentItem] = []
+    ids = [known[v].id for v in wanted if v in known]
+    last_capture = dict(db.execute(select(ContentItemMetric.item_id, func.max(ContentItemMetric.captured_at))
+                                   .where(ContentItemMetric.item_id.in_(ids)).group_by(ContentItemMetric.item_id)).all()) if ids else {}
     for vid in wanted:
         v = videos.get(vid)
         item = known.get(vid)
@@ -459,7 +462,7 @@ async def sync(db: Session, settings: Settings, rt: YouTubeRuntime) -> SyncRepor
             new_items.append(item)
         else:
             report.updated += 1
-        if _snapshot_due(db, item, now):
+        if _snapshot_due(item, last_capture.get(item.id) if item.id else None, now):
             db.flush()
             m = item.metrics or {}
             db.add(ContentItemMetric(item_id=item.id, captured_at=now, views=m.get("views"), likes=m.get("likes"), comments=m.get("comments")))
@@ -514,11 +517,9 @@ def _apply(item: ContentItem, v: dict[str, Any], channel_id: str, now: datetime)
     item.last_synced_at = now
 
 
-def _snapshot_due(db: Session, item: ContentItem, now: datetime) -> bool:
-    if not item.id:
-        return True
-    last = db.scalar(select(ContentItemMetric.captured_at).where(ContentItemMetric.item_id == item.id).order_by(ContentItemMetric.captured_at.desc()).limit(1))
-    if last is None:
+def _snapshot_due(item: ContentItem, last: datetime | None, now: datetime) -> bool:
+    """`last`: the item's newest metric capture (read for the whole sync in one query, not one per video)."""
+    if not item.id or last is None:
         return True
     young = (_aware(item.published_at) or now) >= now - timedelta(hours=48)
     return now - _aware(last) >= (METRIC_EVERY_NEW if young else METRIC_EVERY)  # type: ignore[operator]
