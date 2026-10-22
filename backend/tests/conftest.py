@@ -178,6 +178,11 @@ def _fresh_database() -> Iterator[None]:
     from app.members import xp as member_xp
 
     member_xp.reset_for_tests()
+    from app.api.routes import health
+    from app.security import rate_limit
+
+    rate_limit.reset_for_tests()
+    health._cache["body"] = None
     from app.pokemon import history
 
     history.invalidate()  # computed market rows never outlive the database they were built from
