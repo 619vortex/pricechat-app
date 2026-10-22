@@ -2,8 +2,7 @@ import { Suspense, lazy, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { MarketHome } from "../pages/pokemon/MarketHome";
 import { GradesPage, MoversPage, RecentPage, SetsPage, TrendingPage, YearsPage } from "../pages/pokemon/ListPages";
-import { PokemonCardPage } from "../pages/pokemon/PokemonCardPage";
-import { PageHeadProvider, PublicMarketProvider, type PageHead } from "../pages/pokemon/mx";
+import { MarketShell, PageHeadProvider, PublicMarketProvider, Skeleton, type PageHead } from "../pages/pokemon/mx";
 import { useHead } from "./useHead";
 import { SiteFooter, SiteHeader, useStored } from "./Website";
 import { site } from "./websiteData";
@@ -21,6 +20,9 @@ const VaultItemPage = lazy(() => vault().then((m) => ({ default: m.VaultItemPage
 const VaultRequestsPage = lazy(() => vault().then((m) => ({ default: m.VaultRequestsPage })));
 const marketplace = () => import("../pages/pokemon/marketplace");
 const WalletPage = lazy(() => marketplace().then((m) => ({ default: m.WalletPage })));
+// the card page brings the chart library: the market home and lists don't download it until a card is opened
+const PokemonCardPage = lazy(() => import("../pages/pokemon/PokemonCardPage").then((m) => ({ default: m.PokemonCardPage })));
+const cardPage = <Suspense fallback={<MarketShell><Skeleton rows={6} boxes /></MarketShell>}><PokemonCardPage /></Suspense>;
 const wait = (el: React.ReactNode) => <Suspense fallback={<p className="pf-muted" style={{ padding: 24 }}>Loading…</p>}>{el}</Suspense>;
 
 /** The Pokémon Market on the public website (pricechat.live/pokemon): the same price pages as the dashboard's, read-only,
@@ -49,7 +51,7 @@ export function PublicMarket() {
             <Route path="years" element={<YearsPage />} />
             <Route path="sets" element={<SetsPage />} />
             <Route path="grades" element={<GradesPage />} />
-            <Route path="cards/:id" element={<PokemonCardPage />} />
+            <Route path="cards/:id" element={cardPage} />
             <Route path="vault" element={wait(<VaultStore />)} />
             <Route path="vault/requests" element={wait(<VaultRequestsPage />)} />
             <Route path="vault/:id" element={wait(<VaultItemPage />)} />
