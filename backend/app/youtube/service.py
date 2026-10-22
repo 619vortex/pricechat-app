@@ -86,7 +86,7 @@ def _set_caps(db: Session, **values: Any) -> None:
 
 def _count_request(db: Session) -> None:
     state = get_connector_state(db, Platform.YOUTUBE)
-    day = utcnow().strftime("%Y-%m-%d")
+    day = quota_day(utcnow())  # the day YouTube counts the quota in
     usage = dict(state.usage or {})
     u = dict(usage.get(day) or {"requests": 0, "units": 0})
     u["requests"] += 1
@@ -391,6 +391,13 @@ def quota_reset_after(now: datetime) -> datetime:
     return datetime(day.year, day.month, day.day, tzinfo=tz).astimezone(timezone.utc) + timedelta(minutes=1)
 
 
+def quota_day(now: datetime) -> str:
+    """The quota day (Pacific time) `now` falls in: what "units used today" means to YouTube."""
+    from zoneinfo import ZoneInfo
+
+    return now.astimezone(ZoneInfo(QUOTA_TZ)).strftime("%Y-%m-%d")
+
+
 def quota_paused_until(db: Session, now: datetime | None = None) -> datetime | None:
     """When syncing may try again after YouTube said the day's quota is used up; None when it may run now."""
     until = _published((get_connector_state(db, Platform.YOUTUBE).capabilities or {}).get("quota_paused_until"))
@@ -572,7 +579,7 @@ def status(db: Session, settings: Settings, rt: YouTubeRuntime, next_sync_at: da
     latest = max(mine, key=lambda i: _aware(i.published_at) or datetime.min.replace(tzinfo=timezone.utc), default=None)
     m = mode(db, settings)
     tot = lambda k: sum((i.metrics or {}).get(k) or 0 for i in mine if (i.metrics or {}).get(k) is not None) if any((i.metrics or {}).get(k) is not None for i in mine) else None  # noqa: E731
-    today = (state.usage or {}).get(utcnow().strftime("%Y-%m-%d")) or {}
+    today = (state.usage or {}).get(quota_day(utcnow())) or {}
     paused = quota_paused_until(db)
     return {
         "status": state.status if m else "not_configured", "mode": m,

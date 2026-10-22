@@ -318,6 +318,15 @@ def test_quota_resets_at_midnight_pacific_in_utc() -> None:
     assert winter == datetime(2026, 12, 2, 8, 1, tzinfo=timezone.utc)
 
 
+def test_quota_usage_is_counted_in_youtubes_pacific_day() -> None:
+    from datetime import datetime, timezone
+
+    from app.youtube.service import quota_day
+
+    assert quota_day(datetime(2026, 10, 23, 3, 0, tzinfo=timezone.utc)) == "2026-10-22"  # 20:00 PDT the day before
+    assert quota_day(datetime(2026, 10, 23, 8, 0, tzinfo=timezone.utc)) == "2026-10-23"
+
+
 def test_a_used_up_daily_quota_pauses_syncing_until_it_resets(yt_client: TestClient, fake_youtube: FakeYouTube, db: Session) -> None:
     from app.connectors.state import get_connector_state
     from app.models.enums import Platform
