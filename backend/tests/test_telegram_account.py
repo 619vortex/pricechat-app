@@ -225,3 +225,54 @@ def test_qr_login_with_two_step_password(client: TestClient, tg_account: FakeTel
     tg_account.qr_scanned = True
     assert client.post(f"{B}/qr/poll").json()["status"] == "password_needed"
     assert client.post(f"{B}/password", json={"password": "hunter2"}).json()["status"] == "connected"
+
+
+def test_flood_wait_is_respected_before_asking_telegram_again(client: TestClient, tg_account: FakeTelegramAccount) -> None:
+    """Every early request extends a FloodWait; the 20-second ingest job used to retry right away."""
+    _login(client)
+    tg_account.flood = 120
+    assert client.post(f"{B}/dialogs").status_code == 429
+    tg_account.flood = None
+    made = {"n": 0}
+    inner = tg_account.factory
+
+    def counting(*a):  # type: ignore[no-untyped-def]
+        made["n"] += 1
+        return inner(*a)
+
+    client.app.state.runtime.telegram_account.factory = counting  # type: ignore[attr-defined]
+    r = client.post(f"{B}/dialogs")
+    assert r.status_code == 429 and made["n"] == 0  # still waiting: Telegram is not contacted
+    client.app.state.runtime.telegram_account.flood_until = None  # the wait is over
+    assert client.post(f"{B}/dialogs").status_code == 200 and made["n"] == 1
+
+
+async def test_live_read_goes_forward_from_the_newest_stored_message() -> None:
+    """With more than `limit` new messages, newest-first reading skipped the older ones for good (the next sync starts
+    above the newest one stored)."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.telegram.account import DialogInfo, TelethonGateway
+
+    chat = DialogInfo(-1001111, "Community", "supergroup", None, None)
+    history = [SimpleNamespace(id=i, date=datetime(2026, 10, 1, tzinfo=timezone.utc), message=f"m{i}", action=None) for i in range(1, 11)]
+    calls: list[dict] = []
+
+    class Client:
+        def iter_messages(self, entity, limit, min_id=0, reverse=False):  # type: ignore[no-untyped-def]
+            calls.append({"min_id": min_id, "reverse": reverse})
+            rows = [m for m in history if m.id > min_id]
+            rows = rows if reverse else list(reversed(rows))
+
+            async def gen():  # type: ignore[no-untyped-def]
+                for m in rows[:limit]:
+                    yield m
+            return gen()
+
+    gw = TelethonGateway.__new__(TelethonGateway)
+    gw._client, gw._entities = Client(), {chat.chat_id: object()}
+    got = await gw.messages(chat, min_id=4, limit=3)
+    assert [m.message_id for m in got] == [5, 6, 7] and calls[-1]["reverse"]  # the next sync continues from 7
+    recent = await gw.messages(chat, min_id=0, limit=3)  # history import: the newest ones, oldest first
+    assert [m.message_id for m in recent] == [8, 9, 10] and not calls[-1]["reverse"]

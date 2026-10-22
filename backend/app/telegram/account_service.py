@@ -61,6 +61,7 @@ class TelegramAccountRuntime:
     pending: PendingLogin | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # one Telegram session in use at a time
     discovered: list[DialogInfo] = field(default_factory=list)
+    flood_until: datetime | None = None  # Telegram's FloodWait: no request before this (each early one extends the wait)
 
 
 def get_account(db: Session) -> TelegramAccount:
@@ -258,9 +259,11 @@ async def session(db: Session, settings: Settings, rt: TelegramAccountRuntime): 
     if not saved:
         raise AccountError("No Telegram session: log in first")
     async with rt.lock:
+        if rt.flood_until is not None and rt.flood_until > utcnow():
+            raise FloodWait(int((rt.flood_until - utcnow()).total_seconds()) + 1)
         gw = _gateway(db, settings, rt, saved)
-        await gw.connect()
         try:
+            await gw.connect()
             if not await gw.is_authorized():
                 raise SessionRevoked("The Telegram session is no longer valid; log in again")
             yield gw
@@ -271,6 +274,8 @@ async def session(db: Session, settings: Settings, rt: TelegramAccountRuntime): 
             _record_error(db, exc, "needs_login")
             raise
         except AccountError as exc:
+            if isinstance(exc, FloodWait):
+                rt.flood_until = utcnow() + timedelta(seconds=exc.seconds)
             _record_error(db, exc, "error" if not isinstance(exc, FloodWait) else get_account(db).status)
             raise
         finally:
