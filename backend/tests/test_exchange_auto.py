@@ -30,8 +30,16 @@ def test_on_it_trades_labelled_sim_within_the_swing_and_everything_balances(db: 
     m = _setup(db)
     auto.set_config(db, {"enabled": True, "activity": 12, "swing_pct": 2})
     rng = random.Random(7)
+    # ticks 15 s apart on an explicit clock: the bot's order keys include the tick's second, so ticks that happened to share a
+    # wall-clock second (a fast machine) were deduplicated into fewer trades and the count below flaked
+    from datetime import timedelta
+
+    from app.db.base import utcnow
+
+    now = utcnow() - timedelta(seconds=auto.TICK_SECONDS * 26)
     for _ in range(25):
-        auto.tick(db, rng=rng)
+        now += timedelta(seconds=auto.TICK_SECONDS)
+        auto.tick(db, now=now, rng=rng)
     bot = system(db, "auto").id
     spot = db.scalars(select(ExTrade).where(ExTrade.market_id == m.id)).all()
     assert len(spot) > 5 and all(bot in (t.buyer_account_id, t.seller_account_id) for t in spot)
@@ -42,7 +50,7 @@ def test_on_it_trades_labelled_sim_within_the_swing_and_everything_balances(db: 
     assert views.market_out(db, m)["auto"] is True
     db.expire_all()
     assert reconcile(db)["ok"] and perps.check_invariants(db)["ok"]
-    st = auto.status(db)
+    st = auto.status(db, now=now)
     assert st["trades_last_hour"]["spot"] > 0
     assert all(abs(x["path_bps"]) <= 200 for x in st["markets"])
     # switched off: the maker goes back to quoting around the real reference
