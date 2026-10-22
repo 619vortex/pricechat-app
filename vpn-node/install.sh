@@ -2,8 +2,11 @@
 # Kiwi VPN node installer for a fresh Ubuntu 24.04 VPS. Run as root. Idempotent:
 # re-running keeps the server key, TLS cert, token and peers.
 #
-#   bash install.sh                  install / reconfigure (ad blocking OFF, public DNS)
-#   bash install.sh --adblock        same, with the ad & tracker blocking resolver ON
+#   bash install.sh                  install / reconfigure (ad blocking OFF)
+#   bash install.sh --adblock        same, with the ad & tracker blocklist ON
+#                                    (clients always use the node's own no-logs resolver,
+#                                    unbound on the wg0 address, so toggling never breaks
+#                                    existing device configs)
 #   bash install.sh --update         refresh agent.py, its systemd unit and kiwi-vpn-doctor
 #                                    only, then restart the agent (keys/token/cert/peers,
 #                                    firewall and adblock setting are left alone)
@@ -14,7 +17,6 @@
 #
 # Optional env: PUBLIC_IP (auto-detected), SSH_PORT (22), WG_PORT (51820),
 #               AGENT_PORT (8443), POOL (10.66.0.1/16), POOL6 (fd66:66::1/64, "" = off),
-#               DNS (1.1.1.1,1.0.0.1; ignored with --adblock),
 #               BLOCKLIST_URL (StevenBlack unified hosts),
 #               KIWI_AGENT_URL (where to download agent.py if it is not next to this script)
 set -euo pipefail
@@ -45,7 +47,6 @@ WG_PORT="${WG_PORT:-51820}"
 AGENT_PORT="${AGENT_PORT:-8443}"
 POOL="${POOL:-10.66.0.1/16}"
 POOL6="${POOL6-fd66:66::1/64}"
-DNS="${DNS:-1.1.1.1,1.0.0.1}"
 BLOCKLIST_URL="${BLOCKLIST_URL:-https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts}"
 WG_IF=wg0
 WG_ADDR="${POOL%/*}"
@@ -104,11 +105,6 @@ EOF
 }
 
 render_nftables() {
-  local dns_rules=""
-  if [ "$ADBLOCK" = 1 ]; then
-    dns_rules="    iifname \"$WG_IF\" ip saddr $POOL_NET ip daddr $WG_ADDR udp dport 53 accept comment \"kiwi: dns\"
-    iifname \"$WG_IF\" ip saddr $POOL_NET ip daddr $WG_ADDR tcp dport 53 accept comment \"kiwi: dns\""
-  fi
   cat <<EOF
 #!/usr/sbin/nft -f
 # Managed by kiwi-vpn install.sh. No log rules on purpose (no traffic logging).
@@ -126,8 +122,10 @@ table inet filter {
     ct state invalid drop
     ct state established,related accept
     meta l4proto { icmp, ipv6-icmp } accept
-${dns_rules:+$dns_rules
-}    # VPN clients may not reach SSH, the agent or anything else on the node itself.
+    # DNS to the node's own resolver, from the VPN pool only.
+    iifname "$WG_IF" ip saddr $POOL_NET ip daddr $WG_ADDR udp dport 53 accept comment "kiwi: dns"
+    iifname "$WG_IF" ip saddr $POOL_NET ip daddr $WG_ADDR tcp dport 53 accept comment "kiwi: dns"
+    # VPN clients may not reach SSH, the agent or anything else on the node itself.
     iifname "$WG_IF" reject with icmpx type admin-prohibited comment "kiwi: tunnel to host"
     tcp dport $SSH_PORT accept
     udp dport $WG_PORT accept
@@ -159,8 +157,9 @@ EOF
 
 render_unbound_conf() {
   cat <<EOF
-# Managed by kiwi-vpn install.sh --adblock. Ad & tracker blocking resolver for VPN clients.
-# Listens only on the tunnel address; no query or reply logging of any kind.
+# Managed by kiwi-vpn install.sh. Private resolver for VPN clients (always on; the included
+# blocklist is empty unless install.sh --adblock). Listens only on the tunnel address;
+# no query or reply logging of any kind.
 server:
   interface: $WG_ADDR
   port: 53
@@ -290,7 +289,7 @@ POOL=$POOL
 POOL6=$POOL6
 ENDPOINT_HOST=$PUBLIC_IP
 LISTEN_PORT=$WG_PORT
-DNS=$(if [ "$ADBLOCK" = 1 ]; then echo "$WG_ADDR"; else echo "$DNS"; fi)
+DNS=$WG_ADDR
 ADBLOCK=$ADBLOCK
 AGENT_BIND=0.0.0.0
 AGENT_PORT=$AGENT_PORT
@@ -416,8 +415,7 @@ rules="$(nft list ruleset 2>/dev/null || true)"
 if [ -z "$rules" ]; then
   bad "nftables ruleset empty or unreadable"
 else
-  need=("masquerade" "kiwi: client isolation" "kiwi: smtp 25 blocked" "kiwi: v6 reject" "kiwi: mss clamp" "kiwi: tunnel to host")
-  if [ "$ADBLOCK" = 1 ]; then need+=("kiwi: dns"); fi
+  need=("masquerade" "kiwi: dns" "kiwi: client isolation" "kiwi: smtp 25 blocked" "kiwi: v6 reject" "kiwi: mss clamp" "kiwi: tunnel to host")
   missing=""
   for r in "${need[@]}"; do grep -qF "$r" <<<"$rules" || missing="$missing [$r]"; done
   if [ -z "$missing" ]; then ok "nftables rules present (${#need[@]} checked)"; else bad "nftables rules missing:$missing"; fi
@@ -438,10 +436,14 @@ if [ -r /etc/kiwi-vpn/tls.crt ]; then
   fi
 fi
 
-echo "--- ad blocking"
+echo "--- DNS resolver"
+if systemctl is-active -q unbound; then ok "unbound active"; else bad "unbound not active (journalctl -u unbound -n 50)"; fi
+if ss -Hlun "sport = :53" 2>/dev/null | grep -qF "$WG_ADDR:53"; then ok "unbound listening on $WG_ADDR:53"; else bad "nothing on $WG_ADDR:53"; fi
+for o in verbosity log-queries log-replies; do
+  v="$(unbound-checkconf -o "$o" 2>/dev/null || echo '?')"
+  case "$o=$v" in verbosity=0|log-queries=no|log-replies=no) ;; *) bad "unbound $o is '$v' (should be off)" ;; esac
+done
 if [ "$ADBLOCK" = 1 ]; then
-  if systemctl is-active -q unbound; then ok "unbound active"; else bad "unbound not active (journalctl -u unbound -n 50)"; fi
-  if ss -Hlun "sport = :53" 2>/dev/null | grep -qF "$WG_ADDR:53"; then ok "unbound listening on $WG_ADDR:53"; else bad "nothing on $WG_ADDR:53"; fi
   if systemctl is-active -q kiwi-vpn-blocklist.timer; then ok "daily blocklist timer active"; else bad "kiwi-vpn-blocklist.timer not active"; fi
   bl=/etc/unbound/kiwi-vpn-blocklist.conf
   if [ -s "$bl" ]; then
@@ -452,12 +454,8 @@ if [ "$ADBLOCK" = 1 ]; then
   else
     bad "blocklist file missing"
   fi
-  for o in verbosity log-queries log-replies; do
-    v="$(unbound-checkconf -o "$o" 2>/dev/null || echo '?')"
-    case "$o=$v" in verbosity=0|log-queries=no|log-replies=no) ;; *) bad "unbound $o is '$v' (should be off)" ;; esac
-  done
 else
-  ok "ad blocking off (client DNS: $(conf DNS))"
+  ok "ad blocking off (resolver runs without a blocklist)"
 fi
 
 echo "--- host"
@@ -499,8 +497,8 @@ if [ "$MODE" = print ]; then
   show /etc/systemd/journald.conf.d/kiwi-vpn.conf render_journald
   show /etc/apt/apt.conf.d/20auto-upgrades render_auto_upgrades
   show "$DOCTOR" render_doctor
+  show "$UNBOUND_CONF" render_unbound_conf
   if [ "$ADBLOCK" = 1 ]; then
-    show "$UNBOUND_CONF" render_unbound_conf
     show "$UPDATER" render_blocklist_updater
     show "$BL_SERVICE" render_blocklist_service
     show "$BL_TIMER" render_blocklist_timer
@@ -539,16 +537,18 @@ wait_agent() {
   die "agent did not start; see: journalctl -u kiwi-vpn-agent -n 50 (or run kiwi-vpn-doctor)"
 }
 
-disable_adblock() {
+# Ad blocking off: drop the timer + updater; the resolver keeps running with an empty list.
+remove_blocklist_updater() {
   systemctl disable --now kiwi-vpn-blocklist.timer 2>/dev/null || true
-  rm -f "$BL_TIMER" "$BL_SERVICE" "$UPDATER" "$UNBOUND_CONF" "$BLOCKLIST" "$BLOCKLIST.prev" "$ETC/adblock.env"
-  systemctl disable --now unbound 2>/dev/null || true
+  rm -f "$BL_TIMER" "$BL_SERVICE" "$UPDATER" "$BLOCKLIST.prev" "$ETC/adblock.env"
 }
 
 # ======================= --uninstall =======================
 if [ "$MODE" = uninstall ]; then
   say "Uninstalling Kiwi VPN node"
-  disable_adblock
+  remove_blocklist_updater
+  systemctl disable --now unbound 2>/dev/null || true
+  rm -f "$UNBOUND_CONF" "$BLOCKLIST"
   systemctl disable --now kiwi-vpn-agent 2>/dev/null || true
   systemctl disable --now "wg-quick@$WG_IF" 2>/dev/null || true
   rm -f "$UNIT" "$DOCTOR" /etc/sysctl.d/99-kiwi-vpn.conf /etc/systemd/journald.conf.d/kiwi-vpn.conf
@@ -596,8 +596,8 @@ grep -q 'VERSION_ID="24.04"' /etc/os-release 2>/dev/null || echo "warning: teste
 say "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-PKGS=(wireguard-tools nftables python3 openssl curl ca-certificates unattended-upgrades)
-if [ "$ADBLOCK" = 1 ]; then PKGS+=(unbound unbound-anchor dns-root-data); fi
+PKGS=(wireguard-tools nftables python3 openssl curl ca-certificates unattended-upgrades
+      unbound unbound-anchor dns-root-data)
 apt-get install -y -qq --no-install-recommends "${PKGS[@]}" >/dev/null
 
 # ---------- network facts ----------
@@ -647,7 +647,7 @@ if [ "$(cat "/etc/wireguard/$WG_IF.conf" 2>/dev/null)" != "$WG_CONF_NEW" ]; then
 fi
 
 # ---------- firewall + NAT (nftables owns the whole ruleset) ----------
-say "Writing firewall (SSH $SSH_PORT/tcp, WireGuard $WG_PORT/udp, agent $AGENT_PORT/tcp$(if [ "$ADBLOCK" = 1 ]; then echo ", DNS 53 from the VPN pool"; fi))"
+say "Writing firewall (SSH $SSH_PORT/tcp, WireGuard $WG_PORT/udp, agent $AGENT_PORT/tcp, DNS 53 from the VPN pool)"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
   echo "note: disabling ufw; nftables rules below replace it" >&2
   ufw --force disable >/dev/null
@@ -679,26 +679,29 @@ TOKEN="$(sed -n 's/^TOKEN=//p' "$ETC/agent.env" 2>/dev/null | head -n1)"
 (umask 027; render_agent_env > "$ETC/agent.env")
 chown root:"$SVC_USER" "$ETC/agent.env"; chmod 0640 "$ETC/agent.env"
 
-# ---------- ad & tracker blocking resolver (optional) ----------
+# ---------- private resolver (always) + ad & tracker blocklist (optional) ----------
+say "Setting up the VPN DNS resolver on $WG_ADDR:53 (no query logging; ad blocking $(if [ "$ADBLOCK" = 1 ]; then echo on; else echo off; fi))"
+# Never let the unbound package take over this host's own resolver.
+systemctl mask -q unbound-resolvconf.service 2>/dev/null || true
+render_unbound_conf > "$UNBOUND_CONF"
 if [ "$ADBLOCK" = 1 ]; then
-  say "Setting up ad & tracker blocking DNS on $WG_ADDR:53 (no query logging)"
-  # Never let the unbound package take over this host's own resolver.
-  systemctl mask -q unbound-resolvconf.service 2>/dev/null || true
-  printf 'BLOCKLIST_URL=%s\n' "$BLOCKLIST_URL" > "$ETC/adblock.env"
-  [ -s "$BLOCKLIST" ] || echo "# empty until the first download" > "$BLOCKLIST"
-  render_unbound_conf > "$UNBOUND_CONF"
+  printf 'BLOCKLIST_URL=%s
+' "$BLOCKLIST_URL" > "$ETC/adblock.env"
+  [ -s "$BLOCKLIST" ] && grep -q '^local-zone:' "$BLOCKLIST" || echo "# empty until the first download" > "$BLOCKLIST"
   (umask 022; render_blocklist_updater > "$UPDATER.new"); chmod 0755 "$UPDATER.new"; mv -f "$UPDATER.new" "$UPDATER"
   render_blocklist_service > "$BL_SERVICE"
   render_blocklist_timer > "$BL_TIMER"
-  unbound-checkconf >/dev/null || die "unbound config check failed"
-  systemctl daemon-reload
-  systemctl enable -q unbound kiwi-vpn-blocklist.timer
-  systemctl restart unbound
-  systemctl start kiwi-vpn-blocklist.timer
-  "$UPDATER" || echo "warning: first blocklist download failed; DNS works unfiltered and the daily timer retries" >&2
 else
-  if [ -f "$UNBOUND_CONF" ]; then say "Turning ad blocking off (clients use $DNS)"; fi
-  disable_adblock
+  remove_blocklist_updater
+  echo "# ad blocking off (install.sh --adblock turns it on)" > "$BLOCKLIST"
+fi
+unbound-checkconf >/dev/null || die "unbound config check failed"
+systemctl daemon-reload
+systemctl enable -q unbound
+systemctl restart unbound
+if [ "$ADBLOCK" = 1 ]; then
+  systemctl enable -q --now kiwi-vpn-blocklist.timer
+  "$UPDATER" || echo "warning: first blocklist download failed; DNS works unfiltered and the daily timer retries" >&2
 fi
 
 # ---------- agent ----------
@@ -733,7 +736,7 @@ Paste into Price Chat -> Admin -> VPN -> Add server:
 (Filled in automatically from the agent: endpoint $PUBLIC_IP, listen port $WG_PORT/udp,
  address $POOL, server public key $(wg show "$WG_IF" public-key))
 
-Ad blocking: $(if [ "$ADBLOCK" = 1 ]; then echo "ON (clients use $WG_ADDR)"; else echo "off (clients use $DNS)"; fi)
+Client DNS: $WG_ADDR (this node, no logs). Ad blocking: $(if [ "$ADBLOCK" = 1 ]; then echo ON; else echo off; fi)
 Health check any time: kiwi-vpn-doctor
 If your provider has a cloud firewall, allow: $SSH_PORT/tcp, $WG_PORT/udp, $AGENT_PORT/tcp.
 =====================================================

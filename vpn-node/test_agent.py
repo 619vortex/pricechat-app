@@ -406,12 +406,34 @@ def test_nftables_hardening_rules(flags):
 
 
 @needs_bash
-def test_default_is_public_dns_without_resolver():
-    files = _render()
+@pytest.mark.parametrize("flags", [(), ("--adblock",)])
+def test_resolver_always_on_and_dns_never_changes(flags):
+    # Toggling ad blocking must never change the DNS that existing device configs point at.
+    files = _render(*flags)
     env = files["/etc/kiwi-vpn/agent.env"]
-    assert "DNS=1.1.1.1,1.0.0.1\n" in env and "ADBLOCK=0\n" in env
-    assert "dport 53" not in files["/etc/nftables.conf"]
-    assert not any("unbound" in path or "blocklist" in path for path in files)
+    lines = env.splitlines()
+    assert "DNS=10.66.0.1" in lines
+    assert ("ADBLOCK=1" if flags else "ADBLOCK=0") in lines
+    nft = files["/etc/nftables.conf"]
+    for proto in ("udp", "tcp"):
+        assert f'iifname "wg0" ip saddr 10.66.0.0/16 ip daddr 10.66.0.1 {proto} dport 53 accept' in nft
+    assert nft.index("dport 53") < nft.index("tunnel to host")  # DNS accepted before the reject
+    ub = files["/etc/unbound/unbound.conf.d/kiwi-vpn.conf"]
+    ub_lines = [ln.strip() for ln in ub.splitlines()]
+    for must in ("interface: 10.66.0.1", "port: 53", "access-control: 0.0.0.0/0 refuse",
+                 "access-control: 10.66.0.0/16 allow", "verbosity: 0", "log-queries: no",
+                 "log-replies: no", "log-local-actions: no", "log-servfail: no",
+                 'include: "/etc/unbound/kiwi-vpn-blocklist.conf"'):
+        assert must in ub_lines, must
+    assert _re.findall(r"^\s*interface:", ub, _re.M) == ["  interface:"]  # only the tunnel address
+    # The blocklist updater + daily timer exist only with --adblock.
+    has_updater = any("blocklist" in path for path in files)
+    assert has_updater is bool(flags)
+
+
+@needs_bash
+def test_host_basics():
+    files = _render()
     sysctl = files["/etc/sysctl.d/99-kiwi-vpn.conf"]
     assert "net.ipv4.ip_forward = 1" in sysctl and "net.ipv6.conf.all.forwarding = 0" in sysctl
     assert 'APT::Periodic::Unattended-Upgrade "1";' in files["/etc/apt/apt.conf.d/20auto-upgrades"]
@@ -419,22 +441,8 @@ def test_default_is_public_dns_without_resolver():
 
 
 @needs_bash
-def test_adblock_resolver_config():
+def test_adblock_blocklist_updater():
     files = _render("--adblock")
-    env = files["/etc/kiwi-vpn/agent.env"]
-    assert "DNS=10.66.0.1\n" in env and "ADBLOCK=1\n" in env
-    nft = files["/etc/nftables.conf"]
-    for proto in ("udp", "tcp"):
-        assert f'iifname "wg0" ip saddr 10.66.0.0/16 ip daddr 10.66.0.1 {proto} dport 53 accept' in nft
-    # DNS accepts come before the "tunnel to host" reject.
-    assert nft.index("dport 53") < nft.index("tunnel to host")
-    ub = files["/etc/unbound/unbound.conf.d/kiwi-vpn.conf"]
-    for must in ("interface: 10.66.0.1\n", "port: 53\n", "access-control: 0.0.0.0/0 refuse",
-                 "access-control: 10.66.0.0/16 allow", "verbosity: 0\n", "log-queries: no\n",
-                 "log-replies: no\n", "log-local-actions: no\n", "log-servfail: no\n",
-                 'include: "/etc/unbound/kiwi-vpn-blocklist.conf"'):
-        assert must in ub, must
-    assert _re.findall(r"^\s*interface:", ub, _re.M) == ["  interface:"]  # only the tunnel address
     upd = files["/usr/local/sbin/kiwi-vpn-blocklist-update"]
     assert "--proto '=https'" in upd and "always_nxdomain" in upd
     assert "unbound-checkconf" in upd and "MIN_BYTES" in upd and "MAX_BYTES" in upd
