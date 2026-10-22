@@ -6,7 +6,8 @@
 - A problem that was reported stays "open" until it is fixed; the fix sends one "recovered" message (no cooldown: it
   always pairs with an alert the owner already got).
 - Sources: a background job failing 3 runs in a row (the nightly backup: its first failure), and a Brand Manager TikTok
-  account that is expired / revoked / disconnected while AUTO is on (the `system.alerts` job), and a Kiwi VPN server
+  account that is expired / revoked / disconnected while AUTO is on, Brand Manager publishing that stopped by itself
+  (AUTO blocked or failing, videos past their posting time, sends to TikTok that failed; the `system.alerts` job), and a Kiwi VPN server
   the sync couldn't reach twice in a row / back online / past 90% of its capacity (after each `vpn.sync`).
 - Sending can never break the caller: a Telegram error is logged and swallowed. Messages never carry secrets (job
   errors are already redacted by the scheduler).
@@ -164,7 +165,75 @@ async def check_brand_accounts(db: Session, *, settings: Settings | None = None,
                     _close(db, key)
             elif not auto.running:
                 _close(db, key)  # AUTO was stopped: nothing is waiting on TikTok any more
-    return {"tiktok_alerts": sent, "recovered": recovered}
+    out = {"tiktok_alerts": sent, "recovered": recovered}
+    for k, n in (await check_brand_publishing(db, settings=settings, transport=transport, now=now)).items():
+        out[k] = out.get(k, 0) + n
+    return out
+
+
+BRAND_ERRORS_IN_A_ROW = 3  # failed ticks (one a minute) in the last 15 min before a Brand Manager error is worth a message
+OVERDUE = timedelta(hours=1)  # a video still not sent this long after its posting time
+
+
+async def check_brand_publishing(db: Session, *, settings: Settings | None = None, transport: Any = None, now: datetime | None = None) -> dict[str, int]:
+    """Publishing that stops without anyone pressing STOP: AUTO blocked (a setting, storage) or failing every tick, videos
+    past their posting time (no worker online, waiting for approval), and sends to TikTok that failed. The TikTok sign-in
+    itself has its own alert above. One message per problem (6 h cooldown while it lasts), one when it is fixed."""
+    from sqlalchemy import func
+
+    from app.brand_manager.engine import DAILY_POST_CAP, _published_today
+    from app.models.brand_manager import BmAccount, BmAutomation, BmBrand, BmEvent, BmVideo
+
+    now = now or utcnow()
+    out = {"brand_alerts": 0, "recovered": 0, "send_failed_alerts": 0}
+    for auto, b in db.execute(select(BmAutomation, BmBrand).join(BmBrand, BmBrand.id == BmAutomation.brand_id)).all():
+        key = f"brand:{b.id}:stalled"
+        acc = db.scalar(select(BmAccount).where(BmAccount.brand_id == b.id, BmAccount.platform == "tiktok"))
+        tiktok_bad = (acc.status if acc is not None else "disconnected") in TIKTOK_BAD
+        problems: list[str] = []
+        if auto.running and not tiktok_bad:
+            if auto.status == "blocked":
+                problems.append(f"AUTO is blocked: {auto.reason}")
+            elif auto.status == "error":
+                errors = db.scalar(select(func.count(BmEvent.id)).where(BmEvent.brand_id == b.id, BmEvent.level == "error",
+                                                                         BmEvent.message.like("Something went wrong%"),
+                                                                         BmEvent.at >= now - timedelta(minutes=15))) or 0
+                if errors >= BRAND_ERRORS_IN_A_ROW:
+                    problems.append(f"AUTO keeps failing: {_first_line(auto.reason)}")
+            late = dict(db.execute(select(BmVideo.status, func.count(BmVideo.id)).where(
+                BmVideo.brand_id == b.id, BmVideo.slot_at < now - OVERDUE,
+                BmVideo.status.in_(("queued", "rendering", "needs_review", "ready", "approved"))).group_by(BmVideo.status)).all())
+            waiting = late.get("queued", 0) + late.get("rendering", 0)
+            if waiting:
+                problems.append(f"{waiting} video{'s' * (waiting != 1)} past the posting time still waiting for an AI worker (is it online? Settings › AI)")
+            if late.get("needs_review"):
+                problems.append(f"{late['needs_review']} video{'s' * (late['needs_review'] != 1)} past the posting time waiting for your approval (Content Studio)")
+            unsent = late.get("ready", 0) + late.get("approved", 0)
+            if unsent and _published_today(db, b.id, now) < DAILY_POST_CAP:
+                problems.append(f"{unsent} finished video{'s' * (unsent != 1)} past the posting time not sent to TikTok (see Brand Manager › Log)")
+        if problems:
+            text = (f"Price Chat alert: Brand Manager isn't publishing\nBrand: {b.name}\n" + "\n".join(f"- {p}" for p in problems)
+                    + f"\nTime: {_when(now)}")
+            out["brand_alerts"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, open_=True)
+        elif _is_open(db, key):
+            if auto.running and not tiktok_bad:
+                text = f"Price Chat: recovered\nBrand: {b.name}: Brand Manager is publishing on schedule again.\nTime: {_when(now)}"
+                if await notify_owner(db, f"{key}:recovered", text, settings=settings, transport=transport, now=now, cooldown=False):
+                    out["recovered"] += 1
+                    _close(db, key)
+            else:
+                _close(db, key)  # AUTO stopped, or the TikTok sign-in alert has taken over
+        # sends TikTok refused or whose answer was lost: once per batch of new failures, never the same failure twice
+        fkey = f"brand:{b.id}:send_failed"
+        row = db.get(OwnerAlert, fkey)
+        since = max(now - timedelta(hours=24), _aware(row.last_sent_at) if row is not None and row.last_sent_at else now - timedelta(hours=24))
+        failed = [m for m in db.scalars(select(BmEvent.message).where(BmEvent.brand_id == b.id, BmEvent.stage == "publish",
+                                                                       BmEvent.level == "error", BmEvent.at > since).order_by(BmEvent.id).limit(20))]
+        if failed:
+            text = (f"Price Chat alert: {len(failed)}{'+' if len(failed) == 20 else ''} video{'s' * (len(failed) != 1)} not sent to TikTok\n"
+                    f"Brand: {b.name}\nLatest: {_first_line(failed[-1], 300)}\nCheck TikTok and Brand Manager › Content Studio.\nTime: {_when(now)}")
+            out["send_failed_alerts"] += await notify_owner(db, fkey, text, settings=settings, transport=transport, now=now)
+    return out
 
 
 # --- Kiwi VPN servers (called by the vpn.sync job after each sync) -----------------------------------------------------------
