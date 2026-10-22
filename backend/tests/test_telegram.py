@@ -338,3 +338,19 @@ async def test_total_ingested_counts_each_message_once_across_batches(db: Sessio
     report = await TelegramIngestor(db, _client(fake_telegram), TelegramRuntime()).sync()
     assert report.stored == 150
     assert db.scalar(select(TelegramBotState.total_ingested)) == 150
+
+
+async def test_429_retry_after_is_respected_for_that_chat(fake_telegram: FakeTelegram) -> None:
+    """Sending again before retry_after only extends Telegram's limit: the client now waits it out for that chat."""
+    client = _client(fake_telegram)
+    fake_telegram.error = (429, {"ok": False, "error_code": 429, "description": "Too Many Requests", "parameters": {"retry_after": 17}})
+    with pytest.raises(TelegramRateLimitError):
+        await client.send_message(-100111, "first")
+    fake_telegram.error = None
+    sent = len(fake_telegram.calls)
+    with pytest.raises(TelegramRateLimitError) as exc:
+        await client.send_message(-100111, "too soon")
+    assert len(fake_telegram.calls) == sent and 0 < exc.value.retry_after <= 17  # nothing reached Telegram
+    await client.send_message(-100222, "another chat is not affected")
+    await client.get_updates(None)
+    assert len(fake_telegram.calls) == sent + 2

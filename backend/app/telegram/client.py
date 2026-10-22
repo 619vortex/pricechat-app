@@ -13,6 +13,8 @@ requests, approving/declining those requests, removing a revoked member): see th
 """
 
 import logging
+import math
+import time
 from typing import Any
 
 import httpx
@@ -58,6 +60,7 @@ class TelegramBotClient:
         self._token = token
         self.api_base = api_base.rstrip("/")
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=10.0), transport=transport)
+        self._flood_until: dict[str, float] = {}  # chat id -> monotonic time Telegram's 429 retry_after ends
 
     def __repr__(self) -> str:  # never show the token
         return f"TelegramBotClient(api_base={self.api_base!r})"
@@ -161,6 +164,11 @@ class TelegramBotClient:
 
     async def _call(self, method: str, params: dict[str, Any] | None = None, read_timeout: float | None = None,
                     files: dict[str, Any] | None = None) -> Any:
+        # A 429 for a chat: no more requests to it until retry_after has passed (each early one only extends the limit).
+        chat = str((params or {}).get("chat_id", ""))
+        wait = self._flood_until.get(chat, 0.0) - time.monotonic() if chat else 0.0
+        if wait > 0:
+            raise TelegramRateLimitError(f"Telegram rate limit; retry after {math.ceil(wait)}s", math.ceil(wait))
         url = f"{self.api_base}/bot{self._token}/{method}"
         # an upload goes as multipart form fields (nested values JSON-encoded by the caller), everything else as JSON
         kwargs: dict[str, Any] = {"data": params or {}, "files": files} if files else {"json": params or {}}
@@ -194,6 +202,8 @@ class TelegramBotClient:
             )
         if code == 429:
             retry_after = int((body.get("parameters") or {}).get("retry_after") or 30)
+            if chat:
+                self._flood_until[chat] = time.monotonic() + retry_after
             raise TelegramRateLimitError(f"Telegram rate limit; retry after {retry_after}s", retry_after)
         if code >= 500:
             raise TelegramUnavailableError(f"Telegram server error {code}: {description}")
