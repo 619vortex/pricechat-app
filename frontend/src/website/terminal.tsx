@@ -217,6 +217,7 @@ function CloseDialog({ p, onDone, onClose }: { p: Pos; onDone: (a: Account) => v
             <div><dt>Est. execution impact</dt><dd>≈ {usd(notional * (SLIPPAGE + TAKER_FEE))}</dd></div>
             <div><dt>Worst accepted price</dt><dd>{px(price * (p.side === "LONG" ? 1 - 3 * SLIPPAGE : 1 + 3 * SLIPPAGE))}</dd></div>
           </dl>
+          {p.mode === "PAPER" && <p className="kt-explain">Practice position: the close is simulated at the market price. No order reaches Hyperliquid.</p>}
           <p className="tb-sub">A reduce-only market order (it can only shrink this position, never open the other side). Market orders can fill
             worse than the current price (slippage), and pay the taker fee. {frac < 1 ? "The stop-loss and targets are resized to what's left." : "Its stop-loss and targets are cancelled after the fill."}</p>
           {err && <p className="site-error" role="alert">{err}</p>}
@@ -262,6 +263,8 @@ function CloseAllDialog({ positions, onDone, onClose }: { positions: Pos[]; onDo
         <>
           <p className="tt-dl-line">This closes <b>{positions.length}</b> bot position{positions.length === 1 ? "" : "s"} (≈ <b>{usd(exposure)}</b> exposure) at
             market: {positions.map((p) => `${p.coin} ${p.side}`).join(", ")}.</p>
+          {positions.every((p) => p.mode === "PAPER") && <p className="kt-explain">These are practice positions: the closes are simulated, no order reaches Hyperliquid.</p>}
+          {positions.some((p) => p.mode === "LIVE") && <p className="kt-warn">Includes LIVE positions: real orders on your Hyperliquid account.</p>}
           <p className="tb-sub">Reduce-only market orders, one per position: they can't open reverse positions. Each one is checked against
             Hyperliquid's answer; anything not filled is reported, never shown as closed. Your other Hyperliquid positions aren't touched.</p>
           <label className="tt-check"><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> I understand market orders can

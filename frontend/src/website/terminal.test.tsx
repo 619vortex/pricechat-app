@@ -110,6 +110,7 @@ describe("Kiwi trading bot", () => {
     fireEvent.click(screen.getByRole("button", { name: "CLOSE ALL" }));
     const go = screen.getByRole("button", { name: "Close all 1" }) as HTMLButtonElement;
     expect(go.disabled).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Close all bot positions" }).textContent).toMatch(/Includes LIVE positions: real orders/);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(go);
     await flush();
