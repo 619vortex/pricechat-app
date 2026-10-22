@@ -422,3 +422,29 @@ def test_owner_settings_and_write_only_token(client: TestClient, db: Session) ->
     assert (ov["enabled"], ov["daily_public"], ov["min_rank"]) == (False, 5, 3)
     ov = client.delete("/api/tradingos/admin/vortex-token").json()["vortex_assist"]
     assert ov["token_set"] is False
+
+
+async def test_ingestion_routes_only_replies_to_check_messages(db: Session, fake_telegram: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.telegram.client import TelegramBotClient
+    from app.telegram.ingestion import TelegramIngestor
+    from app.telegram.state import TelegramRuntime
+    from tests.fakes import TOKEN as BOT_TOKEN
+
+    convo = TsAssistConvo(chat_id=-100222, tg_user_id=42, coin="BTC", side="long", trade={}, facts={}, followups=0, created_at=utcnow())
+    db.add(convo)
+    db.flush()
+    db.add(TsAssistJob(public_id="j_test", convo_id=convo.id, kind="assess", status="answered", tg_user_id=42, chat_id=-100222,
+                       message_id=500, question="long btc", facts={}, fallback="", claims=0, created_at=utcnow()))
+    db.commit()
+    seen: list[tuple[Any, ...]] = []
+
+    async def record(db_: Any, client: Any, *args: Any) -> str:
+        seen.append(args)
+        return "queued"
+    monkeypatch.setattr(assist, "followup", record)
+    fake_telegram.message(-100222, "what about 5x?", user_id=42, reply_to=500)
+    fake_telegram.message(-100222, "unrelated reply", user_id=42, reply_to=499)
+    fake_telegram.message(-100222, "plain chat", user_id=42)
+    await TelegramIngestor(db, TelegramBotClient(BOT_TOKEN, "https://api.telegram.test", transport=fake_telegram.transport),
+                           TelegramRuntime()).sync()
+    assert seen == [(-100222, 42, "what about 5x?", 1, 500)]
