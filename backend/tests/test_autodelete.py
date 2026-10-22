@@ -3,13 +3,14 @@ from datetime import timedelta
 from typing import Any
 
 import httpx
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
 from app.models.tradingos import TsAutoDelete
 from app.telegram import client as tg_client
-from app.telegram.errors import TelegramRequestError, TelegramUnavailableError
+from app.telegram.errors import TelegramRateLimitError, TelegramRequestError, TelegramUnavailableError
 from app.tradingos import autodelete, signals
 
 
@@ -59,6 +60,16 @@ def test_main_chat_by_id_and_never_when_it_is_also_bot_chat(db: Session) -> None
     assert asyncio.run(autodelete.run(db, FakeTG()))["queued"] == 0
 
 
+def test_a_burst_reads_the_settings_once(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    chats(db)
+    reads = []
+    real = signals.settings
+    monkeypatch.setattr(signals, "settings", lambda d: reads.append(1) or real(d))
+    for i in range(50):
+        autodelete.note(sent(-100, i + 1, "thepricechat"))
+    assert asyncio.run(autodelete.run(db, FakeTG()))["queued"] == 50 and len(reads) <= 2
+
+
 def test_off_and_telegram_trouble(db: Session) -> None:
     chats(db, minutes=0)
     autodelete.note(sent(-100, 1, "thepricechat"))
@@ -86,3 +97,31 @@ def test_the_client_reports_every_message_it_sends() -> None:
     asyncio.run(c.aclose())
     assert [m[2] for m in autodelete._sent] == [99]
     tg_client.SENT_HOOKS.remove(autodelete.note)
+
+
+@pytest.mark.parametrize(("status", "body", "error"), [
+    (429, {"ok": False, "error_code": 429, "description": "Too Many Requests", "parameters": {"retry_after": 7}}, TelegramRateLimitError),
+    (502, {"ok": False, "error_code": 502, "description": "Bad Gateway"}, TelegramUnavailableError),
+    (400, {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}, TelegramRequestError),
+])
+def test_a_chart_photo_fails_like_every_other_send(status: int, body: dict[str, Any], error: type) -> None:
+    """sendPhoto: a rate limit or a Telegram outage is retryable (not "rejected"), and a sent photo is reported too."""
+    calls: list[httpx.Request] = []
+
+    def handle(r: httpx.Request) -> httpx.Response:
+        calls.append(r)
+        return httpx.Response(status, json=body) if len(calls) == 1 else httpx.Response(200, json={"ok": True, "result": sent(-100, 5, "thepricechat")})
+
+    autodelete._sent.clear()
+    autodelete.install()
+    c = tg_client.TelegramBotClient("123:abc", transport=httpx.MockTransport(handle))
+    try:
+        with pytest.raises(error) as exc:
+            asyncio.run(c.send_photo(-100, b"png", "caption", html=True))
+        assert "123:abc" not in str(exc.value)
+        asyncio.run(c.send_photo(-100, b"png", "caption", buttons=[[{"text": "x", "callback_data": "y"}]], html=True))
+        assert b'name="photo"' in calls[-1].content and b"inline_keyboard" in calls[-1].content
+        assert [m[2] for m in autodelete._sent] == [5]
+    finally:
+        asyncio.run(c.aclose())
+        tg_client.SENT_HOOKS.remove(autodelete.note)

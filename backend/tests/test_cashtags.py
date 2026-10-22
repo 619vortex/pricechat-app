@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.tradingos import bot, chartcmd, market, readout, tickers, venues
+from app.tradingos.market import Candle
 from app.tradingos.structure import Venues
 from app.tradingos.tickers import Symbol, cashtag, parse_symbol
 
@@ -36,7 +37,7 @@ class FakeExchanges:
 
     def __init__(self) -> None:
         self.btc = uptrend_pullback(300)
-        self.kas = flat(300, 0.0374)
+        self.kas = [Candle(c.t, c.o * 0.000374, c.h * 0.000374, c.l * 0.000374, c.c * 0.000374, c.v) for c in flat(300)]  # ~0.0374, swings to scale
         self.calls: list[str] = []
 
     def transport(self) -> httpx.MockTransport:

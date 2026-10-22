@@ -13,17 +13,19 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
 from app.models.tradingos import TsSignalIdea
-from app.tradingos.market import INTERVALS, MarketData, MarketError
+from app.tradingos.market import INTERVALS, MarketData
 
 logger = logging.getLogger(__name__)
 
 FILL_WITHIN = 24  # candles to reach the entry zone
 RESOLVE_WITHIN = 72  # candles after the fill to reach a level
+GIVE_UP = 2 * (FILL_WITHIN + RESOLVE_WITHIN)  # candles: still open by then, its candles can't be read (delisted, venue down): SKIPPED
+MAX_READ = {"okx": 300}  # candles one read returns (else 1000): an older idea's opening candles are out of reach
 DEDUPE = timedelta(hours=1)
 SAME_ENTRY = 0.0025  # entries within 0.25% count as the same plan (the next candle nudges the zone a little)
 GRADED_VENUES = ("hyperliquid", "binance", "bybit", "okx")  # DEX pools: SKIPPED
@@ -117,30 +119,36 @@ def grade(x: TsSignalIdea, candles: list[Any], now: datetime | None = None) -> b
 
 
 def grade_all(db: Session, md: MarketData, vs: Any = None) -> dict[str, int]:
-    """The tradingos.ideas job: grade every open idea, one candle read per market and timeframe."""
+    """The tradingos.ideas job: grade every open idea, one candle read per market and timeframe. An idea still open after
+    GIVE_UP candles can't be graded (no candles for it): SKIPPED, so it isn't read again every run."""
     from app.tradingos import venues
 
     rows = list(db.scalars(select(TsSignalIdea).where(TsSignalIdea.status.in_(OPEN))))
     groups: dict[tuple[str, str, str, str], list[TsSignalIdea]] = {}
     for x in rows:
         groups.setdefault((x.venue, x.kind, x.coin, x.timeframe), []).append(x)
-    now, changed, errors = utcnow(), 0, 0
+    now, changed, errors, skipped = utcnow(), 0, 0, 0
     for (venue, kind, coin, tf), xs in groups.items():
-        oldest = min(x.created_at for x in xs)
-        n = min(int((now - oldest).total_seconds() // INTERVALS[tf]) + 3, 1000)
-        try:
-            if venue == "hyperliquid":
-                cs = md.candles(coin, tf, n)
-            else:
-                listing = venues.Listing(venue=venue, kind=kind, base=coin, quote="", symbol=coin, price=0.0, change_24h=None, volume_24h=None)
-                cs = venues.candles(listing, tf, n, md, vs or venues.client())
-        except (MarketError, KeyError, ValueError) as e:  # retried next run
-            logger.info("idea grading: no %s %s candles (%s)", coin, tf, e)
-            errors += 1
-            continue
-        changed += sum(grade(x, cs, now) for x in xs)
+        age = {x.id: int((now - x.created_at).total_seconds() // INTERVALS[tf]) for x in xs}  # candles since it was shown
+        readable = [x for x in xs if age[x.id] + 3 <= MAX_READ.get(venue, 1000)]
+        if readable:
+            n = max(age[x.id] for x in readable) + 3
+            try:
+                if venue == "hyperliquid":
+                    cs = md.candles(coin, tf, n)
+                else:
+                    listing = venues.Listing(venue=venue, kind=kind, base=coin, quote="", symbol=coin, price=0.0, change_24h=None, volume_24h=None)
+                    cs = venues.candles(listing, tf, n, md, vs or venues.client())
+                changed += sum(grade(x, cs, now) for x in readable)
+            except Exception as e:  # noqa: BLE001 - one market's odd answer never stops the others; retried next run
+                logger.info("idea grading: no %s %s candles (%s: %s)", coin, tf, type(e).__name__, e)
+                errors += 1
+        for x in xs:
+            if x.status in OPEN and age[x.id] > GIVE_UP:
+                x.status = "SKIPPED"
+                skipped += 1
     db.commit()
-    return {"open": len(rows), "changed": changed, "errors": errors}
+    return {"open": len(rows), "changed": changed, "errors": errors, "skipped": skipped}
 
 
 def _graded(db: Session, fam: str | None, limit: int = WINDOW) -> list[TsSignalIdea]:
@@ -163,23 +171,27 @@ def record_line(db: Session, fam: str | None) -> str:
 
 def record_table(db: Session) -> str:
     """/record: per family, over everything graded: how many filled, the win rate of the filled ones, and the average R."""
-    rows = list(db.scalars(select(TsSignalIdea).where(TsSignalIdea.status.in_(DONE))))
-    if not rows:
-        pending = len(list(db.scalars(select(TsSignalIdea.id).where(TsSignalIdea.status.in_(OPEN)))))
+    x = TsSignalIdea
+    filled = x.filled_at.is_not(None)
+    # per family, counted in the database (the graded ideas only ever grow): n, filled, wins of the filled, sum and count of R
+    q = (select(x.family, func.count(), func.count(x.filled_at), func.sum(case((and_(filled, x.status == "TARGET"), 1), else_=0)),
+                func.sum(case((filled, x.r))), func.count(case((filled, x.r))))
+         .where(x.status.in_(DONE)).group_by(x.family))
+    by = {fam: [int(n or 0), int(f or 0), int(w or 0), float(rs or 0.0), int(rn or 0)] for fam, n, f, w, rs, rn in db.execute(q)}
+    if not by:
+        pending = int(db.scalar(select(func.count()).select_from(x).where(x.status.in_(OPEN))) or 0)
         return ("📈 <b>/signal track record</b>\nNothing graded yet" + (f" ({pending} idea{'s' if pending != 1 else ''} being followed)." if pending else ".")
                 + "\nEvery /signal plan is followed on real candles: filled when price reaches the entry, then target or stop.")
+    by[None] = [sum(v[i] for v in by.values()) for i in range(5)]  # type: ignore[index]
     lines = ["📈 <b>/signal track record</b>", "<code>family      n  fill  win   avgR</code>"]
     for fam in (*FAMILIES, "other", None):
-        xs = [x for x in rows if fam is None or x.family == fam]
-        if not xs:
+        if fam not in by:
             continue
-        filled = [x for x in xs if x.filled_at is not None]
-        wins = sum(x.status == "TARGET" for x in filled)
-        rs = [x.r for x in filled if x.r is not None]
+        n, f, wins, r_sum, r_n = by[fam]
         name = "all" if fam is None else fam
-        win = f"{wins / len(filled) * 100:3.0f}%" if filled else "   –"
-        avg = f"{sum(rs) / len(rs):+.2f}" if rs else "  –"
-        lines.append(f"<code>{name:<10}{len(xs):>3} {len(filled) / len(xs) * 100:4.0f}% {win} {avg:>6}</code>")
+        win = f"{wins / f * 100:3.0f}%" if f else "   –"
+        avg = f"{r_sum / r_n:+.2f}" if r_n else "  –"
+        lines.append(f"<code>{name:<10}{n:>3} {f / n * 100:4.0f}% {win} {avg:>6}</code>")
     lines += ["", "fill = reached the entry zone · win = target before stop (of the filled) · avgR = result in risk units.",
               "Chart ideas on request, not trades: no fees. Not financial advice."]
     return "\n".join(lines)

@@ -27,8 +27,8 @@ def md(monkeypatch: pytest.MonkeyPatch) -> StudyMD:
 def idea(db: Session, side: str = "LONG", hours_ago: float = 200, **kw: object) -> TsSignalIdea:
     """LONG: entry 99-101, stop 95 (1R = 5), target 110 (+2R). SHORT mirrored around 100."""
     lv = dict(entry_lo=99.0, entry_hi=101.0, stop=95.0, target=110.0) if side == "LONG" else dict(entry_lo=99.0, entry_hi=101.0, stop=105.0, target=90.0)
-    x = TsSignalIdea(venue="hyperliquid", kind="perp", coin="BTC", tag="$BTCUSD", timeframe="1h", side=side, idea="buy a pullback to EMA20",
-                     full=False, score=3.0, chat_type="group", created_at=utcnow() - timedelta(hours=hours_ago), **{"family": "pullback", **lv, **kw})
+    x = TsSignalIdea(venue="hyperliquid", kind="perp", tag="$BTCUSD", timeframe="1h", side=side, idea="buy a pullback to EMA20",
+                     full=False, score=3.0, chat_type="group", created_at=utcnow() - timedelta(hours=hours_ago), **{"family": "pullback", "coin": "BTC", **lv, **kw})
     db.add(x)
     db.commit()
     return x
@@ -127,8 +127,43 @@ def test_grade_all_reads_candles_once_per_market(db: Session) -> None:
             return bars(x, [(100.5, 99.5), (111, 100)])
 
     out = record.grade_all(db, MD())  # type: ignore[arg-type]
-    assert len(calls) == 1 and calls[0][2] >= 200 and out == {"open": 2, "changed": 2, "errors": 0}
+    assert len(calls) == 1 and calls[0][2] >= 200 and out == {"open": 2, "changed": 2, "errors": 0, "skipped": 0}
     assert (x.status, y.status) == ("TARGET", "STOP")
+
+
+def test_grade_all_one_broken_market_never_stops_the_others_and_dead_ones_are_dropped(db: Session) -> None:
+    ok = idea(db)
+    dead = idea(db, hours_ago=record.GIVE_UP + 5, coin="GONE")  # a delisted market: its candles never come back
+    young = idea(db, hours_ago=5, coin="ODD")
+    calls: list[str] = []
+
+    class MD:
+        def candles(self, coin: str, tf: str, n: int) -> list[Candle]:
+            calls.append(coin)
+            if coin == "GONE":
+                raise market.MarketError("Unknown market GONE")
+            if coin == "ODD":
+                raise TypeError("'NoneType' object is not subscriptable")  # a venue's odd answer
+            return bars(ok, [(100.5, 99.5), (111, 100)])
+
+    out = record.grade_all(db, MD())  # type: ignore[arg-type]
+    assert ok.status == "TARGET" and dead.status == "SKIPPED" and young.status == "OPEN"
+    assert out == {"open": 3, "changed": 1, "errors": 2, "skipped": 1}
+    calls.clear()
+    assert record.grade_all(db, MD())["open"] == 1 and calls == ["ODD"]  # type: ignore[arg-type]  # the dead one isn't read again
+
+
+def test_grade_all_never_grades_on_candles_that_miss_the_start(db: Session) -> None:
+    old = idea(db, hours_ago=1200)  # older than one read (1000 candles): graded on later candles it would be wrong
+    calls: list[int] = []
+
+    class MD:
+        def candles(self, coin: str, tf: str, n: int) -> list[Candle]:
+            calls.append(n)
+            return bars(old, [(100.5, 99.5), (111, 100)])
+
+    record.grade_all(db, MD())  # type: ignore[arg-type]
+    assert not calls and old.status == "SKIPPED" and old.filled_at is None
 
 
 # ---------------------------------------------------------------- the record line and /record
@@ -215,3 +250,20 @@ def test_daily_brief_retries_when_nothing_went_out(db: Session, md: StudyMD) -> 
     assert signals.settings(db).brief_sent_on is None
     tg = FakeTG()
     assert asyncio.run(bot.daily_brief(db, tg, md, at(9))) == "sent"
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_daily_brief_without_a_setup_posts_only_the_overview(db: Session, md: StudyMD, monkeypatch: pytest.MonkeyPatch, fails: bool) -> None:
+    signals.settings(db).publish_chat = "@botpricechat"
+    db.commit()
+
+    async def no_setup(*a: object, **kw: object) -> tuple[str, None]:
+        if fails:
+            raise market.MarketError("Hyperliquid is busy")
+        return "Couldn't read the markets right now. Try /signal BTC.", None
+
+    monkeypatch.setattr(bot, "best_signal", no_setup)
+    tg = FakeTG()
+    assert asyncio.run(bot.daily_brief(db, tg, md, at(8))) == "sent (overview only)"
+    assert len(tg.sent) == 1 and "Daily brief" in tg.sent[0][2]  # never "Try /signal BTC" in the group
+    assert asyncio.run(bot.daily_brief(db, tg, md, at(9))) == "already sent today"

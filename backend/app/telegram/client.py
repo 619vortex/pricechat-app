@@ -110,15 +110,7 @@ class TelegramBotClient:
             data["reply_markup"] = _json.dumps({"inline_keyboard": buttons})
         if reply_to:
             data["reply_parameters"] = _json.dumps({"message_id": reply_to, "allow_sending_without_reply": True})
-        url = f"{self.api_base}/bot{self._token}/sendPhoto"
-        try:
-            response = await self._client.post(url, data=data, files={"photo": ("chart.png", png, "image/png")})
-        except httpx.TransportError as exc:
-            raise TelegramUnavailableError(f"Cannot reach Telegram ({type(exc).__name__})") from None
-        body = response.json()
-        if not body.get("ok"):
-            raise TelegramRequestError(str(body.get("description") or "sendPhoto failed"))
-        return _sent(body["result"])
+        return _sent(await self._call("sendPhoto", data, files={"photo": ("chart.png", png, "image/png")}))
 
     async def delete_message(self, chat_id: int | str, message_id: int) -> None:
         """Only the bot's own messages (tradingos.autodelete: the main chat's, after a few minutes)."""
@@ -167,9 +159,11 @@ class TelegramBotClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def _call(self, method: str, params: dict[str, Any] | None = None, read_timeout: float | None = None) -> Any:
+    async def _call(self, method: str, params: dict[str, Any] | None = None, read_timeout: float | None = None,
+                    files: dict[str, Any] | None = None) -> Any:
         url = f"{self.api_base}/bot{self._token}/{method}"
-        kwargs: dict[str, Any] = {"json": params or {}}
+        # an upload goes as multipart form fields (nested values JSON-encoded by the caller), everything else as JSON
+        kwargs: dict[str, Any] = {"data": params or {}, "files": files} if files else {"json": params or {}}
         if read_timeout is not None:
             kwargs["timeout"] = httpx.Timeout(read_timeout, connect=10.0)
         try:

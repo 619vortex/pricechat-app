@@ -654,7 +654,12 @@ async def daily_brief(db: Session, client: Any, md: Any = None, now: Any = None)
         return f"waiting for {s.brief_hour:02d}:00 UTC"
     md = md or market.data()
     digest = await _md(markets_digest, md)
-    text, png = await best_signal(db, md, s.timeframe, "brief")
+    try:
+        text, png = await best_signal(db, md, s.timeframe, "brief")
+    except Exception:  # noqa: BLE001 - no setup today: the overview still goes out
+        logger.exception("daily brief: no setup")
+        db.rollback()
+        text, png = "", None
     signals.settings(db).brief_sent_on = today
     db.commit()
     try:
@@ -663,12 +668,10 @@ async def daily_brief(db: Session, client: Any, md: Any = None, now: Any = None)
         signals.settings(db).brief_sent_on = None  # nothing went out: the next run tries again
         db.commit()
         raise
-    foot = _Footed(client, footer(db))
+    if png is None:  # no chart means no setup (best_signal's "Couldn't read the markets"): not posted in the group
+        return "sent (overview only)"
     try:
-        if png is None:
-            await foot.send_message(chat, text, html=True)
-        else:
-            await foot.send_photo(chat, png, text, html=True)
+        await _Footed(client, footer(db)).send_photo(chat, png, text, html=True)
     except Exception as e:  # noqa: BLE001 - the overview went out: not retried (no duplicates)
         logger.info("daily brief setup skipped: %s", e)
         return "sent (overview only)"

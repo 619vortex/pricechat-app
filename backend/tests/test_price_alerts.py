@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
 from app.models.tradingos import TsPriceAlert
-from app.telegram.errors import TelegramRequestError
+from app.telegram.errors import TelegramRateLimitError, TelegramRequestError
 from app.tradingos import alerts, bot, market
 from app.tradingos.market import Market
 
@@ -74,7 +74,7 @@ def test_alert_parsing(db: Session, md: MarksMD, text: str, kind: str, price: fl
 
 @pytest.mark.parametrize("text,needle", [("/alert", "Usage"), ("/alert BTC", "Usage"), ("/alert BTC lots", "Usage"),
                                          ("/alert NOPE 5", "Hyperliquid perps"), ("/alert BTC binance 90000", "Hyperliquid perps"),
-                                         ("/alert ETH 5%", "sign")])
+                                         ("/alert ETH 5%", "sign"), ("/alert BTC perp", "Usage")])
 def test_alert_bad_input_explains(db: Session, md: MarksMD, text: str, needle: str) -> None:
     assert needle in say(db, text) and not mine(db)
 
@@ -142,6 +142,48 @@ def test_blocked_user_disables_alert(db: Session, md: MarksMD) -> None:
     assert mine(db)[0].status == "blocked" and mine(db, 10)[0].status == "fired"
 
 
+class SlowTG(FakeTG):
+    """TEST FIXTURE: the second message never finishes (the job's timeout cancels the run)."""
+
+    async def send_message(self, chat_id: Any, text: str, buttons: Any = None, html: bool = False, reply_to: Any = None) -> dict[str, Any]:
+        if self.sent:
+            raise asyncio.CancelledError
+        return await super().send_message(chat_id, text, buttons, html, reply_to)
+
+
+class RateLimitedTG(FakeTG):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tries = 0
+
+    async def send_message(self, chat_id: Any, text: str, buttons: Any = None, html: bool = False, reply_to: Any = None) -> dict[str, Any]:
+        self.tries += 1
+        raise TelegramRateLimitError("Telegram rate limit; retry after 30s", 30)
+
+
+def test_run_cut_short_never_resends_what_went_out(db: Session, md: MarksMD) -> None:
+    say(db, "/alert BTC 85000")
+    say(db, "/alert BTC 85000", uid=10)
+    md.marks["BTC"] = 86_000.0
+    with pytest.raises(asyncio.CancelledError):
+        run(db, SlowTG(), md)
+    db.rollback()
+    assert mine(db)[0].status == "fired" and mine(db, 10)[0].status == "active"
+    tg = FakeTG()
+    run(db, tg, md)
+    assert [s[1] for s in tg.sent] == [10]  # only the one that never went out
+
+
+def test_rate_limit_stops_sending_until_next_run(db: Session, md: MarksMD) -> None:
+    for uid in (9, 10, 11):
+        say(db, "/alert BTC 85000", uid=uid)
+    md.marks["BTC"] = 86_000.0
+    tg = RateLimitedTG()
+    assert run(db, tg, md)["fired"] == 0 and tg.tries == 1
+    ok = FakeTG()
+    assert run(db, ok, md)["fired"] == 3 and len(ok.sent) == 3  # the crossing is kept for the next run
+
+
 # ---------------------------------------------------------------- the /signal button
 def test_signal_button_creates_zone_alert(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     f = FakeMD({"BTC": uptrend_pullback()})
@@ -173,6 +215,28 @@ def test_button_needs_start_in_the_bot(db: Session, md: MarksMD) -> None:
     tg = BlockedTG()
     asyncio.run(bot.handle_callback(db, tg, {"id": "c1", "from": {"id": 9}, "data": data}))
     assert not mine(db) and "press Start" in tg.sent[-1][2]
+
+
+def test_button_double_tap_sets_one_alert_and_telegram_trouble_isnt_blamed_on_start(db: Session, md: MarksMD) -> None:
+    plan = type("P", (), {"side": "LONG", "entry": (79_000.0, 79_500.0), "stop": 77_000.0, "target": 84_000.0})()
+    data = alerts.button("BTC", plan, "1h")[0][0]["callback_data"]  # type: ignore[index]
+    tg = FakeTG()
+    for _ in range(2):
+        asyncio.run(bot.handle_callback(db, tg, {"id": "c1", "from": {"id": 9}, "data": data}))
+    assert len(mine(db)) == 1 and "Already set" in tg.sent[-1][2]
+    md.marks["BTC"] = 85_000.0
+    run(db, tg, md)
+    md.marks["BTC"] = 79_200.0
+    run(db, tg, md)
+    assert len([s for s in tg.sent if s[0] == "msg" and "entered the" in s[2]]) == 1
+
+    class Down(FakeTG):
+        async def send_message(self, *a: Any, **kw: Any) -> dict[str, Any]:
+            raise TelegramRateLimitError("Telegram rate limit; retry after 30s", 30)
+
+    down = Down()
+    asyncio.run(bot.handle_callback(db, down, {"id": "c2", "from": {"id": 10}, "data": data}))
+    assert not mine(db, 10) and "in a moment" in down.sent[-1][2] and "Start" not in down.sent[-1][2]
 
 
 def test_zone_jump_and_button_size() -> None:
