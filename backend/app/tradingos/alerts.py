@@ -125,6 +125,8 @@ async def command(db: Session, uid: int, cmd: str, args: list[str], md: Any) -> 
         return f"You have {MAX_ACTIVE} active alerts (the most). Remove one first: /alerts"
     now_px = marks[coin].mark
     rest = args[1:]
+    if not rest:  # "/alert BTC perp": only the market was left
+        return USAGE
     want = "above" if rest[0] in UP else "below" if rest[0] in DOWN else None
     if want:
         rest = rest[1:]
@@ -242,7 +244,8 @@ def message(a: TsPriceAlert, px: float) -> str:
 
 
 async def check(db: Session, client: Any, md: Any, now: Any = None) -> dict[str, int]:
-    """tradingos.alerts: expire old alerts, fire the crossed ones (once), remember each mark for the next crossing."""
+    """tradingos.alerts: expire old alerts, fire the crossed ones (once), remember each mark for the next crossing. Each fired
+    alert is committed as it's sent, so a run cut short (timeout) never sends it again."""
     from app.telegram.errors import TelegramRequestError
 
     now = now or utcnow()
@@ -251,6 +254,7 @@ async def check(db: Session, client: Any, md: Any, now: Any = None) -> dict[str,
     if not rows:
         return out
     _, marks = await asyncio.to_thread(md.markets)  # one read for every alert
+    telegram_ok = True
     for a in rows:
         if a.expires_at <= now:
             a.status = "expired"
@@ -261,6 +265,8 @@ async def check(db: Session, client: Any, md: Any, now: Any = None) -> dict[str,
             continue
         px = m.mark
         if crossed(a, px):
+            if not telegram_ok:
+                continue  # retried next run (last mark kept)
             try:
                 await client.send_message(a.telegram_user_id, message(a, px), html=True)
             except TelegramRequestError as e:  # blocked the bot / never pressed Start: disable it
@@ -268,11 +274,13 @@ async def check(db: Session, client: Any, md: Any, now: Any = None) -> dict[str,
                 a.status = "blocked"
                 out["blocked"] += 1
                 continue
-            except Exception as e:  # noqa: BLE001 - Telegram down / rate-limited: retried next run (last mark kept)
+            except Exception as e:  # noqa: BLE001 - Telegram down / rate-limited: the rest wait for the next run
                 logger.warning("Price alert %s not sent (%s)", a.id, type(e).__name__)
+                telegram_ok = False
                 continue
             a.status, a.fired_at, a.fired_price = "fired", now, px
             out["fired"] += 1
+            db.commit()
         a.last_price = px
     db.commit()
     out["active"] = len(rows) - out["fired"] - out["expired"] - out["blocked"]
