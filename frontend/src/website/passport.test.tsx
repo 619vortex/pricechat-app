@@ -157,6 +157,12 @@ describe("Kiwi Passport V3", () => {
     expect(container.querySelector(".pp-mcard-done")!.textContent).not.toMatch(/caught up/i);  // never next to more things to do
     expect(container.querySelector(".pp-easy-title")!.textContent).toBe("Keep earning XP");
     expect(container.querySelector<HTMLAnchorElement>(".pp-quick-card[href='/giveaway']")).toBeTruthy();
+    // no Watch & Earn section on the page (no videos): "Watch a short" still goes somewhere that pays, never nowhere
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const watch = [...container.querySelectorAll<HTMLButtonElement>("button.pp-quick-card")].find((b) => b.textContent!.includes("Watch a short"))!;
+    await act(async () => watch.click());
+    expect(assign).toHaveBeenCalledWith("/content");
   });
 
   it("shows ONE mission at a time with one big button, and an honest today count", async () => {
@@ -401,6 +407,41 @@ describe("Kiwi Passport V3", () => {
     await act(async () => screen.getByText("Next mission →").click());
     expect(calls).toContain("POST /api/members/me/notifications/read");
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("Kiwi Passport: loading, errors and live XP", () => {
+  it("offers Try again when the Passport couldn't load, instead of a dead end", async () => {
+    serveV3({ ...base(v3()), "/api/members/me": undefined });  // 404
+    const { container } = await show(<ProfilePage />);
+    expect(container.textContent).toContain("Could not load your passport.");
+    routes["/api/members/me"] = v3();
+    await act(async () => screen.getByRole("button", { name: "Try again" }).click());
+    for (let i = 0; i < 3; i++) await act(async () => new Promise((r) => setTimeout(r, 0)));
+    expect(container.querySelector(".pp-xp-big")!.textContent).toBe("42 XP");
+  });
+
+  it("doesn't announce XP twice: XP already shown by a Passport reload isn't 'just arrived' 15 seconds later", async () => {
+    vi.useFakeTimers();
+    try {
+      serveV3(base(v3()));
+      const { container } = render(<ProfilePage />);
+      for (let i = 0; i < 4; i++) await act(async () => vi.advanceTimersByTimeAsync(0));
+      // the member changes a setting: the Passport reloads, and by then a mission had paid +8 (shown by the play area)
+      routes["/api/members/me"] = v3({ member: { ...v3().member, xp: 50 } });
+      routes["/api/members/session"] = { signed_in: true, member: { id: "m1", username: "Kiwi123", xp: 50, rank: egg } };
+      const box = screen.getByRole("checkbox", { name: "Show me on the public leaderboard" });
+      await act(async () => box.click());
+      for (let i = 0; i < 4; i++) await act(async () => vi.advanceTimersByTimeAsync(0));
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(container.querySelector(".pp-live")).toBeNull();
+      // XP that really arrives in the background (e.g. Telegram messages) is still announced
+      routes["/api/members/session"] = { signed_in: true, member: { id: "m1", username: "Kiwi123", xp: 53, rank: egg } };
+      await act(async () => vi.advanceTimersByTimeAsync(15_000));
+      expect(container.querySelector(".pp-live")!.textContent).toContain("+3 XP just arrived");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
