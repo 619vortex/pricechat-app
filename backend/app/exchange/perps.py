@@ -444,6 +444,9 @@ def fund(db: Session, pm: PerpMarket, now: datetime | None = None, force: bool =
         db.commit()
         db.execute(update(PerpMarket).where(PerpMarket.id == pm.id).values(seq=PerpMarket.seq + 1))
         db.refresh(pm)
+        if not force and pm.last_funding_at and now - pm.last_funding_at < FUNDING_EVERY:  # another run funded it meanwhile
+            db.commit()
+            return None
         ex = _ex(db, pm)
         idx, mk = ex.ref_contract_cents, mark(db, pm, ex)
         if not idx or not mk or ex.ref_status == "insufficient":
