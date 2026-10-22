@@ -301,3 +301,31 @@ def test_recurring_question_to_opportunity(tg_client: TestClient, fake_telegram:
     assert tg_client.post(f"/api/community/questions/{q['id']}/opportunity").json() == {"id": first["id"], "created": False}
     opp = tg_client.get(f"/api/opportunities/{first['id']}").json()["opportunity"]
     assert opp["origin_kind"] == "question" and "Asked 3 times by 3 members" in opp["why"]
+
+
+def test_prepare_reuses_a_proposal_queued_while_it_was_drafting(x_client: TestClient, fake_x: FakeX, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Two Prepare requests for one item (double click): the second used to queue a second reply to the same post."""
+    from app.models.enums import ApprovalStatus, Platform, SocialAction
+    from app.models.social_intel import ApprovalRequest
+    from app.social import x_replies
+
+    o = _opportunity(x_client, fake_x)
+    inner = x_replies.draft_reply
+    first: dict[str, int] = {}
+
+    async def slow_draft(db, *a, **kw):  # type: ignore[no-untyped-def]
+        drafted = await inner(db, *a, **kw)
+        with SessionLocal() as other:  # meanwhile the other request finished and queued its proposal
+            r = ApprovalRequest(platform=Platform.X, action=SocialAction.REPLY, payload={"text": "first"}, source_kind="social_opportunity",
+                                source_id=o["id"], status=ApprovalStatus.PENDING, guard_result={}, expires_at=utcnow() + timedelta(hours=1))
+            other.add(r)
+            other.commit()
+            first["id"] = r.id
+        return drafted
+
+    monkeypatch.setattr(x_replies, "draft_reply", slow_draft)
+    a = x_client.post(f"/api/growth/prepare/x:{o['id']}", json={}).json()
+    assert a["id"] == first["id"]
+    with SessionLocal() as db:
+        n = db.scalars(select(ApprovalRequest).where(ApprovalRequest.source_id == o["id"], ApprovalRequest.status == ApprovalStatus.PENDING)).all()
+        assert len(n) == 1
