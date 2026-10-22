@@ -954,6 +954,9 @@ def run_auto(db: Session, sig: TsSignal) -> list[int]:
     """Members with AUTO on (and not expired) enter a newly published signal within their preapproved limits."""
     out = []
     now = utcnow()
+    # the accounts that already have an intent or a position for this signal: two reads, not two per account
+    seen = set(db.scalars(select(TrIntent.account_id).where(TrIntent.signal_id == sig.id))) | \
+        set(db.scalars(select(TrPosition.account_id).where(TrPosition.signal_id == sig.id)))
     for acc in db.scalars(select(TrAccount).where(TrAccount.auto_enabled.is_(True), TrAccount.paused.is_(False))):
         if acc.auto_until and _aware(acc.auto_until) < now:
             acc.auto_enabled = False
@@ -961,8 +964,7 @@ def run_auto(db: Session, sig: TsSignal) -> list[int]:
         member = db.get(Member, acc.member_id)
         if member is None or (sig.strategy == "test" and acc.mode != "PAPER"):
             continue  # test signals never trade real or testnet money
-        if db.scalar(select(TrIntent.id).where(TrIntent.account_id == acc.id, TrIntent.signal_id == sig.id).limit(1)) or \
-                db.scalar(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.signal_id == sig.id)):
+        if acc.id in seen:
             continue  # each signal is considered once per account (entered, previewed, or skipped)
         if not wants(acc, sig):  # recorded, so a member with AUTO on always sees why a signal wasn't taken
             labels = {"1h": "1h signals only", "15m": "15m signals only", "both": "1h and 15m signals"}

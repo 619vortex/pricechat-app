@@ -253,3 +253,22 @@ def test_member_missions_read_progress_and_rules_once(db: Session) -> None:
     assert len([x for x in out.values()]) >= 12
     assert sum("FROM member_missions" in q for q in sql) <= 3, sum("FROM member_missions" in q for q in sql)
     assert sum("FROM xp_rules" in q for q in sql) <= 2
+
+
+def test_auto_checks_earlier_intents_and_positions_once_per_signal(db: Session) -> None:
+    from app.models.trading import TrIntent
+    from app.tradingos import execution
+
+    sig = TsSignal(number=7, coin="SOL", side="LONG", timeframe="1h", strategy="t", entry_lo=99, entry_hi=101, stop=95, target=110,
+                   lev_lo=3, lev_hi=5, rr=2, status="ACTIVE", expires_at=utcnow() + timedelta(hours=1), published_at=utcnow())
+    db.add(sig)
+    db.flush()
+    for i in range(6):
+        acc = execution.account(db, _member(db, f"auto{i}"))
+        acc.auto_enabled = True
+        db.add(TrIntent(account_id=acc.id, signal_id=sig.id, token=f"tok{i}", mode=acc.mode, plan={"skipped": "x"}, status="SKIPPED",
+                        expires_at=utcnow()))
+    db.commit()
+    with statements(db) as sql:
+        assert execution.run_auto(db, sig) == []  # each already considered
+    assert sum("FROM tr_intents" in q for q in sql) == 1 and sum("FROM tr_positions" in q for q in sql) == 1
