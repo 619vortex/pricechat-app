@@ -66,6 +66,7 @@ LIMITS = {
     "referral": Bucket(burst=10, every=6, shared_burst=300, shared_every=0.2),  # over it: still redirected, click not counted
     "earn": Bucket(burst=30, every=1, shared_burst=600, shared_every=0.02),
     "vpn_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),  # Kiwi VPN device creation, per member
+    "vortex_auth": Bucket(burst=5, every=60, shared_burst=30, shared_every=10),  # failed bearer tokens on /api/vortex/*
 }
 
 

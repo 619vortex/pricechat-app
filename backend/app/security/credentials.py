@@ -51,6 +51,8 @@ KNOWN_SECRETS: dict[str, str] = {
     # Brand Manager: the TikTok app's client credentials (members' TikTok tokens are stored by app/brand_manager/tiktok.py)
     "tiktok_client_key": "tiktok_client_key",
     "tiktok_client_secret": "tiktok_client_secret",
+    # Vortex trade checks: the bearer token of the owner's home AI on /api/vortex/* (app/tradingos/assist.py)
+    "vortex_assist_token": "vortex_assist_token",
 }
 
 
