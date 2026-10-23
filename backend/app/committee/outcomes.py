@@ -13,7 +13,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -100,16 +100,21 @@ def track(db: Session, limit: int = 50) -> dict[str, Any]:
         a["n"] += 1
         a["right"] += 1 if ok else 0
         a["sum_ret"] += ret
+    # "hits" next to "n" so a 100% hit rate on 2 calls reads as 2 of 2; WAIT has no direction to be right about ("no position")
     by = {v: {h: {"n": a["n"], "avg_ret_pct": round(a["sum_ret"] / a["n"], 3),
+                  "hits": (a["right"] if v != "WAIT" else None),
                   "hit_rate": (round(a["right"] / a["n"], 3) if v != "WAIT" else None)} for h, a in hs.items()} for v, hs in agg.items()}
-    return {"by_verdict": by, "recent": [summary(db, r) for r in db.scalars(select(CmRun).where(CmRun.status == "done")
-                                                                            .order_by(CmRun.id.desc()).limit(limit))],
+    scored = db.scalar(select(func.count(func.distinct(CmOutcome.run_id)))) or 0
+    return {"by_verdict": by, "horizons": list(HORIZONS), "scored_runs": int(scored),
+            "recent": [summary(db, r) for r in db.scalars(select(CmRun).where(CmRun.status == "done")
+                                                          .order_by(CmRun.id.desc()).limit(limit))],
             "note": "WAIT is tracked as no position: its row shows the move that followed. Hit rate counts direction only, before costs."}
 
 
 def outcomes_of(db: Session, run: CmRun) -> dict[str, Any]:
     return {o.horizon: {"ret_pct": o.ret_pct, "direction_ok": o.direction_ok, "price_from": o.price_from, "price_to": o.price_to,
-                        "mfe_pct": o.mfe_pct, "mae_pct": o.mae_pct}
+                        "mfe_pct": o.mfe_pct, "mae_pct": o.mae_pct, "source": o.source,
+                        "resolved_at": o.resolved_at.isoformat() if o.resolved_at else None}
             for o in db.scalars(select(CmOutcome).where(CmOutcome.run_id == run.id))}
 
 
