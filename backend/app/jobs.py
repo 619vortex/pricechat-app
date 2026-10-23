@@ -776,6 +776,12 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         return await outcomes.resolve(ctx.db, ctx.now)
 
+    async def committee_paper(ctx: JobContext) -> dict[str, Any]:
+        """Kiwi AI Investment Committee: book finished LONG / SHORT runs in the PAPER book and replay them on real candles."""
+        from app.committee import paper
+
+        return await paper.run_job(ctx.db, ctx.now)
+
     async def committee_llm_expire(ctx: JobContext) -> dict[str, Any]:
         """Kiwi AI Investment Committee: LLM calls Vortex didn't answer within 90 s are expired (their roles use rules)."""
         from app.committee import remote
@@ -935,6 +941,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 900, committee_outcomes, initial_delay_seconds=420, timeout_seconds=300),
         JobSpec("committee.llm_expire", "Kiwi AI Investment Committee: Vortex call expiry", "Every 30 s: committee LLM calls Vortex hasn't answered within 90 s are expired; those roles use the committee's own rules text",
                 30, committee_llm_expire, initial_delay_seconds=45, timeout_seconds=25),
+        JobSpec("committee.paper", "Kiwi AI Investment Committee: paper book", "Every 5 min: books each finished LONG / SHORT committee run in the committee's PAPER book (risk-gate approved: a paper trade; rejected: kept with a hypothetical result) and replays the trades on real Hyperliquid candles (entry zone, stop first, TP1 half / TP2 rest, fees, slippage, real funding). Simulated only, never trades",
+                300, committee_paper, initial_delay_seconds=480, timeout_seconds=240),
         JobSpec("tradingos.funding_alerts", "Earn › Funding Arb alerts", "Every 10 min: when a coin's best cross-venue funding spread, net of estimated taker fees on both legs, clears the threshold (Admin › Trading OS), posts it to the publish chat; 12 h cooldown per coin unless the spread grows 50%+. Read-only, never trades",
                 600, funding_alerts, initial_delay_seconds=240, timeout_seconds=120),
         JobSpec("brand.trends", "Brand Manager trend scan", "Every 30 min: reads today's headlines from crypto and finance outlets (CoinDesk, Cointelegraph, Decrypt, The Block, CNBC, MarketWatch, FT, BBC Business) and CoinGecko's most-searched coins, and counts which words are new or rising against the past 7 days, for Content Studio's topics and scripts",

@@ -283,7 +283,7 @@ def test_api_status_runs_and_placeholders(client: TestClient, db: Session, evide
     lst = client.get("/api/committee/runs?symbol=BTC").json()["runs"]
     assert lst[0]["id"] == rid and lst[0]["verdict"] == "LONG" and "requested_by" not in json.dumps(lst)
     assert client.get(f"/api/committee/runs/{rid}/report.html").status_code == 501
-    assert client.get("/api/committee/paper").json() == {"status": "not_built"}
+    assert client.get("/api/committee/paper").json()["mode"] == "PAPER"
     assert client.get("/api/committee/backtests").json() == {"status": "not_built"}
     assert client.get("/api/committee/backtests/1").json() == {"status": "not_built"}
     assert client.get("/api/committee/runs/cm_nope").status_code == 404
@@ -347,4 +347,4 @@ def test_jobs_are_registered(client: TestClient) -> None:
     from app.jobs import build_jobs
 
     names = {s.name for s in build_jobs(client.app.state.runtime)}
-    assert {"committee.outcomes", "committee.llm_expire"} <= names
+    assert {"committee.outcomes", "committee.llm_expire", "committee.paper"} <= names

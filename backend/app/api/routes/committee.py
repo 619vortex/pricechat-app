@@ -106,9 +106,12 @@ def track(db: DbSession, limit_: int = Query(50, ge=1, le=200, alias="limit")) -
     return outcomes.track(db, limit_)
 
 
-@router.get(f"{P}/paper")
-def paper() -> dict[str, Any]:
-    return {"status": "not_built"}
+@router.get(f"{P}/paper", dependencies=[Depends(limit("earn"))])
+def paper(db: DbSession, limit_: int = Query(100, ge=1, le=500, alias="limit")) -> dict[str, Any]:
+    """The committee's PAPER book (simulated fills on real candles; never real money, never member data)."""
+    from app.committee import paper as paper_book
+
+    return paper_book.view(db, limit_)
 
 
 @router.get(f"{P}/backtests")

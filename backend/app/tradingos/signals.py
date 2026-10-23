@@ -44,6 +44,7 @@ from app.tradingos.market import MarketData, MarketError, fmt_price
 from app.tradingos.tickers import cashtag
 
 TAKER_FEE = 0.00045  # per side, Hyperliquid base tier
+MIN_DEPTH_USD = 100_000  # liquidity: at least this much resting within 0.5% of the mid on each side of the book
 EXPIRY = {"5m": timedelta(minutes=30), "15m": timedelta(hours=1), "1h": timedelta(hours=4), "4h": timedelta(hours=16)}
 LIVE_FOR = timedelta(hours=48)
 HOLD = {"5m": "30 min – 2 h", "15m": "1 – 4 h", "1h": "several hours to 2 days", "4h": "1 – 5 days"}  # from the backtests  # an ACTIVE signal that hits neither level is CLOSED at market after this
@@ -228,7 +229,7 @@ def analyze(md: MarketData, coin: str, timeframe: str = "1h", min_volume: float 
     spread = max(book["spread_bps"], m.spread_bps or 0)
     chk("orderflow", "spread at most the maximum", spread <= max_spread_bps, f"{spread:.1f} bps (max {max_spread_bps:g})", f"spread {spread:.1f} bps too wide")
     depth = min(book["bid_depth_usd"], book["ask_depth_usd"])
-    chk("orderflow", "at least $100k depth within 0.5% each side", depth >= 100_000, f"${depth / 1e3:,.0f}k on the thinner side", "thin order book")
+    chk("orderflow", "at least $100k depth within 0.5% each side", depth >= MIN_DEPTH_USD, f"${depth / 1e3:,.0f}k on the thinner side", "thin order book")
     atr_pct = atr / price * 100
     chk("market", "volatility (ATR) between 0.25% and 5% of price", 0.25 <= atr_pct <= 5, f"{atr_pct:.2f}%", f"volatility {atr_pct:.2f}% out of range")
     if side:
@@ -319,7 +320,7 @@ def analyze_breakout(md: MarketData, coin: str, min_volume: float = 50_000_000, 
         f"24h volume ${m.day_volume / 1e6:,.0f}M below ${min_volume / 1e6:,.0f}M")
     chk("orderflow", "spread at most the maximum", spread <= max_spread_bps, f"{spread:.1f} bps (max {max_spread_bps:g})", f"spread {spread:.1f} bps too wide")
     depth = min(book["bid_depth_usd"], book["ask_depth_usd"])
-    chk("orderflow", "at least $100k depth within 0.5% each side", depth >= 100_000, f"${depth / 1e3:,.0f}k on the thinner side", "thin order book")
+    chk("orderflow", "at least $100k depth within 0.5% each side", depth >= MIN_DEPTH_USD, f"${depth / 1e3:,.0f}k on the thinner side", "thin order book")
     vp = atr / price * 100
     chk("market", "4h volatility (ATR) between 0.4% and 8%", 0.4 <= vp <= 8, f"{vp:.2f}%", f"4h volatility {vp:.2f}% out of range")
     crowded = side == "LONG" and m.funding > 0.0001 or side == "SHORT" and m.funding < -0.0001

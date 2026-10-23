@@ -4,6 +4,7 @@ changes no table outside the committee's own (tr_positions, member accounts, API
 import asyncio
 import re
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
@@ -33,6 +34,23 @@ def _counts(db: Session) -> dict[str, int]:
     return {n: db.execute(text(f'SELECT COUNT(*) FROM "{n}"')).scalar_one() for n in names}
 
 
+def test_the_paper_job_touches_only_the_paper_table(db: Session, monkeypatch: Any) -> None:
+    """The committee.paper job books and replays (fake candles) and changes cm_paper_trades only: no tr_* / member rows."""
+    from datetime import timedelta
+
+    from app.committee import paper
+    from app.db.base import utcnow
+
+    asyncio.run(orchestrator.run_committee(db, "BTC", evidence=btc(), backend=FakeLLM()))
+    monkeypatch.setattr(paper, "fetch_candles", lambda coin, iv, s, e: [{"t": t, "o": 67850.0, "h": 67900.0, "l": 67800.0, "c": 67850.0}
+                                                                        for t in range(s - s % 60_000 + 60_000, e, 60_000)])
+    monkeypatch.setattr(paper, "fetch_funding", lambda coin, s, e: [])
+    before = _counts(db)
+    asyncio.run(paper.run_job(db, utcnow() + timedelta(hours=2)))
+    after = _counts(db)
+    assert {n for n in after if after[n] != before.get(n)} == {"cm_paper_trades"}
+
+
 def test_a_run_touches_only_committee_tables(db: Session) -> None:
     before = _counts(db)
     asyncio.run(orchestrator.run_committee(db, "BTC", evidence=btc(), backend=FakeLLM()))
@@ -51,7 +69,7 @@ def test_importing_the_committee_loads_no_execution_module() -> None:
     import sys
 
     code = ("import sys, app.committee.orchestrator, app.committee.outcomes, app.committee.remote, app.committee.risk_gate, "
-            "app.committee.llm; bad = [m for m in sys.modules if m in ('app.tradingos.execution', 'app.tradingos.exchange', "
+            "app.committee.llm, app.committee.paper; bad = [m for m in sys.modules if m in ('app.tradingos.execution', 'app.tradingos.exchange', "
             "'app.tradingos.accounts', 'app.tradingos.terminal') or m.startswith(('app.exchange', 'hyperliquid'))]; print(bad)")
     out = subprocess.run([sys.executable, "-c", code], cwd=ROOT.parents[1], capture_output=True, text=True, timeout=120,
                          env={**os.environ, "PYTHONPATH": os.pathsep.join([os.environ.get("PYTHONPATH", ""), str(ROOT.parents[1])])})
