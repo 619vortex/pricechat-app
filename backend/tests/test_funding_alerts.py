@@ -37,6 +37,14 @@ def board(*rows: tuple[str, str, float, str, float]) -> dict[str, Any]:
                      for s, sv, sa, lv, la in rows]}
 
 
+@pytest.fixture(autouse=True)
+def alerts_on(db: Session) -> None:
+    """Off by default (owner, 2026-10-23): these tests turn them on at the old 30% line."""
+    s = signals.settings(db)
+    s.strategies = {**s.strategies, "funding_alerts": {"on": True, "min_net_apr": 30}}
+    db.commit()
+
+
 def run(db: Session, b: dict[str, Any], now: datetime = NOW, client: Client | None = None) -> tuple[dict[str, Any], Client]:
     c = client or Client()
     return asyncio.run(fa.run(db, now, c, board=b)), c
@@ -67,12 +75,22 @@ def test_threshold_is_net_of_fees(db: Session) -> None:
     assert (row.symbol, row.long_venue, row.short_venue, row.net_apr_pct) == ("BTC", "lighter", "hyperliquid", 30.5)
 
 
-def test_cooldown_12h_unless_the_spread_grows_half_again(db: Session) -> None:
+def test_off_by_default(db: Session) -> None:
+    s = signals.settings(db)
+    s.strategies = {k: v for k, v in s.strategies.items() if k != "funding_alerts"}
+    db.commit()
+    assert fa.config(db) == {"on": False, "min_net_apr": 50.0}
+    out, c = run(db, net(200))
+    assert "off" in out["skipped"] and not c.sent
+
+
+def test_cooldown_24h_unless_the_spread_doubles(db: Session) -> None:
     assert run(db, net(40))[0]["posted"] == ["SOL 40.0%"]
-    assert run(db, net(55), NOW + timedelta(hours=1))[0]["posted"] == []  # +37%: still cooling down
-    assert run(db, net(60), NOW + timedelta(hours=2))[0]["posted"] == ["SOL 60.0%"]  # +50%: posted again
-    assert run(db, net(70), NOW + timedelta(hours=3))[0]["posted"] == []  # measured from the new post
-    assert run(db, net(35), NOW + timedelta(hours=14, minutes=1))[0]["posted"] == ["SOL 35.0%"]  # 12 h since: due again
+    assert run(db, net(70), NOW + timedelta(hours=1))[0]["posted"] == []  # +75%: still cooling down
+    assert run(db, net(80), NOW + timedelta(hours=2))[0]["posted"] == ["SOL 80.0%"]  # doubled: posted again
+    assert run(db, net(150), NOW + timedelta(hours=3))[0]["posted"] == []  # measured from the new post
+    assert run(db, net(35), NOW + timedelta(hours=14))[0]["posted"] == []  # 12 h is no longer enough
+    assert run(db, net(35), NOW + timedelta(hours=26, minutes=1))[0]["posted"] == ["SOL 35.0%"]  # 24 h since: due again
 
 
 def test_nothing_posts_without_a_publish_chat_or_when_off(db: Session) -> None:
@@ -96,4 +114,11 @@ def test_threshold_setting_failed_sends_and_the_per_run_cap(db: Session) -> None
     out, _ = run(db, b, client=Client(fail=True))
     assert out["posted"] == [] and db.query(ArbFundingAlert).count() == 0  # not recorded: retried next run
     out, _ = run(db, b)
-    assert out["above_threshold"] == 5 and [p.split()[0] for p in out["posted"]] == ["C4", "C3", "C2"]
+    assert out["above_threshold"] == 5 and [p.split()[0] for p in out["posted"]] == ["C4"]  # the widest only
+
+
+def test_at_most_four_posts_a_day(db: Session) -> None:
+    b = board(*[(f"C{i}", "hyperliquid", 150.0 + i, "lighter", 0.0) for i in range(8)])
+    posted = [p for k in range(8) for p in run(db, b, NOW + timedelta(minutes=10 * k))[0]["posted"]]
+    assert [p.split()[0] for p in posted] == ["C7", "C6", "C5", "C4"]
+    assert run(db, b, NOW + timedelta(hours=24, minutes=1))[0]["posted"] == ["C7 150.2%"]  # a day on (net of fees): the oldest is due again

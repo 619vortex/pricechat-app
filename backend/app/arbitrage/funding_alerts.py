@@ -3,7 +3,9 @@
 Reads the funding board (funding.board, cached), takes each coin's best cross-venue spread (short the highest rate, long the
 lowest), subtracts estimated taker fees on both legs (entry + exit, amortized over HOLD_HOURS, like fundarb's signal engine)
 and posts to the Trading OS publish chat when the net spread APR is >= the threshold. One coin is posted at most every
-COOLDOWN unless its net spread has grown GROWTH (x1.5) since the last post; the last post per coin is kept in the database.
+COOLDOWN unless its net spread has grown GROWTH (x2) since the last post, and the chat gets at most MAX_PER_DAY of these a
+day (owner, 2026-10-23: "stop bot from spamming funding spread"); the last post per coin is kept in the database. OFF unless
+the owner turns it on.
 Settings live in TsSettings.strategies["funding_alerts"] = {"on": bool, "min_net_apr": float} (Admin › Trading OS)."""
 
 import logging
@@ -19,11 +21,12 @@ from fundarb.models import HOURS_PER_YEAR
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ON = True
-DEFAULT_MIN_NET_APR = 30.0  # % a year, after estimated fees
-COOLDOWN = timedelta(hours=12)
-GROWTH = 1.5  # a cooled-down coin is posted again early when its net spread is 50%+ wider than at the last post
-MAX_PER_RUN = 3  # a burst of wide spreads never floods the chat
+DEFAULT_ON = False
+DEFAULT_MIN_NET_APR = 50.0  # % a year, after estimated fees
+COOLDOWN = timedelta(hours=24)
+GROWTH = 2.0  # a cooled-down coin is posted again early only when its net spread has doubled since the last post
+MAX_PER_RUN = 1  # the widest due spread only: a burst of wide spreads never floods the chat
+MAX_PER_DAY = 4  # funding posts in the publish chat in any 24 h
 HOLD_HOURS = 168.0  # round-trip fees spread over a one-week hold (fundarb SignalConfig.expected_hold_hours)
 # estimated base-tier taker fees, bps (assumptions: Orderly / Backpack only tell an authenticated account; Lighter's free tier
 # is stressed to 2 bps so a zero never flatters the net)
@@ -103,8 +106,9 @@ async def run(db: Session, now: datetime, client: Any, board: dict[str, Any] | N
     cfg, chat = config(db), signals.settings(db).publish_chat.strip()
     data = board if board is not None else await funding.board()
     found, posted = candidates(data, cfg["min_net_apr"]), []
+    today = db.query(ArbFundingAlert).filter(ArbFundingAlert.sent_at >= now - timedelta(hours=24)).count()
     for c in found:
-        if len(posted) >= MAX_PER_RUN:
+        if len(posted) >= MAX_PER_RUN or today + len(posted) >= MAX_PER_DAY:
             break
         prev = db.scalar(select(ArbFundingAlert).where(ArbFundingAlert.symbol == c["symbol"]))
         if not is_due(prev, c["net_apr"], now):
