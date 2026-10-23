@@ -175,7 +175,8 @@ def stored(row: CmRun) -> dict[str, Any] | None:
 async def run_committee(db: Session, symbol: str, timeframe: str = "1h", *, requested_by: dict[str, Any] | None = None, mode: str = "live",
                         as_of: datetime | None = None, depth: str = "full", evidence: dict[str, Any] | None = None,
                         backend: llm.Backend | None = None, provider: Any = None, gate: Any = None, use_cache: bool = True,
-                        persist: bool = True, _row: CmRun | None = None) -> CommitteeRun:
+                        persist: bool = True, _row: CmRun | None = None, gate_ctx: Any = None) -> CommitteeRun:
+    """gate_ctx: a risk_gate.GateContext (backtests: the point-in-time context); None = the live one from `db`."""
     symbol, timeframe = _norm(symbol, timeframe)
     requested_by = requested_by or {}
     depth = "quick" if depth == "quick" else "full"
@@ -199,7 +200,7 @@ async def run_committee(db: Session, symbol: str, timeframe: str = "1h", *, requ
         else:
             why = None
         ledger = llm.Ledger(db, backend, run_id=row.id if row is not None else None)
-        result = await _pipeline(db, ev, ledger, depth, why)
+        result = await _pipeline(db, ev, ledger, depth, why, gate_ctx)
     except Exception as e:
         if row is not None:
             row.status, row.finished_at = "failed", utcnow()
@@ -220,7 +221,8 @@ async def run_committee(db: Session, symbol: str, timeframe: str = "1h", *, requ
     return CommitteeRun(pid, result)
 
 
-async def _pipeline(db: Session, ev: dict[str, Any], ledger: llm.Ledger, depth: str, why_rules: str | None) -> dict[str, Any]:
+async def _pipeline(db: Session, ev: dict[str, Any], ledger: llm.Ledger, depth: str, why_rules: str | None,
+                    gate_ctx: Any = None) -> dict[str, Any]:
     ctx = roles.Context(ev, ledger, depth)
     if why_rules:
         ctx.degraded.append(f"backend: {why_rules}")
@@ -231,7 +233,7 @@ async def _pipeline(db: Session, ev: dict[str, Any], ledger: llm.Ledger, depth: 
     pm = await roles.portfolio(ctx, deb, tr, rk)
     guard = roles.data_guard(ev)
     execution = risk_gate.evaluate(db, ev, pm["action"], roles.plan_from(ev, pm["action"]), stale_reason=guard,
-                                   scenarios={"LONG": roles.plan_from(ev, "LONG"), "SHORT": roles.plan_from(ev, "SHORT")})
+                                   scenarios={"LONG": roles.plan_from(ev, "LONG"), "SHORT": roles.plan_from(ev, "SHORT")}, ctx=gate_ctx)
     verdict = {**pm, "scenarios": roles.scenarios_view(ev)}
     verdict = {k: verdict[k] for k in ("action", "rating", "summary", "scenarios", "what_changes_view", "author")}
     models = {**ledger.backend.models(), **ledger.models_used}
