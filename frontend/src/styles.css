@@ -478,6 +478,22 @@ tr.is-selected td { background: var(--surface-2); }
 .tba-decide input { flex: 1 1 260px; }
 .tba-checklist { display: grid; gap: 6px; font-size: 13px; padding-left: 20px; }
 
+/* Admin → Trading OS → Trading mode (Normal / Degen) */
+.tmode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.tmode-card { display: grid; gap: 10px; text-align: left; padding: 14px; border: 2px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.tmode-card:hover:not(:disabled) { border-color: var(--muted); }
+.tmode-card:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.tmode-card[aria-checked="true"] { cursor: default; }
+.tmode-card.is-normal[aria-checked="true"] { border-color: var(--good); }
+.tmode-card.is-degen[aria-checked="true"] { border-color: var(--warn); }
+.tmode-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tmode-head b { font-size: 16px; }
+.tmode-card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.tmode-card dt { color: var(--muted); }
+.tmode-card dd { margin: 0; }
+.tmode-foot { font-size: 13px; margin: 10px 0 0; }
+
 /* Admin → Rank Rewards */
 .rwa-list { display: grid; gap: 14px; }
 .rwa-row, .rwa-form { display: grid; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border, #232a33); }

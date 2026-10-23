@@ -10,7 +10,11 @@ interface Settings { scanner_enabled: boolean; auto_publish: boolean; paused: bo
   min_volume_usd: number; max_spread_bps: number; max_open_signals: number; min_rr: number; strategies: Record<string, unknown>; allowed_coins: string }
 interface Overview { settings: Settings; exchange: { ok: boolean; markets?: number; error?: string }; counts: Record<string, number>;
   stats: { label: string; total: number; open: number; closed: number; win_rate: number | null; avg_gain: number | null; avg_loss: number | null; net_return: number; max_drawdown: number };
-  execution: string; vortex_assist?: VortexCfg }
+  execution: string; vortex_assist?: VortexCfg; kitchen?: KitchenModes }
+interface ModeInfo { coins: string[]; models: string[]; max_open: number; confirm_30m: boolean; market_entry: boolean; auto_publish: boolean;
+  cooldown_min: number; min_quality: number; research: { trades_per_day: number; avg_r: number; note: string } }
+type Mode = "standard" | "degen";
+interface KitchenModes { current: Mode; publishing: boolean; live: boolean; signals_24h: number; signals_7d: number; modes: Record<Mode, ModeInfo> }
 interface VortexCfg { on: boolean | null; enabled: boolean; token_set: boolean; daily_public: number; daily_ranked: number; min_rank: number;
   last_seen: string | null; online: boolean; pending: number }
 interface Sig { id: number; number: number; coin: string; side: string; status: string; status_label: string; entry: number[]; stop: number; target: number; rr: number;
@@ -44,6 +48,7 @@ export function TradingOSPage() {
       {tab === "decisions" && <Decisions />}
       {tab === "execution" && <Execution />}
       {tab === "markets" && <Markets />}
+      {tab === "settings" && ov.data?.kitchen && <TradingMode k={ov.data.kitchen} onSaved={() => void ov.reload()} />}
       {tab === "settings" && ov.data && <SettingsForm s={ov.data.settings} onSaved={() => void ov.reload()} />}
       {tab === "settings" && ov.data?.vortex_assist && <VortexAssist v={ov.data.vortex_assist} onSaved={() => void ov.reload()} />}
       {tab === "audit" && <Audit />}
@@ -176,6 +181,64 @@ function Markets() {
             <td>{x.spread_bps == null ? "—" : `${x.spread_bps.toFixed(1)} bps`}</td><td>{x.max_leverage}x</td></tr>
         ))}</tbody>
       </table>
+    </Card>
+  );
+}
+
+const MODE_NAME: Record<Mode, string> = { standard: "Normal", degen: "Degen" };
+const MODE_PITCH: Record<Mode, string> = { standard: "Fewer, stricter 15-minute signals.",
+                                           degen: "Many fast trades: more markets, opened at market straight away." };
+
+/** Admin's Normal / Degen switch for the 15-minute Kiwi Kitchen: what each mode does, the backtest behind it, and how much it
+ *  actually traded lately. Switching never touches signals that are already open. */
+function TradingMode({ k, onSaved }: { k: KitchenModes; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>(null);
+  async function pick(m: Mode) {
+    if (m === k.current || busy) return;
+    const d = k.modes.degen;
+    const ask = m === "degen"
+      ? `Switch to DEGEN mode?\n\n• ${d.coins.length} markets, up to ${d.max_open} signals open at once\n• ${d.auto_publish ? "signals post themselves" : "signals wait for your review"}${d.market_entry ? " and open at market" : ""}\n• backtest: about ${d.research.trades_per_day} trades a day at ${d.research.avg_r > 0 ? "+" : ""}${d.research.avg_r}R a trade (${d.research.note})`
+      : "Switch to NORMAL mode?\n\nFewer, stricter 15-minute signals. Signals already open are not touched.";
+    if (!window.confirm(ask)) return;
+    setBusy(true); setErr(null);
+    try {
+      await request("/tradingos/admin/settings", { method: "PUT", body: JSON.stringify({ kitchen_mode: m }) });
+      onSaved();
+    } catch (e) { setErr(e); } finally { setBusy(false); }
+  }
+  const yes = (b: boolean, y: string, n: string) => (b ? y : n);
+  const card = (m: Mode) => {
+    const x = k.modes[m];
+    const on = k.current === m;
+    const r = x.research;
+    return (
+      <button key={m} type="button" role="radio" aria-checked={on} disabled={busy} onClick={() => void pick(m)}
+              className={`tmode-card ${m === "degen" ? "is-degen" : "is-normal"}`}>
+        <span className="tmode-head"><b>{MODE_NAME[m]}</b>{on ? <Badge tone={m === "degen" ? "warn" : "good"}>Active</Badge> : <span className="muted">Switch</span>}</span>
+        <small className="muted">{MODE_PITCH[m]}</small>
+        <dl>
+          <dt>Markets</dt><dd>{x.coins.join(", ") || "—"}</dd>
+          <dt>Setups</dt><dd>{x.models.length}</dd>
+          <dt>30-minute check</dt><dd>{yes(x.confirm_30m, "Waits for it", "Skipped")}</dd>
+          <dt>Entry</dt><dd>{yes(x.market_entry, "At market, straight away", "Inside the entry zone")}</dd>
+          <dt>Posting</dt><dd>{yes(x.auto_publish, "Posts itself", "Waits for your Publish")}</dd>
+          <dt>Most open at once</dt><dd>{x.max_open}</dd>
+          <dt>Pause after a close</dt><dd>{x.cooldown_min} min</dd>
+          <dt>Backtest</dt><dd>~{r.trades_per_day} trades/day · {r.avg_r > 0 ? "+" : ""}{r.avg_r}R a trade<br /><small className="muted">{r.note}</small></dd>
+        </dl>
+      </button>
+    );
+  };
+  return (
+    <Card title="Trading mode (15-minute Kiwi Kitchen)">
+      <div className="tmode-grid" role="radiogroup" aria-label="Trading mode">{card("standard")}{card("degen")}</div>
+      <p className="tmode-foot">
+        Opened by the Kitchen: <b>{k.signals_24h}</b> in the last 24 h · <b>{k.signals_7d}</b> in 7 days.{" "}
+        {!k.publishing && <span className="muted">15-minute signals are off (shadow): the mode applies once they're switched on below. </span>}
+        {k.live ? <Badge tone="bad">Real money on for opted-in members</Badge> : <span className="muted">Paper only for members.</span>}
+      </p>
+      {err ? <ApiErrorBanner error={err} /> : null}
     </Card>
   );
 }

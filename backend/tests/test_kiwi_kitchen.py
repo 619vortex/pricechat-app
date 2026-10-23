@@ -328,14 +328,39 @@ def test_kitchen_group_announcements() -> None:
     assert text and text.startswith("🍽️ KIWI FINISHED COOKING! #012 $BTC SHORT · STOP HIT") and "Signal result: -3.09%" in text
 
 
-# ---------------------------------------------------------------- degen mode (the default)
-def test_degen_is_the_default_mode_and_standard_is_one_switch(db: Session) -> None:
+# ---------------------------------------------------------------- Normal (standard) is the default, Degen one switch
+def test_normal_is_the_default_mode_and_degen_is_one_switch(db: Session) -> None:
+    cfg = kitchen.config(signals.settings(db))
+    assert cfg["mode"] == "standard" and cfg["confirm_30m"] and not cfg["market_entry"] and not cfg["auto_publish"]
+    assert cfg["coins"] == ["BTC", "ETH", "SOL"] and cfg["min_quality"] == 55 and cfg["cooldown_min"] == 30
+    kitchen_on(db, mode="degen")
     cfg = kitchen.config(signals.settings(db))
     assert cfg["mode"] == "degen" and cfg["max_open"] == 2 and not cfg["confirm_30m"] and cfg["market_entry"] and cfg["auto_publish"]
-    assert "F_scalp" in cfg["models"] and len(cfg["coins"]) == 8
     kitchen_on(db, mode="standard")
     cfg = kitchen.config(signals.settings(db))
     assert cfg["mode"] == "standard" and cfg["confirm_30m"] and not cfg["market_entry"] and cfg["coins"] == ["BTC"]
+
+
+def test_admin_mode_switch_saves_the_mode_and_reports_both(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api.routes import tradingos as route
+
+    monkeypatch.setattr(route, "overview", lambda db: {})  # no Hyperliquid read in a unit test
+    s = signals.settings(db)
+    s.strategies = {**s.strategies, "intraday": {"coins": ["BTC", "ETH"]}}
+    db.commit()
+    m = kitchen.modes(db, s)
+    assert m["current"] == "standard" and m["signals_24h"] == 0 and m["signals_7d"] == 0
+    assert m["modes"]["standard"]["coins"] == ["BTC", "ETH"] == m["modes"]["degen"]["coins"]  # overrides apply to both
+    assert m["modes"]["degen"]["market_entry"] and m["modes"]["degen"]["max_open"] == 2 and m["modes"]["degen"]["research"]["avg_r"] < 0
+
+    class Req:
+        cookies: dict[str, str] = {}
+
+    route.put_settings(route.SettingsIn(kitchen_mode="degen"), Req(), db)  # type: ignore[arg-type]
+    s = signals.settings(db)
+    assert s.strategies["intraday"] == {"coins": ["BTC", "ETH"], "mode": "degen"} and kitchen.config(s)["mode"] == "degen"
+    route.put_settings(route.SettingsIn(kitchen_mode="standard"), Req(), db)  # type: ignore[arg-type]
+    assert kitchen.config(signals.settings(db))["mode"] == "standard"
 
 
 def test_degen_serves_on_the_15m_close_publishes_itself_and_opens_at_market(db: Session, setups: dict[str, Any]) -> None:

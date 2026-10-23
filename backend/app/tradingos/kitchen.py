@@ -30,10 +30,11 @@ Owner switches (TsSettings.strategies JSON, Admin → Trading OS):
   intraday_15m_v1  on: READY creates signals. Off (the default): SHADOW. The kitchen still evaluates and streams, labelled
                    shadow, and proposes nothing.
   intraday_live    on: accounts that opted in may take 15m signals on TESTNET / LIVE. Off (the default): PAPER only.
-  intraday         optional overrides of DEFAULTS (coins, models, thresholds). "mode": "degen" (the default) layers DEGEN on
-                   top: 8 markets, the F_scalp model, no 30m wait, at most 2 open, self-publishing, market entry (the tracker
+  intraday         optional overrides of DEFAULTS (coins, models, thresholds). "mode": "degen" layers DEGEN on top: 8
+                   markets, the F_scalp model, no 30m wait, at most 2 open, self-publishing, market entry (the tracker
                    opens it at the live price once its card is posted) and market exit at the max hold. "mode": "standard"
-                   is the original 15m + 30m rule set. "ml": "auto" (default) | "filter" | "shadow" | "off" (see ml.py).
+                   (Normal, the default since 2026-10-23: the owner wants less trading) is the original 15m + 30m rule set.
+                   Switched in Admin → Trading OS → Settings → Trading mode. "ml": "auto" (default) | "filter" | "shadow" | "off" (see ml.py).
 
 Every state change is one kb_events row (kind "strategy", source "kitchen", member_id NULL, so public). The Earn page
 streams those rows and the Kiwi Brain timeline lists them: one record, two views.
@@ -71,11 +72,11 @@ SLIP = {"BTC": 0.0002, "ETH": 0.0002}  # per side, as in backtest.py; everything
 DEFAULTS: dict[str, Any] = {"coins": ["BTC", "ETH", "SOL"], "models": list(ix.STRATEGIES), "min_quality": 55, "max_cost_r": 0.25,
                             "min_net_r": 0.8, "cooldown_min": 30, "max_funding_h": 0.0001, "min_stop_pct": ix.MIN_STOP_PCT,
                             "confirm_30m": True, "max_open": 0, "market_entry": False, "auto_publish": False, "ml": "auto"}
-# DEGEN mode (the default since 2026-10-18, owner's request): more markets, the momentum scalp, no 30m wait, at most 2 open at
+# DEGEN mode (the default 2026-10-18 → 2026-10-23, now opt-in from Admin): more markets, the momentum scalp, no 30m wait, at most 2 open at
 # once, signals publish themselves and open / close at market. Backtest 2026-10-18 (46 days, these 8 markets, max 2 open):
 # 1.6 trades a day, -0.07R a trade (90% CI -0.22R to +0.10R), so NOT a validated edge; standard mode on BTC/ETH/SOL made
 # 0.16 a day at +0.43R. That's why 15m signals stay PAPER-only for members until the owner switches intraday_live on.
-# Standard mode: strategies["intraday"]["mode"] = "standard".
+# Degen mode: strategies["intraday"]["mode"] = "degen"; anything else is standard (Normal).
 DEGEN: dict[str, Any] = {"coins": ["BTC", "ETH", "SOL", "HYPE", "XRP", "DOGE", "SUI", "LINK"],
                          "models": ["A_pullback", "B_retest", "C_sweep", "F_scalp"], "min_quality": 45, "max_cost_r": 0.25,
                          "min_net_r": 0.6, "min_stop_pct": 0.005, "cooldown_min": 15, "confirm_30m": False, "max_open": 2,
@@ -90,14 +91,41 @@ def slip(coin: str) -> float:
     return SLIP.get(coin.upper(), 0.0005)
 
 
-def config(s: Any) -> dict[str, Any]:
+def config(s: Any, mode: str | None = None) -> dict[str, Any]:
+    """The kitchen's effective config. `mode` previews the other mode with the same overrides (Admin's mode switch)."""
     over = (s.strategies or {}).get("intraday") or {}
-    mode = "standard" if over.get("mode") == "standard" else "degen"
+    mode = mode or ("degen" if over.get("mode") == "degen" else "standard")
     cfg = {**DEFAULTS, **(DEGEN if mode == "degen" else {}), **{k: v for k, v in over.items() if k in DEFAULTS}, "mode": mode}
     cfg["coins"] = [str(c).strip().upper() for c in (cfg["coins"] if isinstance(cfg["coins"], list) else str(cfg["coins"]).split(",")) if str(c).strip()]
     cfg["models"] = [m for m in cfg["models"] if m in ix.STRATEGIES]
     cfg["risk_desk"] = riskteam.settings(s)
     return cfg
+
+
+MODE_RESEARCH = {  # the 2026-10-18 backtest quoted above (46 days, Hyperliquid 15m), shown next to the Admin mode switch
+    "standard": {"trades_per_day": 0.16, "avg_r": 0.43, "note": "BTC/ETH/SOL, 46-day backtest"},
+    "degen": {"trades_per_day": 1.6, "avg_r": -0.07, "note": "8 markets, 46-day backtest; 90% CI -0.22R to +0.10R: no proven edge"},
+}
+
+
+def modes(db: Session, s: Any, now: datetime | None = None) -> dict[str, Any]:
+    """Admin's Normal / Degen switch: the current mode, what each mode does with the current overrides, the backtest behind
+    it, and how many kitchen signals were actually opened in the last 24 h / 7 days."""
+    now = now or utcnow()
+
+    def opened(since: timedelta) -> int:
+        return int(db.scalar(select(func.count()).select_from(TsSignal).where(
+            TsSignal.strategy == STRATEGY, TsSignal.created_at >= now - since)) or 0)
+
+    out: dict[str, Any] = {"current": config(s)["mode"], "publishing": publishing(s), "live": live_enabled(s),
+                           "signals_24h": opened(timedelta(hours=24)), "signals_7d": opened(timedelta(days=7)), "modes": {}}
+    for m in ("standard", "degen"):
+        c = config(s, m)
+        out["modes"][m] = {"coins": c["coins"], "models": c["models"], "max_open": int(c["max_open"] or 0) or s.max_open_signals,
+                           "confirm_30m": bool(c["confirm_30m"]), "market_entry": bool(c["market_entry"]),
+                           "auto_publish": bool(c["auto_publish"]) or bool(s.auto_publish), "cooldown_min": c["cooldown_min"],
+                           "min_quality": c["min_quality"], "research": MODE_RESEARCH[m]}
+    return out
 
 
 def publishing(s: Any) -> bool:

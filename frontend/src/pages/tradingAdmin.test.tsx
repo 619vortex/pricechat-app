@@ -48,6 +48,35 @@ describe("Trading OS (owner)", () => {
     expect(calls.some((c) => c.key === "POST /api/tradingos/admin/signals/4/publish")).toBe(true);
   });
 
+  it("Trading mode: Normal / Degen cards, Degen asks first and saves kitchen_mode", async () => {
+    const mode = (coins: string[], degen: boolean) => ({ coins, models: ["A", "B"], max_open: degen ? 2 : 3, confirm_30m: !degen, market_entry: degen,
+      auto_publish: degen, cooldown_min: degen ? 15 : 30, min_quality: degen ? 45 : 55,
+      research: { trades_per_day: degen ? 1.6 : 0.16, avg_r: degen ? -0.07 : 0.43, note: "46-day backtest" } });
+    const kitchen = { current: "standard", publishing: true, live: false, signals_24h: 1, signals_7d: 4,
+      modes: { standard: mode(["BTC", "ETH", "SOL"], false), degen: mode(["BTC", "ETH", "SOL", "HYPE", "XRP", "DOGE", "SUI", "LINK"], true) } };
+    serve({ "GET /api/tradingos/admin/overview": { ...overview, kitchen }, "GET /api/tradingos/admin/signals": { items: [] },
+            "PUT /api/tradingos/admin/settings": { ...overview, kitchen } });
+    render(<TradingOSPage />);
+    await flush();
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    await flush();
+    const normal = screen.getByRole("radio", { name: /Normal/ });
+    const degen = screen.getByRole("radio", { name: /Degen/ });
+    expect(normal.getAttribute("aria-checked")).toBe("true");
+    expect(degen.getAttribute("aria-checked")).toBe("false");
+    expect(document.body.textContent).toMatch(/in the last 24 h/);
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    fireEvent.click(degen);
+    await flush();
+    expect(String((ask.mock.calls[0] as unknown[])[0])).toMatch(/DEGEN[\s\S]*8 markets/);
+    expect(calls.some((c) => c.key.startsWith("PUT"))).toBe(false);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    fireEvent.click(degen);
+    await flush();
+    expect(calls.find((c) => c.key === "PUT /api/tradingos/admin/settings")?.body).toEqual({ kitchen_mode: "degen" });
+  });
+
   it("a failed Stop all new signals says so instead of failing silently", async () => {
     serve({ "GET /api/tradingos/admin/overview": overview, "GET /api/tradingos/admin/signals": { items: [] },
             "PUT /api/tradingos/admin/settings": new Response(JSON.stringify({ detail: "Database is busy" }), { status: 503 }) });

@@ -15,7 +15,7 @@ from app.api.schemas import StrictInput
 from app.arbitrage import funding_alerts
 from app.models.tradingos import TsAudit, TsSignal
 from app.security import admin_auth, rate_limit
-from app.tradingos import assist, autodelete, bot, market, risk, signals
+from app.tradingos import assist, autodelete, bot, kitchen, market, risk, signals
 
 router = APIRouter(tags=["trading-os"])
 
@@ -54,7 +54,7 @@ def overview(db: DbSession) -> dict[str, Any]:
                                                      "min_volume_usd", "max_spread_bps", "max_open_signals", "min_rr", "strategies", "allowed_coins")},
             "funding_alerts": funding_alerts.config(db), "autodelete": autodelete.config(db),
             "vortex_assist": {**assist.config(db), "pending": assist.pending_count(db), "online": assist.online(db)},
-            "exchange": exchange, "counts": counts, "stats": signals.stats(db),
+            "exchange": exchange, "counts": counts, "stats": signals.stats(db), "kitchen": kitchen.modes(db, s),
             "execution": "ENTER → private preview → confirm. PAPER by default; TESTNET with an approved API wallet; LIVE only for the "
                          "allowlist after the pre-live checks"}
 
@@ -237,6 +237,7 @@ class SettingsIn(StrictInput):
     breakout_4h_v1: bool | None = None
     intraday_15m_v1: bool | None = None  # Kiwi Kitchen: READY proposes signals (off = shadow)
     intraday_live: bool | None = None  # 15m signals may trade TESTNET / LIVE for members who opted in (off = paper only)
+    kitchen_mode: str | None = Field(None, pattern=r"^(standard|degen)$")  # Trading mode: Normal (standard) or Degen
     risk_v2_mode: str | None = Field(None, pattern=r"^(advisory|enforce)$")  # Engine v2 portfolio checks: record only, or refuse entries
     funding_alerts_on: bool | None = None  # Earn › Funding Arb alerts to the publish chat (tradingos.funding_alerts)
     funding_alert_min_apr: float | None = Field(None, ge=1, le=1000)  # net spread APR %, after estimated fees
@@ -262,6 +263,8 @@ def put_settings(payload: SettingsIn, request: Request, db: DbSession) -> dict[s
         s.strategies = {**s.strategies, "funding_alerts": {**funding_alerts.config(db), **{k: x for k, x in fa.items() if x is not None}}}
     if "main_chat_autodelete_min" in v:
         s.strategies = {**s.strategies, "autodelete": {"minutes": v.pop("main_chat_autodelete_min")}}
+    if "kitchen_mode" in v:
+        s.strategies = {**s.strategies, "intraday": {**((s.strategies or {}).get("intraday") or {}), "mode": v.pop("kitchen_mode")}}
     if "risk_v2_mode" in v:
         s.strategies = {**s.strategies, "risk_v2": {**((s.strategies or {}).get("risk_v2") or {}), "mode": v.pop("risk_v2_mode")}}
     vx = {VORTEX_KEYS[k]: v.pop(k) for k in list(v) if k in VORTEX_KEYS}
