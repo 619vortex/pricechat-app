@@ -92,3 +92,48 @@ def test_qa_member_session_is_owner_only_and_removable(client: TestClient, monke
     assert member.get("/api/members/session").json()["member"]["username"] == "qa_scanner"
     assert client.delete("/api/system/qa-member").json()["deleted"] is True
     assert member.get("/api/members/session").json()["signed_in"] is False
+
+
+def _owner_login_required(client: TestClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from pydantic import SecretStr
+
+    from app.security.admin_auth import hash_password
+
+    runtime = client.app.state.runtime  # type: ignore[attr-defined]
+    monkeypatch.setattr(runtime.settings, "admin_username", "admin")
+    monkeypatch.setattr(runtime.settings, "admin_password_hash", SecretStr(hash_password("pw")))
+
+
+def test_a_crawler_walking_card_ids_is_slowed_down(client: TestClient, db: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """2026-10-23: one client walking /api/pokemon/cards/<id> held every database connection (bot and site down)."""
+    _owner_login_required(client, monkeypatch)
+    catalog.ensure_catalog(db)
+    cid = db.scalar(select(PokemonCard.id).limit(1))
+    codes = [client.get(f"/api/pokemon/cards/{cid}?pub=1").status_code for _ in range(70)]
+    assert codes[:60] == [200] * 60 and 429 in codes[60:]
+    r = client.get(f"/api/pokemon/cards/{cid}?pub=1")
+    assert r.status_code == 429 and int(r.headers["retry-after"]) >= 1
+
+
+def test_a_full_house_answers_busy_fast_instead_of_draining_the_pool(client: TestClient, db: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import asyncio
+
+    from app import main
+
+    _owner_login_required(client, monkeypatch)
+    catalog.ensure_catalog(db)
+    cid = db.scalar(select(PokemonCard.id).limit(1))
+    monkeypatch.setattr(main, "MARKET_SLOT_WAIT_S", 0.05)
+    slots = client.app.state.market_slots  # type: ignore[attr-defined]
+    taken = 0
+    while not slots.locked():
+        asyncio.run(slots.acquire())
+        taken += 1
+    try:
+        assert taken == main.MARKET_CONCURRENCY
+        r = client.get(f"/api/pokemon/cards/{cid}?pub=1")
+        assert r.status_code == 503 and r.headers["retry-after"] == "5"
+    finally:
+        for _ in range(taken):
+            slots.release()
+    assert client.get(f"/api/pokemon/cards/{cid}?pub=1").status_code == 200

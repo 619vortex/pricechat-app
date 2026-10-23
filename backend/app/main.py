@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -93,6 +94,10 @@ from app.connectors.x.errors import (
 from app.social.x_service import sync_runtime_from_db
 
 logger = logging.getLogger("pricechat")
+
+# visitors' Pokémon Market reads running at once (each holds a database connection; the pool is 10 + 30, app/db/session.py)
+MARKET_CONCURRENCY = 10
+MARKET_SLOT_WAIT_S = 8.0
 
 
 def _provider_status_code(exc: ProviderError) -> int:
@@ -238,10 +243,13 @@ def create_app(
     from app.security import admin_auth
 
     def _admin_ok(token: str | None) -> bool:
+        if not token:  # no owner cookie: nothing to look up (spares a database connection on every visitor request)
+            return False
         with SessionLocal() as db:
             return admin_auth.current(db, token) is not None
 
     allowed_origins = {o.rstrip("/") for o in app_settings.cors_origins} | {app_settings.members_public_url.rstrip("/")}
+    market_slots = app.state.market_slots = asyncio.Semaphore(MARKET_CONCURRENCY)
 
     from app.security.body_limit import BodyLimit
 
@@ -268,7 +276,23 @@ def create_app(
                     refused = market_public.grade_refused(path, request.query_params)
                     if refused:
                         return JSONResponse(status_code=400, content={"detail": refused, "code": "grade_not_listed"})
-                    response = await call_next(request)
+                    from app.security import rate_limit
+
+                    wait = rate_limit.retry_after("market", request)
+                    if wait is not None:
+                        return JSONResponse(status_code=429, content={"detail": "Too many requests. Please slow down.", "code": "rate_limited"},
+                                            headers={"Retry-After": str(wait)})
+                    # at most MARKET_CONCURRENCY visitor reads at once, so a crawler can never take every database connection
+                    # from the bot, the scheduler and members (a full house answers 503 after a short wait, not a 30 s pool timeout)
+                    try:
+                        await asyncio.wait_for(market_slots.acquire(), MARKET_SLOT_WAIT_S)
+                    except TimeoutError:
+                        return JSONResponse(status_code=503, content={"detail": "The market is busy. Please retry in a moment.", "code": "busy"},
+                                            headers={"Retry-After": "5"})
+                    try:
+                        response = await call_next(request)
+                    finally:
+                        market_slots.release()
                     if response.status_code != 200 or not response.headers.get("content-type", "").startswith("application/json"):
                         return response
                     import json

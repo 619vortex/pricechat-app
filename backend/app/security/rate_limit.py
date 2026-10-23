@@ -77,6 +77,9 @@ LIMITS = {
     "committee": Bucket(burst=5, every=20, shared_burst=30, shared_every=2),
     # the public candles under a committee run's chart (cached per market for a minute; a page loads them once per run shown)
     "committee_chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
+    # visitors' Pokémon Market reads (card pages, charts, tables): a person browsing opens a few a second at most; a crawler
+    # walking /api/pokemon/cards/<id> one id after another held every database connection on 2026-10-23
+    "market": Bucket(burst=60, every=0.5, shared_burst=1200, shared_every=0.01),
 }
 
 
