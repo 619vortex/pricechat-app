@@ -85,6 +85,7 @@ def frame_facts(cs: list[Candle], tf: str) -> dict[str, Any] | None:
             "vol_ratio20": round(v, 2) if (v := ind.volume_ratio(vols)) is not None else None,
             "trend": trend, "structure": ind.swing_structure(highs, lows), "breakout": breakout,
             "realized_vol_pct": round(rv, 3) if (rv := ind.realized_vol_pct(closes)) is not None else None,
+            "last_range": rnd(highs[-1] - lows[-1]),
             "candles": len(cs), "last_closed": iso((cs[-1].t + INTERVALS[tf] * 1000) / 1000)}
 
 

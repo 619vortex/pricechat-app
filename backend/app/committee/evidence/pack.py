@@ -337,7 +337,8 @@ async def _build(db: Any, symbol: str, timeframe: str, as_of: datetime, mode: st
                 iso_only = None
                 flim.append(f"only_isolated unknown: {e}")
             ff.update(max_leverage=hl_market.max_leverage, sz_decimals=hl_market.sz_decimals, only_isolated=iso_only,
-                      oi_usd=rnd(hl_market.oi_usd), volume_24h_usd=rnd(hl_market.day_volume))
+                      oi_usd=rnd(hl_market.oi_usd), volume_24h_usd=rnd(hl_market.day_volume),
+                      spread_bps=round(sp, 2) if (sp := hl_market.spread_bps) is not None else None)
         elif listing.volume_24h is not None and listing.venue != "dex":
             frefs.append(refs.add("F", f"{venues.NAME[listing.venue]} 24h ticker {listing.symbol}", None, fetched(), fetched()))
             ff["volume_24h_usd"] = rnd(listing.volume_24h)

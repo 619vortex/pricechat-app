@@ -34,7 +34,7 @@ async def get_status(db: DbSession, runtime: Runtime) -> dict[str, Any]:
     try:  # the evidence providers' health (cm-evidence), when that package offers it
         from app.committee import evidence
 
-        fn = getattr(evidence, "providers_status", None)
+        fn = getattr(evidence, "provider_status", None)
         if callable(fn):
             res = fn()
             providers = (await res) if inspect.isawaitable(res) else res
