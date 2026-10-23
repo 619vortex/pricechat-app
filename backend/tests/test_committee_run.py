@@ -29,7 +29,7 @@ def test_btc_full_committee_with_a_fake_llm(db: Session) -> None:
     assert len(llm.calls) == 11 <= 12  # 4 analysts, bull, bear, rebuttals, manager, trader, risk panel, portfolio manager
     assert res["meta"]["calls"] == 11 and res["meta"]["tokens_in"] == 1100 and res["meta"]["cost_usd"] == 0.0
     assert res["meta"]["models"] == {"fast": "fake-fast", "deep": "fake-deep", "synthesis": "fake-synth"}
-    assert res["meta"]["framework"] == "TradingAgents v0.7.0 pattern (ported)" and res["meta"]["prompt_version"] == "cm-1"
+    assert res["meta"]["framework"] == "TradingAgents v0.7.0 pattern (ported)" and res["meta"]["prompt_version"] == "cm-2"
     assert all(a["author"] == "llm:fake-fast" for a in res["analysts"].values())
     assert res["analysts"]["technical"]["points"][0]["refs"] == ["T1"]  # an unknown ref id ("ZZ9") is dropped
     assert res["debate"]["rounds"] == 1 and res["debate"]["bull"]["rebuttal"] and res["debate"]["manager"]["rating"] == "Overweight"

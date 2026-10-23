@@ -14,6 +14,7 @@ committee runs never share a session or a lock with execution. The public run JS
 
 import asyncio
 import logging
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -64,8 +65,20 @@ def _iso(d: datetime | None) -> str | None:
     return _aware(d).isoformat().replace("+00:00", "Z") if d else None
 
 
+STARTED = utcnow()  # this process: a queued / running row older than this belongs to a previous process (recover)
+STUCK_AFTER = timedelta(minutes=10)
+INTERRUPTED = "interrupted by a restart"
+_ADDRESS = re.compile(r"^(0x[0-9a-fA-F]{20,64}|[1-9A-HJ-NP-Za-km-z]{30,50})$")  # EVM / Solana-style (base58) addresses
+
+
+def _word(w: str) -> str:
+    w = w.removeprefix("$")
+    return w if _ADDRESS.match(w) else w.upper()
+
+
 def _norm(symbol: str, timeframe: str) -> tuple[str, str]:
-    sym = (symbol or "").strip().upper().removeprefix("$")[:32]
+    """Tickers and exchange words upper-cased; a contract address keeps its case (Solana addresses are case-sensitive)."""
+    sym = " ".join(_word(w) for w in (symbol or "").split())[:64]
     if not sym:
         raise CommitteeError("bad_symbol", "Give a coin, e.g. BTC.")
     if timeframe not in TIMEFRAMES:
@@ -84,10 +97,21 @@ async def _evidence(db: Session, symbol: str, timeframe: str, as_of: datetime | 
 
 
 # ---------------------------------------------------------------- cache and limits
-def cached_run(db: Session, symbol: str, timeframe: str, now: datetime | None = None) -> CmRun | None:
-    """A live run of the same market + timeframe within CACHE_FOR that is done (or still on its way)."""
+def market_key(market: dict[str, Any] | None) -> tuple[str, str] | None:
+    """(venue, market_id) of a resolved market ({"venue", "market_type", "market_id"}, e.g. a run's asset), or None."""
+    if not market or not market.get("venue") or not market.get("market_id"):
+        return None
+    return str(market["venue"]), str(market["market_id"])[:128]
+
+
+def cached_run(db: Session, symbol: str, timeframe: str, now: datetime | None = None, market: dict[str, Any] | None = None) -> CmRun | None:
+    """A live run of the same market + timeframe within CACHE_FOR that is done (or still on its way). With `market` (the
+    resolved venue + market id) the key is the market itself, so "TAO okx" and "$TAO-USDT okx spot" share a run when they
+    are the same market, and two markets never do; without it, the symbol as normalised."""
     now = now or utcnow()
-    return db.scalar(select(CmRun).where(CmRun.symbol == symbol, CmRun.timeframe == timeframe, CmRun.mode == "live",
+    key = market_key(market)
+    same = (CmRun.venue == key[0], CmRun.market_id == key[1]) if key else (CmRun.symbol == symbol,)
+    return db.scalar(select(CmRun).where(*same, CmRun.timeframe == timeframe, CmRun.mode == "live",
                                          CmRun.status.in_(("queued", "running", "done")), CmRun.created_at >= now - CACHE_FOR)
                      .order_by(CmRun.id.desc()).limit(1))
 
@@ -285,14 +309,15 @@ async def _background(public_id: str, depth: str, provider: Any, gate: Any, back
 
 
 def start_run(db: Session, symbol: str, timeframe: str = "1h", *, requested_by: dict[str, Any] | None = None, depth: str = "full",
-              provider: Any = None, gate: Any = None, backend: llm.Backend | None = None) -> str:
+              provider: Any = None, gate: Any = None, backend: llm.Backend | None = None, market: dict[str, Any] | None = None) -> str:
     """Queue a run and return its public id at once (a cached run's id when there is one). Raises LimitReached / CommitteeError.
-    Must be called from a running event loop (the API route / the Telegram handler)."""
+    `market`: the resolved market when the caller resolved it (Telegram), the cache key then. Must be called from a running
+    event loop (the API route / the Telegram handler)."""
     symbol, timeframe = _norm(symbol, timeframe)
     requested_by = requested_by or {}
     if not config(db)["on"]:
         raise CommitteeError("off", "The committee is switched off.")
-    hit = cached_run(db, symbol, timeframe)
+    hit = cached_run(db, symbol, timeframe, market=market)
     if hit is not None:
         return hit.public_id
     if not requested_by.get("admin"):
@@ -300,6 +325,9 @@ def start_run(db: Session, symbol: str, timeframe: str = "1h", *, requested_by: 
         if used_today(db, requested_by) >= limit:
             raise LimitReached("limit", f"Daily limit reached ({limit} committee runs a day).")
     row = _new_row(symbol, timeframe, "live", "quick" if depth == "quick" else "full", "queued", requested_by)
+    key = market_key(market)
+    if key:  # known from the start: a second request for the same market finds this run while it is still queued
+        row.venue, row.market_id, row.market_type = key[0], key[1], (market or {}).get("market_type")
     db.add(row)
     db.commit()
     if not requested_by.get("admin"):
@@ -313,6 +341,26 @@ async def wait(public_id: str) -> None:
     t = _TASKS.get(public_id)
     if t is not None:
         await t
+
+
+def stuck(db: Session, now: datetime | None = None) -> list[CmRun]:
+    """Queued / running live runs that can't finish any more: older than STUCK_AFTER, or created before this process started
+    and not running here (the process that ran them restarted)."""
+    now = now or utcnow()
+    rows = db.scalars(select(CmRun).where(CmRun.status.in_(("queued", "running")))).all()
+    return [r for r in rows if _aware(r.created_at) <= now - STUCK_AFTER or (_aware(r.created_at) < STARTED and r.public_id not in _TASKS)]
+
+
+def mark_interrupted(db: Session, row: CmRun, now: datetime | None = None) -> None:
+    """Failed ("interrupted by a restart"), and the run given back to whoever was charged for it."""
+    row.status, row.finished_at, row.error = "failed", now or utcnow(), INTERRUPTED
+    db.commit()
+    who = {"tg_user_id": row.requested_by_tg, "member_id": row.requested_by_member}
+    key, _ = _who(db, {k: v for k, v in who.items() if v is not None})
+    if key is not None:
+        db.execute(update(CmUsage).where(CmUsage.day == llm.day_of(_aware(row.created_at)), CmUsage.key == key, CmUsage.count > 0)
+                   .values(count=CmUsage.count - 1).execution_options(synchronize_session=False))
+        db.commit()
 
 
 def find(db: Session, public_id: str) -> CmRun | None:

@@ -388,17 +388,19 @@ def view(run: dict[str, Any], name: str) -> str:
     return compact(run)
 
 
-def buttons(run_id: str, name: str = "sum") -> list[list[dict[str, str]]]:
-    """The inline keyboard: callback data cm:<run id>:<view> (well under Telegram's 64 bytes)."""
+def buttons(run_id: str, name: str = "sum", web: str | None = None) -> list[list[dict[str, str]]]:
+    """The inline keyboard: callback data cm:<run id>:<view> (well under Telegram's 64 bytes); `web`: the run's page on the
+    website (a URL button, 🌐 Web report)."""
     def b(text: str, what: str) -> dict[str, str]:
         return {"text": text, "callback_data": f"cm:{run_id}:{what}"}
 
     nav = [b("📄 Full Report", "full"), b("🐂 Bull Case", "bull"), b("🐻 Bear Case", "bear")]
     tools = [b("🛡 Risk Review", "risk"), b("📊 Chart", "chart"), b("🔄 Refresh", "refresh")]
+    link = [[{"text": "🌐 Web report", "url": web}]] if web else []
     if name == "sum":
-        return [nav, tools]
+        return [nav, tools, *link]
     others = [x for x in nav + [tools[0]] if not x["callback_data"].endswith(":" + name)]
-    return [[b("⬅️ Back", "sum"), tools[1], tools[2]], others]
+    return [[b("⬅️ Back", "sum"), tools[1], tools[2]], others, *link]
 
 
 def placeholder(symbol: str, tf: str) -> str:

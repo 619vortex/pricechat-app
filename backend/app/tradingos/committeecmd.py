@@ -135,7 +135,7 @@ async def command(db: Session, client: Any, chat_id: int, user_id: int, cmd: str
     who = {"tg_user_id": int(user_id), "chat_id": int(chat_id) if isinstance(chat_id, int) else None}
     try:
         rid = orchestrator.start_run(db, " ".join(words), tf, requested_by=who, provider=getattr(RUNTIME, "provider", None),
-                                     gate=getattr(RUNTIME, "gate", None))
+                                     gate=getattr(RUNTIME, "gate", None), market=market_of(listing))
     except orchestrator.LimitReached as e:
         return limit_text(db, who, e.message)
     except orchestrator.CommitteeError as e:
@@ -147,8 +147,64 @@ async def command(db: Session, client: Any, chat_id: int, user_id: int, cmd: str
         return None
     sent = await _raw(client).send_message(chat_id, tv.placeholder(shown, tf), html=True, reply_to=reply_to)
     mid = int(sent["message_id"]) if isinstance(sent, dict) and sent.get("message_id") else None
+    _remember(db, rid, chat_id, mid)
     spawn(watch(rid, chat_id, mid, view, reply_to, foot, shown, tf, user_id=user_id, main=main))
     return None
+
+
+def market_of(listing: Any) -> dict[str, Any] | None:
+    """The resolved market as the evidence pack names it (pack._asset): the committee's cache key."""
+    venue, mid = getattr(listing, "venue", None), getattr(listing, "symbol", None)
+    if not venue or not mid:
+        return None
+    kind = "perp" if venue == "hyperliquid" else "dex" if venue == "dex" else getattr(listing, "kind", None)
+    return {"venue": venue, "market_type": kind, "market_id": str(mid)}
+
+
+def _remember(db: Session, rid: str, chat_id: Any, message_id: int | None) -> None:
+    """The placeholder on the run's row (when it has none yet): recovery edits it if the run never finishes."""
+    row = orchestrator.find(db, rid)
+    if row is not None and message_id and row.message_id is None and isinstance(chat_id, int):
+        row.chat_id, row.message_id = chat_id, message_id
+        db.commit()
+
+
+def report_url(run_id: str) -> str:
+    """The run on the website's Earn page (members_public_url, the address the site's other links use)."""
+    from app.config.settings import get_settings
+    from app.tradingos.bot import SITE
+
+    base = (get_settings().members_public_url or "").rstrip("/")
+    return f"{base if base.startswith('https://') else SITE}/earn/committee?run={run_id}"
+
+
+def buttons(run_id: str, view: str = "sum") -> list[list[dict[str, str]]]:
+    return tv.buttons(run_id, view, web=report_url(run_id) if run_id else None)
+
+
+async def recover(db: Session, client: Any = None, now: Any = None) -> int:
+    """committee.llm_expire (also its first run after a start): runs stuck in queued / running (older than 10 min, or left by
+    a previous process) are failed as "interrupted by a restart", their usage given back, and their Telegram placeholder
+    edited into a short note. A Telegram failure never stops the rest."""
+    rows = orchestrator.stuck(db, now)
+    if not rows:
+        return 0
+    own = None
+    for row in rows:
+        orchestrator.mark_interrupted(db, row, now)
+        if row.chat_id and row.message_id:
+            try:
+                own = own or client or _client()
+                await _raw(own).edit_message_text(row.chat_id, row.message_id,
+                                                  f"⚠️ The Kiwi Committee on <b>{tv.esc(row.symbol)} {tv.esc(row.timeframe)}</b> was interrupted "
+                                                  "(the bot restarted). Send the command again: this run wasn't counted.", html=True, buttons=[])
+            except Exception as e:  # noqa: BLE001 - deleted, too old, Telegram down: the row is fixed either way
+                logger.info("committee recovery: placeholder of %s not edited (%s)", row.public_id, str(e)[:120])
+    if own is not None and client is None and CLIENT_FACTORY is None:
+        close = getattr(own, "aclose", None)
+        if close is not None:
+            await close()
+    return len(rows)
 
 
 def limit_text(db: Session, who: dict[str, Any], message: str) -> str:
@@ -243,23 +299,25 @@ async def _edit_or_send(client: Any, chat_id: Any, message_id: int | None, text:
 
 
 async def deliver(client: Any, chat_id: Any, message_id: int | None, run: dict[str, Any], view: str, reply_to: int | None, foot: str = "",
-                  user_id: int | None = None, main: bool = False) -> None:
+                  user_id: int | None = None, main: bool = False, single: bool = False) -> None:
     """Show a view of a finished run in the message (edit) or as a new reply. The full report is one or two messages; in
     the main chat it goes to the asker privately and the chat gets the compact summary."""
     rid = str(run.get("id") or "")
     if view == "full" and main:
-        await _edit_or_send(client, chat_id, message_id, _with_footer(tv.compact(run), foot), tv.buttons(rid, "sum"), reply_to)
+        await _edit_or_send(client, chat_id, message_id, _with_footer(tv.compact(run), foot), buttons(rid, "sum"), reply_to)
         if user_id:
             await send_private_full(client, user_id, run)
         return
     if view == "full":
         parts = tv.full_report(run)
-        await _edit_or_send(client, chat_id, message_id, parts[0] if len(parts) > 1 else _with_footer(parts[0], foot), tv.buttons(rid, "full"), reply_to)
+        if single and len(parts) > 1:  # a button press: one message, edited in place (part 2 is never sent again and again)
+            parts = [parts[0] + "\n<i>… the rest is in the 🌐 Web report.</i>"]
+        await _edit_or_send(client, chat_id, message_id, parts[0] if len(parts) > 1 else _with_footer(parts[0], foot), buttons(rid, "full"), reply_to)
         for p in parts[1:]:
             await client.send_message(chat_id, _with_footer(p, foot), html=True)
         return
     text = tv.view(run, view)
-    await _edit_or_send(client, chat_id, message_id, _with_footer(text, foot), tv.buttons(rid, view), reply_to)
+    await _edit_or_send(client, chat_id, message_id, _with_footer(text, foot), buttons(rid, view), reply_to)
 
 
 async def send_private_full(client: Any, user_id: int, run: dict[str, Any]) -> bool:
@@ -315,7 +373,7 @@ async def callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
         return
     await bot._answer(client, cq, uid, "", dm=False)
     foot = bot.footer(db)
-    await deliver(client, chat_id, int(mid), run, action, None, foot)
+    await deliver(client, chat_id, int(mid), run, action, None, foot, single=True)
 
 
 async def _chart(db: Session, client: Any, chat_id: Any, chat_username: str | None, run: dict[str, Any], mid: int) -> None:
@@ -365,7 +423,8 @@ async def _refresh(db: Session, client: Any, cq: dict[str, Any], uid: int, row: 
     who = {"tg_user_id": uid, "chat_id": int(chat_id) if isinstance(chat_id, int) else None}
     try:
         rid = orchestrator.start_run(db, row.symbol, row.timeframe, requested_by=who, provider=getattr(RUNTIME, "provider", None),
-                                     gate=getattr(RUNTIME, "gate", None))
+                                     gate=getattr(RUNTIME, "gate", None),
+                                     market={"venue": row.venue, "market_type": row.market_type, "market_id": row.market_id})
     except orchestrator.LimitReached as e:
         await bot._answer(client, cq, uid, re.sub(r"<[^>]+>", "", limit_text(db, who, e.message))[:190], alert=True, dm=False)
         return
@@ -380,5 +439,6 @@ async def _refresh(db: Session, client: Any, cq: dict[str, Any], uid: int, row: 
     if new is not None and new.status == "done" and new.result:
         await deliver(_raw(client), chat_id, mid, new.result, "sum", None, foot)
         return
-    await _edit_or_send(_raw(client), chat_id, mid, tv.placeholder(shown or row.symbol, row.timeframe), None, None)
+    await _edit_or_send(_raw(client), chat_id, mid, tv.placeholder(shown or row.symbol, row.timeframe), [], None)
+    _remember(db, rid, chat_id, mid)
     spawn(watch(rid, chat_id, mid, "sum", None, foot, shown or row.symbol, row.timeframe, user_id=uid, main=main))

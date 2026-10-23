@@ -783,10 +783,25 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         return await paper.run_job(ctx.db, ctx.now)
 
     async def committee_llm_expire(ctx: JobContext) -> dict[str, Any]:
-        """Kiwi AI Investment Committee: LLM calls Vortex didn't answer within 90 s are expired (their roles use rules)."""
-        from app.committee import remote
+        """Kiwi AI Investment Committee: LLM calls Vortex didn't answer within 90 s are expired (their roles use rules); runs
+        stuck in queued / running (10 min, or left by a previous process: so also right after a start) are failed as
+        "interrupted by a restart" and their Telegram placeholder says so."""
+        from app.committee import orchestrator, remote
+        from app.tradingos import committeecmd
 
-        return {"expired": remote.expire(ctx.db, ctx.now)}
+        out: dict[str, Any] = {"expired": remote.expire(ctx.db, ctx.now)}
+        if orchestrator.stuck(ctx.db, ctx.now):
+            client = None
+            if s.telegram_configured:
+                from app.telegram.service import make_client
+
+                client = make_client(s, runtime.telegram.transport)
+            try:
+                out["interrupted"] = await committeecmd.recover(ctx.db, client, ctx.now)
+            finally:
+                if client is not None:
+                    await client.aclose()
+        return out
 
     async def funding_alerts(ctx: JobContext) -> dict[str, Any]:
         """Earn › Funding Arb: post wide cross-venue funding spreads (net of estimated fees) to the publish chat. Read-only."""
