@@ -25,8 +25,20 @@ The AI cannot override anything here: the gate never reads model text, only (act
 
 Reference account (owner-tunable: TsSettings.strategies["committee"]["reference"]): REFERENCE below, the defaults of a new
 member trading account with risk per trade = risk_pct of equity.
+
+Lot size: Hyperliquid's szDecimals from the evidence (fundamental facts), else from the context, else from Hyperliquid's
+market list (the shared, cached market.data() snapshot). None known -> REJECTED with that reason (never a guessed default: a
+wrong lot size rounds an order to zero or oversizes it).
+
+Context (GateContext): everything the gate reads besides the evidence - the moment (as_of), a settings snapshot, the reference
+account, the paper book's state and the Risk Team's view of the kitchen signals. Live (ctx omitted): context(db) reads them all
+from the database now, exactly as before. A backtest passes its own point-in-time context (its simulated book at the decision
+time) and the gate then never touches a database.
 """
 
+import types
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -47,16 +59,74 @@ def _settings(db: Session) -> TsSettings | None:
     return db.scalar(select(TsSettings).limit(1))
 
 
-def reference(db: Session) -> dict[str, Any]:
-    s = _settings(db)
+def snapshot(s: TsSettings | None) -> Any:
+    """A detached copy of the settings row (attribute access like the row), or None."""
+    if s is None:
+        return None
+    return types.SimpleNamespace(**{c.name: getattr(s, c.name) for c in TsSettings.__table__.columns})
+
+
+def reference_of(s: Any, equity: float, paper_risk_pct: float) -> dict[str, Any]:
+    """The reference account from a settings row / snapshot; `equity` and `paper_risk_pct` are the paper book's (used unless the
+    owner fixed them in strategies["committee"]["reference"])."""
     over = (((s.strategies or {}) if s else {}).get("committee") or {}).get("reference") or {}
     out = {**REFERENCE, **{k: type(REFERENCE[k])(v) for k, v in over.items() if k in REFERENCE}}
     if "equity" not in over:  # the paper book's own equity (starting equity + realised paper P&L)
-        pc = paper.config(db)
-        out["equity"] = paper.equity(db, pc)
+        out["equity"] = float(equity)
         if "risk_pct" not in over:
-            out["risk_pct"] = float(pc["paper_risk_pct"])
+            out["risk_pct"] = float(paper_risk_pct)
     return out
+
+
+def reference(db: Session) -> dict[str, Any]:
+    s = _settings(db)
+    over = (((s.strategies or {}) if s else {}).get("committee") or {}).get("reference") or {}
+    if "equity" in over and "risk_pct" in over:
+        return reference_of(s, 0.0, 0.0)
+    pc = paper.config(db)
+    return reference_of(s, paper.equity(db, pc) if "equity" not in over else 0.0, pc["paper_risk_pct"])
+
+
+@dataclass
+class GateContext:
+    """What the gate reads besides the evidence. book = {"open", "day_pnl", "week_pnl", "exposure", "trades_today"}, the shape
+    of paper.book_state."""
+
+    as_of: datetime
+    settings: Any  # TsSettings row or snapshot(); None = the column defaults
+    reference: dict[str, Any]
+    book: dict[str, Any]
+    team: Any = None  # riskteam.Context; None = no kitchen signals known at as_of
+    lot_sizes: dict[str, int] = field(default_factory=dict)  # coin -> szDecimals, used when the evidence lacks it
+
+    def __post_init__(self) -> None:
+        if self.team is None:
+            self.team = riskteam.Context(self.as_of)
+
+
+def context(db: Session, as_of: datetime | None = None) -> GateContext:
+    """The live context: settings, reference account, paper book and Risk Team view, read from the database at `as_of` (now)."""
+    now = as_of or utcnow()
+    return GateContext(now, _settings(db), reference(db), paper.book_state(db, now), riskteam.context(db, now))
+
+
+def lot_size(coin: str, fund: dict[str, Any], ctx: GateContext) -> tuple[int | None, str]:
+    """(szDecimals, where it came from): the evidence, the context, Hyperliquid's market list - or (None, why not)."""
+    v = fund.get("sz_decimals")
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v, "evidence"
+    if coin.upper() in ctx.lot_sizes:
+        return int(ctx.lot_sizes[coin.upper()]), "context"
+    from app.tradingos import market
+
+    try:
+        _, ms = market.data().markets()
+    except Exception as e:  # noqa: BLE001 - unreadable: unknown, the trade is refused
+        return None, f"not in the evidence and Hyperliquid's market list is unreadable ({type(e).__name__})"
+    m = ms.get(coin.upper())
+    if m is None:
+        return None, f"not in the evidence and {coin.upper()} isn't in Hyperliquid's market list"
+    return int(m.sz_decimals), "Hyperliquid market list"
 
 
 def _result(status: str, reasons: list[str], checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -144,10 +214,20 @@ def _hl_perp(ev: dict[str, Any]) -> bool:
     return a.get("venue") == "hyperliquid" and a.get("market_type") == "perp" and bool(a.get("hl_tradable", True))
 
 
-def evaluate(db: Session, ev: dict[str, Any], action: str, plan: dict[str, Any] | None, *, stale_reason: str | None = None,
-             scenarios: dict[str, dict[str, Any] | None] | None = None) -> dict[str, Any]:
+def evaluate(db: Session | None, ev: dict[str, Any], action: str, plan: dict[str, Any] | None, *, stale_reason: str | None = None,
+             scenarios: dict[str, dict[str, Any] | None] | None = None, ctx: GateContext | None = None) -> dict[str, Any]:
     """The execution block of a run. WAIT: NOT_APPLICABLE, and each evidence scenario (scenarios = {"LONG": plan, "SHORT":
-    plan}) is still run through the engine so the run can say why no trade would be approved right now."""
+    plan}) is still run through the engine so the run can say why no trade would be approved right now. `ctx` omitted: the
+    live context(db), built once and only when a trade is evaluated; given: the database is never read."""
+    box: list[GateContext] = [ctx] if ctx is not None else []
+
+    def get_ctx() -> GateContext:
+        if not box:
+            if db is None:
+                raise ValueError("the risk gate needs a database or a GateContext")
+            box.append(context(db))
+        return box[0]
+
     if not _hl_perp(ev):
         return _result("NOT_APPLICABLE", (["no trade proposed"] if action not in ("LONG", "SHORT") else [])
                        + ["execution only on Hyperliquid perpetuals"], [])
@@ -156,21 +236,20 @@ def evaluate(db: Session, ev: dict[str, Any], action: str, plan: dict[str, Any] 
         for side, p in (scenarios or {}).items():
             if not p:
                 continue
-            sub = _trade(db, ev, side, p, None)
+            sub = _trade(get_ctx(), ev, side, p, None)
             checks += [{**c, "name": f"{side.lower()} scenario · {c['name']}"} for c in sub["checks"]]
             reasons.append(f"{side.lower()} scenario now: " + ("the risk engine would approve it" if sub["status"] == "APPROVED"
                                                                else "; ".join(sub["reasons"][:3])))
         return _result("NOT_APPLICABLE", reasons, checks)
-    return _trade(db, ev, action, plan, stale_reason)
+    return _trade(get_ctx(), ev, action, plan, stale_reason)
 
 
-def _trade(db: Session, ev: dict[str, Any], action: str, plan: dict[str, Any] | None, stale_reason: str | None) -> dict[str, Any]:
+def _trade(ctx: GateContext, ev: dict[str, Any], action: str, plan: dict[str, Any] | None, stale_reason: str | None) -> dict[str, Any]:
     asset, price = ev.get("asset") or {}, ev.get("price") or {}
     if plan is None:
         checks = [_check("stop-loss and targets from the evidence", False, why="no plan from the evidence scenarios")]
         return _result("REJECTED", _reasons(checks), checks)
-    s = _settings(db)
-    ref = reference(db)
+    s, ref = ctx.settings, ctx.reference
     fund = (((ev.get("sections") or {}).get("fundamental") or {}).get("facts") or {})
     senti = (((ev.get("sections") or {}).get("sentiment") or {}).get("facts") or {})
     tech = (((ev.get("sections") or {}).get("technical") or {}))
@@ -190,19 +269,25 @@ def _trade(db: Session, ev: dict[str, Any], action: str, plan: dict[str, Any] | 
                f"system {risk.HARD_MAX_LEVERAGE}x, market {market_max}x)", why=f"leverage {int(ref['leverage'])}x is over the cap of {cap}x"),
         _check("stop-loss set", plan.get("stop") is not None, plan.get("stop"), why="no stop-loss"),
     ]
+    sz, sz_from = lot_size(coin, fund, ctx)
+    checks.append(_check("lot size known (szDecimals)", sz is not None, f"{sz} decimals ({sz_from})" if sz is not None else "unknown",
+                         why=f"lot size (szDecimals) unknown: {sz_from}"))
     reasons = []
     if stale_reason:
         reasons.append(stale_reason)
-    bk = paper.book_state(db, utcnow())
+    bk = ctx.book
     n_open, day_pnl, week_pnl, exposure = bk["open"], bk["day_pnl"], bk["week_pnl"], bk["exposure"]
     equity = float(ref["equity"])
     max_loss = round(equity * float(ref["risk_pct"]) / 100, 2)
+    if sz is None:  # no sizing without the lot size: refused by the check above, nothing guessed
+        reasons += [r for r in _reasons(checks) if r not in reasons]
+        return _result("REJECTED", reasons, checks)
     p = risk.plan_trade(coin=coin, side=action, mark=mark, entry_zone=(plan["entry_zone"][0], plan["entry_zone"][1]), stop=float(plan["stop"]),
                         target=float(plan["targets"][0]), sig_lev_hi=int(ref["leverage"]), market_max_lev=market_max,
-                        sz_decimals=int(fund.get("sz_decimals") or 2), equity=equity, max_leverage=int(ref["max_leverage"]),
+                        sz_decimals=sz, equity=equity, max_leverage=int(ref["max_leverage"]),
                         max_loss_usd=max_loss, max_allocation_pct=float(ref["max_allocation_pct"]), max_positions=int(ref["max_positions"]),
                         open_positions=n_open, daily_pnl=day_pnl, daily_loss_limit=float(ref["daily_loss_limit_usd"]), allowed=[],
-                        paused=bool(ref["paused"]), global_paused=bool(s and s.paused), trades_today=bk["trades_today"])
+                        paused=bool(ref["paused"]), global_paused=bool(s and s.paused), trades_today=int(bk.get("trades_today", 0)))
     checks.append(_check("risk engine sizing (risk.plan_trade)", p.ok,
                          f"${p.notional:,.2f} at {p.leverage}x, loss at stop ${p.max_loss_usd:,.2f}" if p.ok else "; ".join(p.reasons),
                          f"max loss ${max_loss:,.2f} ({ref['risk_pct']:g}% of ${equity:,.0f})", why="; ".join(p.reasons)))
@@ -223,7 +308,7 @@ def _trade(db: Session, ev: dict[str, Any], action: str, plan: dict[str, Any] | 
     if rcfg.get("enabled", True):
         fr = ((tech.get("facts") or {}).get("frames") or {}).get(ev.get("timeframe") or "1h") or {}
         rng = fr.get("last_range")
-        rv = riskteam.review(riskteam.context(db), rcfg, coin, action, float(rng or 0), float(fr["atr14"]) if rng and fr.get("atr14") else None)
+        rv = riskteam.review(ctx.team, rcfg, coin, action, float(rng or 0), float(fr["atr14"]) if rng and fr.get("atr14") else None)
         for v in rv["votes"]:
             checks.append(_check(f"risk team: {v['label']}", v["vote"] != "veto", f"{v['vote']}: {v['detail']}", why=f"{v['label']}: {v['detail']}"))
     ok = all(c["ok"] for c in checks)

@@ -10,6 +10,7 @@ import random
 import statistics
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -98,11 +99,8 @@ def _cfg(**kw: Any) -> cbt.Config:
 
 
 def _decide(ds: cbt.Dataset, points: list[tuple[str, int, int]]) -> tuple[list[cbt.Decision], dict[Any, Any], cbt.TimeMachine]:
-    gate = cbt._gate_db()
-    try:
-        return asyncio.run(cbt.rules_decisions(_cfg(mode="llm"), ds, points, gate, cbt.Regimes(ds.candles[("BTC", "1d")])))
-    finally:
-        gate.close()
+    sim = cbt.PaperSim(cbt.Book({c: ds.series(c, "4h") for c in BASE}, ds.funding), "committee_rules")
+    return asyncio.run(cbt.rules_decisions(_cfg(mode="llm"), ds, points, cbt.Regimes(ds.candles[("BTC", "1d")]), sim))
 
 
 # ---------------------------------------------------------------- leakage
@@ -399,3 +397,65 @@ def test_importing_the_backtest_loads_no_execution_module() -> None:
                          env={**os.environ, "PYTHONPATH": os.pathsep.join([os.environ.get("PYTHONPATH", ""), str(root)])})
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.strip() == "[]"
+
+
+# ---------------------------------------------------------------- the risk gate's lot size and point-in-time context
+def _ctx(t: datetime | None = None, book: dict[str, Any] | None = None) -> Any:
+    from app.committee import risk_gate
+
+    return risk_gate.GateContext(t or datetime(2026, 10, 23, 12, tzinfo=timezone.utc), None, risk_gate.reference_of(None, 10_000.0, 0.5),
+                                 book or {"open": 0, "day_pnl": 0.0, "week_pnl": 0.0, "exposure": [], "trades_today": 0})
+
+
+def test_gate_takes_the_lot_size_from_evidence_or_market_list_and_refuses_without_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.committee import risk_gate, roles
+    from tests.committee_fixtures import btc
+
+    ev = btc()
+    plan = roles.plan_from(ev, "LONG")
+    ok = risk_gate.evaluate(None, ev, "LONG", plan, ctx=_ctx())  # a context: no database needed at all
+    assert ok["status"] == "APPROVED", ok["reasons"]
+    assert any(c["name"] == "lot size known (szDecimals)" and "evidence" in (c["value"] or "") for c in ok["checks"])
+    del ev["sections"]["fundamental"]["facts"]["sz_decimals"]
+    monkeypatch.setattr(market, "_shared", MarketData(transport=httpx.MockTransport(_hl)))  # lists BTC with szDecimals 4
+    via_list = risk_gate.evaluate(None, ev, "LONG", plan, ctx=_ctx())
+    assert via_list["status"] == "APPROVED"
+    assert any(c["name"] == "lot size known (szDecimals)" and "market list" in (c["value"] or "") for c in via_list["checks"])
+    monkeypatch.setattr(market, "_shared", MarketData(transport=httpx.MockTransport(lambda r: httpx.Response(503, text="down"))))
+    refused = risk_gate.evaluate(None, ev, "LONG", plan, ctx=_ctx())
+    assert refused["status"] == "REJECTED" and any(r.startswith("lot size (szDecimals) unknown") for r in refused["reasons"])
+    assert not any("risk engine sizing" in c["name"] for c in refused["checks"])  # nothing sized on a guessed lot size
+
+
+def test_gate_context_book_limits_apply_point_in_time() -> None:
+    from app.committee import risk_gate, roles
+    from tests.committee_fixtures import btc
+
+    ev = btc()
+    plan = roles.plan_from(ev, "LONG")
+    full = {"open": 2, "day_pnl": 0.0, "week_pnl": 0.0, "exposure": [{"side": "LONG", "notional": 900.0, "margin": 300.0}] * 2, "trades_today": 2}
+    r = risk_gate.evaluate(None, ev, "LONG", plan, ctx=_ctx(book=full))
+    assert r["status"] == "REJECTED" and any("positions open" in x for x in r["reasons"])
+    lost = {"open": 0, "day_pnl": -200.0, "week_pnl": -200.0, "exposure": [], "trades_today": 1}
+    r = risk_gate.evaluate(None, ev, "LONG", plan, ctx=_ctx(book=lost))
+    assert r["status"] == "REJECTED" and any("daily loss limit" in x for x in r["reasons"])
+
+
+def test_paper_sim_shows_the_gate_only_what_was_known_then(world: cbt.Dataset) -> None:
+    book = _book(world)
+    f = book.series["BTC"]
+    i = 400
+    nxt = f.o[i + 1]
+    d = cbt.Decision("BTC", f.t[i] + 4 * H, i, "LONG", exec_status="APPROVED",
+                     plan={"entry_zone": [nxt, nxt], "stop": nxt * 0.97, "targets": [nxt * 1.03, nxt * 1.06]})
+    sim = cbt.PaperSim(book, "c", None, 10_000.0, 0.5)
+    before = sim.context(d.t - 1)
+    sim.add(d, {"notional": 1000.0, "margin": 333.0, "max_loss_usd": 50.0})
+    (tr,) = sim.trades
+    during, after = sim.context(tr.t_exit - 1), sim.context(tr.t_exit)
+    assert before.book["open"] == 0 and during.book["open"] == 1 and during.book["exposure"][0]["notional"] == 1000.0
+    assert during.reference["equity"] == 10_000.0 and during.book["week_pnl"] == 0.0  # the exit isn't known yet
+    assert after.book["open"] == 0 and after.reference["equity"] == pytest.approx(10_000.0 + tr.r_net * 50.0, abs=0.01)
+    assert after.book["week_pnl"] == pytest.approx(tr.r_net * 50.0)
+    sim.add(replace(d, t=d.t + DAY // 2, i=d.i + 3), None)  # the same coin while open: not booked
+    assert sim.skipped["a position on this coin is still open"] == (1 if d.t + DAY // 2 < tr.t_exit else 0)

@@ -387,8 +387,16 @@ async def test_backtest_pack_never_leaks_later_data(world: World, db: Any) -> No
     for name in ("news",):
         assert p["sections"][name]["status"] == "unavailable"
         assert any(common.NO_HISTORY in x for x in p["sections"][name]["limitations"])
-    assert p["sections"]["fundamental"]["status"] == "unavailable"
-    assert any(common.NO_HISTORY in x for x in p["sections"]["fundamental"]["limitations"])
+    # fundamentals in a backtest: only what has a point in time - the 24h volume from the closed candles before as_of (never
+    # the poisoned later ones) and Hyperliquid's lot size (a static instrument spec, labelled); the rest is unavailable
+    fu = p["sections"]["fundamental"]
+    assert fu["status"] == "partial" and any(common.NO_HISTORY in x for x in fu["limitations"])
+    assert fu["facts"]["sz_decimals"] == 5 and any("static instrument spec" in x for x in fu["limitations"])
+    end = int(as_of.timestamp() * 1000)
+    hours = [t0 for t0 in range((end - 24 * H) // H * H, end, H) if t0 >= end - 24 * H and t0 + H <= end]
+    want = sum(c.v * c.c for c in (world.candle(80_000.0, t0, H) for t0 in hours))
+    assert fu["facts"]["volume_24h_usd"] == pytest.approx(want, rel=1e-5)
+    assert "max_leverage" not in fu["facts"] and "oi_usd" not in fu["facts"] and "spread_bps" not in fu["facts"]
     assert any("community mentions: " + common.NO_HISTORY == x for x in s["limitations"])
     hosts = {httpx.URL(u).host for _, u, _ in world.requests}
     assert not hosts & {"api.coingecko.com", "www.coindesk.com", "cointelegraph.com", "decrypt.co"}

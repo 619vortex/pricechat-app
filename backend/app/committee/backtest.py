@@ -28,8 +28,10 @@ Honest-by-construction (the same rules as app.tradingos.backtest / lab, whose fu
   - costs: taker fee 0.045% per fill, slippage per side 0.02% BTC/ETH, 0.05% others, real hourly Hyperliquid funding.
   - portfolio (every strategy alike): backtest.portfolio - at most 2 open, one per coin, 0.5% of equity risked per trade,
     no new trades on a day after -2%.
-  - the risk gate runs against an isolated in-memory database: the reference paper account with an empty book (the live paper
-    book and live kitchen signals are "now", not "then"), the owner's current risk settings copied in, the global pause ignored.
+  - the risk gate (the live code) gets an explicit point-in-time context (risk_gate.GateContext): the decision time, a snapshot
+    of the owner's current settings (global pause ignored), and the backtest's OWN reference paper book at that moment (open
+    committee trades, today's / the week's realised P&L, trades today, equity = paper start equity + realised P&L), built only
+    from trades decided before and exits that happened by then. No kitchen signals are replayed (the Risk Team desks see none).
 
 Evaluation (all pre-declared, nothing tuned; the committee has no tuned parameters):
   - chronological split: SELECTION = the first 60% of the period, HOLDOUT = the last 40%; walk-forward: 4 consecutive folds.
@@ -117,10 +119,13 @@ LIMITATIONS = [
     "Hyperliquid serves at most 5000 candles per interval: the 1h alignment frame exists only for roughly the last 208 days, so "
     "older decisions are made without it (counted in decisions.with_1h_frame).",
     "Coins are chosen today (survivorship); HYPE trades only since late 2024.",
-    "Hyperliquid's lot size (szDecimals) is today's, injected into the evidence for the risk gate (backtest evidence has no "
-    "Hyperliquid meta); max leverage is not injected, so the gate uses the reference account's 3x cap.",
-    "The risk gate runs on an empty reference paper book (each decision alone); portfolio limits are applied afterwards by "
-    "backtest.portfolio. Current owner risk settings are applied to the whole history; the global pause is ignored.",
+    "Hyperliquid's lot size (szDecimals) in backtest evidence is today's (a static instrument spec from the market list); "
+    "max leverage has no history, so the gate uses the reference account's 3x cap.",
+    "The risk gate sees the backtest's own paper book at each decision (point-in-time) but no kitchen signals (the Risk Team's "
+    "exposure / streak desks see none). Current owner risk settings apply to the whole history; the global pause is ignored. "
+    "backtest.portfolio is still applied afterwards, as for every strategy.",
+    "Liquidity in backtest evidence: 24h volume is computed from the closed candles before the decision (not the exchange "
+    "ticker); spread and order-book depth have no history and are 'unknown' (never block).",
     "Fees and slippage per strategy are estimated from the entry notional for both legs; funding is the remainder of the "
     "simulator's exact cost, so it absorbs that small estimation error.",
     "P&L is additive at 0.5% risk per trade; the live gate's notional cap (allocation x leverage) is not applied to the R results.",
@@ -554,31 +559,37 @@ def grid(cfg: Config, ds: Dataset) -> list[tuple[str, int, int]]:
     return sorted(out, key=lambda x: (x[2], x[0]))
 
 
-def _gate_db(real_db: Any = None) -> Any:
-    """An isolated in-memory database for the risk gate: no paper book, no kitchen signals (they are 'now', not 'then'); the
-    owner's current risk settings copied in (global pause off)."""
-    from sqlalchemy import select
+def _ledger_db() -> Any:
+    """LLM mode without a real database (the CLI): an in-memory one for the model router's routes and the call ledger only.
+    The risk gate never uses it (it gets a GateContext)."""
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
     import app.models  # noqa: F401 - every table
     from app.db.base import Base
     from app.db.session import build_engine
-    from app.models.tradingos import TsSettings
 
     eng = build_engine("sqlite://", poolclass=StaticPool)
     Base.metadata.create_all(eng)
-    s = sessionmaker(bind=eng, expire_on_commit=False)()
-    if real_db is not None:
-        try:
-            src = real_db.scalar(select(TsSettings).limit(1))
-        except Exception:  # noqa: BLE001 - no settings table: the defaults
-            src = None
-        if src is not None:
-            s.add(TsSettings(strategies=dict(src.strategies or {}), max_spread_bps=src.max_spread_bps, min_volume_usd=src.min_volume_usd,
-                             min_rr=src.min_rr, paused=False))
-            s.commit()
-    return s
+    return sessionmaker(bind=eng, expire_on_commit=False)()
+
+
+def settings_snapshot(real_db: Any = None) -> Any:
+    """The owner's current settings, detached (global pause off: a pause can't be replayed historically); None = defaults."""
+    if real_db is None:
+        return None
+    from sqlalchemy import select
+
+    from app.committee import risk_gate
+    from app.models.tradingos import TsSettings
+
+    try:
+        snap = risk_gate.snapshot(real_db.scalar(select(TsSettings).limit(1)))
+    except Exception:  # noqa: BLE001 - no settings table: the defaults
+        return None
+    if snap is not None:
+        snap.paused = False
+    return snap
 
 
 def _has_1h(ev: dict[str, Any]) -> bool:
@@ -598,45 +609,23 @@ async def _evidence(tm: TimeMachine, http: httpx.AsyncClient, db: Any, coin: str
         tm.cutoff = None
 
 
-def instrument_specs(coins: list[str]) -> dict[str, int]:
-    """Hyperliquid's lot size (szDecimals) per coin, from the current market snapshot: a static instrument spec, not market
-    data. Backtest evidence has no Hyperliquid meta (no point-in-time history), and without it the risk gate sizes with a
-    default of 2 decimals, which rounds a BTC order to zero and rejects every BTC trade as "under the $10 minimum"."""
-    from app.tradingos import market
-
-    try:
-        _, ms = market.data().markets()
-    except Exception:  # noqa: BLE001 - unreadable: the gate's own default, reported in the result
-        return {}
-    return {c: ms[c].sz_decimals for c in coins if c in ms}
-
-
-def _with_specs(ev: dict[str, Any], coin: str, specs: dict[str, int]) -> dict[str, Any]:
-    if coin not in specs:
-        return ev
-    f = ev["sections"]["fundamental"]
-    f["facts"]["sz_decimals"] = specs[coin]
-    f["limitations"] = [*f["limitations"], "sz_decimals: Hyperliquid's current lot size (a static instrument spec), for the risk gate's sizing"]
-    return ev
-
-
-async def rules_decisions(cfg: Config, ds: Dataset, points: list[tuple[str, int, int]], gate_db: Any, regimes: Regimes,
-                          progress: Any = None, specs: dict[str, int] | None = None
-                          ) -> tuple[list[Decision], dict[tuple[str, int], dict[str, Any]], TimeMachine]:
-    """The deterministic committee at every point. Also returns the evidence packs (by coin, time) for the LLM sample."""
+async def rules_decisions(cfg: Config, ds: Dataset, points: list[tuple[str, int, int]], regimes: Regimes, sim: PaperSim,
+                          progress: Any = None) -> tuple[list[Decision], dict[tuple[str, int], dict[str, Any]], TimeMachine]:
+    """The deterministic committee at every point, gated with the point-in-time context of `sim` (the committee's paper book,
+    which books every APPROVED trade). Also returns the evidence packs (by coin, time) for the LLM sample."""
     from app.committee import llm, orchestrator, roles
 
-    specs = instrument_specs(cfg.coins) if specs is None else specs
     tm = TimeMachine(ds)
     out: list[Decision] = []
     packs: dict[tuple[str, int], dict[str, Any]] = {}
     async with httpx.AsyncClient(transport=tm.transport()) as http:
         for n, (coin, i, t) in enumerate(points):
             try:
-                ev = _with_specs(await _evidence(tm, http, gate_db, coin, cfg.timeframe, t), coin, specs)
-                run = await orchestrator.run_committee(gate_db, coin, cfg.timeframe, mode="backtest",
+                ev = await _evidence(tm, http, None, coin, cfg.timeframe, t)
+                run = await orchestrator.run_committee(None, coin, cfg.timeframe, mode="backtest",  # type: ignore[arg-type]
                                                        as_of=datetime.fromtimestamp(t / 1000, tz=timezone.utc), evidence=ev,
-                                                       backend=llm.Backend(), persist=False, use_cache=False, depth=cfg.depth)
+                                                       backend=llm.Backend(), persist=False, use_cache=False, depth=cfg.depth,
+                                                       gate_ctx=sim.context(t))
             except Exception as e:  # noqa: BLE001 - recorded as an ERROR decision, never a crash of the whole backtest
                 out.append(Decision(coin, t, i, "ERROR", regime=regimes.at(t), note=f"{type(e).__name__}: {str(e)[:160]}"))
                 continue
@@ -645,8 +634,10 @@ async def rules_decisions(cfg: Config, ds: Dataset, points: list[tuple[str, int,
                 packs[(coin, t)] = ev
             ex = r.get("execution") or {}
             action = r["verdict"]["action"]
-            out.append(Decision(coin, t, i, action, r["verdict"].get("rating"), ex.get("status"), list(ex.get("reasons") or [])[:3],
-                                roles.plan_from(ev, action), regimes.at(t), "rules", _has_1h(ev)))
+            d = Decision(coin, t, i, action, r["verdict"].get("rating"), ex.get("status"), list(ex.get("reasons") or [])[:3],
+                         roles.plan_from(ev, action), regimes.at(t), "rules", _has_1h(ev))
+            out.append(d)
+            sim.add(d, ex.get("sizing"))
             if progress and n % 25 == 0:
                 progress(n + 1, len(points))
     return out, packs, tm
@@ -797,8 +788,8 @@ def _real_levels(ev: dict[str, Any]) -> list[float]:
     return vals
 
 
-async def llm_decisions(cfg: Config, ds: Dataset, sample: list[Decision], packs: dict[tuple[str, int], dict[str, Any]], gate_db: Any,
-                        backend: Any, real_db: Any = None) -> tuple[list[Decision], dict[str, Any]]:
+async def llm_decisions(cfg: Config, ds: Dataset, sample: list[Decision], packs: dict[tuple[str, int], dict[str, Any]], ledger_db: Any,
+                        backend: Any, sim: PaperSim, real_db: Any = None) -> tuple[list[Decision], dict[str, Any]]:
     """The LLM committee on the sample (anonymised evidence), the trade planned and gated on the real evidence."""
     from app.committee import llm, orchestrator, risk_gate, roles
 
@@ -828,25 +819,27 @@ async def llm_decisions(cfg: Config, ds: Dataset, sample: list[Decision], packs:
             out.append(replace(d, action="ERROR", author="llm", note="anonymisation refused: " + ", ".join(problems)))
             continue
         try:
-            run = await orchestrator.run_committee(gate_db, "ASSET", cfg.timeframe, mode="backtest", evidence=anon, backend=backend,
-                                                   persist=False, use_cache=False, depth=cfg.depth)
+            run = await orchestrator.run_committee(ledger_db, "ASSET", cfg.timeframe, mode="backtest", evidence=anon, backend=backend,
+                                                   persist=False, use_cache=False, depth=cfg.depth, gate_ctx=sim.context(d.t))
         except Exception as e:  # noqa: BLE001
             out.append(replace(d, action="ERROR", author="llm", note=f"{type(e).__name__}"))
             continue
         r, meta = run.result, run.result["meta"]
         action = r["verdict"]["action"]
         plan = roles.plan_from(ev, action)
-        ex = risk_gate.evaluate(gate_db, ev, action, plan, stale_reason=roles.data_guard(ev))
+        ex = risk_gate.evaluate(None, ev, action, plan, stale_reason=roles.data_guard(ev), ctx=sim.context(d.t))
         for k in ("calls", "tokens_in", "tokens_out"):
             info[k] += int(meta.get(k) or 0)
         info["cost_usd"] = round(info["cost_usd"] + float(meta.get("cost_usd") or 0), 6)
         if real_db is not None and meta.get("calls"):
             llm.record(real_db, int(meta.get("tokens_in") or 0), int(meta.get("tokens_out") or 0), float(meta.get("cost_usd") or 0))
         authors = {(v or {}).get("author") for v in (r.get("analysts") or {}).values()} | {r["verdict"].get("author")}
-        out.append(replace(d, action=action, rating=r["verdict"].get("rating"), exec_status=ex["status"], exec_reasons=ex["reasons"][:3],
-                           plan=plan if action in ("LONG", "SHORT") else None, author=",".join(sorted(a for a in authors if a)),
-                           calls=int(meta.get("calls") or 0), tokens_in=int(meta.get("tokens_in") or 0), tokens_out=int(meta.get("tokens_out") or 0),
-                           cost_usd=float(meta.get("cost_usd") or 0), note="; ".join(meta.get("degraded") or [])[:300] or None))
+        nd = replace(d, action=action, rating=r["verdict"].get("rating"), exec_status=ex["status"], exec_reasons=ex["reasons"][:3],
+                     plan=plan if action in ("LONG", "SHORT") else None, author=",".join(sorted(a for a in authors if a)),
+                     calls=int(meta.get("calls") or 0), tokens_in=int(meta.get("tokens_in") or 0), tokens_out=int(meta.get("tokens_out") or 0),
+                     cost_usd=float(meta.get("cost_usd") or 0), note="; ".join(meta.get("degraded") or [])[:300] or None)
+        out.append(nd)
+        sim.add(nd, ex.get("sizing"))
     return out, info
 
 
@@ -867,6 +860,34 @@ class Book:
     funding: dict[str, list[tuple[int, float]]]
 
 
+HISTORY_ENDED = "history ended before the trade finished"
+INF = 1 << 62
+
+
+def simulate_decision(d: Decision, book: Book, name: str) -> tuple[bt.Trade | None, str | None]:
+    """(trade, None) or (None, why it wasn't traded): entry at the next open + slippage, skipped beyond the stop or TP1, TP1 half /
+    TP2 rest (one target: all at TP1), stop first, fees, real funding, 14-day time stop (backtest.simulate)."""
+    f, fund = book.series[d.coin], book.funding.get(d.coin, [])
+    i = d.i
+    if i + 1 >= len(f.t) or not d.plan:
+        return None, "no next candle" if d.plan else "no plan"
+    long, sg, sl = d.action == "LONG", (1 if d.action == "LONG" else -1), bt.slip(d.coin)
+    entry = f.o[i + 1] * (1 + sg * sl)
+    stop, tgs = float(d.plan["stop"]), [float(x) for x in d.plan["targets"]]
+    if (long and entry <= stop) or (not long and entry >= stop):
+        return None, "opened beyond the stop"
+    if (long and entry >= tgs[0]) or (not long and entry <= tgs[0]):
+        return None, "opened beyond TP1"
+    if len(tgs) >= 2:
+        r = bt.simulate(f, i, d.action, stop, 1.0, 0.0, MAX_HOLD_MIN, d.coin, fund, fixed_targets=(tgs[0], tgs[1]))
+    else:
+        r = bt.simulate(f, i, d.action, stop, None, 0.0, MAX_HOLD_MIN, d.coin, fund, fixed_targets=(tgs[0], tgs[0]))
+    if r is None:
+        return None, HISTORY_ENDED
+    return bt.Trade(d.coin, name, d.action, d.regime, d.t, r["t_entry"], r["t_exit"], r["entry"], stop, r["r_net"], r["r_gross"],
+                    r["cost_r"], r["exit"], r["hold_min"]), None
+
+
 def committee_trades(decisions: list[Decision], book: Book, name: str, gated: bool = True) -> tuple[list[bt.Trade], Counter[str]]:
     trades: list[bt.Trade] = []
     skipped: Counter[str] = Counter()
@@ -879,31 +900,69 @@ def committee_trades(decisions: list[Decision], book: Book, name: str, gated: bo
         if d.t < last_exit.get(d.coin, 0):
             skipped["a position on this coin is still open"] += 1
             continue
-        f, fund = book.series[d.coin], book.funding.get(d.coin, [])
-        i = d.i
-        if i + 1 >= len(f.t):
-            skipped["no next candle"] += 1
+        tr, why = simulate_decision(d, book, name)
+        if tr is None:
+            skipped[why or "?"] += 1
             continue
-        long, sg, sl = d.action == "LONG", (1 if d.action == "LONG" else -1), bt.slip(d.coin)
-        entry = f.o[i + 1] * (1 + sg * sl)
-        stop, tgs = float(d.plan["stop"]), [float(x) for x in d.plan["targets"]]
-        if (long and entry <= stop) or (not long and entry >= stop):
-            skipped["opened beyond the stop"] += 1
-            continue
-        if (long and entry >= tgs[0]) or (not long and entry <= tgs[0]):
-            skipped["opened beyond TP1"] += 1
-            continue
-        if len(tgs) >= 2:
-            r = bt.simulate(f, i, d.action, stop, 1.0, 0.0, MAX_HOLD_MIN, d.coin, fund, fixed_targets=(tgs[0], tgs[1]))
-        else:
-            r = bt.simulate(f, i, d.action, stop, None, 0.0, MAX_HOLD_MIN, d.coin, fund, fixed_targets=(tgs[0], tgs[0]))
-        if r is None:
-            skipped["history ended before the trade finished"] += 1
-            continue
-        trades.append(bt.Trade(d.coin, name, d.action, d.regime, d.t, r["t_entry"], r["t_exit"], r["entry"], stop, r["r_net"], r["r_gross"],
-                               r["cost_r"], r["exit"], r["hold_min"]))
-        last_exit[d.coin] = r["t_exit"]
+        trades.append(tr)
+        last_exit[d.coin] = tr.t_exit
     return trades, skipped
+
+
+class PaperSim:
+    """The backtest's reference PAPER book, the risk gate's point-in-time context. Every APPROVED decision is booked in time
+    order: simulated (simulate_decision), or skipped (its entry never filled, active until the next candle's open). A trade
+    whose exit the history doesn't reach stays open. At time t the gate sees only what was knowable at t: trades decided
+    before, their exits that happened by t, the realised P&L of those (r_net x the gate's loss at the stop), the equity."""
+
+    def __init__(self, book: Book, name: str, settings: Any = None, start_equity: float = 10_000.0, risk_pct: float = 0.5) -> None:
+        self.book, self.name, self.settings = book, name, settings
+        self.start_equity, self.risk_pct = float(start_equity), float(risk_pct)
+        self.entries: list[dict[str, Any]] = []
+        self.trades: list[bt.Trade] = []
+        self.skipped: Counter[str] = Counter()
+        self.last_exit: dict[str, int] = {}
+
+    def context(self, t: int) -> Any:
+        from app.committee import risk_gate
+
+        day0, week0 = t // DAY * DAY, t - 7 * DAY
+        closed = [e for e in self.entries if e["t_exit"] is not None and e["t_exit"] <= t]
+        active = [e for e in self.entries if e["decided"] <= t < e["until"]]
+        equity = self.start_equity + sum(e["pnl"] for e in closed)
+        book = {"open": len(active), "day_pnl": sum(e["pnl"] for e in closed if e["t_exit"] >= day0),
+                "week_pnl": sum(e["pnl"] for e in closed if e["t_exit"] >= week0),
+                "exposure": [{"side": e["side"], "notional": e["notional"], "margin": e["margin"]} for e in active],
+                "trades_today": sum(1 for e in self.entries if e["decided"] >= day0 and not (e["skipped"] and t >= e["until"]))}
+        return risk_gate.GateContext(datetime.fromtimestamp(t / 1000, tz=timezone.utc), self.settings,
+                                     risk_gate.reference_of(self.settings, round(equity, 2), self.risk_pct), book)
+
+    def add(self, d: Decision, sizing: dict[str, Any] | None) -> None:
+        if d.action not in ("LONG", "SHORT") or d.exec_status != "APPROVED" or not d.plan:
+            return
+        if d.t < self.last_exit.get(d.coin, 0):
+            self.skipped["a position on this coin is still open"] += 1
+            return
+        sz = sizing or {}
+        notional, margin = float(sz.get("notional") or 0.0), float(sz.get("margin") or 0.0)
+        tr, why = simulate_decision(d, self.book, self.name)
+        f = self.book.series[d.coin]
+        if tr is None:
+            self.skipped[why or "?"] += 1
+            if why == HISTORY_ENDED:  # still open when the history ends
+                self.entries.append({"coin": d.coin, "side": d.action, "decided": d.t, "until": INF, "t_exit": None, "pnl": 0.0,
+                                     "notional": notional, "margin": margin, "skipped": False})
+                self.last_exit[d.coin] = INF
+            else:  # never filled: pending until the next candle's open
+                until = f.t[d.i + 1] if d.i + 1 < len(f.t) else d.t
+                self.entries.append({"coin": d.coin, "side": d.action, "decided": d.t, "until": until, "t_exit": None, "pnl": 0.0,
+                                     "notional": notional, "margin": margin, "skipped": True})
+            return
+        loss = float(sz.get("max_loss_usd") or self.start_equity * self.risk_pct / 100)
+        self.entries.append({"coin": d.coin, "side": d.action, "decided": d.t, "until": tr.t_exit, "t_exit": tr.t_exit,
+                             "pnl": tr.r_net * loss, "notional": notional, "margin": margin, "skipped": False})
+        self.trades.append(tr)
+        self.last_exit[d.coin] = tr.t_exit
 
 
 def ema_cross_trades(points: list[tuple[str, int, int]], book: Book, regimes: Regimes) -> list[bt.Trade]:
@@ -1055,7 +1114,12 @@ async def run_backtest(cfg: Config, ds: Dataset, *, real_db: Any = None, backend
     p = Period(points[0][2], end)
     starts = {c: min((t for cc, _, t in points if cc == c), default=p.start) for c in cfg.coins}
     book = Book({c: ds.series(c, cfg.timeframe) for c in cfg.coins}, {c: ds.funding.get(c, []) for c in cfg.coins})
-    gate_db = _gate_db(real_db)
+    from app.committee import paper
+
+    snap = settings_snapshot(real_db)
+    pc = paper.config(real_db) if real_db is not None else dict(paper.DEFAULTS)
+    sim = PaperSim(book, "committee_rules", snap, pc["paper_start_equity"], pc["paper_risk_pct"])
+    ledger_db = None
     try:
         if cfg.mode == "llm":
             # rules decisions are needed only on the sample: pick the sample from the grid first (evenly spaced), then decide
@@ -1064,13 +1128,12 @@ async def run_backtest(cfg: Config, ds: Dataset, *, real_db: Any = None, backend
             points_run = [x for x in points if (x[0], x[2]) in chosen]
         else:
             points_run = points
-        specs = instrument_specs(cfg.coins)
-        rules, packs, tm = await rules_decisions(cfg, ds, points_run, gate_db, regimes, progress, specs)
+        rules, packs, tm = await rules_decisions(cfg, ds, points_run, regimes, sim, progress)
         result: dict[str, Any] = {"config": asdict(cfg), "period": {"start": iso(p.start), "end": iso(p.end), "selection_until": iso(p.cut),
                                                                     "folds": [[iso(a), iso(b)] for a, b in p.folds()]},
                                   "methodology": __doc__.split("Run:")[0].strip(), "limitations": list(LIMITATIONS)}
         strategies: dict[str, Any] = {}
-        c_tr, c_skip = committee_trades(rules, book, "committee_rules")
+        c_tr, c_skip = sim.trades, sim.skipped
         u_tr, _ = committee_trades(rules, book, "committee_rules_ungated", gated=False)
         decisions = {"committee_rules": _summary(rules, c_skip)}
         strategies["committee_rules"] = evaluate(bt.portfolio(c_tr), p, 0.0, "deterministic committee, rules backend; trades only when the "
@@ -1082,7 +1145,9 @@ async def run_backtest(cfg: Config, ds: Dataset, *, real_db: Any = None, backend
             be = backend
             why = None
             if be is None:
-                be, why = await llm.choose(real_db if real_db is not None else gate_db, provider, gate)
+                ledger_db = real_db if real_db is not None else _ledger_db()
+                be, why = await llm.choose(ledger_db, provider, gate)
+            l_sim = PaperSim(book, "committee_llm", snap, pc["paper_start_equity"], pc["paper_risk_pct"])
             if be.name == "rules":
                 info = {"backend": "rules", "skipped": f"no model backend available ({why or 'rules backend configured'}); LLM mode not run"}
                 l_dec: list[Decision] = []
@@ -1090,9 +1155,11 @@ async def run_backtest(cfg: Config, ds: Dataset, *, real_db: Any = None, backend
                 info = {"backend": be.name, "skipped": "a paid backend needs llm_max_usd > 0; LLM mode not run"}
                 l_dec = []
             else:
-                l_dec, info = await llm_decisions(cfg, ds, rules, packs, gate_db, be, real_db)
+                if ledger_db is None:
+                    ledger_db = real_db if real_db is not None else _ledger_db()
+                l_dec, info = await llm_decisions(cfg, ds, rules, packs, ledger_db, be, l_sim, real_db)
             info["contamination_note"] = CONTAMINATION_NOTE
-            l_tr, l_skip = committee_trades(l_dec, book, "committee_llm")
+            l_tr, l_skip = (l_sim.trades, l_sim.skipped) if l_dec else ([], Counter())
             decisions["committee_llm"] = _summary(l_dec, l_skip)
             strategies["committee_llm"] = evaluate(bt.portfolio(l_tr), p, float(info.get("cost_usd") or 0.0),
                                                    f"LLM committee ({info.get('backend')}), anonymised evidence, {len(l_dec)} sampled decisions")
@@ -1113,8 +1180,9 @@ async def run_backtest(cfg: Config, ds: Dataset, *, real_db: Any = None, backend
                              "decision_points": dict(Counter(regimes.at(t) for _, _, t in points))}
         result["inference"] = {"rules_usd": 0.0, "llm": {k: result.get("llm", {}).get(k) for k in ("backend", "calls", "tokens_in", "tokens_out", "cost_usd")}
                                if cfg.mode == "llm" else None}
-        result["instrument_specs"] = {"sz_decimals": specs, "note": "Hyperliquid's current lot sizes (static), injected into the "
-                                      "backtest evidence for the risk gate's sizing" if specs else "unavailable: the gate's default sizing was used"}
+        result["gate_context"] = {"settings": "owner's current settings (snapshot, global pause off)" if snap is not None else "column defaults",
+                                  "paper_start_equity": pc["paper_start_equity"], "paper_risk_pct": pc["paper_risk_pct"],
+                                  "book": "the backtest's own committee paper book, point-in-time", "kitchen_signals": "none replayed"}
         result["point_in_time"] = {"time_machine_requests": dict(tm.requests), "evidence_mode": "backtest",
                                    "check": "every candle served closed by its decision time; funding / F&G published by then"}
         result["trades_committee_rules"] = _compact(c_tr)
@@ -1122,7 +1190,8 @@ async def run_backtest(cfg: Config, ds: Dataset, *, real_db: Any = None, backend
         result["duration_s"] = round(time.time() - started, 1)
         return result
     finally:
-        gate_db.close()
+        if ledger_db is not None and ledger_db is not real_db:
+            ledger_db.close()
 
 
 # ---------------------------------------------------------------- markdown tables
@@ -1211,7 +1280,7 @@ def markdown(r: dict[str, Any]) -> str:
             L.append(f"- **{k}**: {v['note']}")
     L.append("\n## Limitations\n")
     L += [f"- {x}" for x in r["limitations"]]
-    L.append(f"\nInstrument specs: {r.get('instrument_specs')}\n")
+    L.append(f"\nRisk-gate context: {r.get('gate_context')}\n")
     L.append(f"Point-in-time: {r['point_in_time']}\n")
     return "\n".join(L) + "\n"
 

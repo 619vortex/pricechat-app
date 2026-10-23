@@ -167,6 +167,21 @@ def _candle_source(listing: venues.Listing, tf: str) -> tuple[str, str | None]:
     return f"{venues.NAME[listing.venue]} {listing.symbol} {tf} candles", None
 
 
+def vol_tf(frames: dict[str, list[Candle]]) -> str | None:
+    return next((tf for tf in ("1h", "4h", "1d") if frames.get(tf)), None)
+
+
+def _volume_24h(frames: dict[str, list[Candle]], as_of: datetime) -> float | None:
+    """Notional volume of the 24 h before as_of from closed candles (finest frame that covers them), or None."""
+    end = as_of.timestamp() * 1000
+    for tf in ("1h", "4h", "1d"):
+        cs = frames.get(tf) or []
+        span = INTERVALS[tf] * 1000
+        if cs and cs[0].t <= end - 86_400_000 and cs[-1].t + span >= end - span:
+            return sum(c.v * c.c for c in cs if c.t >= end - 86_400_000 and c.t + span <= end)
+    return None
+
+
 # ---------------------------------------------------------------- signal
 def _settings(db: Any) -> tuple[float, float, float]:
     """The admin's signal rule settings, read without creating the row (defaults = the column defaults)."""
@@ -326,7 +341,16 @@ async def _build(db: Any, symbol: str, timeframe: str, as_of: datetime, mode: st
     flim = ["token unlocks: no verified unlock-schedule source is configured"]
     frefs: list[str] = []
     if bt:
-        flim.append(f"exchange listings, volume, Hyperliquid meta and CoinGecko: {NO_HISTORY}")
+        flim.append(f"exchange listings, Hyperliquid meta (leverage, OI, spread) and CoinGecko: {NO_HISTORY}")
+        if hl and hl_market is not None:  # a static instrument spec, not market data: today's value applies to the past
+            ff["sz_decimals"] = hl_market.sz_decimals
+            flim.append("sz_decimals: Hyperliquid's current lot size from the market list (a static instrument spec)")
+        vol = _volume_24h(frames, as_of)
+        if vol is not None:
+            ff["volume_24h_usd"] = rnd(vol)
+            frefs.append(refs.add("F", f"24h volume = sum of volume x close of the closed {vol_tf(frames)} candles in the 24 h before as_of",
+                                  None, iso(as_of), fetched()))
+            flim.append("24h volume is computed from the closed candles before as_of (point-in-time), not the exchange's 24h ticker")
     else:
         if hl and hl_market is not None:
             r = refs.add("F", "Hyperliquid metaAndAssetCtxs", HL_API, iso(hl_at), iso(hl_at))
