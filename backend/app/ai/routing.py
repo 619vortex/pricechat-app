@@ -63,6 +63,11 @@ TASKS: dict[str, TaskSpec] = {
         TaskSpec("kiwi.ask", "Ask Kiwi", "Answer a member's question about their trading bot from logged evidence only", ModelTier.STRONG, 0.2, 1200),
         TaskSpec("kiwi.risk_memo", "Risk team memo", "Explain the risk desks' decision on a kitchen setup from their numbers only", ModelTier.FAST, 0.2, 300),
         TaskSpec("kiwi.teach", "Teach Your Kiwi", "Turn a member's plain-language trading rule into the supported config fields", ModelTier.FAST, 0.0, 700),
+        TaskSpec("committee.analyst", "Committee analysts", "Kiwi AI Investment Committee: technical / fundamental / news / sentiment reads of one evidence pack", ModelTier.FAST, 0.2, 900),
+        TaskSpec("committee.debate", "Committee bull / bear debate", "Kiwi AI Investment Committee: the bull and bear cases (one round, one rebuttal) from the evidence only", ModelTier.STRONG, 0.4, 900),
+        TaskSpec("committee.trader", "Committee trader", "Kiwi AI Investment Committee: LONG / SHORT / WAIT, choosing among the evidence's own scenarios", ModelTier.FAST, 0.1, 600),
+        TaskSpec("committee.risk", "Committee risk panel", "Kiwi AI Investment Committee: aggressive / neutral / conservative views of the trader's proposal", ModelTier.FAST, 0.2, 900),
+        TaskSpec("committee.synthesis", "Committee managers", "Kiwi AI Investment Committee: research manager rating and portfolio manager verdict", ModelTier.STRONG, 0.2, 900),
     )
 }
 

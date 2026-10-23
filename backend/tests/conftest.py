@@ -21,6 +21,10 @@ os.environ["GOOGLE_MEMBER_CLIENT_ID"] = ""  # tests configure the sign-in client
 os.environ["GOOGLE_MEMBER_CLIENT_SECRET"] = ""
 os.environ["RESEND_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
+for _k in ("COMMITTEE_MODEL_FAST", "COMMITTEE_MODEL_DEEP", "COMMITTEE_MODEL_SYNTH", "COMMITTEE_COSTS"):  # the committee: no paid models
+    os.environ[_k] = ""
+os.environ["COMMITTEE_BACKEND"] = "auto"
 os.environ["PORTFOLIO_BUCKET"] = ""
 os.environ["PORTFOLIO_UPLOAD_DIR"] = tempfile.mkdtemp(prefix="pricechat-uploads-")
 os.environ["TIMEZONE"] = "UTC"

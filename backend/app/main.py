@@ -49,6 +49,7 @@ from app.api.routes import (
     exchange,
     vault,
     brand_manager,
+    committee,
     short_market,
     tradingbot,
     tradingos,
@@ -343,7 +344,7 @@ def create_app(
     for module in (
         health, overview, agent, brand, model, knowledge, content, connectors, activity, settings, api_keys,
         telegram, telegram_account, community, opportunities, jobs, x, social, growth, analytics, youtube, website,
-        members, members_admin, admin, pokemon, portfolio, market, exchange, vault, brand_manager, short_market, invites, system, tradingbot, tradingos, trading, kiwibrain, arbitrage, burner, workers, rewards, home, seo, vpn, vortex,
+        members, members_admin, admin, pokemon, portfolio, market, exchange, vault, brand_manager, short_market, invites, system, tradingbot, tradingos, trading, kiwibrain, arbitrage, burner, workers, rewards, home, seo, vpn, vortex, committee,
     ):
         app.include_router(module.router, prefix="/api")
 
