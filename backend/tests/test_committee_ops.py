@@ -284,8 +284,8 @@ def test_api_status_runs_and_placeholders(client: TestClient, db: Session, evide
     assert lst[0]["id"] == rid and lst[0]["verdict"] == "LONG" and "requested_by" not in json.dumps(lst)
     assert client.get(f"/api/committee/runs/{rid}/report.html").status_code == 501
     assert client.get("/api/committee/paper").json() == {"status": "not_built"}
-    assert client.get("/api/committee/backtests").json() == {"status": "not_built"}
-    assert client.get("/api/committee/backtests/1").json() == {"status": "not_built"}
+    assert client.get("/api/committee/backtests").status_code == 401  # owner only (cm-backtest)
+    assert client.get("/api/committee/backtests/1").status_code == 401
     assert client.get("/api/committee/runs/cm_nope").status_code == 404
     from app.security import rate_limit
 

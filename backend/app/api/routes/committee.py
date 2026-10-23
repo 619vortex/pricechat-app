@@ -2,7 +2,7 @@
 
 Public (outside the admin login, admin_auth.PUBLIC_PREFIXES; rate-limited): status, run lists, a run's JSON, the track record.
 Run JSON never contains member data (who asked is only on the cm_runs row). Starting a run needs a signed-in Kiwi Passport
-member (their daily limit) or the owner's admin login (unlimited). The report, paper book and backtests are stage 2.
+member (their daily limit) or the owner's admin login (unlimited). Backtests (start, list, read) are owner only.
 """
 
 import inspect
@@ -111,11 +111,55 @@ def paper() -> dict[str, Any]:
     return {"status": "not_built"}
 
 
+class BacktestIn(StrictInput):
+    coins: list[str] = Field(default_factory=lambda: ["BTC", "ETH", "SOL", "HYPE"], min_length=1, max_length=8)
+    timeframe: str = Field("4h", pattern="^(1h|4h|1d)$")
+    every: int = Field(6, ge=1, le=48)
+    mode: str = Field("rules", pattern="^(rules|llm)$")
+    llm_max_decisions: int = Field(20, ge=1, le=60)
+    llm_max_usd: float = Field(0.0, ge=0, le=5)
+    start: str | None = Field(None, max_length=32)
+    end: str | None = Field(None, max_length=32)
+
+
+def _owner(db: Any, pc_admin: str | None) -> None:
+    if admin_auth.current(db, pc_admin) is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Owner login required.")
+
+
+@router.post(f"{P}/backtests", status_code=status.HTTP_202_ACCEPTED)
+async def create_backtest(body: BacktestIn, db: DbSession, runtime: Runtime, pc_admin: AdminCookie = None) -> dict[str, Any]:
+    """Owner only: start a committee backtest in the background (one at a time). Research only: nothing trades."""
+    from app.committee import backtest as cbt
+
+    _owner(db, pc_admin)
+    try:
+        cfg = cbt.Config.parse(body.model_dump())
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    busy = cbt.running(db)
+    if busy is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Backtest {busy.id} is still {busy.status}.")
+    return {"id": cbt.start(db, cfg, runtime.provider, runtime.gate), "status": "queued"}
+
+
 @router.get(f"{P}/backtests")
-def backtests() -> dict[str, Any]:
-    return {"status": "not_built"}
+def backtests(db: DbSession, pc_admin: AdminCookie = None, limit_: int = Query(20, ge=1, le=100, alias="limit")) -> dict[str, Any]:
+    from app.models.committee import CmBacktest
+
+    _owner(db, pc_admin)
+    rows = db.scalars(select(CmBacktest).order_by(CmBacktest.id.desc()).limit(limit_))
+    return {"backtests": [{"id": r.id, "created_at": r.created_at.isoformat(), "status": r.status, "config": r.config,
+                           "period": (r.result or {}).get("period"), "verdicts": (r.result or {}).get("verdicts"),
+                           "error": (r.result or {}).get("error")} for r in rows]}
 
 
 @router.get(f"{P}/backtests/{{bt_id}}")
-def backtest(bt_id: str) -> dict[str, Any]:
-    return {"status": "not_built"}
+def backtest(bt_id: str, db: DbSession, pc_admin: AdminCookie = None) -> dict[str, Any]:
+    from app.models.committee import CmBacktest
+
+    _owner(db, pc_admin)
+    row = db.get(CmBacktest, int(bt_id)) if bt_id.isdigit() else None
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such backtest.")
+    return {"id": row.id, "created_at": row.created_at.isoformat(), "status": row.status, "config": row.config, "result": row.result}
