@@ -10,7 +10,7 @@ Prompts are versioned (PROMPT_VERSION) and stored with each run's meta.
 import json
 from typing import Any
 
-PROMPT_VERSION = "cm-1"
+PROMPT_VERSION = "cm-2"  # cm-2: the evidence block carries "derived" (roles.derived: distances in %, ATR, R/R)
 MAX_EVIDENCE_CHARS = 9000
 
 RULES = """Rules (all of them, always):
@@ -89,7 +89,8 @@ def analyst_prompt(ev: dict[str, Any], name: str) -> str:
     sec = (ev.get("sections") or {}).get(name) or {}
     refs = [r for r in ev.get("refs") or [] if r.get("id") in set(sec.get("refs") or [])]
     return (f"Write the {name} analyst report for {header(ev)['market']}.\n"
-            + evidence_block({**header(ev), name: section_view(sec), "refs": refs}))
+            + evidence_block({**header(ev), name: section_view(sec), **({"derived": derived_of(ev)} if name == "technical" else {}),
+                              "refs": refs}))
 
 
 def _reports(analysts: dict[str, Any]) -> dict[str, Any]:
@@ -97,10 +98,21 @@ def _reports(analysts: dict[str, Any]) -> dict[str, Any]:
                 "limitations": v["limitations"]} for k, v in analysts.items()}
 
 
+def derived_of(ev: dict[str, Any]) -> dict[str, Any]:
+    """The deterministic derivations the rules writers quote (roles.derived): distances to the nearest levels and triggers in
+    %, stop distance in % and in ATR14, reward-to-risk to T1. The grounder knows them, so a model may copy them."""
+    from app.committee.roles import derived  # lazy: roles imports this module
+
+    try:
+        return derived(ev)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return {}
+
+
 def scenarios_of(ev: dict[str, Any]) -> dict[str, Any]:
     t = ((ev.get("sections") or {}).get("technical") or {}).get("facts") or {}
     return {"scenarios": t.get("scenarios") or {}, "support": t.get("support") or [], "resistance": t.get("resistance") or [],
-            "signal": t.get("signal")}
+            "signal": t.get("signal"), "derived": derived_of(ev)}
 
 
 def debate_prompt(ev: dict[str, Any], analysts: dict[str, Any], side: str) -> str:
@@ -131,7 +143,8 @@ def trader_prompt(ev: dict[str, Any], analysts: dict[str, Any], debate: dict[str
 
 def risk_prompt(ev: dict[str, Any], analysts: dict[str, Any], trader: dict[str, Any]) -> str:
     return "Review the trader's proposal.\n" + evidence_block({**header(ev), "trader": trader, "analyst_reports": _reports(analysts),
-                                                               "data_status": {k: (v or {}).get("status") for k, v in (ev.get("sections") or {}).items()}})
+                                                               "data_status": {k: (v or {}).get("status") for k, v in (ev.get("sections") or {}).items()},
+                                                               "derived": derived_of(ev)})
 
 
 def portfolio_prompt(ev: dict[str, Any], debate: dict[str, Any], trader: dict[str, Any], risk: dict[str, Any]) -> str:

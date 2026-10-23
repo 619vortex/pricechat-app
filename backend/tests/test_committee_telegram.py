@@ -186,7 +186,8 @@ def test_committee_doge_placeholder_is_edited_into_the_compact_summary(db: Sessi
     assert "<b>Verdict: WAIT</b> (Underweight)" in body
     assert "Long if: 4h close &gt; 0.08011 · stop 0.07823 · T 0.08231 / 0.08379" in body  # 0.083795 at 4 significant digits
     assert "Short if: 4h close &lt; 0.07932 · stop 0.08264 · T 0.07142 / 0.06954" in body
-    assert "No trade approved because: no trade proposed; long scenario now: price 0.079475 is outside the entry zone" in body
+    assert ("No trade approved because: no trade proposed; long scenario now: liquidity: 24h volume $13M below the $50M minimum; "
+            "price 0.079475 is outside the entry zone; short scenario now: liquidity: 24h volume $13M below the $50M minimum") in body
     assert "Risk: thin liquidity: 24h volume $12.76M" in body
     assert "Bull: Thin bull case" in body and "Bear: 1 of 4 sections lean bearish (technical)" in body
     assert "Research only — nothing was traded. Not financial advice." in body
@@ -196,6 +197,9 @@ def test_committee_doge_placeholder_is_edited_into_the_compact_summary(db: Sessi
     row = db.query(CmRun).one()
     btns = ed[0]["buttons"]
     assert ids_in(btns) == [f"cm:{row.public_id}:{v}" for v in ("full", "bull", "bear", "risk", "chart", "refresh")]
+    assert btns[-1] == [{"text": "🌐 Web report", "url": f"{committeecmd.report_url(row.public_id)}"}]
+    assert committeecmd.report_url(row.public_id).endswith(f"/earn/committee?run={row.public_id}")
+    assert (row.chat_id, row.message_id) == (GROUP, ph["id"])  # the placeholder is on the row (recovery edits it)
     assert all(len(d.encode()) <= 64 for d in ids_in(btns))
     assert row.requested_by_tg == USER and orchestrator.used_today(db, {"tg_user_id": USER}) == 1
 
@@ -504,3 +508,93 @@ def test_rules_text_is_grounded_and_has_no_probabilities(db: Session) -> None:
                  "verdict": {k: res["verdict"][k] for k in ("summary", "what_changes_view")}}
         for role, out in texts.items():
             assert grounding.check(role, out, g) is None, (name, role)
+
+
+# ---------------------------------------------------------------- follow-ups: address case, market cache key, recovery, single full report, prompts
+def test_contract_addresses_keep_their_case() -> None:
+    sol = "So11111111111111111111111111111111111111112"
+    assert orchestrator._norm(f"${sol} 1h".replace(" 1h", ""), "1h") == (sol, "1h")
+    assert orchestrator._norm("0xAbCdEf0123456789aBcDeF0123456789AbCdEf01", "4h")[0] == "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01"
+    assert orchestrator._norm("$tao okx", "1h") == ("TAO OKX", "1h") and orchestrator._norm("btcusdt", "1h")[0] == "BTCUSDT"
+
+
+def test_cache_is_keyed_by_the_resolved_market(db: Session, tg: TG, world: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    markets = {"TAO": ("okx", "spot", "TAO-USDT"), "TAO OKX": ("okx", "spot", "TAO-USDT"), "TAO HL": ("hyperliquid", "perp", "TAO")}
+
+    async def resolve(words: list[str]) -> Any:
+        v, k, m = markets[" ".join(words).upper()]
+        return SimpleNamespace(tag="TAO", venue=v, kind=k, symbol=m)
+
+    monkeypatch.setattr(committeecmd, "resolve", resolve)
+    say(db, tg, "/committee tao okx")
+    say(db, tg, "/committee TAO", user=OTHER)  # the same market: the same run, not counted
+    assert world == ["TAO OKX 1h"] and db.query(CmRun).count() == 1
+    assert orchestrator.used_today(db, {"tg_user_id": OTHER}) == 0
+    row = db.query(CmRun).one()
+    assert (row.venue, row.market_id) == ("okx", "TAO-USDT")
+    with pytest.raises(orchestrator.CommitteeError):  # another market never shares it (here: no evidence pack for it)
+        asyncio.run(orchestrator.run_committee(db, "TAO HL", "1h", requested_by={"admin": True}))
+    assert orchestrator.cached_run(db, "TAO HL", "1h", market={"venue": "hyperliquid", "market_id": "TAO"}) is None
+    assert orchestrator.cached_run(db, "X", "4h", market={"venue": "okx", "market_id": "TAO-USDT"}) is None  # other timeframe
+
+
+def test_stuck_runs_are_failed_refunded_and_their_placeholder_edited(db: Session, tg: TG, world: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.db.base import utcnow
+    from app.models.committee import CmUsage
+
+    now = utcnow()
+    old = CmRun(public_id="cm_stuck0000000001", symbol="DOGE", timeframe="4h", mode="live", depth="full", status="running",
+                requested_by_tg=USER, chat_id=GROUP, message_id=42, created_at=now - timedelta(minutes=11), cost_usd=0.0, calls=0)
+    prev = CmRun(public_id="cm_stuck0000000002", symbol="BTC", timeframe="1h", mode="live", depth="full", status="queued",
+                 created_at=orchestrator.STARTED - timedelta(seconds=5), cost_usd=0.0, calls=0)
+    fresh = CmRun(public_id="cm_fresh0000000003", symbol="ETH", timeframe="1h", mode="live", depth="full", status="running",
+                  created_at=now, cost_usd=0.0, calls=0)
+    db.add_all([old, prev, fresh])
+    db.add(CmUsage(day=orchestrator.llm.day_of(now), key=f"tg:{USER}", tg_user_id=USER, count=2, calls=0, tokens_in=0, tokens_out=0, cost_usd=0.0))
+    db.commit()
+    assert {r.public_id for r in orchestrator.stuck(db)} == {old.public_id, prev.public_id}
+    assert asyncio.run(committeecmd.recover(db, tg)) == 2
+    db.expire_all()
+    got = {r.public_id: (r.status, r.error) for r in db.query(CmRun)}
+    assert got[old.public_id] == ("failed", "interrupted by a restart") and got[prev.public_id][0] == "failed"
+    assert got[fresh.public_id] == ("running", None)
+    ed = tg.of("edit")
+    assert len(ed) == 1 and ed[0]["chat"] == GROUP and ed[0]["id"] == 42 and "was interrupted" in ed[0]["text"] and "Send the command again" in ed[0]["text"]
+    assert orchestrator.used_today(db, {"tg_user_id": USER}) == 1  # given back
+    assert asyncio.run(committeecmd.recover(db, tg)) == 0
+
+
+def test_the_job_runs_the_recovery(db: Session, client: Any) -> None:
+    from app.db.base import utcnow
+
+    db.add(CmRun(public_id="cm_stuck0000000009", symbol="BTC", timeframe="1h", mode="live", depth="full", status="running",
+                 created_at=utcnow() - timedelta(minutes=30), cost_usd=0.0, calls=0))
+    db.commit()
+    from app.jobs import build_jobs
+
+    spec = next(j for j in build_jobs(client.app.state.runtime) if j.name == "committee.llm_expire")
+    out = asyncio.run(spec.func(SimpleNamespace(db=db, now=utcnow(), trigger="manual", state={})))
+    assert out["interrupted"] == 1
+    db.expire_all()
+    assert db.query(CmRun).one().status == "failed"
+
+
+def test_full_report_button_is_one_message_however_often_it_is_pressed(db: Session, tg: TG, world: list[str]) -> None:
+    rid, mid = _first_run(db, tg)
+    tg.sent.clear()
+    for _ in range(3):
+        press(db, tg, f"cm:{rid}:full", mid=mid)
+    assert not tg.of("send") and len(tg.of("edit")) == 3
+    assert all(e["id"] == mid and len(e["text"]) <= 4096 and "FULL REPORT" in e["text"] for e in tg.of("edit"))
+
+
+def test_prompts_carry_the_derived_distances() -> None:
+    from app.committee import prompts
+
+    ev = live("doge")
+    assert prompts.PROMPT_VERSION == "cm-2"
+    d = roles.derived(ev)
+    for p in (prompts.analyst_prompt(ev, "technical"), prompts.risk_prompt(ev, {}, {"action": "WAIT"}),
+              prompts.debate_prompt(ev, {}, "bull")):
+        assert '"derived":' in p and '"stop_atr":' + str(d["long"]["stop_atr"]) in p.replace(" ", "")
+    assert '"derived"' not in prompts.analyst_prompt(ev, "news")
