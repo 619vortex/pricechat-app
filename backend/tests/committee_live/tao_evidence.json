@@ -1,0 +1,452 @@
+{
+ "asset": {
+  "symbol": "TAO",
+  "venue": "okx",
+  "market_type": "spot",
+  "market_id": "TAO-USDT",
+  "label": "OKX spot TAO-USDT",
+  "hl_tradable": false,
+  "alternatives": [
+   "OKX Perpetual"
+  ]
+ },
+ "timeframe": "1h",
+ "as_of": "2026-10-23T03:36:19Z",
+ "mode": "live",
+ "price": {
+  "value": 261.8,
+  "kind": "last",
+  "source": "okx",
+  "ts": "2026-10-23T03:36:20Z",
+  "stale": false,
+  "ref": "P1"
+ },
+ "sections": {
+  "technical": {
+   "status": "partial",
+   "limitations": [
+    "only 115 closed 1d candles: EMA200 and some indicators unavailable"
+   ],
+   "facts": {
+    "frames": {
+     "1h": {
+      "close": 261.9,
+      "ema20": 260.092,
+      "ema50": 264.095,
+      "ema200": 271.091,
+      "rsi14": 51.9,
+      "macd": -2.09608,
+      "macd_signal": -2.91043,
+      "macd_hist": 0.814354,
+      "bb_upper": 262.36,
+      "bb_mid": 258.72,
+      "bb_lower": 255.08,
+      "bb_width_pct": 2.81,
+      "atr14": 2.79307,
+      "atr_pct": 1.07,
+      "vol_ratio20": 0.53,
+      "trend": "down",
+      "structure": "LH/LL",
+      "breakout": null,
+      "realized_vol_pct": 0.568,
+      "last_range": 3.6,
+      "candles": 299,
+      "last_closed": "2026-10-23T03:00:00Z"
+     },
+     "4h": {
+      "close": 257.6,
+      "ema20": 266.188,
+      "ema50": 270.741,
+      "ema200": 273.31,
+      "rsi14": 37.5,
+      "macd": -3.25517,
+      "macd_signal": -1.70406,
+      "macd_hist": -1.55111,
+      "bb_upper": 280.174,
+      "bb_mid": 267.52,
+      "bb_lower": 254.866,
+      "bb_width_pct": 9.46,
+      "atr14": 6.52865,
+      "atr_pct": 2.53,
+      "vol_ratio20": 0.17,
+      "trend": "down",
+      "structure": "HH/HL",
+      "breakout": null,
+      "realized_vol_pct": 1.242,
+      "last_range": 3.6,
+      "candles": 299,
+      "last_closed": "2026-10-23T00:00:00Z"
+     },
+     "1d": {
+      "close": 257.6,
+      "ema20": 276.672,
+      "ema50": 269.314,
+      "ema200": null,
+      "rsi14": 41.1,
+      "macd": -3.69268,
+      "macd_signal": -0.462804,
+      "macd_hist": -3.22987,
+      "bb_upper": 311.372,
+      "bb_mid": 281.515,
+      "bb_lower": 251.658,
+      "bb_width_pct": 21.21,
+      "atr14": 19.3413,
+      "atr_pct": 7.51,
+      "vol_ratio20": 1.01,
+      "trend": "range",
+      "structure": "LH/LL",
+      "breakout": null,
+      "realized_vol_pct": 3.749,
+      "last_range": 21.1,
+      "candles": 115,
+      "last_closed": "2026-10-23T00:00:00Z"
+     }
+    },
+    "support": [
+     259.7,
+     256.7,
+     254.3
+    ],
+    "resistance": [
+     261.9,
+     266.4,
+     269.5
+    ],
+    "scenarios": {
+     "long": {
+      "trigger": 261.9,
+      "trigger_rule": "nearest resistance above the price 261.80: 1h pivot high 261.90",
+      "invalidation": 259.002,
+      "invalidation_rule": "nearest support below the trigger at least 0.75 x ATR away (1h pivot low (kept from 2 levels within 0.25 x ATR14(1h) 2.793: most touches (17), then most recent) 259.70) minus 0.25 x ATR14(1h) 2.793 = 259.00 (>= 1 x ATR from the trigger)",
+      "targets": [
+       266.4,
+       269.5
+      ],
+      "target_rule": "T1 = 1h pivot high 266.40 (first resistance at least max(1R, 1 x ATR) = 2.898 beyond the trigger; R = |trigger - invalidation| = 2.898); T2 = 1h pivot high (kept from 3 levels within 0.25 x ATR14(1h) 2.793: most touches (32), then most recent) 269.50 (next resistance at least 1 x ATR beyond T1)"
+     },
+     "short": {
+      "trigger": 259.7,
+      "trigger_rule": "nearest support below the price 261.80: 1h pivot low (kept from 2 levels within 0.25 x ATR14(1h) 2.793: most touches (17), then most recent) 259.70",
+      "invalidation": 262.598,
+      "invalidation_rule": "nearest resistance above the trigger at least 0.75 x ATR away (1h pivot high 261.90) plus 0.25 x ATR14(1h) 2.793 = 262.60 (>= 1 x ATR from the trigger)",
+      "targets": [
+       256.7,
+       252.6
+      ],
+      "target_rule": "T1 = 1h pivot low (kept from 4 levels within 0.25 x ATR14(1h) 2.793: most touches (14), then most recent) 256.70 (first support at least max(1R, 1 x ATR) = 2.898 beyond the trigger; R = |trigger - invalidation| = 2.898); T2 = 1h pivot low (kept from 2 levels within 0.25 x ATR14(1h) 2.793: most touches (1), then most recent) 252.60 (next support at least 1 x ATR beyond T1)"
+     }
+    },
+    "signal": {
+     "rule": "trend_pullback_v1",
+     "verdict": "WAIT",
+     "first_fail": "price stretched away from EMA20",
+     "scope": "chart rules",
+     "note": "candle-only checks of the same rules (volume, spread, depth, funding and BTC checks need live Hyperliquid data)",
+     "ref": "T4"
+    }
+   },
+   "items": [],
+   "lean": "bearish",
+   "score": -1,
+   "reasons": [
+    {
+     "text": "1h trend down (EMA20/EMA50 aligned, EMA50 sloping, close on that side)",
+     "refs": [
+      "T1"
+     ]
+    },
+    {
+     "text": "4h trend down (EMA20/EMA50 aligned, EMA50 sloping, close on that side)",
+     "refs": [
+      "T2"
+     ]
+    },
+    {
+     "text": "1d trend range (EMA20/EMA50 not aligned)",
+     "refs": [
+      "T3"
+     ]
+    },
+    {
+     "text": "1h MACD histogram above zero (+0.8144)",
+     "refs": [
+      "T1"
+     ]
+    },
+    {
+     "text": "trend_pullback_v1 (chart rules): WAIT, first failing check: price stretched away from EMA20",
+     "refs": [
+      "T4"
+     ]
+    }
+   ],
+   "refs": [
+    "T1",
+    "T2",
+    "T3",
+    "T4"
+   ]
+  },
+  "fundamental": {
+   "status": "ok",
+   "limitations": [
+    "token unlocks: no verified unlock-schedule source is configured"
+   ],
+   "facts": {
+    "token_unlocks": "unavailable",
+    "volume_24h_usd": 3505606.0,
+    "listed_on": [
+     "Binance Perpetual",
+     "Binance Spot",
+     "Bybit Perpetual",
+     "Hyperliquid Perpetual",
+     "OKX Perpetual",
+     "OKX Spot"
+    ],
+    "coingecko": {
+     "id": "bittensor",
+     "matched_by": "exact symbol, best market-cap rank",
+     "ambiguous": false,
+     "market_cap": 2962715142.0,
+     "fdv": 5486680835.0,
+     "circulating": 11339645.9251,
+     "total": 21000000.0,
+     "max_supply": 21000000.0,
+     "rank": 36,
+     "ath": 757.6,
+     "ath_change_pct": -65.51362,
+     "categories": [
+      "Artificial Intelligence (AI)",
+      "Smart Contract Platform",
+      "Layer 1 (L1)"
+     ],
+     "genesis_date": null,
+     "last_updated": "2026-10-23T03:33:47.000Z"
+    },
+    "risk_flags": []
+   },
+   "items": [],
+   "lean": "neutral",
+   "score": 0,
+   "reasons": [],
+   "refs": [
+    "F1",
+    "F2",
+    "F3"
+   ]
+  },
+  "news": {
+   "status": "ok",
+   "limitations": [],
+   "facts": {
+    "feeds": [
+     {
+      "source": "CoinDesk",
+      "ok": true,
+      "items": 25
+     },
+     {
+      "source": "Cointelegraph",
+      "ok": true,
+      "items": 30
+     },
+     {
+      "source": "Decrypt",
+      "ok": true,
+      "items": 40
+     }
+    ],
+    "window_h": 48,
+    "matched": 0,
+    "macro": 8
+   },
+   "items": [
+    {
+     "title": "Switzerland approves first spot Bitcoin ETF for retail investors",
+     "source": "Cointelegraph",
+     "url": "https://cointelegraph.com/news/switzerland-approves-first-spot-bitcoin-etf-for-retail-investors?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+     "published": "2026-10-23T00:59:35Z",
+     "age_h": 2.6,
+     "match": "macro",
+     "summary": "BIT Asset Management\u2019s Bitcoin Fund ETF is expected to begin trading on SIX Swiss Exchange in November, with its public ",
+     "ref": "N2"
+    },
+    {
+     "title": "Bitcoin ETFs Erase October Losses With $1 Billion in Three Days",
+     "source": "Decrypt",
+     "url": "https://decrypt.co/381611/bitcoin-etfs-erase-october-losses-1-billion-three-days",
+     "published": "2026-10-22T16:31:07Z",
+     "age_h": 11.1,
+     "match": "macro",
+     "summary": "Spot Bitcoin ETFs have drawn about $1.07 billion over three sessions, pushing October flows to a gain of roughly $460 mi",
+     "ref": "N3"
+    },
+    {
+     "title": "Bitcoin circles $81.5K ETF cost basis as Trump Iran comments send stocks lower",
+     "source": "Cointelegraph",
+     "url": "https://cointelegraph.com/markets/bitcoin-circles-815k-etf-cost-basis-as-trump-iran-comments-send-stocks-lower?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+     "published": "2026-10-22T16:20:35Z",
+     "age_h": 11.3,
+     "match": "macro",
+     "summary": "Bitcoin extended daily losses to 3% as US stocks came under pressure from President Donald Trump\u2019s comments on Iran mili",
+     "ref": "N2"
+    },
+    {
+     "title": "Thailand SEC says several companies eye crypto ETFs, none has applied",
+     "source": "Cointelegraph",
+     "url": "https://cointelegraph.com/news/thailand-sec-crypto-etf-applications?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+     "published": "2026-10-22T13:20:57Z",
+     "age_h": 14.3,
+     "match": "macro",
+     "summary": "Thailand\u2019s SEC says several asset managers have sought consultations on spot crypto ETFs, but it cannot confirm whether ",
+     "ref": "N2"
+    }
+   ],
+   "lean": "unknown",
+   "score": null,
+   "reasons": [],
+   "refs": [
+    "N1",
+    "N2",
+    "N3"
+   ]
+  },
+  "sentiment": {
+   "status": "partial",
+   "limitations": [
+    "funding is the Hyperliquid TAO perpetual's, not OKX spot TAO-USDT's (spot has no funding)",
+    "taker flow: the Hyperliquid trade tape isn't recording this market in this process",
+    "community mentions: no Telegram / X messages ingested in the 8 days before as_of"
+   ],
+   "facts": {
+    "funding_1h_pct": 0.00125,
+    "funding_24h_avg_pct": 0.001017,
+    "funding_7d_avg_pct": 0.001134,
+    "funding_ref": "S1",
+    "fear_greed": {
+     "value": 50,
+     "label": "Neutral",
+     "ts": "2026-10-23T00:00:00Z",
+     "value_7d_ago": 63,
+     "ref": "S2"
+    }
+   },
+   "items": [],
+   "lean": "neutral",
+   "score": 0,
+   "reasons": [
+    {
+     "text": "24h average funding +0.001017%/h: not extreme",
+     "refs": [
+      "S1"
+     ]
+    },
+    {
+     "text": "Fear & Greed 50 (Neutral): not extreme",
+     "refs": [
+      "S2"
+     ]
+    }
+   ],
+   "refs": [
+    "S1",
+    "S2"
+   ]
+  }
+ },
+ "refs": [
+  {
+   "id": "P1",
+   "source": "OKX spot TAO-USDT last price",
+   "url": null,
+   "ts": "2026-10-23T03:36:20Z",
+   "fetched_at": "2026-10-23T03:36:20Z"
+  },
+  {
+   "id": "T1",
+   "source": "OKX TAO-USDT 1h candles",
+   "url": "https://www.okx.com/api/v5/market/candles?instId=TAO-USDT&bar=1H",
+   "ts": "2026-10-23T03:00:00Z",
+   "fetched_at": "2026-10-23T03:36:20Z"
+  },
+  {
+   "id": "T2",
+   "source": "OKX TAO-USDT 4h candles",
+   "url": "https://www.okx.com/api/v5/market/candles?instId=TAO-USDT&bar=4H",
+   "ts": "2026-10-23T00:00:00Z",
+   "fetched_at": "2026-10-23T03:36:20Z"
+  },
+  {
+   "id": "T3",
+   "source": "OKX TAO-USDT 1d candles",
+   "url": "https://www.okx.com/api/v5/market/candles?instId=TAO-USDT&bar=1Dutc",
+   "ts": "2026-10-23T00:00:00Z",
+   "fetched_at": "2026-10-23T03:36:20Z"
+  },
+  {
+   "id": "T4",
+   "source": "Price Chat signal rules (trend_pullback_v1, chart rules)",
+   "url": null,
+   "ts": "2026-10-23T03:36:19Z",
+   "fetched_at": "2026-10-23T03:36:20Z"
+  },
+  {
+   "id": "F1",
+   "source": "OKX 24h ticker TAO-USDT",
+   "url": null,
+   "ts": "2026-10-23T03:36:21Z",
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "F2",
+   "source": "Exchange listings (Hyperliquid, Binance, Bybit, OKX 24h tickers)",
+   "url": null,
+   "ts": "2026-10-23T03:36:21Z",
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "F3",
+   "source": "CoinGecko bittensor",
+   "url": "https://api.coingecko.com/api/v3/coins/bittensor",
+   "ts": "2026-10-23T03:33:47.000Z",
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "N1",
+   "source": "CoinDesk RSS",
+   "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+   "ts": null,
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "N2",
+   "source": "Cointelegraph RSS",
+   "url": "https://cointelegraph.com/rss",
+   "ts": null,
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "N3",
+   "source": "Decrypt RSS",
+   "url": "https://decrypt.co/feed",
+   "ts": null,
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "S1",
+   "source": "Hyperliquid TAO perpetual fundingHistory",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T03:00:00Z",
+   "fetched_at": "2026-10-23T03:36:21Z"
+  },
+  {
+   "id": "S2",
+   "source": "alternative.me Crypto Fear & Greed Index (daily)",
+   "url": "https://api.alternative.me/fng/",
+   "ts": "2026-10-23T00:00:00Z",
+   "fetched_at": "2026-10-23T03:36:21Z"
+  }
+ ],
+ "built_at": "2026-10-23T03:36:21Z",
+ "degraded": []
+}

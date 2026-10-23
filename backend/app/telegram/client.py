@@ -138,11 +138,15 @@ class TelegramBotClient:
         """Only the bot's own messages (tradingos.autodelete: the main chat's, after a few minutes)."""
         await self._call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
 
-    async def edit_message_text(self, chat_id: int | str, message_id: int, text: str, html: bool = False) -> dict[str, Any]:
-        """Rewrite one of the bot's own text messages (Vortex trade checks: the placeholder becomes the answer)."""
+    async def edit_message_text(self, chat_id: int | str, message_id: int, text: str, html: bool = False,
+                                buttons: list[list[dict[str, str]]] | None = None) -> dict[str, Any]:
+        """Rewrite one of the bot's own text messages (Vortex trade checks: the placeholder becomes the answer; the committee:
+        the placeholder becomes the summary, and its buttons switch views). `buttons` replaces the inline keyboard."""
         params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text[:4096], "disable_web_page_preview": True}
         if html:
             params["parse_mode"] = "HTML"
+        if buttons is not None:
+            params["reply_markup"] = {"inline_keyboard": buttons}
         result = await self._call("editMessageText", params)
         return _sent(result) if isinstance(result, dict) else {}
 

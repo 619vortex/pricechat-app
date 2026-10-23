@@ -1,0 +1,469 @@
+{
+ "asset": {
+  "symbol": "BTC",
+  "venue": "hyperliquid",
+  "market_type": "perp",
+  "market_id": "BTC",
+  "label": "Hyperliquid perpetual",
+  "hl_tradable": true,
+  "alternatives": [
+   "Binance Perpetual",
+   "Binance Spot",
+   "Bybit Perpetual"
+  ]
+ },
+ "timeframe": "1h",
+ "as_of": "2026-10-23T03:36:13Z",
+ "mode": "live",
+ "price": {
+  "value": 81851.5,
+  "kind": "mark",
+  "source": "hyperliquid",
+  "ts": "2026-10-23T03:36:13Z",
+  "stale": false,
+  "ref": "P1"
+ },
+ "sections": {
+  "technical": {
+   "status": "ok",
+   "limitations": [],
+   "facts": {
+    "frames": {
+     "1h": {
+      "close": 81971.0,
+      "ema20": 81803.4,
+      "ema50": 82299.0,
+      "ema200": 82471.3,
+      "rsi14": 49.8,
+      "macd": -367.166,
+      "macd_signal": -449.756,
+      "macd_hist": 82.5908,
+      "bb_upper": 82187.0,
+      "bb_mid": 81615.6,
+      "bb_lower": 81044.1,
+      "bb_width_pct": 1.4,
+      "atr14": 431.524,
+      "atr_pct": 0.53,
+      "vol_ratio20": 1.08,
+      "trend": "down",
+      "structure": "mixed",
+      "breakout": null,
+      "realized_vol_pct": 0.295,
+      "last_range": 783.0,
+      "candles": 300,
+      "last_closed": "2026-10-23T03:00:00Z"
+     },
+     "4h": {
+      "close": 81410.0,
+      "ema20": 82400.4,
+      "ema50": 82421.6,
+      "ema200": 82090.1,
+      "rsi14": 40.5,
+      "macd": -68.8368,
+      "macd_signal": 165.529,
+      "macd_hist": -234.365,
+      "bb_upper": 84459.1,
+      "bb_mid": 82540.8,
+      "bb_lower": 80622.4,
+      "bb_width_pct": 4.65,
+      "atr14": 821.609,
+      "atr_pct": 1.01,
+      "vol_ratio20": 0.54,
+      "trend": "down",
+      "structure": "mixed",
+      "breakout": null,
+      "realized_vol_pct": 0.627,
+      "last_range": 377.0,
+      "candles": 300,
+      "last_closed": "2026-10-23T00:00:00Z"
+     },
+     "1d": {
+      "close": 81410.0,
+      "ema20": 82596.4,
+      "ema50": 80812.5,
+      "ema200": 75791.6,
+      "rsi14": 46.2,
+      "macd": 59.7584,
+      "macd_signal": 255.938,
+      "macd_hist": -196.18,
+      "bb_upper": 86069.9,
+      "bb_mid": 83052.8,
+      "bb_lower": 80035.7,
+      "bb_width_pct": 7.27,
+      "atr14": 2200.67,
+      "atr_pct": 2.7,
+      "vol_ratio20": 1.61,
+      "trend": "up",
+      "structure": "mixed",
+      "breakout": null,
+      "realized_vol_pct": 1.481,
+      "last_range": 3424.0,
+      "candles": 300,
+      "last_closed": "2026-10-23T00:00:00Z"
+     }
+    },
+    "support": [
+     81657.0,
+     81301.0,
+     81171.0
+    ],
+    "resistance": [
+     81992.0,
+     82100.0,
+     82250.0
+    ],
+    "scenarios": {
+     "long": {
+      "trigger": 81992.0,
+      "trigger_rule": "nearest resistance above the price 81,851.5: 1d pivot high 81,992.0",
+      "invalidation": 81549.1,
+      "invalidation_rule": "nearest support below the trigger at least 0.75 x ATR away (4h pivot low (kept from 6 levels within 0.25 x ATR14(1h) 431.52: most touches (39), then most recent) 81,657.0) minus 0.25 x ATR14(1h) 431.52 = 81,549.1 (>= 1 x ATR from the trigger)",
+      "targets": [
+       82436.0,
+       82898.0
+      ],
+      "target_rule": "T1 = 1d pivot high 82,436.0 (first resistance at least max(1R, 1 x ATR) = 442.88 beyond the trigger; R = |trigger - invalidation| = 442.88); T2 = 4h pivot high 82,898.0 (next resistance at least 1 x ATR beyond T1)"
+     },
+     "short": {
+      "trigger": 81657.0,
+      "trigger_rule": "nearest support below the price 81,851.5: 4h pivot low (kept from 6 levels within 0.25 x ATR14(1h) 431.52: most touches (39), then most recent) 81,657.0",
+      "invalidation": 82099.9,
+      "invalidation_rule": "nearest resistance above the trigger at least 0.75 x ATR away (1d pivot high 81,992.0) plus 0.25 x ATR14(1h) 431.52 = 82,099.9 (>= 1 x ATR from the trigger)",
+      "targets": [
+       81171.0,
+       80644.0
+      ],
+      "target_rule": "T1 = 1h pivot low (kept from 3 levels within 0.25 x ATR14(1h) 431.52: most touches (19), then most recent) 81,171.0 (first support at least max(1R, 1 x ATR) = 442.88 beyond the trigger; R = |trigger - invalidation| = 442.88); T2 = 1h pivot low (kept from 4 levels within 0.25 x ATR14(1h) 431.52: most touches (2), then most recent) 80,644.0 (next support at least 1 x ATR beyond T1)"
+     }
+    },
+    "signal": {
+     "rule": "trend_pullback_v1",
+     "verdict": "WAIT",
+     "first_fail": "MACD momentum against the trend",
+     "scope": "full",
+     "ref": "T4"
+    }
+   },
+   "items": [],
+   "lean": "neutral",
+   "score": 0,
+   "reasons": [
+    {
+     "text": "1h trend down (EMA20/EMA50 aligned, EMA50 sloping, close on that side)",
+     "refs": [
+      "T1"
+     ]
+    },
+    {
+     "text": "4h trend down (EMA20/EMA50 aligned, EMA50 sloping, close on that side)",
+     "refs": [
+      "T2"
+     ]
+    },
+    {
+     "text": "1d trend up (EMA20/EMA50 aligned, EMA50 sloping, close on that side)",
+     "refs": [
+      "T3"
+     ]
+    },
+    {
+     "text": "1h MACD histogram above zero (+82.59)",
+     "refs": [
+      "T1"
+     ]
+    },
+    {
+     "text": "trend_pullback_v1 (full): WAIT, first failing check: MACD momentum against the trend",
+     "refs": [
+      "T4"
+     ]
+    }
+   ],
+   "refs": [
+    "T1",
+    "T2",
+    "T3",
+    "T4"
+   ]
+  },
+  "fundamental": {
+   "status": "ok",
+   "limitations": [
+    "token unlocks: no verified unlock-schedule source is configured"
+   ],
+   "facts": {
+    "token_unlocks": "unavailable",
+    "max_leverage": 40,
+    "sz_decimals": 5,
+    "only_isolated": false,
+    "oi_usd": 3581786483.0,
+    "volume_24h_usd": 3102771856.0,
+    "spread_bps": 0.12,
+    "listed_on": [
+     "Binance Perpetual",
+     "Binance Spot",
+     "Bybit Perpetual",
+     "Bybit Spot",
+     "Hyperliquid Perpetual",
+     "OKX Perpetual",
+     "OKX Spot"
+    ],
+    "coingecko": {
+     "id": "bitcoin",
+     "matched_by": "exact symbol, best market-cap rank",
+     "ambiguous": false,
+     "market_cap": 1642646370612.0,
+     "fdv": 1642646370612.0,
+     "circulating": 20102128.0,
+     "total": 20102128.0,
+     "max_supply": 21000000.0,
+     "rank": 1,
+     "ath": 126080.0,
+     "ath_change_pct": -35.18788,
+     "categories": [
+      "Smart Contract Platform",
+      "Layer 1 (L1)",
+      "FTX Holdings"
+     ],
+     "genesis_date": "2009-01-03",
+     "last_updated": "2026-10-23T03:33:47.000Z"
+    },
+    "risk_flags": []
+   },
+   "items": [],
+   "lean": "neutral",
+   "score": 0,
+   "reasons": [],
+   "refs": [
+    "F1",
+    "F2",
+    "F3"
+   ]
+  },
+  "news": {
+   "status": "ok",
+   "limitations": [],
+   "facts": {
+    "feeds": [
+     {
+      "source": "CoinDesk",
+      "ok": true,
+      "items": 25
+     },
+     {
+      "source": "Cointelegraph",
+      "ok": true,
+      "items": 30
+     },
+     {
+      "source": "Decrypt",
+      "ok": true,
+      "items": 40
+     }
+    ],
+    "window_h": 48,
+    "matched": 15,
+    "macro": 3
+   },
+   "items": [
+    {
+     "title": "Bitcoin, gold trim early losses as yen gives up gains. Oil stays near $100",
+     "source": "CoinDesk",
+     "url": "https://www.coindesk.com/markets/2026/10/23/bitcoin-gold-trim-early-losses-as-yen-gives-up-gains-oil-stays-near-usd100",
+     "published": "2026-10-23T03:13:01Z",
+     "age_h": 0.4,
+     "match": "name",
+     "summary": "Bitcoin and gold pared early losses as the yen gave up gains and Asian stocks rebounded, though oil near $100 keeps infl",
+     "ref": "N1"
+    },
+    {
+     "title": "Switzerland approves first spot Bitcoin ETF for retail investors",
+     "source": "Cointelegraph",
+     "url": "https://cointelegraph.com/news/switzerland-approves-first-spot-bitcoin-etf-for-retail-investors?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+     "published": "2026-10-23T00:59:35Z",
+     "age_h": 2.6,
+     "match": "name",
+     "summary": "BIT Asset Management\u2019s Bitcoin Fund ETF is expected to begin trading on SIX Swiss Exchange in November, with its public ",
+     "ref": "N2"
+    },
+    {
+     "title": "New DeepSeek ban in US, Swiss-Asia crypto ties deepen: Asia Express",
+     "source": "Cointelegraph",
+     "url": "https://cointelegraph.com/magazine/new-deepseek-ban-in-us-swiss-asia-crypto-ties-deepen-asia-express?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+     "published": "2026-10-22T22:50:22Z",
+     "age_h": 4.8,
+     "match": "name",
+     "summary": "DeepSeek banned from US federal civilian agencies over spying fears. Singapore firm behind Europe\u2019s only spot Bitcoin ET",
+     "ref": "N2"
+    },
+    {
+     "title": "Here\u2019s what happened in crypto today",
+     "source": "Cointelegraph",
+     "url": "https://cointelegraph.com/news/what-happened-in-crypto-today?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+     "published": "2026-10-22T20:09:59Z",
+     "age_h": 7.4,
+     "match": "name",
+     "summary": "Need to know what happened in crypto today? Here is the latest news on daily trends and events impacting Bitcoin price, ",
+     "ref": "N2"
+    }
+   ],
+   "lean": "neutral",
+   "score": 0,
+   "reasons": [
+    {
+     "text": "15 headline(s) about the coin in the last 48 h; 1 with bullish words, 3 with bearish words",
+     "refs": [
+      "N1",
+      "N2",
+      "N3"
+     ]
+    }
+   ],
+   "refs": [
+    "N1",
+    "N2",
+    "N3"
+   ]
+  },
+  "sentiment": {
+   "status": "partial",
+   "limitations": [
+    "open-interest 24h change: no Price Chat snapshots for this market",
+    "taker flow: the Hyperliquid trade tape isn't recording this market in this process",
+    "community mentions: no Telegram / X messages ingested in the 8 days before as_of"
+   ],
+   "facts": {
+    "funding_1h_pct": 0.00125,
+    "funding_24h_avg_pct": 0.00125,
+    "funding_7d_avg_pct": 0.001038,
+    "funding_ref": "S1",
+    "fear_greed": {
+     "value": 50,
+     "label": "Neutral",
+     "ts": "2026-10-23T00:00:00Z",
+     "value_7d_ago": 63,
+     "ref": "S2"
+    },
+    "oi_usd": 3581786483.0,
+    "oi_change_24h_pct": null,
+    "oi_ref": "F1"
+   },
+   "items": [],
+   "lean": "neutral",
+   "score": 0,
+   "reasons": [
+    {
+     "text": "24h average funding +0.00125%/h: not extreme",
+     "refs": [
+      "S1"
+     ]
+    },
+    {
+     "text": "Fear & Greed 50 (Neutral): not extreme",
+     "refs": [
+      "S2"
+     ]
+    }
+   ],
+   "refs": [
+    "S1",
+    "S2"
+   ]
+  }
+ },
+ "refs": [
+  {
+   "id": "P1",
+   "source": "Hyperliquid perpetual mark price",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T03:36:13Z",
+   "fetched_at": "2026-10-23T03:36:14Z"
+  },
+  {
+   "id": "T1",
+   "source": "Hyperliquid BTC perpetual 1h candles (candleSnapshot)",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T03:00:00Z",
+   "fetched_at": "2026-10-23T03:36:14Z"
+  },
+  {
+   "id": "T2",
+   "source": "Hyperliquid BTC perpetual 4h candles (candleSnapshot)",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T00:00:00Z",
+   "fetched_at": "2026-10-23T03:36:14Z"
+  },
+  {
+   "id": "T3",
+   "source": "Hyperliquid BTC perpetual 1d candles (candleSnapshot)",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T00:00:00Z",
+   "fetched_at": "2026-10-23T03:36:14Z"
+  },
+  {
+   "id": "T4",
+   "source": "Price Chat signal rules (trend_pullback_v1, full)",
+   "url": null,
+   "ts": "2026-10-23T03:36:13Z",
+   "fetched_at": "2026-10-23T03:36:14Z"
+  },
+  {
+   "id": "F1",
+   "source": "Hyperliquid metaAndAssetCtxs",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T03:36:13Z",
+   "fetched_at": "2026-10-23T03:36:13Z"
+  },
+  {
+   "id": "F2",
+   "source": "Exchange listings (Hyperliquid, Binance, Bybit, OKX 24h tickers)",
+   "url": null,
+   "ts": "2026-10-23T03:36:16Z",
+   "fetched_at": "2026-10-23T03:36:16Z"
+  },
+  {
+   "id": "F3",
+   "source": "CoinGecko bitcoin",
+   "url": "https://api.coingecko.com/api/v3/coins/bitcoin",
+   "ts": "2026-10-23T03:33:47.000Z",
+   "fetched_at": "2026-10-23T03:36:16Z"
+  },
+  {
+   "id": "N1",
+   "source": "CoinDesk RSS",
+   "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+   "ts": null,
+   "fetched_at": "2026-10-23T03:36:16Z"
+  },
+  {
+   "id": "N2",
+   "source": "Cointelegraph RSS",
+   "url": "https://cointelegraph.com/rss",
+   "ts": null,
+   "fetched_at": "2026-10-23T03:36:16Z"
+  },
+  {
+   "id": "N3",
+   "source": "Decrypt RSS",
+   "url": "https://decrypt.co/feed",
+   "ts": null,
+   "fetched_at": "2026-10-23T03:36:16Z"
+  },
+  {
+   "id": "S1",
+   "source": "Hyperliquid BTC perpetual fundingHistory",
+   "url": "https://api.hyperliquid.xyz/info",
+   "ts": "2026-10-23T03:00:00Z",
+   "fetched_at": "2026-10-23T03:36:17Z"
+  },
+  {
+   "id": "S2",
+   "source": "alternative.me Crypto Fear & Greed Index (daily)",
+   "url": "https://api.alternative.me/fng/",
+   "ts": "2026-10-23T00:00:00Z",
+   "fetched_at": "2026-10-23T03:36:17Z"
+  }
+ ],
+ "built_at": "2026-10-23T03:36:17Z",
+ "degraded": []
+}

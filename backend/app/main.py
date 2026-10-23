@@ -162,6 +162,9 @@ def create_app(
         from app.tradingos import autodelete
 
         autodelete.install()  # notes the bot's main-chat messages for tradingos.autodelete
+        from app.tradingos import committeecmd
+
+        committeecmd.RUNTIME = runtime  # /committee in Telegram: the model provider, gate and Telegram transport
         # One scheduler for every background job; tests can turn it off.
         specs = build_jobs(runtime)
         off = app_settings.jobs_off(s.name for s in specs)

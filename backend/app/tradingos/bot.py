@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 SITE = "https://pricechat.live"
 HELP = """<b>Price Chat bot</b>
 
+🥝 <b>AI Investment Committee</b> (research only)
+/committee BTC 4h · analysts, bull vs bear, risk check, verdict
+/debate ETH · bull vs bear · /research SOL · the full report
+/risk BTC · risk committee + Kiwi risk engine · /committee status
+
 📈 <b>Market data</b>
 /price BTC ETH SOL · price + 24h move
 /markets · today's movers, volume, funding (/markets weekly)
@@ -101,8 +106,10 @@ def _pct(x: float) -> str:
 
 
 # ---------------------------------------------------------------- commands (private chats and groups)
-PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/record", "/idea", "/ideas"}  # groups too
-MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator"}
+PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/record", "/idea", "/ideas",
+          "/committee", "/debate", "/research"}  # groups too ("/risk <coin>" as well: the committee's risk review)
+MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator", "/committee", "/debate", "/research"}
+COMMITTEE = {"/committee", "/debate", "/research"}  # committeecmd.py (Kiwi AI Investment Committee)
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
 PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close", "/vpn"} | alerts.COMMANDS  # DMs only
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
@@ -349,7 +356,8 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
             btns = [*(btns or []), [{"text": "🎁 Sign up on Hyperliquid · 4% off fees", "url": ref}]]
         await client.send_message(chat_id, text_, btns, html=True)
         return
-    if group and cmd in PRIVATE:
+    committee = cmd in COMMITTEE or (cmd == "/risk" and len(parts) > 1)  # "/risk BTC": the committee; "/risk": your limits
+    if group and cmd in PRIVATE and not committee:
         from app.telegram.ingestion import get_bot_state
 
         name = get_bot_state(db).bot_username or "cryptopricechatbot"
@@ -366,6 +374,10 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
     try:
         if cmd in ("/idea", "/ideas"):
             reply = await _idea_command(db, chat_id, user_id, cmd, parts[1:], author)
+        elif committee:  # market research for anyone, groups too (the words keep their case: contract addresses)
+            from app.tradingos import committeecmd
+
+            reply = await committeecmd.command(db, client, chat_id, user_id, cmd, parts[1:], reply_to, chat_username, footer(db))
         elif cmd == "/vpn":  # device names keep the case they were typed in
             reply = await vpn_command(db, client, chat_id, user_id, parts[1:])
         elif redirect:  # the chart goes to Bot Chat; the main chat gets one short line pointing there
@@ -941,6 +953,11 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     if data[:3] in ("cf:", "cx:", "cl:") and uid:
         await _trade_callback(db, client, cq, uid, data)
         return
+    if data.startswith("cm:") and uid:  # the committee's views (committeecmd.py)
+        from app.tradingos import committeecmd
+
+        await committeecmd.callback(db, client, cq)
+        return
     if data.startswith("pa:") and uid:  # 🔔 Alert me at entry (under /signal)
         await alerts.callback(db, client, cq, uid, data)
         return
@@ -1287,13 +1304,17 @@ async def announce(db: Session, client: Any, sig: TsSignal, before: str) -> bool
 MENU_PRIVATE = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
                 ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
                 ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
+                ("committee", "AI Investment Committee, e.g. /committee BTC 4h"), ("debate", "Bull vs bear, e.g. /debate ETH"),
+                ("research", "Full committee report, e.g. /research SOL"),
                 ("record", "How /signal ideas played out"), ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("status", "Your account"),
                 ("positions", "Your Hyperliquid positions"), ("pnl", "Your Hyperliquid P&L"), ("trades", "Your bot trades and results"),
-                ("risk", "Your mode and limits"), ("pause", "STOP NEW TRADES"), ("close", "Close a bot position"), ("connect", "Connect Hyperliquid"),
+                ("risk", "Your limits · /risk BTC: committee risk review"), ("pause", "STOP NEW TRADES"), ("close", "Close a bot position"), ("connect", "Connect Hyperliquid"),
                 ("vpn", "Kiwi VPN: your devices and configs"), ("help", "All commands")]
 MENU_GROUP = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
               ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
               ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
+              ("committee", "AI Investment Committee, e.g. /committee BTC 4h"), ("debate", "Bull vs bear, e.g. /debate ETH"),
+              ("research", "Full committee report, e.g. /research SOL"), ("risk", "Committee risk review, e.g. /risk BTC"),
               ("record", "How /signal ideas played out"), ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("help", "All commands")]
 _menu_set = False
 
