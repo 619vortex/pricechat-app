@@ -454,31 +454,83 @@ def flat(n: int, px: float, span: int = H, t0: int = 0) -> list[Candle]:
     return [Candle(t0 + i * span, px, px * 1.001, px * 0.999, px, 10) for i in range(n)]
 
 
+def lv(*pairs: tuple[float, str]) -> list[tuple[float, str, int]]:
+    return [(v, lbl, i) for i, (v, lbl) in enumerate(pairs)]
+
+
 def test_scenarios_follow_the_documented_rules() -> None:
     cs = flat(40, 100.0)
     atr = 2.0
-    lows = [(95.0, "1h pivot low"), (90.0, "4h pivot low"), (99.0, "1h pivot low")]
-    highs = [(104.0, "1h pivot high"), (110.0, "1d pivot high"), (120.0, "4h pivot high"), (101.0, "1h pivot high")]
+    lows = lv((95.0, "1h pivot low"), (90.0, "4h pivot low"), (99.8, "1h pivot low"))
+    highs = lv((101.0, "1h pivot high"), (101.8, "1h pivot high"), (104.0, "1h pivot high"), (110.0, "1d pivot high"), (120.0, "4h pivot high"))
     long = technical.scenario("long", 100.5, cs, "1h", atr, lows, highs)
-    assert long["trigger"] == 101.0 and "nearest resistance above the price" in long["trigger_rule"] and "1h pivot high 101" in long["trigger_rule"]
-    assert long["invalidation"] == 99.0 - 0.25 * atr and "minus 0.25 x ATR14(1h) 2" in long["invalidation_rule"]
-    assert long["targets"] == [104.0, 110.0] and long["target_rule"].startswith("T1 = 1h pivot high 104.00; T2 = 1d pivot high 110.00")
+    assert long["trigger"] == 101.0 and "nearest resistance above the price 100.50: 1h pivot high 101.00" in long["trigger_rule"]
+    # 99.8 is only 1.2 below the trigger (< 0.75 ATR + buffer would leave < 1 ATR): skipped for 95
+    assert long["invalidation"] == 95.0 - 0.25 * atr and "(1h pivot low 95) minus 0.25 x ATR14(1h) 2 = 94.5" in long["invalidation_rule"]
+    # R = 6.5: 101.8 and 104 are closer than 1R, so T1 is 110; T2 must be >= T1 + 1 ATR
+    assert long["targets"] == [110.0, 120.0]
+    assert long["target_rule"].startswith("T1 = 1d pivot high 110.00 (first resistance at least max(1R, 1 x ATR) = 6.5 beyond the trigger")
+    assert "T2 = 4h pivot high 120.00 (next resistance at least 1 x ATR beyond T1)" in long["target_rule"]
     short = technical.scenario("short", 100.5, cs, "1h", atr, lows, highs)
-    assert short["trigger"] == 99.0 and short["invalidation"] == 101.0 + 0.25 * atr
+    assert short["trigger"] == 99.8 and short["invalidation"] == 101.8 + 0.25 * atr  # 101 is only 1.2 above: skipped
     assert short["targets"] == [95.0, 90.0]
 
 
 def test_scenario_falls_back_to_breakout_level_and_atr_targets() -> None:
     cs = flat(40, 100.0)
-    lows = [(97.0, "1h pivot low")]
-    long = technical.scenario("long", 100.5, cs, "1h", 2.0, lows, [])
-    hi20 = max(c.h for c in cs[-20:])
+    hi20, lo20 = max(c.h for c in cs[-20:]), min(c.l for c in cs[-20:])
+    long = technical.scenario("long", 100.5, cs, "1h", 2.0, lv((97.0, "1h pivot low")), [])
     assert long["trigger"] == round(hi20, 4) and "highest high of the last 20 closed 1h candles" in long["trigger_rule"]
+    assert long["invalidation"] == 96.5
     assert long["targets"] == [round(hi20 + 4, 4), round(hi20 + 6, 4)]
-    assert "trigger + 2 x ATR14(1h) 2" in long["target_rule"] and "trigger + 3 x ATR14(1h) 2" in long["target_rule"]
-    assert technical.scenario("short", 100.5, cs, "1h", 2.0, lows, []) is None  # nothing above a breakdown trigger to invalidate it
-    assert technical.scenario("long", 100.5, cs[:10], "1h", 2.0, lows, []) is None  # too few candles
-    assert technical.scenario("long", 100.5, cs, "1h", None, lows, []) is None  # no ATR
+    assert "T1 = trigger + 2 x ATR14(1h) 2 = " in long["target_rule"] and "T2 = trigger + 3 x ATR14(1h) 2 = " in long["target_rule"]
+    # a far invalidation (R > 2 ATR): T1 = 1R, T2 = T1 + 1 ATR
+    far = technical.scenario("long", 100.5, cs, "1h", 2.0, lv((92.0, "1d pivot low")), [])
+    r = hi20 - 91.5
+    assert far["targets"] == [round(hi20 + r, 4), round(hi20 + r + 2, 4)]
+    assert "T1 = trigger + 1R (R = |trigger - invalidation| = " in far["target_rule"] and "T2 = T1 + 1 x ATR14(1h) 2" in far["target_rule"]
+    # nothing behind the trigger: invalidation = trigger -/+ 1.5 ATR
+    short = technical.scenario("short", 100.5, cs, "1h", 2.0, [], [])
+    assert short["trigger"] == round(lo20, 4) and short["invalidation"] == round(lo20 + 3, 4)
+    assert "no resistance at least 0.75 x ATR above the trigger: trigger + 1.5 x ATR14(1h) 2" in short["invalidation_rule"]
+    assert short["targets"] == [round(lo20 - 4, 4), round(lo20 - 6, 4)]
+    assert technical.scenario("long", 100.5, cs[:10], "1h", 2.0, [], []) is None  # too few candles
+    assert technical.scenario("long", 100.5, cs, "1h", None, [], []) is None  # no ATR
+
+
+def test_levels_within_a_quarter_atr_are_merged() -> None:
+    cs = flat(40, 99.8)  # ranges reach 100.3 with the 0.5 tolerance, not 100.6
+    pool = lv((100.0, "1h pivot high"), (100.3, "4h pivot high"), (100.6, "1d pivot high"), (105.0, "1d pivot high"))
+    out = technical.cluster(pool, cs, 2.0, "1h")
+    assert [v for v, _, _ in out] == [100.3, 105.0]  # {100, 100.3}: tie on touches, the more recent wins; then 100.6 is within 0.5 of 100.3
+    assert out[0][1] == "4h pivot high (kept from 3 levels within 0.25 x ATR14(1h) 2: most touches (40), then most recent)"
+    assert technical.cluster(pool, cs, None, "1h") == pool
+
+
+def assert_scenario_spacing(p: dict[str, Any]) -> None:
+    t = p["sections"]["technical"]["facts"]
+    atr = t["frames"][p["timeframe"]]["atr14"]
+    for side, sc in t["scenarios"].items():
+        assert sc is not None, side
+        trig, inv, tg = sc["trigger"], sc["invalidation"], sc["targets"]
+        r = abs(trig - inv)
+        assert r >= atr * 0.999, (side, sc)
+        assert abs(tg[0] - trig) >= max(r, atr) * 0.999, (side, sc)
+        assert len(tg) == 2 and abs(tg[1] - tg[0]) >= atr * 0.999, (side, sc)
+        assert (tg[0] > trig) == (side == "long") and (inv < trig) == (side == "long")
+    for levels in (t["support"], t["resistance"]):
+        assert all(abs(a - b) > 0.25 * atr for a, b in zip(levels, levels[1:])), levels
+
+
+async def test_btc_fixture_scenarios_are_not_too_tight(world: World, db: Any) -> None:
+    # the first version gave T1 82,905.5 for a trigger at 82,867.7 (0.05%) on this fixture: pivots 0.04% apart were all kept
+    p = await pack(world, db, "BTC")
+    assert_scenario_spacing(p)
+    for h in (6, 30, 77):  # and at other moments of the fixture's price waves
+        world.now_ms -= h * H
+        common.reset()
+        market._shared._cache.clear()  # type: ignore[union-attr]
+        assert_scenario_spacing(await pack(world, db, "BTC"))
 
 
 def test_technical_build_with_too_few_candles_has_null_scenarios() -> None:

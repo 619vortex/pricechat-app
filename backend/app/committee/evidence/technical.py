@@ -10,13 +10,19 @@ pivot highs and lows both rising HH/HL, both falling LH/LL, else mixed), breakou
 candles' high / low).
 
 Levels: pivot highs / lows (k=2) of the last 120 run-timeframe candles, the last 120 4h candles and the daily candles, plus
-the run timeframe's 120-candle extreme and the daily window extreme; clustered 0.4% apart; nearest three each side.
+the run timeframe's 120-candle extreme and the daily window extreme. Levels within 0.25 x ATR14(run timeframe) of each other
+are merged (grouped in price order, each group spanning at most 0.25 ATR, repeated until no two are closer); the one kept
+has the most touches of the last 120 run-timeframe candles (range within 0.25 ATR of it), then is the most recent.
+Nearest three each side.
 
-Scenarios (every number says how it was made; null when it can't be derived, e.g. fewer than 20 candles or no ATR):
+Scenarios (every number's rule string says how it was made; null when it can't be derived: < 20 candles or no ATR):
   long   trigger      the nearest resistance above the price, else the highest high of the last 20 run-timeframe candles
-         invalidation the nearest support below the trigger minus 0.25 x ATR14(run timeframe)
-         targets      the next two resistances above the trigger; missing ones filled with trigger + 2 x ATR, + 3 x ATR
-  short  mirrored (nearest support below the price / 20-candle low; nearest resistance above + 0.25 ATR; supports or - ATR)
+         invalidation the nearest support at least 0.75 ATR below the trigger, minus 0.25 x ATR (so >= 1 ATR from the
+                      trigger); no such support -> trigger - 1.5 x ATR
+         targets      T1 = the first resistance >= max(1R, 1 x ATR) above the trigger (R = trigger - invalidation), else
+                      trigger + max(2 x ATR, 1R); T2 = the next resistance >= 1 x ATR above T1, else trigger + 3 x ATR when
+                      that is >= T1 + 1 x ATR, else T1 + 1 x ATR
+  short  mirrored (supports and resistances swapped, signs flipped; targets must stay above zero)
 
 Lean / score (deterministic): +1 / -1 for each of the 1h, 4h, 1d trends that is up / down; +1 / -1 for the run
 timeframe's MACD histogram above / below zero; RSI14 >= 70 takes 1 off a positive total, <= 30 adds 1 to a negative one
@@ -83,77 +89,136 @@ def frame_facts(cs: list[Candle], tf: str) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------- levels
-def level_pool(frames: dict[str, list[Candle]], timeframe: str) -> tuple[list[tuple[float, str]], list[tuple[float, str]]]:
-    """(support candidates, resistance candidates) as (price, where it comes from)."""
-    lows: list[tuple[float, str]] = []
-    highs: list[tuple[float, str]] = []
+Level = tuple[float, str, int]  # (price, where it comes from, open time of the candle that made it, ms)
+
+
+def level_pool(frames: dict[str, list[Candle]], timeframe: str) -> tuple[list[Level], list[Level]]:
+    """(support candidates, resistance candidates), before clustering. Pivots as indicators.pivots (k=2)."""
+    lows: list[Level] = []
+    highs: list[Level] = []
+    k = 2
     for tf in dict.fromkeys((timeframe, "4h", "1d")):
         cs = frames.get(tf) or []
         if tf != "1d":
             cs = cs[-LEVEL_WINDOW:]
         if not cs:
             continue
-        pl, ph = ind.pivots([c.h for c in cs], [c.l for c in cs])
-        lows += [(x, f"{tf} pivot low") for x in pl]
-        highs += [(x, f"{tf} pivot high") for x in ph]
+        for i in range(k, len(cs) - k):
+            win = cs[i - k:i + k + 1]
+            if cs[i].l == min(c.l for c in win):
+                lows.append((cs[i].l, f"{tf} pivot low", cs[i].t))
+            if cs[i].h == max(c.h for c in win):
+                highs.append((cs[i].h, f"{tf} pivot high", cs[i].t))
         if tf in (timeframe, "1d"):  # the window's own extremes, when no swing stands on that side (a one-way market)
-            lows.append((min(c.l for c in cs), f"{tf} {len(cs)}-candle low"))
-            highs.append((max(c.h for c in cs), f"{tf} {len(cs)}-candle high"))
+            lo, hi = min(cs, key=lambda c: c.l), max(cs, key=lambda c: c.h)
+            lows.append((lo.l, f"{tf} {len(cs)}-candle low", lo.t))
+            highs.append((hi.h, f"{tf} {len(cs)}-candle high", hi.t))
     return lows, highs
 
 
-def nearest(pool: list[tuple[float, str]], ref: float, below: bool, n: int) -> list[tuple[float, str]]:
-    """indicators.nearest_levels over labelled levels (the first label of a cluster wins)."""
-    vals = ind.nearest_levels([p for p, _ in pool], ref, below, n)
+def touches(v: float, cs: list[Candle], tol: float) -> int:
+    """Run-timeframe candles whose range reaches within tol of the level."""
+    return sum(1 for c in cs if c.l - tol <= v <= c.h + tol)
+
+
+def cluster(pool: list[Level], cs: list[Candle], atr: float | None, tf: str) -> list[Level]:
+    """Levels within 0.25 x ATR14(tf) of each other become one: in price order, a group spans at most 0.25 ATR from its
+    lowest member (no chaining) and keeps the member with the most touches of the last LEVEL_WINDOW run-timeframe candles,
+    then the most recent; repeated until no two kept levels are within 0.25 ATR. Its label says what was merged."""
+    if not pool or not atr:
+        return list(pool)
+    tol = 0.25 * atr
+    recent = cs[-LEVEL_WINDOW:]
+    items = [(v, lbl, t, 1) for v, lbl, t in pool]  # + how many raw levels it stands for
+    while True:
+        groups: list[list[tuple[float, str, int, int]]] = []
+        for lv in sorted(items, key=lambda x: x[0]):
+            if groups and lv[0] - groups[-1][0][0] <= tol:
+                groups[-1].append(lv)
+            else:
+                groups.append([lv])
+        merged = []
+        for g in groups:
+            best = max(g, key=lambda x: (touches(x[0], recent, tol), x[2]))
+            merged.append((best[0], best[1], best[2], sum(x[3] for x in g)))
+        if len(merged) == len(items):
+            break
+        items = merged
     out = []
-    for v in vals:
-        out.append((v, next(lbl for p, lbl in pool if p == v)))
+    for v, lbl, t, n in items:
+        if n > 1:
+            lbl += f" (kept from {n} levels within 0.25 x ATR14({tf}) {fmt_price(atr)}: most touches ({touches(v, recent, tol)}), then most recent)"
+        out.append((v, lbl, t))
     return out
 
 
-def scenario(side: str, price: float, cs: list[Candle], tf: str, atr: float | None, lows: list[tuple[float, str]],
-             highs: list[tuple[float, str]]) -> dict[str, Any] | None:
-    """One scenario per the module docstring, or None when its levels can't be derived."""
+def nearest(pool: list[Level], ref: float, below: bool, n: int, min_dist: float = 0.0) -> list[Level]:
+    """The n levels nearest to ref on one side (strictly), at least min_dist away from it."""
+    side = [x for x in pool if (ref - x[0] if below else x[0] - ref) > 0 and abs(ref - x[0]) >= min_dist]
+    return sorted(side, key=lambda x: abs(ref - x[0]))[:n]
+
+
+def scenario(side: str, price: float, cs: list[Candle], tf: str, atr: float | None, lows: list[Level],
+             highs: list[Level]) -> dict[str, Any] | None:
+    """One scenario per the module docstring (lows / highs already clustered), or None when it can't be derived."""
     if len(cs) < MIN_SCENARIO or not atr or price <= 0:
         return None
     long = side == "long"
+    sign = 1 if long else -1
+    pm = "+" if long else "-"
     f = fmt_price
-    atr_txt = f"ATR14({tf}) {f(atr)}"
-    above, below = (highs, lows) if long else (lows, highs)
-    near = nearest(above, price, not long, 1)
+    a = f"ATR14({tf}) {f(atr)}"
+    res, sup = ("resistance", "support") if long else ("support", "resistance")
+    ahead, behind = (highs, lows) if long else (lows, highs)
+    near = nearest(ahead, price, not long, 1)
     if near:
-        trigger, lbl = near[0]
-        trigger_rule = f"nearest {'resistance above' if long else 'support below'} the price {f(price)}: {lbl} {f(trigger)}"
+        trigger, lbl, _ = near[0]
+        trigger_rule = f"nearest {res} {'above' if long else 'below'} the price {f(price)}: {lbl} {f(trigger)}"
     else:
         trigger = max(c.h for c in cs[-20:]) if long else min(c.l for c in cs[-20:])
-        trigger_rule = (f"no {'resistance above' if long else 'support below'} the price: {'highest high' if long else 'lowest low'} "
+        trigger_rule = (f"no {res} {'above' if long else 'below'} the price: {'highest high' if long else 'lowest low'} "
                         f"of the last 20 closed {tf} candles {f(trigger)} ({'breakout' if long else 'breakdown'} level)")
-    guard = nearest(below, trigger, long, 1)
-    if not guard:
+    # invalidation: past the nearest opposite level that still leaves >= 1 ATR to the trigger after the 0.25 ATR buffer
+    guard = nearest(behind, trigger, long, 1, min_dist=0.75 * atr)
+    if guard:
+        g, glbl, _ = guard[0]
+        invalidation = g - sign * 0.25 * atr
+        inv_rule = (f"nearest {sup} {'below' if long else 'above'} the trigger at least 0.75 x ATR away ({glbl} {f(g)}) "
+                    f"{'minus' if long else 'plus'} 0.25 x {a} = {f(invalidation)} (>= 1 x ATR from the trigger)")
+    else:
+        invalidation = trigger - sign * 1.5 * atr
+        inv_rule = (f"no {sup} at least 0.75 x ATR {'below' if long else 'above'} the trigger: "
+                    f"trigger {'-' if long else '+'} 1.5 x {a} = {f(invalidation)}")
+    if invalidation <= 0:
         return None
-    g, glbl = guard[0]
-    sign = 1 if long else -1
-    invalidation = g - sign * 0.25 * atr
-    inv_rule = (f"nearest {'support below' if long else 'resistance above'} the trigger ({glbl} {f(g)}) "
-                f"{'minus' if long else 'plus'} 0.25 x {atr_txt}")
-    targets: list[float] = []
+    r = abs(trigger - invalidation)
+    t1_min = max(r, atr)
     parts: list[str] = []
-    for v, lbl in nearest(above, trigger, not long, 2):
-        targets.append(v)
-        parts.append(f"{lbl} {f(v)}")
-    for mult in (2, 3):
-        if len(targets) >= 2:
-            break
-        v = trigger + sign * mult * atr
-        if (not targets or sign * (v - targets[-1]) > 0) and v > 0:
-            targets.append(v)
-            parts.append(f"trigger {'+' if long else '-'} {mult} x {atr_txt} = {f(v)}")
-    if not targets or invalidation <= 0:
+    lv = nearest(ahead, trigger, not long, 1, min_dist=t1_min)
+    if lv:
+        t1 = lv[0][0]
+        parts.append(f"T1 = {lv[0][1]} {f(t1)} (first {res} at least max(1R, 1 x ATR) = {f(t1_min)} beyond the trigger; "
+                     f"R = |trigger - invalidation| = {f(r)})")
+    else:
+        d = max(2 * atr, r)
+        t1 = trigger + sign * d
+        how = f"2 x {a}" if d == 2 * atr else f"1R (R = |trigger - invalidation| = {f(r)})"
+        parts.append(f"T1 = trigger {pm} {how} = {f(t1)} (no {res} at least max(1R, 1 x ATR) = {f(t1_min)} beyond the trigger)")
+    lv = nearest(ahead, t1, not long, 1, min_dist=atr)
+    if lv:
+        t2 = lv[0][0]
+        parts.append(f"T2 = {lv[0][1]} {f(t2)} (next {res} at least 1 x ATR beyond T1)")
+    elif sign * (trigger + sign * 3 * atr - t1) >= atr:
+        t2 = trigger + sign * 3 * atr
+        parts.append(f"T2 = trigger {pm} 3 x {a} = {f(t2)} (no {res} at least 1 x ATR beyond T1)")
+    else:
+        t2 = t1 + sign * atr
+        parts.append(f"T2 = T1 {pm} 1 x {a} = {f(t2)} (no {res} at least 1 x ATR beyond T1)")
+    if t1 <= 0:
         return None
+    targets, parts = ([t1, t2], parts) if t2 > 0 else ([t1], parts[:1])
     return {"trigger": rnd(trigger), "trigger_rule": trigger_rule, "invalidation": rnd(invalidation), "invalidation_rule": inv_rule,
-            "targets": [rnd(t) for t in targets],
-            "target_rule": "; ".join(f"T{i + 1} = {p}" for i, p in enumerate(parts))
-            + f" (next {'resistances above' if long else 'supports below'} the trigger, then ATR multiples)"}
+            "targets": [rnd(t) for t in targets], "target_rule": "; ".join(parts)}
 
 
 # ---------------------------------------------------------------- lean
@@ -212,9 +277,10 @@ def build(frames: dict[str, list[Candle]], timeframe: str, price: float | None, 
         status = "partial"
     ref_price = price or run_cs[-1].c
     atr = ind.atr([c.h for c in run_cs], [c.l for c in run_cs], [c.c for c in run_cs])
-    lows, highs = level_pool(frames, timeframe)
-    support = [rnd(v) for v, _ in nearest(lows, ref_price, True, 3)]
-    resistance = [rnd(v) for v, _ in nearest(highs, ref_price, False, 3)]
+    raw_lows, raw_highs = level_pool(frames, timeframe)
+    lows, highs = cluster(raw_lows, run_cs, atr, timeframe), cluster(raw_highs, run_cs, atr, timeframe)
+    support = [rnd(v) for v, _, _ in nearest(lows, ref_price, True, 3)]
+    resistance = [rnd(v) for v, _, _ in nearest(highs, ref_price, False, 3)]
     scen = {"long": scenario("long", ref_price, run_cs, timeframe, atr, lows, highs),
             "short": scenario("short", ref_price, run_cs, timeframe, atr, lows, highs)}
     if len(run_cs) < MIN_SCENARIO or not atr:
