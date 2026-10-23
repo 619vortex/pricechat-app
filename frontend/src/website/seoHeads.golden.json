@@ -38,6 +38,10 @@
    "title": "Earn: Funding Arb · Price Chat",
    "description": "Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them."
   },
+  "earn/committee": {
+   "title": "Earn: AI Investment Committee · Price Chat",
+   "description": "Kiwi's AI Investment Committee researches one market at a time: analysts, bull vs bear, risk checks. Research only: nothing is traded."
+  },
   "learn": {
    "title": "Beginner content · Price Chat",
    "description": "Exclusive beginner lessons for Kiwi Chicks and above."

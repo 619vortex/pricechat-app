@@ -5,14 +5,15 @@ import { memberApi } from "./members";
 import "./tradingbot.css";
 import "./arbitrage.css";
 
-export type EarnTab = "bot" | "lunch" | "funding";
+export type EarnTab = "bot" | "lunch" | "funding" | "committee";
 const TABS: { key: EarnTab; href: string; icon: string; title: string; sub: string }[] = [
   { key: "bot", href: "/earn", icon: "🥝", title: "Trading Bot", sub: "Kiwi's signals on Hyperliquid" },
   { key: "lunch", href: "/earn/lunch", icon: "🍱", title: "Lunch Bot", sub: "pump.fun launches · paper" },
   { key: "funding", href: "/earn/funding", icon: "⚖️", title: "Funding Arb", sub: "funding gaps across 4 DEXs" },
+  { key: "committee", href: "/earn/committee", icon: "🏛️", title: "AI Committee", sub: "research only · no trades" },
 ];
 
-/** Earn's three products as three big tabs across the top of every Earn page: the trading bot first. */
+/** Earn's products as big tabs across the top of every Earn page: the trading bot first. */
 export function EarnTabs({ current }: { current: EarnTab }) {
   return (
     <nav className="earn-tabs" aria-label="Earn products">

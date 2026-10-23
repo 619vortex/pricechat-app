@@ -28,6 +28,7 @@ export const PAGE_HEADS = {
   "earn/brain": { title: "Kiwi Brain · Price Chat", description: "How the Kiwi trading bot reads the market, signal by signal, live." },
   "earn/lunch": { title: "Earn: Lunch Bot · Price Chat", description: "Lunch Bot paper-trades pump.fun launches at real on-chain prices." },
   "earn/funding": { title: "Earn: Funding Arb · Price Chat", description: "Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them." },
+  "earn/committee": { title: "Earn: AI Investment Committee · Price Chat", description: "Kiwi's AI Investment Committee researches one market at a time: analysts, bull vs bear, risk checks. Research only: nothing is traded." },
   learn: { title: "Beginner content · Price Chat", description: "Exclusive beginner lessons for Kiwi Chicks and above." },
   vpn: { title: "Kiwi VPN · Price Chat", description: "A private WireGuard VPN for Kiwi Passport members. No traffic logs." },
   "website/privacy": { title: "Privacy · Price Chat", description: "How Price Chat handles member data, connected accounts and Kiwi XP." },

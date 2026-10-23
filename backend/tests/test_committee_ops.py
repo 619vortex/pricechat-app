@@ -282,7 +282,7 @@ def test_api_status_runs_and_placeholders(client: TestClient, db: Session, evide
     assert client.post("/api/committee/runs", json={"symbol": "BTC"}).json() == {"id": rid, "cached": True}
     lst = client.get("/api/committee/runs?symbol=BTC").json()["runs"]
     assert lst[0]["id"] == rid and lst[0]["verdict"] == "LONG" and "requested_by" not in json.dumps(lst)
-    assert client.get(f"/api/committee/runs/{rid}/report.html").status_code == 501
+    assert client.get(f"/api/committee/runs/{rid}/report.html").headers["content-disposition"].startswith("attachment; filename=\"kiwi-committee-BTC-1h-")
     assert client.get("/api/committee/paper").json() == {"status": "not_built"}
     assert client.get("/api/committee/backtests").json() == {"status": "not_built"}
     assert client.get("/api/committee/backtests/1").json() == {"status": "not_built"}

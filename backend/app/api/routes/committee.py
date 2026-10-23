@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession, Runtime
 from app.api.routes.members import SessionToken, _current
 from app.api.schemas import StrictInput
-from app.committee import llm, orchestrator, outcomes
+from app.committee import llm, orchestrator, outcomes, report as cm_report
 from app.models.committee import CmRun
 from app.security import admin_auth
 from app.security.rate_limit import limit
@@ -76,7 +76,7 @@ def list_runs(db: DbSession, symbol: str | None = Query(None, max_length=32), li
     q = select(CmRun).where(CmRun.status.in_(("queued", "running", "done", "failed")))
     if symbol:
         q = q.where(CmRun.symbol == symbol.strip().upper())
-    return {"runs": [outcomes.summary(db, r) for r in db.scalars(q.order_by(CmRun.id.desc()).limit(limit_))]}
+    return {"runs": [cm_report.public_run(outcomes.summary(db, r)) for r in db.scalars(q.order_by(CmRun.id.desc()).limit(limit_))]}
 
 
 def _run(db: Any, run_id: str) -> CmRun:
@@ -92,18 +92,27 @@ def get_run(run_id: str, db: DbSession) -> dict[str, Any]:
     out = dict(orchestrator.stored(row) or {})
     out["status"] = row.status
     out["outcomes"] = outcomes.outcomes_of(db, row)
-    return out
+    return cm_report.public_run(out)
 
 
-@router.get(f"{P}/runs/{{run_id}}/report.html")
+@router.get(f"{P}/runs/{{run_id}}/report.html", dependencies=[Depends(limit("earn"))])
 def report(run_id: str, db: DbSession) -> Response:
-    _run(db, run_id)
-    return Response("The committee report page is not built yet.", status_code=status.HTTP_501_NOT_IMPLEMENTED, media_type="text/plain")
+    """The run as a standalone, downloadable HTML document (inline CSS, no scripts, escaped model text)."""
+    row = _run(db, run_id)
+    run = orchestrator.stored(row) or {}
+    if row.status != "done" or not row.result:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This run has no finished report yet.")
+    body = cm_report.render(run, outcomes.outcomes_of(db, row), row.created_at)
+    name = cm_report.filename(run, row.created_at)
+    return Response(body, media_type="text/html; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="{name}"', "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'",
+        "Cache-Control": "private, max-age=60"})
 
 
 @router.get(f"{P}/track", dependencies=[Depends(limit("earn"))])
 def track(db: DbSession, limit_: int = Query(50, ge=1, le=200, alias="limit")) -> dict[str, Any]:
-    return outcomes.track(db, limit_)
+    return cm_report.public_run(outcomes.track(db, limit_))
 
 
 @router.get(f"{P}/paper")
