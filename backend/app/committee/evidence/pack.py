@@ -339,6 +339,13 @@ async def _build(db: Any, symbol: str, timeframe: str, as_of: datetime, mode: st
             ff.update(max_leverage=hl_market.max_leverage, sz_decimals=hl_market.sz_decimals, only_isolated=iso_only,
                       oi_usd=rnd(hl_market.oi_usd), volume_24h_usd=rnd(hl_market.day_volume),
                       spread_bps=round(sp, 2) if (sp := hl_market.spread_bps) is not None else None)
+            try:  # the live book: spread and USD depth within 0.5% of mid, for the risk gate's liquidity check
+                b = await asyncio.to_thread(md.book, listing.symbol)
+                ff["book"] = {"spread_bps": round(b["spread_bps"], 2), "bid_depth_usd": rnd(b["bid_depth_usd"]),
+                              "ask_depth_usd": rnd(b["ask_depth_usd"])}
+                frefs.append(refs.add("F", f"Hyperliquid l2Book {listing.symbol}", HL_API, fetched(), fetched()))
+            except MarketError as e:
+                flim.append(f"order book unavailable: {e}")
         elif listing.volume_24h is not None and listing.venue != "dex":
             frefs.append(refs.add("F", f"{venues.NAME[listing.venue]} 24h ticker {listing.symbol}", None, fetched(), fetched()))
             ff["volume_24h_usd"] = rnd(listing.volume_24h)
