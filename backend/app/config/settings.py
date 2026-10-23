@@ -138,6 +138,20 @@ class Settings(BaseSettings):
     portfolio_scans_total_per_day: int = Field(1500, ge=0)  # whole site (credit protection)
     anthropic_api_key: SecretStr | None = None
     condition_model: str = "claude-sonnet-5-5"
+    # Kiwi AI Investment Committee (app/committee). Backend: auto | vortex | router | anthropic | openai | rules. Model names
+    # for the paid backends come from here only (none hardcoded); keys from ANTHROPIC_API_KEY / OPENAI_API_KEY or the store.
+    committee_backend: str = "auto"
+    committee_model_fast: str = ""
+    committee_model_deep: str = ""
+    committee_model_synth: str = ""
+    committee_costs: str = ""  # JSON {"model": [usd per 1M input tokens, per 1M output]} over the built-in table
+    committee_daily_limit: int = Field(3, ge=0, le=1000)  # runs per Telegram user / member a day
+    committee_daily_limit_ranked: int = Field(10, ge=0, le=1000)  # Passport members at / above the boost Kiwi Rank
+    committee_max_concurrent: int = Field(2, ge=1, le=20)
+    committee_daily_calls: int = Field(300, ge=0)
+    committee_daily_usd: float = Field(2.0, ge=0)
+    committee_call_timeout_seconds: float = Field(90.0, ge=5)
+    openai_api_key: SecretStr | None = None
     portfolio_conditions_per_day: int = Field(5, ge=0, le=100)  # per member
     portfolio_conditions_total_per_day: int = Field(300, ge=0)
     # Card Marketplace (docs/MARKETPLACE.md). "simulation": sandbox listings + simulated USDT payments only. "live" is refused

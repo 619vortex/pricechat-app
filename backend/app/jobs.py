@@ -770,6 +770,18 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         finally:
             await tg.aclose()
 
+    async def committee_outcomes(ctx: JobContext) -> dict[str, Any]:
+        """Kiwi AI Investment Committee: score finished runs at 1h / 4h / 24h / 7d from Hyperliquid candles (read-only)."""
+        from app.committee import outcomes
+
+        return await outcomes.resolve(ctx.db, ctx.now)
+
+    async def committee_llm_expire(ctx: JobContext) -> dict[str, Any]:
+        """Kiwi AI Investment Committee: LLM calls Vortex didn't answer within 90 s are expired (their roles use rules)."""
+        from app.committee import remote
+
+        return {"expired": remote.expire(ctx.db, ctx.now)}
+
     async def funding_alerts(ctx: JobContext) -> dict[str, Any]:
         """Earn › Funding Arb: post wide cross-venue funding spreads (net of estimated fees) to the publish chat. Read-only."""
         from app.arbitrage import funding_alerts as fa
@@ -919,6 +931,10 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 60, autodelete, initial_delay_seconds=50, timeout_seconds=50),
         JobSpec("tradingos.vortex_expire", "Trading OS: Vortex trade-check expiry", "Every 20 s: a /help <trade> check Vortex hasn't answered within 60 s gets the bot's own assessment instead (a late answer from Vortex is then ignored)",
                 20, vortex_expire, initial_delay_seconds=30, timeout_seconds=18),
+        JobSpec("committee.outcomes", "Kiwi AI Investment Committee: outcomes", "Every 15 min: what the market did 1 h / 4 h / 24 h / 7 d after each committee verdict, measured from the first Hyperliquid candle close after it (the public track record). Read-only, never trades",
+                900, committee_outcomes, initial_delay_seconds=420, timeout_seconds=300),
+        JobSpec("committee.llm_expire", "Kiwi AI Investment Committee: Vortex call expiry", "Every 30 s: committee LLM calls Vortex hasn't answered within 90 s are expired; those roles use the committee's own rules text",
+                30, committee_llm_expire, initial_delay_seconds=45, timeout_seconds=25),
         JobSpec("tradingos.funding_alerts", "Earn › Funding Arb alerts", "Every 10 min: when a coin's best cross-venue funding spread, net of estimated taker fees on both legs, clears the threshold (Admin › Trading OS), posts it to the publish chat; 12 h cooldown per coin unless the spread grows 50%+. Read-only, never trades",
                 600, funding_alerts, initial_delay_seconds=240, timeout_seconds=120),
         JobSpec("brand.trends", "Brand Manager trend scan", "Every 30 min: reads today's headlines from crypto and finance outlets (CoinDesk, Cointelegraph, Decrypt, The Block, CNBC, MarketWatch, FT, BBC Business) and CoinGecko's most-searched coins, and counts which words are new or rising against the past 7 days, for Content Studio's topics and scripts",

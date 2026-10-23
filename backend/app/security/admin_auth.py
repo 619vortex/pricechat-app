@@ -222,7 +222,8 @@ PUBLIC_PREFIXES = ("/api/members/",
                    # Brand Manager: AI workers authenticate with their own token; TikTok fetches videos by signed URL
                    "/api/brand-manager/worker/", "/api/brand-manager/media/",
                    "/api/short-market/worker/",  # member APIs have their own member sign-in
-                   "/api/vortex/",  # Vortex trade checks: the owner's home AI, its own bearer token (never the admin cookie)
+                   "/api/vortex/",
+                   "/api/committee/",  # Kiwi AI Investment Committee: public research JSON; starting a run checks member / owner itself  # Vortex trade checks: the owner's home AI, its own bearer token (never the admin cookie)
                    "/api/website/seo/",  # sitemaps and link previews: only what public pages already show
                    "/api/r/")  # tracked referral links: count a click, 302 on (stores no IP / user agent / member)
 PUBLIC_EXACT = {

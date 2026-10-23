@@ -34,6 +34,8 @@ KNOWN_SECRETS: dict[str, str] = {
     "resend_api_key": "resend_api_key",
     # Pokémon Portfolio: the AI condition assistant (Anthropic vision)
     "anthropic_api_key": "anthropic_api_key",
+    # Kiwi AI Investment Committee: the OpenAI backend (app/committee/llm.py). A ChatGPT subscription is not an API key.
+    "openai_api_key": "openai_api_key",
     "x_member_client_secret": "x_member_client_secret",
     # Combot official API key (group admin) for importing legacy Telegram reputation
     "combot_api_key": "combot_api_key",

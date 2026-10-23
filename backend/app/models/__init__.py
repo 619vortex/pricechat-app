@@ -104,3 +104,4 @@ from app.models.rewards import ArenaRun, BeginnerContent, RankReward, RewardAudi
 from app.models.alerts import OwnerAlert, OwnerAlertSettings  # noqa: E402,F401
 from app.models.vpn import VpnDevice, VpnServer, VpnSettings  # noqa: E402,F401
 from app.models.perf_indexes import PERF_INDEXES  # noqa: E402,F401  (hot-query indexes, migration 0090)
+from app.models.committee import CmBacktest, CmLlmJob, CmOutcome, CmPaperTrade, CmRun, CmUsage  # noqa: E402,F401

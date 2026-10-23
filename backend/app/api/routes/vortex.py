@@ -1,5 +1,9 @@
 """The Vortex worker API (/api/vortex/*): the owner's home AI long-polls for trade-check jobs and posts its answers.
 
+The same channel carries the Kiwi AI Investment Committee's LLM calls ("l_…" ids, kind "llm", app/committee/remote.py):
+claim hands them out after the trade checks; answer / fail take {"text", "model", "tokens_in", "tokens_out"} for them, and
+their text goes back to the committee as is (it grounds it), never to Telegram.
+
 Outside the admin login (admin_auth.PUBLIC_PREFIXES): every route needs `Authorization: Bearer <vortex_assist_token>`,
 compared in constant time; failed tokens are rate-limited. The token is never logged. See app/tradingos/assist.py.
 """
@@ -16,6 +20,7 @@ from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
 from app.security.admin_auth import client_key
 from app.security.rate_limit import LIMITS
+from app.committee import remote
 from app.tradingos import assist
 
 router = APIRouter(tags=["vortex"])
@@ -56,7 +61,8 @@ def _claim_once(max_jobs: int, seen: bool) -> list[dict[str, Any]]:
         if seen:
             assist.mark_seen(db)
             db.commit()
-        return assist.claim(db, max_jobs)
+        jobs = assist.claim(db, max_jobs)
+        return jobs + remote.claim(db, max_jobs - len(jobs))
     finally:
         db.close()
 
@@ -74,7 +80,10 @@ async def claim(body: ClaimIn, request: Request, authorization: Bearer = None) -
 
 
 class AnswerIn(StrictInput):
-    text: str = Field("", max_length=20_000)
+    text: str = Field("", max_length=remote.MAX_ANSWER)
+    model: str | None = Field(None, max_length=64)  # committee llm jobs (ignored for trade checks)
+    tokens_in: int | None = Field(None, ge=0, le=10_000_000)
+    tokens_out: int | None = Field(None, ge=0, le=10_000_000)
 
 
 class FailIn(StrictInput):
@@ -91,6 +100,8 @@ def _job(db: Any, job_id: str) -> Any:
 @router.post(f"{P}/jobs/{{job_id}}/answer")
 async def answer(job_id: str, body: AnswerIn, request: Request, db: DbSession, runtime: Runtime, authorization: Bearer = None) -> dict[str, Any]:
     _auth(request, authorization)
+    if job_id.startswith("l_"):
+        return _llm_answer(db, job_id, body)
     text = body.text.strip()
     if not text or len(text) > assist.MAX_ANSWER:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"text must be 1-{assist.MAX_ANSWER} characters.")
@@ -107,9 +118,33 @@ async def answer(job_id: str, body: AnswerIn, request: Request, db: DbSession, r
     return {"ok": True}
 
 
+def _llm_job(db: Any, job_id: str) -> Any:
+    job = remote.find(db, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such job.")
+    return job
+
+
+def _llm_answer(db: Any, job_id: str, body: AnswerIn) -> dict[str, Any]:
+    job = _llm_job(db, job_id)
+    try:
+        remote.answer(db, job, body.text, body.model, body.tokens_in, body.tokens_out)
+    except remote.Conflict as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    return {"ok": True}
+
+
 @router.post(f"{P}/jobs/{{job_id}}/fail")
 async def fail(job_id: str, body: FailIn, request: Request, db: DbSession, runtime: Runtime, authorization: Bearer = None) -> dict[str, Any]:
     _auth(request, authorization)
+    if job_id.startswith("l_"):
+        try:
+            remote.fail(db, _llm_job(db, job_id))
+        except remote.Conflict as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+        return {"ok": True}
     job = _job(db, job_id)
     tg = _tg(runtime)
     try:
