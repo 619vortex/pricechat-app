@@ -79,6 +79,8 @@ LIMITS = {
     "committee_chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
     # visitors' Pokémon Market reads (card pages, charts, tables): a person browsing opens a few a second at most; a crawler
     # walking /api/pokemon/cards/<id> one id after another held every database connection on 2026-10-23
+    # inbound webhooks (signature-checked): TikTok delivers in bursts after an outage; this only stops a flood of junk
+    "webhook": Bucket(burst=120, every=0.1, shared_burst=600, shared_every=0.02),
     "market": Bucket(burst=60, every=0.5, shared_burst=1200, shared_every=0.01),
 }
 

@@ -225,6 +225,7 @@ PUBLIC_PREFIXES = ("/api/members/",
                    "/api/vortex/",
                    "/api/committee/",  # Kiwi AI Investment Committee: public research JSON; starting a run checks member / owner itself  # Vortex trade checks: the owner's home AI, its own bearer token (never the admin cookie)
                    "/api/website/seo/",  # sitemaps and link previews: only what public pages already show
+                   "/api/webhooks/",  # TikTok etc.: each webhook verifies its sender's signature over the raw body
                    "/api/r/")  # tracked referral links: count a click, 302 on (stores no IP / user agent / member)
 PUBLIC_EXACT = {
     # the owner login itself (every other /api/admin/... route needs the login)

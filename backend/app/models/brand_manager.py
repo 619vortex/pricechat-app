@@ -192,3 +192,17 @@ class BmTrendDay(IdMixin, TimestampMixin, Base):
     docs: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # distinct headlines in the last 24 h
     sources: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)  # outlets that used it
     examples: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)  # [{title, source, url, at}]
+
+
+class BmTiktokWebhookEvent(IdMixin, Base):
+    """A TikTok webhook delivery accepted at /api/webhooks/tiktok (signature verified). TikTok delivers at least once and
+    retries for up to 72 h, so the body's SHA-256 is unique: a repeat is answered 200 and not handled again. Only the event
+    name, the user's open_id and TikTok's create_time are kept, never the content."""
+    __tablename__ = "bm_tiktok_webhook_events"
+    __table_args__ = (UniqueConstraint("body_sha256", name="uq_bm_tiktok_webhook_events_body"),)
+
+    body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_openid: Mapped[str | None] = mapped_column(String(128))
+    create_time: Mapped[int | None] = mapped_column(BigInteger)
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
