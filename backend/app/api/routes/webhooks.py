@@ -20,7 +20,9 @@ async def tiktok(request: Request, db: DbSession, runtime: Runtime) -> Any:
     try:
         got = tiktok_webhook.receive(db, runtime.settings, request.headers.get(tiktok_webhook.HEADER), body)
     except tiktok_webhook.WebhookError as exc:
-        tiktok_webhook.log.warning("TikTok webhook refused: %s (%s, %d bytes, signature header %s)", exc.code, exc.status, len(body),
-                                   "present" if request.headers.get(tiktok_webhook.HEADER) else "missing")
+        header = request.headers.get(tiktok_webhook.HEADER)
+        why = tiktok_webhook.diagnose(runtime.settings, header, body) if header and exc.code in ("bad_signature", "stale") else {}
+        tiktok_webhook.log.warning("TikTok webhook refused: %s (%s, %d bytes, signature header %s) %s", exc.code, exc.status, len(body),
+                                   "present" if header else "missing", why)
         return JSONResponse(status_code=exc.status, content={"detail": str(exc), "code": exc.code})
     return {"ok": True, "event": got.event, "duplicate": got.duplicate}

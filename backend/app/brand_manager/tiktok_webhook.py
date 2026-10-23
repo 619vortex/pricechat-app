@@ -75,6 +75,38 @@ def verify(settings: Settings, header: str | None, body: bytes, now: float | Non
         raise WebhookError(401, "stale", "Signature timestamp outside the 5-minute window")
 
 
+def diagnose(settings: Settings, header: str | None, body: bytes, now: float | None = None) -> dict[str, Any]:
+    """Why a signed delivery didn't verify, for the refusal log: facts only (yes/no, numbers, where the secret comes from),
+    never the secret, the signature or the body. `variant` names another signing layout that WOULD match, if any; the
+    delivery is refused either way."""
+    from app.security.credentials import info
+
+    out: dict[str, Any] = {}
+    try:
+        data = json.loads(body)
+        ck = data.get("client_key") if isinstance(data, dict) else None
+        out["client_key"] = "absent" if not ck else "ours" if ck == resolve("tiktok_client_key", settings) else "other"
+    except (ValueError, UnicodeDecodeError):
+        out["client_key"] = "unparsed"
+    s_info = info("tiktok_client_secret", settings)
+    secret = resolve("tiktok_client_secret", settings) or ""
+    out["secret"] = f"{s_info.source}/{len(secret)}"
+    try:
+        t, given = parse_header(header)
+    except WebhookError:
+        return out
+    out["skew_s"] = int((time.time() if now is None else now) - t)
+    if secret:
+        def mac(key: bytes, msg: bytes) -> str:
+            return hmac.new(key, msg, hashlib.sha256).hexdigest()
+
+        k = secret.encode()
+        variants = {"body_only": mac(k, body), "no_dot": mac(k, f"{t}".encode() + body),
+                    "stripped_secret": mac(secret.strip().encode(), f"{t}.".encode() + body)}
+        out["variant"] = next((name for name, v in variants.items() if hmac.compare_digest(v, given)), "none")
+    return out
+
+
 def parse(settings: Settings, body: bytes) -> dict[str, Any]:
     try:
         data = json.loads(body)

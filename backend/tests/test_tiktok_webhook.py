@@ -112,3 +112,19 @@ def test_logs_never_carry_the_secret_signature_or_body(client: TestClient, app_k
     text = caplog.text
     assert "accepted" in text and "refused" in text
     assert SECRET not in text and h["TikTok-Signature"].split("s=")[1] not in text and "private-content-xyz" not in text
+
+
+def test_a_refusal_says_why_without_secrets(client: TestClient, app_keys: None, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="pricechat.tiktok.webhook")
+    raw = body()
+    t = int(time.time())
+    import hashlib
+    import hmac
+
+    body_only = hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()  # a layout we don't accept
+    assert client.post(URL, content=raw, headers={"TikTok-Signature": f"t={t},s={body_only}"}).status_code == 401
+    assert client.post(URL, content=raw, headers=signed(raw, secret="rotated-in-portal")).status_code == 401
+    lines = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    assert "'variant': 'body_only'" in lines[0] and "'client_key': 'ours'" in lines[0] and f"'secret': 'dashboard/{len(SECRET)}'" in lines[0]
+    assert "'variant': 'none'" in lines[1]
+    assert SECRET not in caplog.text and body_only not in caplog.text
