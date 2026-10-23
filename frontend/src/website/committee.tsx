@@ -67,6 +67,42 @@ export function safeUrl(u: unknown): string | null {
     return null;
   }
 }
+const SCENARIO_REASON = /^(long|short) scenario now: ([\s\S]*)$/i;
+/** A WAIT scenario's "price X is outside the entry zone" (risk.plan_trade) means the setup hasn't triggered. */
+const plainReason = (r: string) => r.trim().replace(/^price (\S+) is outside the entry zone$/, "not triggered yet (price $1 is outside its entry zone)");
+const NOT_TRIGGERED = /^not triggered yet \(price (\S+) is outside its entry zone\)$/;
+const uniq = (xs: string[]) => [...new Set(xs.map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean))];
+
+/** The risk engine's reasons, each said once (as the Telegram Risk Review shows them): reasons that block both scenarios on one
+    line ("Both setups blocked: …"), the rest labelled long / short, and "no trade proposed" left out when the verdict is WAIT. */
+export function whyLines(run: Pick<Run, "execution" | "verdict">): string[] {
+  const wait = (run.verdict?.action ?? "WAIT") === "WAIT";
+  const general: string[] = [];
+  const per: Partial<Record<"long" | "short", string[]>> = {};
+  const passed: ("long" | "short")[] = [];
+  for (const r of run.execution?.reasons ?? []) {
+    const m = SCENARIO_REASON.exec(r.trim());
+    if (!m) { general.push(r); continue; }
+    const side = m[1].toLowerCase() as "long" | "short";
+    const body = m[2].trim();
+    if (body.replace(/\.$/, "") === "the risk engine would approve it") { passed.push(side); per[side] ??= []; continue; }
+    per[side] = uniq([...(per[side] ?? []), ...body.split("; ").map(plainReason)]);
+  }
+  const shared = per.long && per.short ? per.long.filter((x) => per.short!.includes(x)) : [];
+  const trig = shared.map((x) => NOT_TRIGGERED.exec(x)).find((m) => m);
+  const both = shared.filter((x) => !NOT_TRIGGERED.test(x));
+  const out = uniq(general).filter((x) => !(wait && x === "no trade proposed"));
+  if (trig) out.push(`Neither setup has triggered yet (price ${trig[1]})`);
+  if (both.length) out.push(`Both setups blocked: ${both.join("; ")}`);
+  for (const side of ["long", "short"] as const) {
+    const own = (per[side] ?? []).filter((x) => !shared.includes(x));
+    const label = side === "long" ? "Long" : "Short";
+    if (own.length) out.push(`${label}${both.length ? " only" : ""}: ${own.join("; ")}`);
+    else if (passed.includes(side)) out.push(`${label}: would pass the risk checks${wait ? "; the verdict is still WAIT" : ""}`);
+  }
+  return out.length ? out : [wait ? "the committee's verdict is WAIT" : "the risk engine rejected it"];
+}
+
 const when = (iso: string | null | undefined) => (iso ? `${fmt.day(iso)} ${fmt.time(iso).slice(0, 5)}` : "—");
 const move = (o: Outcome | undefined) => (o ? fmt.pct(o.ret_pct) : "—");
 
@@ -456,7 +492,7 @@ export function RunDetail({ run, err, gaveUp }: { run: Run | null; err: string |
         {noTrade ? (
           <div className="cm-notrade" aria-label="No trade approved">
             <h3>No trade approved because…</h3>
-            <ul className="cm-points">{(ex?.reasons.length ? ex.reasons : ["the committee's verdict is WAIT"]).map((r, i) => <li key={i}>{r}</li>)}</ul>
+            <ul className="cm-points">{whyLines(run).map((r, i) => <li key={i}>{r}</li>)}</ul>
           </div>
         ) : (
           <p className="cm-approved">The risk engine would approve this on a reference account. Nothing was traded.</p>
@@ -510,22 +546,21 @@ function Outcomes({ o }: { o: Record<string, Outcome> | undefined }) {
   );
 }
 
-const CHART_TF: Record<string, string> = { "15m": "15m", "1h": "1h", "4h": "4h", "1d": "4h" };
+export type RunCandles = Candles & { run: string; symbol: string; venue: string; price_at: number | null;
+  levels: Record<"long" | "short", { trigger: number; invalidation: number; targets: number[]; entry_zone?: number[] } | null> };
 
+/** The run's own market and timeframe (GET /api/committee/runs/{id}/candles: public, cached, closed candles only), for everyone. */
 function CommitteeChart({ run }: { run: Run }) {
-  const member = useSession();
-  const hl = run.asset.venue === "hyperliquid" && run.asset.market_type === "perp";
-  const tf = CHART_TF[run.timeframe] ?? "1h";
-  const coin = run.asset.market_id || run.asset.symbol;
-  const cand = usePoll<Candles>(hl && member ? `/members/kiwi-brain/candles?coin=${encodeURIComponent(coin)}&timeframe=${tf}&n=120` : null, 120_000);
-  if (!hl) return <p className="cm-muted cm-block">No chart: {run.asset.label ?? "this market"} isn't a Hyperliquid perpetual.</p>;
-  if (member === null) return <p className="cm-muted cm-block">Sign in to see the {tf} chart with these levels.</p>;
+  const cand = usePoll<RunCandles>(run.status === "done" ? `/committee/runs/${encodeURIComponent(run.id)}/candles` : null, 120_000);
+  const where = run.asset.label ?? run.asset.venue ?? "";
   return (
-    <section className="cm-block" aria-label={`${run.asset.symbol} ${tf} chart with the scenario levels`}>
-      <h2>Chart <small className="cm-muted">{run.asset.symbol} · {tf}{tf !== run.timeframe ? ` (the ${run.timeframe} run, shown on ${tf})` : ""}</small></h2>
+    <section className="cm-block" aria-label={`${run.asset.symbol} ${run.timeframe} chart with the scenario levels`}>
+      <h2>Chart <small className="cm-muted">{run.asset.symbol} · {run.timeframe}{where ? ` · ${where}` : ""}</small></h2>
       <div className="cm-chart-box">
-        {cand.data ? <LevelsChart data={cand.data} run={run} /> : <p className="cm-muted">{cand.err ? "Chart unavailable right now." : "Loading candles…"}</p>}
+        {cand.data ? <LevelsChart data={cand.data} run={run} />
+          : <p className="cm-muted">{cand.err ? "Chart unavailable for this market right now." : "Loading candles…"}</p>}
       </div>
+      {cand.data && <p className="cm-muted cm-chart-src">{cand.data.source}</p>}
     </section>
   );
 }

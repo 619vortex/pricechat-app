@@ -8,7 +8,8 @@ vi.mock("lightweight-charts", () => {
 });
 
 import fixture from "./committee.fixture.json";
-import { CommitteeSection, POLL_MAX_MS, POLL_MS, RunDetail, safeUrl, useRunPoll, type Run, type RunSummary } from "./committee";
+import { CommitteeSection, POLL_MAX_MS, POLL_MS, RunDetail, safeUrl, useRunPoll, whyLines, type Run, type RunSummary } from "./committee";
+import { createChart } from "lightweight-charts";
 import { refreshSession } from "./members";
 
 const RUN = fixture as unknown as Run;  // a real rules-backend run: DOGE 4h Hyperliquid perp, verdict WAIT
@@ -22,6 +23,7 @@ function stubFetch(runFor: (n: number) => Run) {
   calls = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     calls.push(url);
+    if (/^\/api\/committee\/runs\/[^/]+\/candles/.test(url)) return json(CANDLES);
     if (url.startsWith("/api/committee/runs/")) return json(runFor(n++));
     if (url.startsWith("/api/committee/runs")) return json({ runs: [SUMMARY] });
     if (url.startsWith("/api/committee/status")) return json({ enabled: true, backend: "rules", backends: {}, providers: { hyperliquid: { ok: true }, news: { ok: false } },
@@ -34,7 +36,10 @@ function stubFetch(runFor: (n: number) => Run) {
   }));
 }
 
-const runCalls = () => calls.filter((u) => u.startsWith(`/api/committee/runs/${RUN.id}`)).length;
+const runCalls = () => calls.filter((u) => u === `/api/committee/runs/${RUN.id}`).length;
+const CANDLES = { run: RUN.id, coin: "DOGE", symbol: "DOGE", venue: "hyperliquid", timeframe: "4h", source: "Hyperliquid DOGE perpetual 4h candles (closed only)",
+  candles: Array.from({ length: 120 }, (_, i) => [1_761_000_000_000 + i * 14_400_000, 0.079, 0.08, 0.078, 0.0795, 1000]), markers: [],
+  levels: { long: RUN.verdict!.scenarios.long, short: RUN.verdict!.scenarios.short }, price_at: 0.079475 };
 
 beforeEach(() => { refreshSession(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -62,7 +67,9 @@ describe("committee run detail", () => {
     expect(long.textContent).toContain(RUN.verdict!.scenarios.long!.trigger_rule);
     const why = screen.getByLabelText("No trade approved");
     expect(why.textContent).toContain("No trade approved because");
-    expect(why.textContent).toContain("no trade proposed");
+    expect(why.textContent).not.toContain("no trade proposed");  // the verdict already says WAIT
+    expect(why.textContent).toContain("Long: not triggered yet (price 0.079475 is outside its entry zone)");
+    expect(why.textContent).toContain("Short: would pass the risk checks; the verdict is still WAIT");
     expect(screen.getByRole("heading", { name: "What changes our view" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Download HTML report" }).getAttribute("href")).toBe(`/api/committee/runs/${RUN.id}/report.html`);
   });
@@ -145,5 +152,43 @@ describe("committee section", () => {
     expect(screen.getByText(/no position · move/)).toBeTruthy();
     expect(screen.getByText(/missing news/)).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /DOGE/ }).length).toBe(2);  // latest runs + historical recommendations
+  });
+});
+
+describe("chart and reasons", () => {
+  it("draws the run's own chart for a signed-out visitor from the public run candles", async () => {
+    stubFetch(() => RUN);
+    render(<RunDetail run={RUN} err={null} gaveUp={false} />);
+    const chart = await screen.findByLabelText("DOGE 4h chart with the scenario levels");
+    expect(await within(chart).findByText(/closed only/)).toBeTruthy();
+    expect(calls).toContain(`/api/committee/runs/${RUN.id}/candles`);
+    expect(calls.some((u) => u.includes("kiwi-brain"))).toBe(false);  // never the members-only candles
+    expect(vi.mocked(createChart)).toHaveBeenCalled();
+    expect(chart.textContent).not.toMatch(/Sign in/);
+  });
+
+  it("an OKX run gets its chart too, and a market without candles says so", async () => {
+    const okx = { ...RUN, id: "cm_okx1", asset: { symbol: "TAO", venue: "okx", market_type: "spot", market_id: "TAO-USDT", label: "OKX spot TAO-USDT" }, timeframe: "1d" } as Run;
+    stubFetch(() => okx);
+    render(<RunDetail run={okx} err={null} gaveUp={false} />);
+    expect(await screen.findByLabelText("TAO 1d chart with the scenario levels")).toBeTruthy();
+    await screen.findByText(/closed only/);
+    expect(calls).toContain("/api/committee/runs/cm_okx1/candles");
+    cleanup();
+    const gone = { ...okx, id: "cm_gone1" } as Run;
+    vi.stubGlobal("fetch", vi.fn(async () => json({ detail: "No chart for this run's market." }, 404)));
+    render(<RunDetail run={gone} err={null} gaveUp={false} />);
+    expect(await screen.findByText("Chart unavailable for this market right now.")).toBeTruthy();
+  });
+
+  it("says a reason that blocks both setups once, keeps side-only reasons labelled, and drops 'no trade proposed' on WAIT", () => {
+    const liq = ["liquidity: 24h volume $12M below the $50M minimum", "liquidity: thin order book ($80k within 0.5% on the thinner side, minimum $100k)"];
+    const run = { verdict: { ...RUN.verdict!, action: "WAIT" as const }, execution: { ...RUN.execution!, reasons: ["no trade proposed",
+      `long scenario now: ${liq.join("; ")}; price 0.0795 is outside the entry zone`, `short scenario now: ${liq.join("; ")}`] } };
+    expect(whyLines(run)).toEqual([`Both setups blocked: ${liq.join("; ")}`, "Long only: not triggered yet (price 0.0795 is outside its entry zone)"]);
+    const between = { verdict: run.verdict, execution: { ...run.execution, reasons: ["no trade proposed", "long scenario now: price 2406.8 is outside the entry zone",
+      "short scenario now: price 2406.8 is outside the entry zone; liquidity: spread 9.0 bps above the 8 bps maximum"] } };
+    expect(whyLines(between)).toEqual(["Neither setup has triggered yet (price 2406.8)", "Short: liquidity: spread 9.0 bps above the 8 bps maximum"]);
+    expect(whyLines({ verdict: run.verdict, execution: { ...run.execution, reasons: ["no trade proposed"] } })).toEqual(["the committee's verdict is WAIT"]);
   });
 });

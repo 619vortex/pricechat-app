@@ -112,6 +112,14 @@ def _points(points: Any, known: set[str]) -> str:
     return f"<ul>{li}</ul>"
 
 
+def _why(run: dict[str, Any]) -> list[str]:
+    """The engine's reasons, each said once (shared by both scenarios: one line), as the Telegram Risk Review shows them."""
+    from app.committee import telegram_view as tv
+
+    parts = tv.why_parts(run) or [("", tv.reason_groups(run.get("execution") or {})["general"])]
+    return [(f"{label[0].upper() + label[1:]}: " if label else "") + "; ".join(rs) for label, rs in parts if rs]
+
+
 def _list(items: Any, empty: str = "None.") -> str:
     if not isinstance(items, list) or not items:
         return f'<p class="muted">{e(empty)}</p>'
@@ -225,7 +233,7 @@ def render(run: dict[str, Any], outcome_rows: dict[str, Any] | None = None, crea
              if checks else '<p class="muted">No checks ran (the risk engine only evaluates Hyperliquid perpetuals).</p>')
     add(f"""<section><h2>Kiwi risk engine</h2>
 <p>Status: <b>{e(execution.get('status'))}</b> · engine {e(execution.get('engine'))}. The AI cannot override the risk engine; it is evaluated on a hypothetical reference account.</p>
-<h4>Reasons</h4>{_list(execution.get('reasons'), 'None.')}{table}</section>""")
+<h4>Reasons</h4>{_list(_why(run), 'None.')}{table}</section>""")
 
     # ---- scenarios
     scen = verdict.get("scenarios") or {}

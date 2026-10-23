@@ -181,3 +181,81 @@ def test_track_shows_sample_sizes_and_keeps_wait_apart(client: TestClient, db: S
     assert t["horizons"] == ["1h", "4h", "24h", "7d"] and t["scored_runs"] == 2
     assert "no position" in t["note"]
     assert {r["id"] for r in t["recent"]} >= {"cm_tracklong0001", "cm_trackwait0001"}
+
+
+# ---------------------------------------------------------------- the public chart candles of a run (its own market)
+def _cs(tf_s: int, n: int, base: float) -> list[Any]:
+    """n candles of tf_s seconds ending with one still forming now (oldest first)."""
+    import time
+
+    from app.tradingos.market import Candle
+
+    now = int(time.time()) // tf_s * tf_s
+    return [Candle((now - (n - 1 - i) * tf_s) * 1000, base + i, base + i + 2, base + i - 2, base + i + 1, 10.0) for i in range(n)]
+
+
+@pytest.fixture
+def chart_world(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+    import httpx
+
+    from app.api.routes import committee as routes
+    from app.tradingos import market, venues
+    from app.tradingos.structure import Venues
+    from tests.test_trading_os import FakeMD
+
+    asked: dict[str, list[str]] = {"okx": []}
+    monkeypatch.setattr(market, "_shared", FakeMD({"DOGE": _cs(14400, 200, 100.0), "BTC": _cs(3600, 200, 80000.0)}))
+
+    def okx(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "www.okx.com" and request.url.path == "/api/v5/market/candles"
+        asked["okx"].append(f"{request.url.params['instId']} {request.url.params['bar']}")
+        rows = [[str(c.t), str(c.o), str(c.h), str(c.l), str(c.c), str(c.v)] for c in reversed(_cs(3600, 200, 260.0))]  # newest first
+        return httpx.Response(200, json={"code": "0", "msg": "", "data": rows})
+
+    monkeypatch.setattr(venues, "_shared", Venues(transport=httpx.MockTransport(okx)))
+    routes._candle_cache.clear()
+    return asked
+
+
+def test_run_candles_hyperliquid_closed_only_with_the_levels(client: TestClient, db: Session, chart_world: dict[str, list[str]]) -> None:
+    run = load("doge")  # DOGE 4h Hyperliquid perp
+    run["requested_by"] = {"tg_user_id": 4242}
+    store(db, run, pid="cm_chartdoge001")
+    r = client.get("/api/committee/runs/cm_chartdoge001/candles")  # no sign-in: public
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["coin"], body["venue"], body["timeframe"]) == ("DOGE", "hyperliquid", "4h") and len(body["candles"]) == 120
+    import time
+
+    assert all(k[0] + 14400_000 <= time.time() * 1000 for k in body["candles"])  # the forming candle is left out
+    assert body["levels"]["long"]["trigger"] == run["verdict"]["scenarios"]["long"]["trigger"]
+    assert body["levels"]["short"]["invalidation"] == run["verdict"]["scenarios"]["short"]["invalidation"]
+    assert "Hyperliquid DOGE perpetual 4h candles" in body["source"] and body["markers"] == []
+    for secret in ("4242", "-100555", "requested_by", "chat_id", "member"):
+        assert secret not in r.text
+
+
+def test_run_candles_okx_market_from_okx(client: TestClient, db: Session, chart_world: dict[str, list[str]]) -> None:
+    run = load("tao")  # TAO 1h OKX spot: no Hyperliquid perp, the evidence read OKX
+    store(db, run, pid="cm_charttao0001")
+    body = client.get("/api/committee/runs/cm_charttao0001/candles").json()
+    assert body["venue"] == "okx" and body["coin"] == run["asset"]["market_id"] and body["timeframe"] == "1h"
+    assert chart_world["okx"] == [f"{run['asset']['market_id']} 1H"] and len(body["candles"]) == 120
+    ts = [k[0] for k in body["candles"]]
+    assert ts == sorted(ts) and body["candles"][-1][4] > body["candles"][0][4]  # oldest first
+    client.get("/api/committee/runs/cm_charttao0001/candles")
+    assert len(chart_world["okx"]) == 1  # cached: every visitor of the run shares one fetch
+
+
+def test_run_candles_unknown_run_is_404(client: TestClient, db: Session, chart_world: dict[str, list[str]]) -> None:
+    assert client.get("/api/committee/runs/cm_nope/candles").status_code == 404
+
+
+def test_run_candles_have_their_own_rate_limit(client: TestClient, db: Session, chart_world: dict[str, list[str]]) -> None:
+    from app.security.rate_limit import LIMITS
+
+    store(db, load("btc"), pid="cm_chartbtc0001")
+    burst = int(LIMITS["committee_chart"].burst)
+    codes = [client.get("/api/committee/runs/cm_chartbtc0001/candles").status_code for _ in range(burst + 1)]
+    assert codes[:burst] == [200] * burst and codes[-1] == 429
+    assert client.get("/api/committee/runs/cm_chartbtc0001").status_code == 200  # the run JSON's bucket is separate

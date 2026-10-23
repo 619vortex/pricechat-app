@@ -166,15 +166,133 @@ def _plan_line(run: dict[str, Any]) -> str | None:
     return f"Plan: entry {entry} · stop {px(p.get('stop'))} · T " + " / ".join(px(x) for x in (p.get("targets") or [])[:2])
 
 
-def _execution_lines(run: dict[str, Any], n: int = 3, width: int = 110) -> list[str]:
+WHY_MAX = 220  # the compact "No trade approved because" line, in characters (the detail is in Risk Review / Full Report)
+NO_TRADE = "no trade proposed"
+WOULD_PASS = "the risk engine would approve it"
+_SCENARIO_REASON = re.compile(r"^(long|short) scenario now: (.*)$", re.I | re.S)
+_SCENARIO_CHECK = re.compile(r"^(long|short) scenario · (.*)$", re.I | re.S)
+
+
+def _uniq(xs: list[str]) -> list[str]:
+    out: list[str] = []
+    for x in xs:
+        x = re.sub(r"\s+", " ", str(x or "")).strip()
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def reason_groups(ex: dict[str, Any]) -> dict[str, Any]:
+    """The risk engine's reasons, grouped so each is said once: {"general": [...] (not tied to a scenario, "no trade proposed"
+    included), "both": [...] (blocks the long AND the short scenario), "long": [...], "short": [...] (that scenario only),
+    "pass": ["short"] (scenarios the engine would approve right now), "sides": ["long", "short"] (scenarios evaluated)}.
+    Reads the gate's own strings ("long scenario now: a; b; c"), so it works for every stored run."""
+    general: list[str] = []
+    per: dict[str, list[str]] = {}
+    passed: list[str] = []
+    for r in ex.get("reasons") or []:
+        m = _SCENARIO_REASON.match(str(r).strip())
+        if not m:
+            general.append(str(r))
+            continue
+        side, body = m.group(1).lower(), m.group(2).strip()
+        if body.rstrip(".") == WOULD_PASS:
+            passed.append(side)
+            per.setdefault(side, [])
+            continue
+        per[side] = _uniq(per.get(side, []) + [scenario_reason(x.strip()) for x in body.split("; ")])
+    lo, sh = per.get("long", []), per.get("short", [])
+    both = [x for x in lo if x in sh] if "long" in per and "short" in per else []
+    return {"general": _uniq(general), "both": both, "long": [x for x in lo if x not in both], "short": [x for x in sh if x not in both],
+            "pass": passed, "sides": [s for s in ("long", "short") if s in per]}
+
+
+_OUTSIDE = re.compile(r"^price ([\d.eE+-]+) is outside the entry zone$")
+_NOT_TRIGGERED = re.compile(r"^not triggered yet \(price (\S+) is outside its entry zone\)$")
+
+
+def scenario_reason(r: str) -> str:
+    """A WAIT scenario's reason in plain words: risk.plan_trade's "price X is outside the entry zone" means the setup hasn't
+    triggered (the price isn't where it would be entered)."""
+    m = _OUTSIDE.match(r)
+    return f"not triggered yet (price {px(m.group(1))} is outside its entry zone)" if m else r
+
+
+def short_reason(r: str) -> str:
+    """The compact wording of a gate reason (the full one stays in Risk Review / Full Report)."""
+    r = re.sub(r"^liquidity: ", "", str(r or "").strip())
+    m = re.match(r"thin order book \((\$[\d,.]+k) within 0\.5% on the thinner side, minimum (\$[\d,.]+k)\)$", r)
+    if m:
+        return f"order book {m.group(1)} within 0.5% (min {m.group(2)})"
+    m = re.match(r"^fees, slippage & funding: ([\d.]+R) round trip.*\(max ([\d.]+R)\)$", r)
+    if m:
+        return f"round-trip costs {m.group(1)} (max {m.group(2)})"
+    m = _NOT_TRIGGERED.match(r)
+    if m:
+        return f"not triggered (price {m.group(1)} outside its entry zone)"
+    return r
+
+
+def why_parts(run: dict[str, Any], short: bool = False) -> list[tuple[str, list[str]]]:
+    """[(label, reasons)] for "no trade approved because": reasons shared by both scenarios once ("Both setups blocked"),
+    the rest labelled long / short; "no trade proposed" dropped when the verdict is WAIT (the verdict already says it)."""
+    ex, v = run.get("execution") or {}, run.get("verdict") or {}
+    g = reason_groups(ex)
+    f = short_reason if short else (lambda x: x)
+    wait = (v.get("action") or "WAIT") not in ("LONG", "SHORT")
+    general = [f(x) for x in g["general"] if not (wait and x == NO_TRADE)]
+    out: list[tuple[str, list[str]]] = [("", general)] if general else []
+    trig = [m.group(1) for m in map(_NOT_TRIGGERED.match, g["both"]) if m]
+    both = [x for x in g["both"] if not _NOT_TRIGGERED.match(x)]
+    if trig:  # the same mark outside both entry zones: the price sits between the two triggers
+        out.append(("", [f"neither setup has triggered yet (price {trig[0]})"]))
+    if both:
+        out.append(("Both setups blocked", [f(x) for x in both]))
+    for side in ("long", "short"):
+        if g[side]:
+            out.append((f"{side} only" if both else side, [f(x) for x in g[side]]))
+        elif side in g["pass"]:
+            out.append((side, ["would pass the risk checks" + ("; the verdict is still WAIT" if wait else "")]))
+    return out
+
+
+def _render_why(parts: list[tuple[str, list[str]]]) -> str:
+    return " · ".join((f"{label}: " if label else "") + "; ".join(rs) for label, rs in parts if rs)
+
+
+def why_line(run: dict[str, Any], limit: int = WHY_MAX, width: int = 110) -> str | None:
+    """The compact "No trade approved because: …" (≤ limit characters before escaping), or None when there's nothing to add
+    (a WAIT with no scenario checked, an informational market: their own lines already say it)."""
     ex = run.get("execution") or {}
-    reasons = [clip(r, width) for r in (ex.get("reasons") or [])[:n]]
     st = ex.get("status")
     if st == "APPROVED":
-        return ["✅ Kiwi risk engine: APPROVED on the reference paper account"]
-    if st == "REJECTED":
-        return ["⛔ No trade approved because: " + esc("; ".join(reasons) or "the risk engine rejected it")]
-    return ["No trade approved because: " + esc("; ".join(reasons) or "no trade proposed")]
+        return "✅ Kiwi risk engine: APPROVED on the reference paper account"
+    head = "⛔ No trade approved because: " if st == "REJECTED" else "No trade approved because: "
+    if st != "REJECTED" and informational(run):
+        return None
+    parts = [(label, [clip(r, width) for r in rs]) for label, rs in why_parts(run, short=True)]
+    if not any(rs for _, rs in parts):
+        return head + "the risk engine rejected it" if st == "REJECTED" else None
+    dropped = 0
+    while True:
+        more = f" · +{dropped} more in Risk Review" if dropped else ""
+        text = head + _render_why(parts) + more
+        if len(text) <= limit:
+            return text
+        live = [i for i, (_, rs) in enumerate(parts) if rs]
+        if len(live) == 1 and len(parts[live[0]][1]) == 1:  # one reason left: cut it to fit
+            label, rs = parts[live[0]]
+            room = limit - len(head) - len(more) - (len(label) + 2 if label else 0)
+            parts[live[0]] = (label, [clip(rs[0], max(20, room))])
+            return (head + _render_why(parts) + more)[:limit]
+        i = live[-1]  # drop the last reason of the last group first (the shared ones, said first, stay longest)
+        parts[i] = (parts[i][0], parts[i][1][:-1])
+        dropped += 1
+
+
+def _execution_lines(run: dict[str, Any], n: int = 3, width: int = 110) -> list[str]:
+    line = why_line(run, WHY_MAX, width)
+    return [esc(line)] if line else []
 
 
 def compact(run: dict[str, Any]) -> str:
@@ -264,8 +382,8 @@ def risk_view(run: dict[str, Any]) -> str:
     lines += ["", f"<b>Kiwi risk engine: {esc(st.replace('_', ' '))}</b>"]
     if informational(run):
         lines.append(f"{esc(market_label(run.get('asset') or {}))}: informational only, execution only on Hyperliquid perpetuals")
-    lines += [f"· {esc(clip(r, 200))}" for r in (ex.get("reasons") or [])[:5]]
-    checks = ex.get("checks") or []
+    lines += why_lines(run, 5, 200)
+    checks = merged_checks(ex.get("checks") or [])
     bad = [c for c in checks if not c.get("ok")]
     keys = ("warn", "sizing", "fees", "spread", "slippage", "exposure", "drawdown", "stop distance", "risk team", "leverage")
 
@@ -281,6 +399,37 @@ def risk_view(run: dict[str, Any]) -> str:
                                                      for c in good[:6])]
     lines += ["", f"<i>{esc(ex.get('note') or 'Research only — nothing was traded.')} The AI cannot override the risk engine. Not financial advice.</i>"]
     return _fit("\n".join(lines))
+
+
+def why_lines(run: dict[str, Any], n: int = 5, width: int = 200) -> list[str]:
+    """Risk Review / Full Report: the engine's reasons, each said once (full wording), one bullet per group, at most n."""
+    parts = why_parts(run) or [("", reason_groups(run.get("execution") or {})["general"])]  # e.g. a WAIT with nothing checked
+    out = []
+    for label, rs in [p for p in parts if p[1]][:n]:
+        text = (f"{label[0].upper() + label[1:]}: " if label else "") + "; ".join(rs)
+        out.append(f"· {esc(clip(text, width))}")
+    return out
+
+
+def merged_checks(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The checks with the long and short scenario's identical results merged into one ("both setups · …")."""
+    seen: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for c in checks:
+        m = _SCENARIO_CHECK.match(str(c.get("name") or ""))
+        base, side = (m.group(2), m.group(1).lower()) if m else (str(c.get("name") or ""), None)
+        key = (base, c.get("value"), bool(c.get("ok")), side is None)
+        if key in seen and side is not None:
+            seen[key]["_sides"].append(side)
+            continue
+        seen[key] = {**c, "_base": base, "_sides": [side] if side else []}
+    out = []
+    for c in seen.values():
+        sides = c.pop("_sides")
+        base = c.pop("_base")
+        if sides:
+            c["name"] = f"{'both setups' if len(set(sides)) > 1 else sides[0]} · {base}"
+        out.append(c)
+    return out
 
 
 def _author(x: dict[str, Any]) -> str:
@@ -348,10 +497,10 @@ def full_report(run: dict[str, Any]) -> list[str]:
         x = rk.get(voice) or {}
         L.append(f"· {voice.capitalize()} ({esc(x.get('stance') or '?')}): {esc(clip('; '.join(x.get('concerns') or []) or 'no concern', 300))}")
     L += ["", f"<b>Kiwi risk engine: {esc(str(ex.get('status') or '?').replace('_', ' '))}</b>"]
-    L += [f"· {esc(clip(r, 220))}" for r in (ex.get("reasons") or [])[:5]]
-    bad = [c for c in ex.get("checks") or [] if not c.get("ok")]
+    L += why_lines(run, 5, 220)
+    bad = [c for c in merged_checks(ex.get("checks") or []) if not c.get("ok")]
     L += [f"❌ {esc(clip(c.get('name'), 80))}: {esc(clip(c.get('value'), 160))}" for c in bad[:6]]
-    L.append(f"{sum(1 for c in ex.get('checks') or [] if c.get('ok'))} checks passed")
+    L.append(f"{sum(1 for c in merged_checks(ex.get('checks') or []) if c.get('ok'))} checks passed")
     notes = missing_notes(run)
     deg = meta.get("degraded") or []
     L += ["", f"<i>Run {esc(run.get('id') or '')} · {esc(meta.get('backend') or 'rules')} backend · {int(meta.get('calls') or 0)} model calls"

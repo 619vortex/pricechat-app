@@ -4,8 +4,10 @@
 Routing follows the bot's rules (bot.py): these are market-analysis commands with no account data, so like /signal they
 are answered for anyone, in groups too (/risk with no coin stays the private account command). Replies in the main
 community chat are tidied away after a few minutes like every other bot message there (autodelete.py); the Full Report,
-which is long, goes to the presser's private chat when it's asked for in the main chat. The chart button reuses /chart
-(and Bot Chat routing). The bot channel + referral footer goes under the finished answer when it fits.
+which is long, goes to the presser's private chat when it's asked for in the main chat. Buttons pressed in a group never
+switch the shared message: the Bull / Bear / Risk / Full view goes to the presser privately (an alert asks them to press
+Start in the bot first when Telegram refuses) and the group keeps the summary; in a private chat the message is edited.
+The chart button reuses /chart (and Bot Chat routing). The bot channel + referral footer goes under the finished answer when it fits.
 
 A run takes seconds on the rules backend and up to ~3 min with Vortex, so the command answers at once with a placeholder
 and a watcher (its own database session and Telegram client, never the ingestion batch's) polls the cm_runs row and edits
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 COMMANDS = {"/committee", "/debate", "/research"}  # and "/risk <coin>" (bot.py routes it here)
 VIEW_OF = {"/committee": "sum", "/debate": "debate", "/research": "full", "/risk": "risk"}
+VIEW_LABEL = {"full": "Full Report", "bull": "Bull Case", "bear": "Bear Case", "risk": "Risk Review", "debate": "Bull vs Bear"}
 TIMEFRAMES = orchestrator.TIMEFRAMES  # 15m 1h 4h 1d
 USAGE = ("Usage: /committee BTC · /committee DOGE 4h · /debate ETH · /research SOL · /risk BTC · /committee status\n"
          "Timeframes: 15m 1h 4h 1d (default 1h). Research only, nothing is traded.")
@@ -330,6 +333,23 @@ async def send_private_full(client: Any, user_id: int, run: dict[str, Any]) -> b
         return False
 
 
+async def send_private_view(client: Any, user_id: int, run: dict[str, Any], view: str) -> bool:
+    """A button pressed in a group: the view goes to the presser's private chat, with the buttons (pressed there, they edit
+    that private message in place). False when Telegram refuses (the member never pressed Start in the bot)."""
+    if view == "full":
+        return await send_private_full(client, user_id, run)
+    try:
+        await client.send_message(int(user_id), tv.view(run, view), buttons(str(run.get("id") or ""), view), html=True)
+        return True
+    except Exception as e:  # noqa: BLE001 - as above
+        logger.info("committee: %s view not sent privately (%s)", view, str(e)[:120])
+        return False
+
+
+def _group(chat: dict[str, Any]) -> bool:
+    return chat.get("type") in ("group", "supergroup", "channel") or (isinstance(chat.get("id"), int) and chat["id"] < 0)
+
+
 # ---------------------------------------------------------------- buttons
 async def callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     from app.tradingos import bot
@@ -362,14 +382,15 @@ async def callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     if action not in tv.VIEWS:
         await bot._answer(client, cq, uid, "Unknown button.", dm=False)
         return
-    if action == "full" and main:  # long text stays out of the main chat: the presser gets it privately
-        if await send_private_full(client, uid, run):
-            await bot._answer(client, cq, uid, "Full report sent to you privately.", dm=False)
+    if action != "sum" and _group(chat):  # in a group the shared message stays on the summary: the presser gets the view privately
+        label = VIEW_LABEL.get(action, "This view")
+        if await send_private_view(client, uid, run, action):
+            await bot._answer(client, cq, uid, f"{label} sent to you privately.", dm=False)
         else:
             from app.telegram.ingestion import get_bot_state
 
             name = get_bot_state(db).bot_username or "cryptopricechatbot"
-            await bot._answer(client, cq, uid, f"Open t.me/{name} and press Start, then tap Full Report again.", alert=True, dm=False)
+            await bot._answer(client, cq, uid, f"Open t.me/{name} and press Start, then tap {label} again.", alert=True, dm=False)
         return
     await bot._answer(client, cq, uid, "", dm=False)
     foot = bot.footer(db)

@@ -75,6 +75,8 @@ LIMITS = {
     "chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
     # starting a Kiwi AI Investment Committee run (each can cost several model calls; the daily limit per member still applies)
     "committee": Bucket(burst=5, every=20, shared_burst=30, shared_every=2),
+    # the public candles under a committee run's chart (cached per market for a minute; a page loads them once per run shown)
+    "committee_chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
 }
 
 
