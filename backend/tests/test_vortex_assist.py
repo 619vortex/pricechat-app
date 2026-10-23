@@ -415,8 +415,11 @@ def test_followup_while_vortex_is_away_says_so(db: Session, md: FakeMD, token: s
 
 
 # ---------------------------------------------------------------- owner settings
-def test_owner_settings_and_write_only_token(client: TestClient, db: Session) -> None:
-    ov = client.get("/api/tradingos/admin/overview").json()["vortex_assist"]
+def test_owner_settings_and_write_only_token(client: TestClient, db: Session, md: FakeMD) -> None:
+    # md: the overview reads Hyperliquid's market list; the fake keeps this test off api.hyperliquid.xyz
+    full = client.get("/api/tradingos/admin/overview").json()
+    assert full["exchange"] == {"ok": True, "markets": len(md.markets()[1])}
+    ov = full["vortex_assist"]
     assert ov["enabled"] is False and ov["token_set"] is False and ov["daily_public"] == 3 and ov["daily_ranked"] == 10
     assert client.put("/api/tradingos/admin/vortex-token", json={"token": "short"}).status_code == 422
     ov = client.put("/api/tradingos/admin/vortex-token", json={"token": TOKEN}).json()["vortex_assist"]

@@ -239,7 +239,7 @@ def evaluate(db: Session | None, ev: dict[str, Any], action: str, plan: dict[str
             sub = _trade(get_ctx(), ev, side, p, None)
             checks += [{**c, "name": f"{side.lower()} scenario · {c['name']}"} for c in sub["checks"]]
             reasons.append(f"{side.lower()} scenario now: " + ("the risk engine would approve it" if sub["status"] == "APPROVED"
-                                                               else "; ".join(sub["reasons"][:3])))
+                                                               else "; ".join(sub["reasons"][:6])))
         return _result("NOT_APPLICABLE", reasons, checks)
     return _trade(get_ctx(), ev, action, plan, stale_reason)
 

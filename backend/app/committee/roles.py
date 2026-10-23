@@ -429,7 +429,8 @@ def rules_debater(ev: dict[str, Any], analysts: dict[str, Any], side: str) -> di
     facts = side_facts(ev, side)
     best = "; ".join(f["text"] for f in facts[:3])
     if names:
-        thesis = f"{len(names)} of {len(SECTIONS)} sections lean {lean} ({', '.join(names)})" + (f": {best}." if best else ".")
+        thesis = (f"{len(names)} of {len(SECTIONS)} sections lean{'s' if len(names) == 1 else ''} {lean} ({', '.join(names)})"
+                  + (f"; best facts: {best}." if best else "."))
     elif facts:
         thesis = f"Thin {side} case: no section leans {lean}; its best facts: {best}."
     else:
@@ -563,7 +564,7 @@ def risk_notes(ev: dict[str, Any], side: str | None) -> dict[str, list[str]]:
         out["data"].append(f"missing or stale data: {', '.join(gone)}")
     part = [n for n in SECTIONS if sec(ev, n)["status"] == "partial"]
     if part:
-        out["partial"].append(f"partial data: {', '.join(part)}")
+        out["partial"].append(f"{', '.join(part)} data incomplete")
     return out
 
 

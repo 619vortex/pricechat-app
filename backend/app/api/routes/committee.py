@@ -1,11 +1,16 @@
 """Kiwi AI Investment Committee API (/api/committee/*, contract: Committee run). Research only: nothing here trades.
 
-Public (outside the admin login, admin_auth.PUBLIC_PREFIXES; rate-limited): status, run lists, a run's JSON, the track record.
+Public (outside the admin login, admin_auth.PUBLIC_PREFIXES; rate-limited): status, run lists, a run's JSON, its chart candles
+(the run's own market and timeframe, cached), the track record.
 Run JSON never contains member data (who asked is only on the cm_runs row). Starting a run needs a signed-in Kiwi Passport
 member (their daily limit) or the owner's admin login (unlimited). Backtests (start, list, read) are owner only.
 """
 
+import asyncio
 import inspect
+import re
+import threading
+import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Response, status
@@ -93,6 +98,84 @@ def get_run(run_id: str, db: DbSession) -> dict[str, Any]:
     out["status"] = row.status
     out["outcomes"] = outcomes.outcomes_of(db, row)
     return cm_report.public_run(out)
+
+
+CANDLES_N = 120
+CANDLES_TTL = 60.0  # s: the chart's candles per market and timeframe (every visitor of a run shares them)
+_candle_cache: dict[tuple[str, str, str], tuple[float, list[list[float]], str]] = {}
+_candle_lock = threading.Lock()
+
+
+def _listing(asset: dict[str, Any], row: CmRun, run: dict[str, Any]) -> Any:
+    """The run's own market as a venues.Listing (what the evidence read), or None when it can't be named again."""
+    from app.tradingos import venues
+
+    venue = row.venue or asset.get("venue")
+    mid = row.market_id or asset.get("market_id")
+    kind = row.market_type or asset.get("market_type") or "spot"
+    if not venue or not mid:
+        return None
+    network = None
+    if venue == "dex":  # the pool's network, from the evidence's own candle source (GeckoTerminal .../networks/<net>/pools/<id>)
+        for ref in ((run.get("evidence") or {}).get("refs") or []):
+            m = re.search(r"/networks/([a-z0-9_-]+)/pools/", str((ref or {}).get("url") or ""))
+            if m:
+                network = m.group(1)
+                break
+        if network is None:
+            return None
+    elif venue not in ("hyperliquid", *venues.EXCHANGES):
+        return None
+    return venues.Listing(venue=venue, kind="perp" if venue == "hyperliquid" else kind, base=str(asset.get("symbol") or row.symbol),
+                          quote="USD", symbol=str(mid), price=0.0, change_24h=None, volume_24h=None, network=network)
+
+
+def _closed_candles(listing: Any, tf: str, n: int) -> tuple[list[list[float]], str]:
+    """[[t ms, o, h, l, c, v]] of the last n CLOSED candles (cached CANDLES_TTL per market and timeframe), and their source."""
+    from app.tradingos import market, venues
+
+    key = (listing.venue, listing.symbol, tf)
+    now = time.time()
+    with _candle_lock:
+        hit = _candle_cache.get(key)
+        if hit is not None and now - hit[0] < CANDLES_TTL:
+            return hit[1], hit[2]
+    cs = venues.candles(listing, tf, n + 1, market.data(), venues.client())
+    span = market.INTERVALS[tf] * 1000
+    closed = [c for c in cs if c.t + span <= now * 1000][-n:]
+    rows = [[c.t, c.o, c.h, c.l, c.c, c.v] for c in closed]
+    source = (f"Hyperliquid {listing.symbol} perpetual" if listing.venue == "hyperliquid" else
+              f"{venues.NAME.get(listing.venue, 'DEX')} {listing.symbol}" if listing.venue != "dex" else f"GeckoTerminal pool {listing.symbol}")
+    with _candle_lock:
+        if len(_candle_cache) > 500:
+            _candle_cache.clear()
+        _candle_cache[key] = (now, rows, source)
+    return rows, source
+
+
+@router.get(f"{P}/runs/{{run_id}}/candles", dependencies=[Depends(limit("committee_chart"))])
+async def run_candles(run_id: str, db: DbSession) -> dict[str, Any]:
+    """Public, read-only: the closed candles (~120) of the run's OWN market and timeframe, from the same source its evidence
+    used (Hyperliquid via market.data(), other venues via venues), with the run's scenario levels. No member data."""
+    row = _run(db, run_id)
+    run = orchestrator.stored(row) or {}
+    asset = run.get("asset") or {}
+    tf = str(run.get("timeframe") or row.timeframe)
+    listing = _listing(asset, row, run)
+    if listing is None or tf not in orchestrator.TIMEFRAMES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No chart for this run's market.")
+    from app.tradingos import market, venues
+
+    try:
+        rows, source = await asyncio.to_thread(_closed_candles, listing, tf, CANDLES_N)
+    except (market.MarketError, venues.NotFound, OSError, ValueError, KeyError) as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Candles unavailable right now: {str(e)[:160]}") from None
+    scen = (run.get("verdict") or {}).get("scenarios") or {}
+    levels = {side: {k: s.get(k) for k in ("trigger", "invalidation", "targets", "entry_zone")} if isinstance(s, dict) else None
+              for side, s in (("long", scen.get("long")), ("short", scen.get("short")))}
+    return {"run": row.public_id, "coin": listing.symbol, "symbol": asset.get("symbol") or row.symbol, "venue": listing.venue,
+            "timeframe": tf, "source": f"{source} {tf} candles (closed only)", "candles": rows, "markers": [],
+            "levels": levels, "price_at": (run.get("price") or {}).get("value")}
 
 
 @router.get(f"{P}/runs/{{run_id}}/report.html", dependencies=[Depends(limit("earn"))])

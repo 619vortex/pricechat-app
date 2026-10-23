@@ -130,7 +130,8 @@ def say(db: Session, tg: TG, text: str, chat: int = GROUP, user: int = USER, rep
 
 
 def press(db: Session, tg: TG, data: str, chat: int = GROUP, mid: int = 1, user: int = OTHER, username: str | None = None) -> None:
-    cq = {"id": "cb1", "data": data, "from": {"id": user}, "message": {"message_id": mid, "chat": {"id": chat, "type": "supergroup", "username": username}}}
+    kind = "supergroup" if chat < 0 else "private"
+    cq = {"id": "cb1", "data": data, "from": {"id": user}, "message": {"message_id": mid, "chat": {"id": chat, "type": kind, "username": username}}}
 
     async def go() -> None:
         await bot.handle_callback(db, tg, cq)
@@ -186,10 +187,13 @@ def test_committee_doge_placeholder_is_edited_into_the_compact_summary(db: Sessi
     assert "<b>Verdict: WAIT</b> (Underweight)" in body
     assert "Long if: 4h close &gt; 0.08011 · stop 0.07823 · T 0.08231 / 0.08379" in body  # 0.083795 at 4 significant digits
     assert "Short if: 4h close &lt; 0.07932 · stop 0.08264 · T 0.07142 / 0.06954" in body
-    assert ("No trade approved because: no trade proposed; long scenario now: liquidity: 24h volume $13M below the $50M minimum; "
-            "price 0.079475 is outside the entry zone; short scenario now: liquidity: 24h volume $13M below the $50M minimum") in body
+    why = next(x for x in body.split("\n") if x.startswith("No trade approved because"))
+    # a reason both scenarios share is said once; the verdict line already says no trade was proposed
+    assert why == ("No trade approved because: Both setups blocked: 24h volume $13M below the $50M minimum · "
+                   "long only: not triggered (price 0.07948 outside its entry zone)")
+    assert len(why) <= tv.WHY_MAX and "no trade proposed" not in body and body.count("24h volume $13M") == 1
     assert "Risk: thin liquidity: 24h volume $12.76M" in body
-    assert "Bull: Thin bull case" in body and "Bear: 1 of 4 sections lean bearish (technical)" in body
+    assert "Bull: Thin bull case" in body and "Bear: 1 of 4 sections leans bearish (technical)" in body
     assert "Research only — nothing was traded. Not financial advice." in body
     for verbose in ("pivot high", "kept from", "most touches", "x ATR14(4h)"):
         assert verbose not in body  # the scenarios' rule strings belong to the full report
@@ -286,7 +290,7 @@ def test_okx_market_is_labelled_informational(db: Session) -> None:
     text = tv.compact(run_of(db, live("tao")))
     assert "· <b>TAO 1H</b> · OKX spot" in text
     assert "Market: OKX spot TAO-USDT · informational only, no execution" in text
-    assert "No trade approved because: no trade proposed; execution only on Hyperliquid perpetuals" in text
+    assert "No trade approved because" not in text  # the Market line already says it: said once, not twice
     assert "News: no signal" in text  # the feeds answered, nothing about TAO: not "missing"
     assert "Price 261.8 · 03:36 UTC" in text and "Long if: 1h close &gt; 261.9 · stop 259 · T 266.4 / 269.5" in text
 
@@ -329,24 +333,25 @@ def test_prices_are_formatted_by_magnitude() -> None:
 
 
 # ---------------------------------------------------------------- buttons
-def _first_run(db: Session, tg: TG, text: str = "/committee doge 4h") -> tuple[str, int]:
-    say(db, tg, text)
+def _first_run(db: Session, tg: TG, text: str = "/committee doge 4h", chat: int = GROUP) -> tuple[str, int]:
+    say(db, tg, text, chat=chat, reply_to=None if chat > 0 else 77)
     row = db.query(CmRun).order_by(CmRun.id.desc()).first()
     return row.public_id, tg.of("send")[0]["id"]
 
 
 def test_each_view_edits_the_same_message_with_a_back_button(db: Session, tg: TG, world: list[str]) -> None:
-    rid, mid = _first_run(db, tg)
+    rid, mid = _first_run(db, tg, chat=USER)  # a private chat: the buttons switch the message in place
     for view, needle in (("bull", "BULL CASE"), ("bear", "BEAR CASE"), ("risk", "RISK REVIEW"), ("sum", "KIWI AI INVESTMENT COMMITTEE")):
         tg.sent.clear()
-        press(db, tg, f"cm:{rid}:{view}", mid=mid)
+        press(db, tg, f"cm:{rid}:{view}", chat=USER, mid=mid, user=USER)
         ed = tg.of("edit")
-        assert len(ed) == 1 and ed[0]["id"] == mid and needle in ed[0]["text"] and len(ed[0]["text"]) <= 4096
+        assert len(ed) == 1 and ed[0]["id"] == mid and ed[0]["chat"] == USER and needle in ed[0]["text"] and len(ed[0]["text"]) <= 4096
+        assert not tg.of("send")
         assert tg.of("answer")[0]["text"] == ""
         data = ids_in(ed[0]["buttons"])
         assert (data[0] == f"cm:{rid}:sum") == (view != "sum")  # Back on every view, not on the summary
     tg.sent.clear()
-    press(db, tg, f"cm:{rid}:full", mid=mid)  # not the main chat: the report replaces the message (+ a second part)
+    press(db, tg, f"cm:{rid}:full", chat=USER, mid=mid, user=USER)  # private: the report replaces the message
     ed, more = tg.of("edit"), tg.of("send")
     assert "FULL REPORT" in ed[0]["text"] and len(more) <= 1 and all(len(m["text"]) <= 4096 for m in ed + more)
 
@@ -362,7 +367,7 @@ def test_full_report_in_the_main_chat_goes_privately(db: Session, tg: TG, world:
     rid = db.query(CmRun).one().public_id
     tg.sent.clear()
     press(db, tg, f"cm:{rid}:full", chat=MAIN, mid=edits[0]["id"])
-    assert [m["chat"] for m in tg.of("send")][0] == OTHER and tg.of("answer")[0]["text"] == "Full report sent to you privately."
+    assert [m["chat"] for m in tg.of("send")][0] == OTHER and tg.of("answer")[0]["text"] == "Full Report sent to you privately."
     assert not tg.of("edit")
     tg.sent.clear()
     tg.fail_dm = True
@@ -485,7 +490,7 @@ def test_rules_writers_state_the_decisive_facts_with_numbers(db: Session) -> Non
     bull, bear = doge["debate"]["bull"], doge["debate"]["bear"]
     assert bull["thesis"].startswith("Thin bull case: no section leans bullish; its best facts: 4h structure HH/HL")
     assert "The long setup needs a 4h close above 0.080107 (0.8% away), stop 0.0782308 (2.3%, 1.4 x ATR14), T1 0.082313 (R/R 1.2)." in bull["thesis"]
-    assert bear["thesis"].startswith("1 of 4 sections lean bearish (technical): 4h trend down; 4h MACD histogram -0.0003062")
+    assert bear["thesis"].startswith("1 of 4 sections leans bearish (technical); best facts: 4h trend down; 4h MACD histogram -0.0003062")
     assert bull["points"] and bear["points"] and bull["rebuttal"].startswith("The bear case rests on technical; against it:")
     rk = doge["risk_committee"]
     assert rk["conservative"]["concerns"][0] == "thin liquidity: 24h volume $12.76M, slippage risk"
@@ -580,10 +585,10 @@ def test_the_job_runs_the_recovery(db: Session, client: Any) -> None:
 
 
 def test_full_report_button_is_one_message_however_often_it_is_pressed(db: Session, tg: TG, world: list[str]) -> None:
-    rid, mid = _first_run(db, tg)
+    rid, mid = _first_run(db, tg, chat=USER)
     tg.sent.clear()
     for _ in range(3):
-        press(db, tg, f"cm:{rid}:full", mid=mid)
+        press(db, tg, f"cm:{rid}:full", chat=USER, mid=mid, user=USER)
     assert not tg.of("send") and len(tg.of("edit")) == 3
     assert all(e["id"] == mid and len(e["text"]) <= 4096 and "FULL REPORT" in e["text"] for e in tg.of("edit"))
 
@@ -598,3 +603,99 @@ def test_prompts_carry_the_derived_distances() -> None:
               prompts.debate_prompt(ev, {}, "bull")):
         assert '"derived":' in p and '"stop_atr":' + str(d["long"]["stop_atr"]) in p.replace(" ", "")
     assert '"derived"' not in prompts.analyst_prompt(ev, "news")
+
+
+# ---------------------------------------------------------------- group buttons: answered privately
+def test_group_buttons_answer_the_presser_privately_and_keep_the_summary(db: Session, tg: TG, world: list[str]) -> None:
+    rid, mid = _first_run(db, tg)  # a group (not the main chat)
+    for view, needle, label in (("bull", "BULL CASE", "Bull Case"), ("bear", "BEAR CASE", "Bear Case"), ("risk", "RISK REVIEW", "Risk Review"),
+                                ("full", "FULL REPORT", "Full Report")):
+        tg.sent.clear()
+        press(db, tg, f"cm:{rid}:{view}", mid=mid, user=OTHER)
+        assert not tg.of("edit")  # the shared message stays on the summary for everyone
+        dms = tg.of("send")
+        assert dms and all(m["chat"] == OTHER for m in dms) and needle in dms[0]["text"] and all(len(m["text"]) <= 4096 for m in dms)
+        assert tg.of("answer")[0]["text"] == f"{label} sent to you privately." and tg.of("answer")[0]["alert"] is False
+        if view != "full":  # the private copy has the buttons: pressed there, they edit that message in place
+            assert ids_in(dms[0]["buttons"])[0] == f"cm:{rid}:sum"
+    tg.sent.clear()
+    press(db, tg, f"cm:{rid}:sum", mid=mid)  # Back / summary in the group: the summary, edited in place
+    assert "KIWI AI INVESTMENT COMMITTEE" in tg.of("edit")[0]["text"] and not tg.of("send")
+
+
+def test_group_button_without_a_private_chat_asks_to_press_start(db: Session, tg: TG, world: list[str]) -> None:
+    rid, mid = _first_run(db, tg)
+    tg.sent.clear()
+    tg.fail_dm = True
+    press(db, tg, f"cm:{rid}:bear", mid=mid, user=OTHER)
+    ans = tg.of("answer")[0]
+    assert ans["alert"] is True and "press Start" in ans["text"] and "Bear Case" in ans["text"]
+    assert not tg.of("edit") and not tg.of("send")
+
+
+# ---------------------------------------------------------------- "no trade approved because": each reason once
+def _with_reasons(reasons: list[str], action: str = "WAIT", checks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    r = json.loads((Path(__file__).parent / "committee_runs" / "doge.json").read_text(encoding="utf-8"))
+    r["verdict"]["action"] = action
+    r["execution"] = {"status": "NOT_APPLICABLE" if action == "WAIT" else "REJECTED", "reasons": reasons, "checks": checks or [],
+                      "engine": "kiwi-risk", "note": "Research only — nothing was traded."}
+    return r
+
+
+LIQ = ["liquidity: 24h volume $12M below the $50M minimum",
+       "liquidity: thin order book ($80k within 0.5% on the thinner side, minimum $100k)"]
+
+
+def test_reasons_shared_by_both_scenarios_are_said_once() -> None:
+    run = _with_reasons(["no trade proposed", "long scenario now: " + "; ".join(LIQ), "short scenario now: " + "; ".join(LIQ)])
+    line = tv.why_line(run)
+    assert line == ("No trade approved because: Both setups blocked: 24h volume $12M below the $50M minimum; "
+                    "order book $80k within 0.5% (min $100k)")
+    assert len(line) <= tv.WHY_MAX
+    body = tv.compact(run)
+    assert body.count("24h volume $12M") == 1 and "no trade proposed" not in body and "scenario now" not in body
+    risk = tv.risk_view(run)  # Risk Review: once too, in the engine's full wording
+    assert risk.count("24h volume $12M below") == 1 and "Both setups blocked: liquidity: 24h volume $12M below the $50M minimum; liquidity: thin order book ($80k" in risk
+
+
+def test_scenario_only_reasons_keep_their_side_and_the_line_stays_short() -> None:
+    many = [f"check {i}: a fairly long explanation of why this particular check failed for the setup" for i in range(6)]
+    run = _with_reasons(["no trade proposed", "long scenario now: " + "; ".join(LIQ[:1] + many),
+                         "short scenario now: " + "; ".join(LIQ[:1] + ["price 0.0795 is outside the entry zone"])])
+    line = tv.why_line(run)
+    assert line.startswith("No trade approved because: Both setups blocked: 24h volume $12M below the $50M minimum · long only: check 0")
+    assert len(line) <= tv.WHY_MAX and "more in Risk Review" in line
+    g = tv.reason_groups(run["execution"])
+    assert g["both"] == [LIQ[0]] and g["short"] == ["not triggered yet (price 0.0795 is outside its entry zone)"] and len(g["long"]) == 6
+    risk = tv.risk_view(run)
+    assert "· Long only: check 0" in risk and "· Short only: not triggered yet (price 0.0795 is outside its entry zone)" in risk
+
+
+def test_a_scenario_the_engine_would_pass_is_said_plainly() -> None:
+    run = _with_reasons(["no trade proposed", "long scenario now: price 0.079475 is outside the entry zone",
+                         "short scenario now: the risk engine would approve it"])
+    assert tv.why_line(run) == ("No trade approved because: long: not triggered (price 0.07948 outside its entry zone) · "
+                                "short: would pass the risk checks; the verdict is still WAIT")
+    assert tv.why_line(_with_reasons(["no trade proposed"])) is None  # nothing to add to "Verdict: WAIT"
+    between = _with_reasons(["no trade proposed", "long scenario now: price 2406.8 is outside the entry zone",
+                             "short scenario now: price 2406.8 is outside the entry zone; round-trip check failed"])
+    assert tv.why_line(between) == ("No trade approved because: neither setup has triggered yet (price 2,406.8) · "
+                                    "short: round-trip check failed")
+    assert "· no trade proposed" in tv.risk_view(_with_reasons(["no trade proposed"]))  # Risk Review still says why
+
+
+def test_rejected_trade_keeps_its_reasons_and_failed_checks_merge() -> None:
+    checks = [{"name": f"{s} scenario · 24h volume at least the minimum", "ok": False, "value": "$12M", "limit": "$50M"} for s in ("long", "short")]
+    run = _with_reasons(LIQ, "LONG", checks)
+    assert tv.why_line(run).startswith("⛔ No trade approved because: 24h volume $12M below the $50M minimum; order book $80k")
+    wait = _with_reasons(["no trade proposed", "long scenario now: " + LIQ[0], "short scenario now: " + LIQ[0]], checks=checks)
+    risk = tv.risk_view(wait)
+    assert "❌ both setups · 24h volume at least the minimum: $12M" in risk and risk.count("24h volume at least the minimum") == 1
+
+
+def test_html_report_says_shared_reasons_once() -> None:
+    from app.committee import report
+
+    run = _with_reasons(["no trade proposed", "long scenario now: " + "; ".join(LIQ), "short scenario now: " + "; ".join(LIQ)])
+    html_ = report.render(run)
+    assert html_.count("24h volume $12M below the $50M minimum") == 1 and "Both setups blocked" in html_
