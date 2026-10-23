@@ -228,22 +228,12 @@ def _rescale(v: float | None, price: float) -> float | None:
 
 
 def _pivots(cs: list[Any], k: int = 2) -> tuple[list[float], list[float]]:
-    lows, highs = [c.l for c in cs], [c.h for c in cs]
-    n = len(cs)
-    pl = [lows[i] for i in range(k, n - k) if lows[i] == min(lows[i - k:i + k + 1])]
-    ph = [highs[i] for i in range(k, n - k) if highs[i] == max(highs[i - k:i + k + 1])]
-    return pl, ph
+    return ind.pivots([c.h for c in cs], [c.l for c in cs], k)
 
 
 def _nearest(levels: list[float], ref: float, below: bool, n: int = 2, gap: float = 0.004) -> list[float]:
     """The n levels nearest to ref on one side, at least `gap` apart (clustered)."""
-    out: list[float] = []
-    for x in sorted((x for x in levels if (x < ref if below else x > ref)), key=lambda x: abs(ref - x)):
-        if all(abs(x - y) / y > gap for y in out):
-            out.append(x)
-        if len(out) == n:
-            break
-    return out
+    return ind.nearest_levels(levels, ref, below, n, gap)
 
 
 def build_facts(md: Any, tr: Trade, rules: tuple[str, float, float, float] = ("1h", 50_000_000, 8.0, 1.6),

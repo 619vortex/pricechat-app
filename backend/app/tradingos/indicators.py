@@ -170,3 +170,58 @@ def main_three_lines(d: dict[str, float] | None) -> list[str]:
     where = "price above both" if p > max(e20, e50) else "price below both" if p < min(e20, e50) else "price between them"
     stack = "20 over 50" if e20 > e50 else "20 under 50"
     return [f"RSI(14) {r:.1f} · {zone}", f"MACD {macd_word} · {momentum}", f"EMA 20/50 {where} · {stack}"]
+
+
+# --- swing levels, structure and volatility (shared by assist.py and the committee evidence pack) ------------------------
+
+def pivots(highs: Sequence[float], lows: Sequence[float], k: int = 2) -> tuple[list[float], list[float]]:
+    """(pivot lows, pivot highs), oldest first: a low that is the lowest of the k candles either side (a high mirrored).
+    The last k candles can't be pivots yet (their right side hasn't printed)."""
+    n = min(len(highs), len(lows))
+    pl = [lows[i] for i in range(k, n - k) if lows[i] == min(lows[i - k:i + k + 1])]
+    ph = [highs[i] for i in range(k, n - k) if highs[i] == max(highs[i - k:i + k + 1])]
+    return pl, ph
+
+
+def nearest_levels(levels: Sequence[float], ref: float, below: bool, n: int = 2, gap: float = 0.004) -> list[float]:
+    """The n levels nearest to ref on one side (strictly below / above), nearest first, at least `gap` (fraction) apart."""
+    out: list[float] = []
+    for x in sorted((x for x in levels if (x < ref if below else x > ref)), key=lambda x: abs(ref - x)):
+        if all(abs(x - y) / y > gap for y in out):
+            out.append(x)
+        if len(out) == n:
+            break
+    return out
+
+
+def swing_structure(highs: Sequence[float], lows: Sequence[float], k: int = 2) -> str | None:
+    """'HH/HL' when the last two pivot highs AND the last two pivot lows rise, 'LH/LL' when both fall, else 'mixed'.
+    None with fewer than two pivots on either side."""
+    pl, ph = pivots(highs, lows, k)
+    if len(pl) < 2 or len(ph) < 2:
+        return None
+    if ph[-1] > ph[-2] and pl[-1] > pl[-2]:
+        return "HH/HL"
+    if ph[-1] < ph[-2] and pl[-1] < pl[-2]:
+        return "LH/LL"
+    return "mixed"
+
+
+def realized_vol_pct(closes: Sequence[float], period: int = 20) -> float | None:
+    """Population standard deviation of the last `period` close-to-close log returns, in % per candle (not annualised)."""
+    import math
+
+    if len(closes) < period + 1 or any(c <= 0 for c in closes[-period - 1:]):
+        return None
+    w = closes[-period - 1:]
+    rets = [math.log(b / a) for a, b in zip(w[:-1], w[1:])]
+    mean = sum(rets) / period
+    return (sum((r - mean) ** 2 for r in rets) / period) ** 0.5 * 100
+
+
+def volume_ratio(volumes: Sequence[float], period: int = 20) -> float | None:
+    """The last candle's volume over the average of the `period` candles before it. None without enough (or zero) volume."""
+    if len(volumes) < period + 1:
+        return None
+    avg = sum(volumes[-period - 1:-1]) / period
+    return volumes[-1] / avg if avg > 0 else None
