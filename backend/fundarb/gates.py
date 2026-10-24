@@ -9,8 +9,14 @@ Order (cheap gates first; the order book is read only for markets that pass them
   oi_cap             if the market has an OI cap: open_interest_usd <= max_oi_cap_share x cap
   spread             top-of-book spread (l2Book) <= max_spread_bps
   depth              min(bid, ask) notional within 1% of mid >= min_depth_usd
-  oracle             |basis| now <= the market's own 99th percentile of |basis| (needs oracle_min_samples of history;
-                     until then it passes, flagged "warming up")
+  oracle             three states, plus a backstop that always applies:
+                       backstop   |basis| > oracle_backstop_bps (150) -> reject, whatever the history
+                       WARMING    fewer than oracle_min_samples (30) samples -> pass, flagged; a scan stamps itself
+                                  "oracle gate provisional"
+                       ENFORCING  |basis| now > the market's own nearest-rank 99th percentile of |basis| -> reject.
+                                  Nearest rank at n samples is the ceil(0.99 n)-th smallest: for 30 <= n <= 99 that IS the
+                                  largest sample (reject only beyond everything seen so far); from n = 100 on it is a true
+                                  99th percentile (n = 100: the second largest)
 Flag (not a reject): |basis| > oracle_persistent_bps on every one of the last oracle_recent_samples samples and steady
 (std < oracle_stable_std_bps): usually a thin or lagging oracle, not an opportunity.
 
@@ -46,6 +52,7 @@ class GateConfig:
     min_depth_usd: float
     max_oi_cap_share: float
     oracle_min_samples: int
+    oracle_backstop_bps: float
     oracle_persistent_bps: float
     oracle_stable_std_bps: float
     oracle_recent_samples: int
@@ -150,6 +157,10 @@ def market_inputs(m: Market, book: Book | None, book_error: str | None, history:
             "book": None if book is None else asdict(book), "book_error": book_error, "oracle": oracle_stats(history, cfg)}
 
 
+def oracle_state(n: int, cfg: GateConfig) -> str:
+    return "ENFORCING" if n >= cfg.oracle_min_samples else "WARMING"
+
+
 def _chk(gate: str, ok: bool | None, value: Any, limit: Any, note: str = "") -> dict[str, Any]:
     return {"gate": gate, "ok": ok, "value": value, "limit": limit, "note": note}
 
@@ -183,14 +194,19 @@ def decide(x: dict[str, Any], cfg: GateConfig) -> dict[str, Any]:
         checks.append(_chk("depth", book["depth_usd_1pct"] >= cfg.min_depth_usd, round(book["depth_usd_1pct"], 2), cfg.min_depth_usd,
                            book["source"] + lower))
     o, b = x["oracle"], x["basis_bps"]
+    state = oracle_state(o["n"], cfg)
     if b is None:
-        checks.append(_chk("oracle", False, None, None, "no basis (mark or oracle missing)"))
-    elif o["n"] < cfg.oracle_min_samples or o["p99_abs_bps"] is None:
-        checks.append(_chk("oracle", True, round(b, 3), None, f"warming up: {o['n']}/{cfg.oracle_min_samples} samples"))
+        checks.append(_chk("oracle", False, None, None, f"{state}: no basis (mark or oracle missing)"))
+    elif abs(b) > cfg.oracle_backstop_bps:
+        checks.append(_chk("oracle", False, round(b, 3), cfg.oracle_backstop_bps, f"{state}: backstop, |basis| above {cfg.oracle_backstop_bps:g} bps"))
+    elif state == "WARMING" or o["p99_abs_bps"] is None:
+        checks.append(_chk("oracle", True, round(b, 3), cfg.oracle_backstop_bps,
+                           f"WARMING: {o['n']}/{cfg.oracle_min_samples} samples, backstop only (provisional)"))
         if x["listing_live"]:
-            flags.append(f"oracle history warming up ({o['n']}/{cfg.oracle_min_samples})")
+            flags.append(f"oracle gate provisional ({o['n']}/{cfg.oracle_min_samples} samples)")
     else:
-        checks.append(_chk("oracle", abs(b) <= o["p99_abs_bps"], round(b, 3), round(o["p99_abs_bps"], 3), "|basis| vs own p99"))
+        checks.append(_chk("oracle", abs(b) <= o["p99_abs_bps"], round(b, 3), round(o["p99_abs_bps"], 3),
+                           f"ENFORCING: |basis| vs own p99 over {o['n']} samples"))
     recent = list(o["recent_bps"]) + ([b] if b is not None else [])
     if len(recent) >= cfg.oracle_recent_samples and all(abs(r) > cfg.oracle_persistent_bps for r in recent) \
             and statistics.pstdev(recent) < cfg.oracle_stable_std_bps:

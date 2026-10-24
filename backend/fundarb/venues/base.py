@@ -84,6 +84,7 @@ class PerpVenue(ABC):
         self._client: httpx.AsyncClient | None = None
         self._cache = TTLCache()
         self.connected = False
+        self.calls = 0  # HTTP requests made (Module 5 call accounting)
 
     # --- lifecycle --------------------------------------------------------------------------------------------------------
 
@@ -124,6 +125,7 @@ class PerpVenue(ABC):
             raise VenueUnavailable(f"{self.name}: not connected (call connect() first)")
 
         async def go() -> Any:
+            self.calls += 1
             r = await self._client.request(method, path, **kw)  # type: ignore[union-attr]
             r.raise_for_status()
             return r.json()

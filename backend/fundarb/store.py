@@ -6,7 +6,9 @@ Tables
 - gate_runs     one row per gate run: schema hash, the exact gate config, pass counts, wall-clock cost, API calls
 - gate_results  per market per run: passed, first failed gate, every check, flags, and the full input record
 - pairs         pair identities (Phase C fills it)
-- scan_results  every ranked list a scan produces, each row with its full input set (Phase C fills it)
+- scan_results  every list a scan produces (capital_apr, score, transient, net_unknown, rejected), each row with its full
+                inputs, metrics and the scan config
+- cluster_runs / cluster_members   the correlation clustering behind each scan (not printed; inspect with SQL)
 Everything a decision used is stored next to it, so a run can be replayed and must reproduce the same result."""
 
 from __future__ import annotations
@@ -34,7 +36,12 @@ DDL = [
        leg_b TEXT NOT NULL, venue_b TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS scan_results (scan_id TEXT NOT NULL, ts TEXT NOT NULL, list_name TEXT NOT NULL, rank INTEGER NOT NULL,
        pair_id TEXT NOT NULL, metrics TEXT NOT NULL, inputs TEXT NOT NULL, config TEXT NOT NULL, PRIMARY KEY (scan_id, list_name, rank))""",
+    """CREATE TABLE IF NOT EXISTS cluster_runs (scan_id TEXT PRIMARY KEY, ts TEXT NOT NULL, threshold REAL NOT NULL, window_days REAL NOT NULL,
+       legs INTEGER NOT NULL, clusters INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS cluster_members (scan_id TEXT NOT NULL, leg_id TEXT NOT NULL, cluster INTEGER NOT NULL, hours INTEGER NOT NULL,
+       PRIMARY KEY (scan_id, leg_id))""",
 ]
+SCAN_LISTS = ("capital_apr", "score", "transient", "unprofitable", "net_unknown", "rejected")
 QUOTE_COLS = ["ts", "raw_name", "funding_rate_raw", "funding_interval_hours", "funding_apr", "premium", "mark_price", "oracle_price",
               "basis_bps", "open_interest_usd", "volume_24h_usd", "max_leverage", "spread_bps", "spread_source", "depth_usd_1pct",
               "depth_source"]
@@ -102,6 +109,40 @@ class UniverseStore:
             row = c.execute("SELECT run_id FROM gate_runs ORDER BY ts DESC LIMIT 1").fetchone()
         return row[0] if row else None
 
+    def save_scan(self, scan_id: str, ts: str, config: dict[str, Any], lists: dict[str, list[dict[str, Any]]], clusters: dict[str, Any]) -> None:
+        cfg = json.dumps(config, sort_keys=True)
+        rows, pairs = [], {}
+        for name in SCAN_LISTS:
+            for i, r in enumerate(lists.get(name, []), 1):
+                rows.append((scan_id, ts, name, i, r["pair_id"], json.dumps(r["metrics"], sort_keys=True, default=str),
+                             json.dumps(r["inputs"], sort_keys=True, default=str), cfg))
+                p = r["inputs"]
+                pairs[r["pair_id"]] = (r["pair_id"], p["kind"], p["short"]["leg_id"], p["short"]["venue"], p["long"]["leg_id"], p["long"]["venue"], ts, ts)
+        members = clusters.get("members", [])
+        with closing(self._conn()) as c, c:
+            c.executemany("INSERT INTO scan_results VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            c.executemany("INSERT INTO pairs VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(pair_id) DO UPDATE SET last_seen=excluded.last_seen", list(pairs.values()))
+            c.execute("INSERT INTO cluster_runs VALUES (?, ?, ?, ?, ?, ?)", (scan_id, ts, clusters.get("threshold"), clusters.get("window_days"),
+                                                                            len(members), len({m["cluster"] for m in members})))
+            c.executemany("INSERT INTO cluster_members VALUES (?, ?, ?, ?)", [(scan_id, m["leg_id"], m["cluster"], m["hours"]) for m in members])
+
+    def load_scan(self, scan_id: str) -> dict[str, Any]:
+        with closing(self._conn()) as c:
+            rows = c.execute("SELECT * FROM scan_results WHERE scan_id = ? ORDER BY list_name, rank", (scan_id,)).fetchall()
+        if not rows:
+            raise KeyError(f"no scan {scan_id}")
+        lists: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            lists.setdefault(r["list_name"], []).append({"pair_id": r["pair_id"], "rank": r["rank"], "metrics": json.loads(r["metrics"]),
+                                                        "inputs": json.loads(r["inputs"])})
+        return {"scan_id": scan_id, "ts": rows[0]["ts"], "config": json.loads(rows[0]["config"]), "lists": lists}
+
+    def latest_scan(self) -> str | None:
+        with closing(self._conn()) as c:
+            row = c.execute("SELECT scan_id FROM scan_results ORDER BY ts DESC LIMIT 1").fetchone()
+        return row[0] if row else None
+
     def counts(self) -> dict[str, int]:
         with closing(self._conn()) as c:
-            return {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("markets", "quotes", "gate_runs", "gate_results", "pairs", "scan_results")}
+            return {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                    for t in ("markets", "quotes", "gate_runs", "gate_results", "pairs", "scan_results", "cluster_runs", "cluster_members")}

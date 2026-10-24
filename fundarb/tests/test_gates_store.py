@@ -16,8 +16,8 @@ from fundarb.gates import GateConfig, cheap_pass, decide, oracle_stats, parse_bo
 from fundarb.store import UniverseStore
 from fundarb.universe import AssetClass, classify, load_overrides, pairing_rule
 
-CFG = GateConfig(min_volume_24h_usd=5e6, min_oi_usd=2e6, max_spread_bps=10, min_depth_usd=250_000, max_oi_cap_share=0.8,
-                 oracle_min_samples=100, oracle_persistent_bps=50, oracle_stable_std_bps=10, oracle_recent_samples=20)
+CFG = GateConfig(min_volume_24h_usd=5e6, min_oi_usd=2e6, max_spread_bps=10, min_depth_usd=250_000, max_oi_cap_share=0.8, oracle_backstop_bps=150,
+                 oracle_min_samples=30, oracle_persistent_bps=50, oracle_stable_std_bps=10, oracle_recent_samples=20)
 BOOK = {"spread_bps": 1.0, "depth_usd_1pct": 1e6, "complete": True, "source": "l2Book full precision"}
 
 
@@ -61,7 +61,7 @@ def test_cross_margin_only_inside_one_account_with_one_collateral() -> None:
     assert market_bucket(False, "strictIsolated", "USDC").startswith("isolated:")
     same = pair_capital(native, native, 2.0, 0.25)
     assert same.mode == "cross" and same.capital_per_notional == pytest.approx(2.25 / 2)
-    for a, b, why in ((native, xyz, "separate margin accounts"), (native, usdh, "different collateral"), (xyz, iso, "isolated-only")):
+    for a, b, why in ((native, xyz, "separate margin accounts"), (native, usdh, "separate margin accounts"), (xyz, iso, "isolated-only")):
         c = pair_capital(a, b, 2.0, 0.25)
         assert c.mode == "isolated" and why in c.reason and c.capital_per_notional == pytest.approx(2.5 / 2)  # the 2.5x tax at 1x
     lighter = market_bucket(False, "unset", "USDC", venue="lighter")
@@ -107,8 +107,23 @@ def test_oracle_gate_uses_the_markets_own_99th_percentile_after_warm_up() -> Non
     assert o["n"] == 200 and o["p99_abs_bps"] == 9.0 and len(o["recent_bps"]) == 19
     assert decide(x(basis_bps=9.0, oracle=o), CFG)["passed"]
     assert decide(x(basis_bps=-9.5, oracle=o), CFG)["failed_gate"] == "oracle"  # beyond its own p99, either sign
-    warm = decide(x(basis_bps=500.0, oracle=oracle_stats(hist[:50], CFG)), CFG)
-    assert warm["passed"] and "warming up (50/100)" in warm["flags"][0]
+    warm = decide(x(basis_bps=120.0, oracle=oracle_stats(hist[:29], CFG)), CFG)  # 29 < 30 samples: WARMING
+    assert warm["passed"] and "oracle gate provisional (29/30 samples)" in warm["flags"][0]
+    assert decide(x(basis_bps=120.0, oracle=oracle_stats(hist[:30], CFG)), CFG)["failed_gate"] == "oracle"  # 30: ENFORCING
+
+
+def test_the_150bp_backstop_applies_in_every_state() -> None:
+    hist = [float(i) for i in range(200)]  # a market whose own p99 is far above 150 bps
+    for o in (oracle_stats([], CFG), oracle_stats(hist[:10], CFG), oracle_stats(hist, CFG)):
+        d = decide(x(basis_bps=-150.5, oracle=o), CFG)
+        assert d["failed_gate"] == "oracle" and "backstop" in d["checks"][-1]["note"]
+    assert decide(x(basis_bps=150.0, oracle=oracle_stats([], CFG)), CFG)["passed"]
+
+
+def test_nearest_rank_p99_is_the_sample_max_until_100_samples() -> None:
+    for n in (30, 50, 99):
+        assert oracle_stats([float(i) for i in range(n)], CFG)["p99_abs_bps"] == n - 1
+    assert oracle_stats([float(i) for i in range(100)], CFG)["p99_abs_bps"] == 98  # n = 100: second largest
 
 
 def test_a_persistent_stable_basis_is_flagged_not_rejected() -> None:

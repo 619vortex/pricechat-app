@@ -78,6 +78,13 @@ def load_overrides(path: Path) -> dict[str, Override]:
     return out
 
 
+def load_spot_aliases(path: Path) -> dict[str, str]:
+    """Perp coin -> Hyperliquid spot token name, when they differ (e.g. a wrapped token): operator data, never guessed."""
+    if not path.exists():
+        return {}
+    return {str(k): str(v) for k, v in (json.loads(path.read_text(encoding="utf-8")).get("spot_aliases") or {}).items()}
+
+
 def classify(namespace: str, raw_name: str, categories: dict[str, str], overrides: dict[str, Override] | None = None) -> tuple[AssetClass, str]:
     """(class, the rule that decided it). Exactly one class per market."""
     o = (overrides or {}).get(raw_name)

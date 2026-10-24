@@ -3,6 +3,8 @@
   python -m fundarb quotes BTC-PERP ETH-PERP [--venues hyperliquid,lighter] [--save] [--json]
   python -m fundarb intervals [--symbol BTC-PERP]
   python -m fundarb gates [--watch] [--replay RUN_ID] [--json]
+  python -m fundarb scan [--top 20] [--replay SCAN_ID|latest] [--json]   (Module 3: crypto pairs, both ranked lists)
+  python -m fundarb scan-legacy ...                                       (the Phase 2 four-venue scan)
   python -m fundarb universe [--live-only] [--dex xyz] [--class EQUITY] [--csv out.csv] [--json] [--accept-schema] [--watch]
 
 Every venue answers or says why it couldn't; nothing is ever shown as a silent zero. (`scan` and `status` come in
@@ -344,6 +346,142 @@ def cmd_gates(a: argparse.Namespace) -> int:
     return asyncio.run(loop())
 
 
+def _oracle_state(r: dict[str, Any]) -> str:
+    note = next((c["note"] for c in r["checks"] if c["gate"] == "oracle"), "")
+    return "ENFORCING" if note.startswith("ENFORCING") else "WARMING"
+
+
+def _pct(v: Any, d: int = 1) -> str:
+    return "-" if v is None else f"{v:+.{d}f}%"
+
+
+def _usd_m(v: Any) -> str:
+    return "-" if v is None else f"${v / 1e6:.2f}M"
+
+
+def _scan_rows(title: str, rows: list[dict[str, Any]], top: int) -> None:
+    print(f"\n{title}")
+    hdr = ["#", "pair", "short leg", "long leg", "gross APR", "7d avg", "net APR", "capital APR", "capital", "breakeven", "depth short / long",
+           "spread sd", "score", "intervals", "oracle"]
+    out = [hdr]
+    for i, r in enumerate(rows[:top], 1):
+        m, p = r["metrics"], r["inputs"]
+        s, l = p["short"], p["long"]
+        iv = "/".join("spot" if x["kind"] == "spot" else f"{x['interval_hours']:g}h" for x in (s, l))
+        be = m["breakeven_hours"]
+        out.append([str(i), p["symbol"].replace("-PERP", ""), f"{s['venue']}:{s['dex'] or '-'}" if s["venue"] == "hyperliquid" else s["venue"],
+                    f"{l['venue']}:{l['dex'] or '-'}" if l["venue"] == "hyperliquid" else l["venue"], _pct(m["gross_apr_pct"]),
+                    _pct(m["mean_7d_apr_pct"]), _pct(m["net_apr_pct"]),
+                    _pct(m["capital_apr_pct"]), f"{m['capital_mode']} {m['capital_per_notional']:.3f}",
+                    "-" if be is None else "never" if be == float("inf") else f"{be:.1f}h", f"{_usd_m(s['depth_usd_1pct'])} / {_usd_m(l['depth_usd_1pct'])}",
+                    "-" if m["spread_stdev_bps"] is None else f"{m['spread_stdev_bps']:.1f}bp", "-" if m["score"] is None else f"{m['score']:.2f}", iv,
+                    "PROVISIONAL" if m["oracle"] == "provisional" else "enforced"])
+    widths = [max(len(r[i]) for r in out) for i in range(len(hdr))]
+    for r in out:
+        print("  ".join(v.ljust(w) for v, w in zip(r, widths)))
+
+
+def _print_scan(scan_id: str, res: dict[str, Any], lists: dict[str, list[dict[str, Any]]], gate: dict[str, Any], top: int) -> None:
+    from collections import Counter
+
+    ranked = lists["all_ranked"]
+    provisional = any(r["metrics"]["oracle"] == "provisional" for r in ranked)
+    print(f"scan {scan_id}  (gate run {gate['report'].run_id})" + ("   *** ORACLE GATE PROVISIONAL: fewer than the enforcing sample count ***"
+                                                                    if provisional else ""))
+    pairs = res["pairs"]
+    kinds = Counter(p["kind"] for p in pairs)
+    every = [*ranked, *lists["transient"], *lists["unprofitable"], *lists["net_unknown"], *lists["rejected"]]
+    modes = Counter(r["metrics"]["capital_mode"] for r in every)
+    print(f"legs: {len(res['legs'])} ({sum(1 for x in res['legs'].values() if x['venue'] == 'hyperliquid' and x['kind'] == 'perp')} Hyperliquid perps that "
+          f"passed every gate, the rest their second legs); clusters: {len({m['cluster'] for m in res['clusters']['members']})} over "
+          f"{res['clusters']['legs']} legs at corr >= {res['clusters']['threshold']} (stored, not printed)")
+    print(f"candidate pairs: {len(pairs)} ({dict(kinds)}); capital model split: {dict(modes)} "
+          f"(cross = both legs in one Hyperliquid account; every cross-venue pair is two accounts, so isolated)")
+    print(f"ranked: {len(ranked)}  unprofitable after costs: {len(lists['unprofitable'])}  transient: {len(lists['transient'])}  "
+          f"net unknown (fees): {len(lists['net_unknown'])}  "
+          f"rejected: {len(lists['rejected'])}  dropped (no second leg): {len(res['dropped'])}")
+    _scan_rows(f"TOP {top} BY CAPITAL APR (net APR on the capital both legs tie up)", lists["capital_apr"], top)
+    _scan_rows(f"TOP {top} BY VARIANCE-ADJUSTED SCORE (capital APR / max(price-spread stdev bps, 1))", lists["score"], top)
+    if lists["unprofitable"]:
+        _scan_rows("BEST OF THE UNPROFITABLE (net APR <= 0 after round-trip costs over the hold; stored, not ranked)", lists["unprofitable"], 5)
+    rej = Counter(r["metrics"]["reject_code"] for r in lists["rejected"])
+    print(f"\nrejected by reason: {dict(rej.most_common())}")
+    for code in [c for c, _ in rej.most_common()]:
+        ex = next(r for r in lists["rejected"] if r["metrics"]["reject_code"] == code)
+        print(f"  e.g. {ex['pair_id']}: {ex['metrics']['reject']}")
+    nu = Counter(f"{r['inputs']['short']['venue']}/{r['inputs']['long']['venue']}" for r in lists["net_unknown"])
+    if nu:
+        print(f"net unknown (a venue serves fees only to a signed-in account): {dict(nu)}; gross APRs stored")
+    if lists["transient"]:
+        print(f"transient (spread not paid in each of the last windows; stored for study, never ranked): "
+              f"{', '.join(r['pair_id'] for r in lists['transient'][:10])}{' ...' if len(lists['transient']) > 10 else ''}")
+    print(f"dropped, no second leg: {', '.join(d['symbol'].replace('-PERP', '') for d in res['dropped']) or 'none'}")
+    if res["dropped"]:
+        print(f"  ({res['dropped'][0]['reason']})")
+    others = Counter(m.asset_class.value for m in gate["snap"].markets if m.raw_name in gate["report"].passed and m.asset_class.value != "CRYPTO")
+    print(f"not paired here: {dict(others)} passed the gates but are not crypto (Phase D equity bucket; never mixed into these lists)")
+    for k, v in res["notes"].items():
+        print(f"VENUE {k}: {v}")
+
+
+async def _scan_once(s: Any, top: int) -> int:
+    from fundarb.gates import GateConfig
+    from fundarb.pairs import PairConfig, config_dict, gather_inputs, rank
+    from fundarb.store import UniverseStore
+    from fundarb.universe import HyperliquidUniverse, load_spot_aliases
+
+    store = UniverseStore(s.universe_db_path)
+    t0 = time.monotonic()
+    gate = await _gates_once(HyperliquidUniverse(s), store, GateConfig.from_settings(s))
+    if gate is None:
+        return 2
+    def depth(r: dict[str, Any]) -> dict[str, Any]:
+        c = next(c for c in r["checks"] if c["gate"] == "depth")
+        return {"depth_usd_1pct": c["value"] if c["ok"] is not None else None, "depth_source": c["note"]}
+
+    results = {r["raw_name"]: {"passed": r["passed"], "oracle_state": _oracle_state(r), **depth(r)} for r in gate["report"].results}
+    cfg = PairConfig.from_settings(s, top_n=top)
+    res = await gather_inputs(s, gate["snap"].markets, results, cfg, load_spot_aliases(s.universe_overrides_path))
+    lists = rank(res["pairs"], cfg)
+    scan_id = "s" + gate["report"].run_id[1:]
+    store.save_scan(scan_id, gate["report"].ts, config_dict(cfg), lists, res["clusters"])
+    _print_scan(scan_id, res, lists, gate, top)
+    elapsed = time.monotonic() - t0
+    print(f"cost: gates {gate['calls']} calls + pairs {res['calls']} calls, {elapsed:.1f}s wall clock for one full scan "
+          f"(funding interval {min((m.funding_interval_hours or 1) for m in gate['snap'].markets if m.funding_interval_hours) * 3600:.0f}s: "
+          f"{'OK' if elapsed < 3600 else 'SLOWER THAN THE FUNDING INTERVAL'}); stored as {scan_id} in {store.path}")
+    return 0
+
+
+def _replay_scan(s: Any, scan_id: str | None) -> int:
+    from fundarb.pairs import PairConfig, rank
+    from fundarb.store import UniverseStore
+
+    store = UniverseStore(s.universe_db_path)
+    scan_id = store.latest_scan() if scan_id in (None, "latest") else scan_id
+    if scan_id is None:
+        print("no stored scan to replay")
+        return 1
+    old = store.load_scan(scan_id)
+    cfg = PairConfig(**old["config"])
+    inputs = {r["pair_id"]: r["inputs"] for rows in old["lists"].values() for r in rows}
+    new = rank(list(inputs.values()), cfg)
+    names = ("capital_apr", "score", "transient", "unprofitable", "net_unknown", "rejected")
+    diff = [name for name in names
+            if [r["pair_id"] for r in new[name]] != [r["pair_id"] for r in old["lists"].get(name, [])]
+            or [r["metrics"] for r in new[name]] != [r["metrics"] for r in old["lists"].get(name, [])]]
+    print(f"replayed scan {scan_id}: {len(inputs)} pairs; lists identical: {', '.join(n for n in names if n not in diff)}"
+          + (f"; DIFFERENT: {', '.join(diff)}" if diff else ""))
+    return 0 if not diff else 1
+
+
+def cmd_scan2(a: argparse.Namespace) -> int:
+    s = load()
+    if a.replay:
+        return _replay_scan(s, a.replay)
+    return asyncio.run(_scan_once(s, max(1, min(a.top, 20))))  # hard cap: never a "top 500"
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
     p = argparse.ArgumentParser(prog="fundarb", description="Funding-rate arbitrage scanner (read-only)")
@@ -358,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--symbol", default="BTC-PERP")
     i.add_argument("--venues")
     i.set_defaults(fn=cmd_intervals)
-    sc = sub.add_parser("scan", help="the top funding spreads: capital-adjusted, variance-ranked, with costs and break-even")
+    sc = sub.add_parser("scan-legacy", help="Phase 2 scan: the top funding spreads across the four venues' shared symbols")
     sc.add_argument("--top", type=int, default=10)
     sc.add_argument("--shortlist", type=int, default=25, help="symbols whose 7-day history is read")
     sc.add_argument("--leverage", type=float, default=2.0, help="per leg")
@@ -367,6 +505,10 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--venues")
     sc.add_argument("--json", action="store_true")
     sc.set_defaults(fn=cmd_scan)
+    s2 = sub.add_parser("scan", help="Module 3: crypto pairs (same asset, two venues / spot-perp), ranked by capital APR and by variance-adjusted score")
+    s2.add_argument("--top", type=int, default=20, help="rows per list (hard cap 20)")
+    s2.add_argument("--replay", metavar="SCAN_ID", help="re-rank a stored scan from its stored inputs ('latest' for the newest)")
+    s2.set_defaults(fn=cmd_scan2)
     g = sub.add_parser("gates", help="Module 2: liquidity / quality / oracle gates over the whole universe, persisted (read-only)")
     g.add_argument("--watch", action="store_true", help="repeat every FUNDARB_UNIVERSE_REFRESH_SECONDS (builds the oracle history)")
     g.add_argument("--replay", metavar="RUN_ID", help="re-decide a stored run from its stored inputs ('latest' for the newest)")

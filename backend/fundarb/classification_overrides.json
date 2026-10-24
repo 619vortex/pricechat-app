@@ -1,5 +1,6 @@
 {
   "_doc": "Operator decisions that override Hyperliquid's perpCategories registry (fundarb.universe.classify, rule 0). Data, not code: edit this file (or point FUNDARB_UNIVERSE_OVERRIDES_PATH elsewhere); every entry says who decided and why.",
+  "spot_aliases": {},
   "markets": {
     "io:EWY": {"class": "EQUITY", "pairing": true, "reason": "iShares MSCI South Korea ETF; missing from perpCategories", "decided": "operator, 2026-10-24"},
     "para:BTCD": {"class": "INDEX", "pairing": false, "reason": "crypto dominance index: an index product with no second leg for funding arb", "decided": "operator, 2026-10-24"},

@@ -43,13 +43,21 @@ def pair_capital(bucket_a: str, bucket_b: str, leverage: float, buffer: float) -
         raise ValueError("leverage must be positive")
     if is_cross(bucket_a) and bucket_a == bucket_b:
         return PairCapital("cross", f"both legs cross-margined in one account ({bucket_a.split(':', 1)[1]})", (2 + buffer) / leverage)
+    a, b = bucket_a.split(":"), bucket_b.split(":")
     if not (is_cross(bucket_a) and is_cross(bucket_b)):
         why = "an isolated-only / noCross leg"
-    elif bucket_a.split(":")[3] != bucket_b.split(":")[3]:
-        why = "different collateral tokens"
-    else:
+    elif a[1:3] != b[1:3]:
         why = "separate margin accounts (different venue or dex)"
+    else:
+        why = "different collateral tokens"
     return PairCapital("isolated", why, 2 * (1 + buffer) / leverage)
+
+
+def spot_perp_capital(leverage: float, buffer: float) -> PairCapital:
+    """Long spot (no leverage: fully paid) + short perp (its own margin and buffer): 1 + (1 + b) / L per $1 of notional."""
+    if leverage <= 0:
+        raise ValueError("leverage must be positive")
+    return PairCapital("spot-perp", "spot leg fully paid, perp leg margined", 1 + (1 + buffer) / leverage)
 
 
 def capital_apr(net_apr: float, cap: PairCapital) -> float:

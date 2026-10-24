@@ -58,11 +58,16 @@ class Settings(BaseSettings):
     max_spread_bps: float = Field(10.0, gt=0)
     min_depth_usd: float = Field(250_000, ge=0)
     max_oi_cap_share: float = Field(0.8, gt=0, le=1)
-    oracle_min_samples: int = Field(100, ge=10)  # basis samples before a market's own 99th percentile is trusted
+    oracle_min_samples: int = Field(30, ge=10)  # basis samples before the gate ENFORCES each market's own 99th percentile
+    oracle_backstop_bps: float = Field(150.0, gt=0)  # |mark - oracle| above this is rejected at all times
     oracle_persistent_bps: float = Field(50.0, gt=0)  # |basis| above this on every recent sample = a thin or lagging oracle
     oracle_stable_std_bps: float = Field(10.0, gt=0)  # ...and this steady (std of those samples)
     oracle_recent_samples: int = Field(20, ge=3)
     book_concurrency: int = Field(4, ge=1, le=16)
+
+    # fees a venue only shows a signed-in account: unknown (net APR not computed) unless the operator states an assumption,
+    # e.g. FUNDARB_ASSUMED_TAKER_BPS='{"orderly": 5, "backpack": 5}'. Never defaulted.
+    assumed_taker_bps: dict[str, float] = Field(default_factory=dict)
 
     # capital model (fundarb.capital)
     capital_buffer: float = Field(0.25, ge=0)  # idle collateral on top of initial margin, share of that margin
