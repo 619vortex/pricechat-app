@@ -2,20 +2,27 @@
 /* the big product tabs, above everything else on Earn */
 .earn-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(8px, 1.5vw, 16px); margin-top: 8px; }
 .earn-tabs a { display: flex; align-items: center; gap: clamp(8px, 1.4vw, 16px); min-height: 92px; padding: clamp(14px, 2vw, 22px) clamp(12px, 2vw, 24px);
+  container-type: inline-size; min-width: 0;
   border-radius: 22px; border: 2px solid var(--site-line); background: var(--tb-card, #0d100f); color: var(--site-text); text-decoration: none;
   transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
 .earn-tabs a:hover { transform: translateY(-2px); border-color: rgba(0, 229, 143, 0.5); }
 .earn-tabs a.is-on { border-color: var(--tb-green, #00e58f); background: linear-gradient(160deg, rgba(0, 229, 143, 0.18), rgba(155, 92, 255, 0.12)), #070908;
   box-shadow: 0 0 0 1px rgba(0, 229, 143, 0.35), 0 18px 50px -20px rgba(0, 229, 143, 0.55); }
-.earn-tab-icon { font-size: clamp(30px, 4.5vw, 46px); line-height: 1; flex: none; }
-.earn-tab-text { display: grid; gap: 4px; min-width: 0; }
-.earn-tab-text b { font-family: var(--site-display); font-size: clamp(17px, 2.2vw, 26px); text-transform: uppercase; letter-spacing: 0.01em; line-height: 1; }
-.earn-tab-text small { color: var(--site-soft); font-size: clamp(11px, 1.2vw, 14px); }
+.earn-tab-icon { font-size: clamp(26px, 17cqi, 44px); line-height: 1; flex: none; }
+.earn-tab-text { display: grid; gap: 5px; min-width: 0; }
+/* sized off the tab's own width (cqi), so the longest word ("COMMITTEE") always fits inside the box at every column width */
+.earn-tab-text b { font-family: var(--site-display); font-size: clamp(14px, 9.5cqi, 24px); text-transform: uppercase; letter-spacing: 0.01em; line-height: 1.05;
+  text-wrap: balance; hyphens: none; }
+.earn-tab-text small { color: var(--site-soft); font-size: clamp(11px, 5.6cqi, 14px); line-height: 1.3; text-wrap: balance; }
 .earn-tabs a.is-on .earn-tab-text b { color: var(--tb-green, #00e58f); }
+/* too narrow for icon + title side by side: stack them, so the title gets the tab's full width */
+@media (max-width: 900px) {
+  .earn-tabs a { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 12px 8px; }
+  .earn-tab-text b { font-size: clamp(14px, 11cqi, 20px); }
+}
 @media (max-width: 640px) {
-  .earn-tabs a { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 12px 6px; }
+  .earn-tabs a { padding: 12px 6px; }
   .earn-tab-text small { display: none; }
-  .earn-tab-text b { overflow-wrap: anywhere; }
 }
 @media (max-width: 520px) {
   .earn-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -107,3 +114,67 @@
 .arb-score-gap { margin: 12px 0 0; font-size: 14px; }
 .arb-score-gap b { color: var(--site-text); }
 @media (max-width: 420px) { .arb-score-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Funding Arb: average APR tiles and the guided start (fundingstart.tsx) */
+.arb-avg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.arb-avg-tile { display: grid; gap: 4px; align-content: start; padding: 16px 18px; border-radius: 18px; border: 1px solid var(--site-line); background: var(--tb-card); min-width: 0; }
+.arb-avg-tile span { color: var(--site-soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.arb-avg-tile b { font-family: var(--site-display); font-size: clamp(24px, 3vw, 34px); line-height: 1.05; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.arb-avg-tile small { color: var(--site-soft); font-size: 12.5px; line-height: 1.35; }
+.arb-avg-tile.is-main { border-color: rgba(0, 229, 143, 0.45); box-shadow: 0 0 0 1px rgba(0, 229, 143, 0.18), 0 16px 44px -24px rgba(0, 229, 143, 0.6); }
+.arb-avg-tile.is-main b { color: var(--tb-green); }
+@media (max-width: 900px) { .arb-avg { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.arb-start { overflow-x: visible; }
+.arb-steps { margin: 14px 0 0; padding: 0; display: grid; gap: 14px; }
+.arb-step { padding: 16px; border-radius: 16px; border: 1px solid var(--site-line); background: rgba(255, 255, 255, 0.015); display: grid; gap: 10px; min-width: 0; }
+.arb-step h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.arb-step p { margin: 0; }
+.arb-step-n { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-size: 13px; font-weight: 800;
+  color: #04110b; background: var(--tb-green); }
+.arb-wallet-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.arb-wallet-row .tb-btn { display: inline-flex; align-items: center; gap: 8px; }
+.arb-wallet-row img { border-radius: 4px; }
+.arb-wallet p { color: var(--site-text); }
+.arb-linkbtn { background: none; border: 0; padding: 0; margin-left: 6px; color: var(--site-soft); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline;
+  text-underline-offset: 3px; }
+.arb-linkbtn:hover { color: var(--site-text); }
+.arb-stale { color: #ffc93c !important; font-size: 13px; }
+.arb-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 18px; margin: 0; }
+.arb-kv dt { font-size: 12px; color: var(--site-soft); }
+.arb-kv dd { margin: 3px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.arb-kv .is-good { color: var(--tb-green); }
+.arb-kv .is-bad { color: #ff5c5c; }
+.arb-form { display: flex; flex-wrap: wrap; gap: 12px; }
+.arb-form label { display: grid; gap: 4px; font-size: 12px; color: var(--site-soft); text-transform: uppercase; letter-spacing: 0.06em; flex: 0 1 auto; min-width: 0; }
+.arb-form label:first-child { flex: 1 1 280px; }
+.arb-form input, .arb-form select { font: 600 16px/1.2 var(--site-sans); color: var(--site-text); background: #0b0e0d; border: 1px solid var(--site-line-strong, rgba(255, 255, 255, 0.2));
+  border-radius: 10px; padding: 10px 12px; min-width: 0; width: 100%; }
+.arb-form input { width: 150px; }
+.arb-legs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.arb-leg { display: grid; gap: 6px; align-content: start; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--site-line); border-top-width: 3px; min-width: 0; }
+.arb-leg.is-short { border-top-color: #ff5468; }
+.arb-leg.is-long { border-top-color: var(--tb-green); }
+.arb-leg-side { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; }
+.arb-leg.is-short .arb-leg-side { color: #ff5468; }
+.arb-leg.is-long .arb-leg-side { color: var(--tb-green); }
+.arb-leg b { font-size: 18px; }
+.arb-leg small { font-size: 13px; }
+.arb-leg-links { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 4px 0; }
+.arb-leg-links .tb-btn { text-decoration: none; }
+.arb-rules { margin: 0; padding: 0; display: grid; gap: 6px; color: var(--site-soft); font-size: 13.5px; }
+.arb-rules li { position: relative; padding-left: 16px; }
+.arb-rules li::before { content: ""; position: absolute; left: 2px; top: 0.6em; width: 5px; height: 5px; border-radius: 50%; background: #ffc93c; }
+@media (max-width: 640px) {
+  .arb-legs-grid { grid-template-columns: minmax(0, 1fr); }
+  .arb-form input { width: 100%; }
+  .arb-form label { flex: 1 1 100%; }
+  .arb-step { padding: 14px 12px; }
+}
+.arb-use { font: 700 12px/1 var(--site-sans); color: var(--tb-green); background: rgba(0, 229, 143, 0.08); border: 1px solid rgba(0, 229, 143, 0.35); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; }
+.arb-use:hover { background: rgba(0, 229, 143, 0.16); }
+.arb-more { margin-top: 12px; background: none; border: 1px solid var(--site-line); border-radius: 10px; color: var(--site-text); font: 600 13px/1 var(--site-sans);
+  padding: 10px 14px; cursor: pointer; }
+.arb-more:hover { border-color: rgba(0, 229, 143, 0.5); }
+.arb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

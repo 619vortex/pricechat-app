@@ -231,7 +231,7 @@ function RunForm({ status, onStarted }: { status: Status | null; onStarted: (id:
   if (member === undefined) return <div className="cm-form cm-form-skel" aria-hidden />;
   if (member === null) {
     return (
-      <div className="cm-form">
+      <div className="cm-form cm-form-out">
         <p>Signed-in Kiwi Passport members can ask the committee about a market (a few runs a day).</p>
         <button type="button" className="tb-btn" onClick={openLogin}>Sign in to ask</button>
       </div>
@@ -428,9 +428,9 @@ export function RunDetail({ run, err, gaveUp }: { run: Run | null; err: string |
           {ANALYSTS.map(([k, label]) => {
             const a = run.analysts?.[k];
             return (
-              <article key={k} className="cm-card" aria-label={`${label} analyst`}>
+              <article key={k} className="cm-card cm-analyst" aria-label={`${label} analyst`}>
                 <h3>{label} <span className={`cm-lean l-${a?.lean ?? "unknown"}`}>{LEAN_LABEL[a?.lean ?? "unknown"]}</span></h3>
-                <p className="cm-muted">confidence {a?.confidence ?? "—"} · {a?.author === "rules" ? "rules" : a?.author ?? "—"}</p>
+                <p className="cm-muted cm-card-meta">confidence {a?.confidence ?? "—"} · {a?.author === "rules" ? "rules" : a?.author ?? "—"}</p>
                 <p>{a?.summary}</p>
                 <details>
                   <summary>Evidence ({a?.points.length ?? 0})</summary>

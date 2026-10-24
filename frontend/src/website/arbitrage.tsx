@@ -4,6 +4,7 @@ import { pageHead } from "./seo";
 import { memberApi } from "./members";
 import "./tradingbot.css";
 import "./arbitrage.css";
+import { FundingAverages, FundingStart } from "./fundingstart";
 
 export type EarnTab = "bot" | "lunch" | "funding" | "committee";
 const TABS: { key: EarnTab; href: string; icon: string; title: string; sub: string }[] = [
@@ -134,7 +135,16 @@ export function FundingPage() {
   );
 }
 
+const FUNDING_ROWS = 12;
+
 export function FundingArb({ d }: { d: FundingBoard }) {
+  const [all, setAll] = useState(false);
+  const [pick, setPick] = useState<string | null>(null);
+  const use = (sym: string) => {
+    setPick(sym);
+    document.getElementById("arb-start-title")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+  const rows = all ? d.rows : d.rows.slice(0, FUNDING_ROWS);
   return (
     <section className="arb-bot" aria-label="Funding Arb">
       <header className="arb-head">
@@ -146,6 +156,7 @@ export function FundingArb({ d }: { d: FundingBoard }) {
           <p className="arb-muted">Updated {ago(d.as_of)} · {d.pairs_found} perps listed on 2 or more venues</p>
         </div>
       </header>
+      <FundingAverages d={d} />
       <div className="arb-stats">
         {Object.entries(d.venues).map(([k, v]) => (
           <div key={k} className={`arb-stat ${v.ok ? "" : "is-bad"}`}>
@@ -160,8 +171,8 @@ export function FundingArb({ d }: { d: FundingBoard }) {
         {d.rows.length === 0 ? <p className="arb-muted">No perp is listed on two venues that answered.</p> : (
           <table className="arb-table">
             <thead><tr><th>Perp</th><th>Gap now</th><th>On capital</th><th>7-day avg ± swing</th><th>Now vs avg</th><th>Paid</th>
-              <th>Short on</th><th>Long on</th><th>All venues</th></tr></thead>
-            <tbody>{d.rows.map((r) => {
+              <th>Short on</th><th>Long on</th><th>All venues</th><th><span className="arb-sr">Start</span></th></tr></thead>
+            <tbody>{rows.map((r) => {
               const hi = r.legs.find((l) => l.venue === r.short)!, lo = r.legs.find((l) => l.venue === r.long)!;
               const st = r.stats && r.stats.mean_apr_pct != null ? r.stats : null;
               return (
@@ -181,10 +192,15 @@ export function FundingArb({ d }: { d: FundingBoard }) {
                       {VENUE[l.venue] ?? l.venue} {apr(l.apr_pct)} <small>/{l.interval_hours}h</small>
                     </span>
                   ))}</td>
+                  <td><button type="button" className="arb-use" onClick={() => use(r.symbol)} aria-label={`Use ${r.symbol.replace("-PERP", "")} in Start`}>Use</button></td>
                 </tr>
               );
             })}</tbody>
           </table>
+        )}
+        {d.rows.length > FUNDING_ROWS && (
+          <button type="button" className="arb-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
+            {all ? `Show the top ${FUNDING_ROWS}` : `Show all ${d.rows.length} pairs`}</button>
         )}
         <p className="arb-fine">APR = the venue's rate ÷ its own funding interval × 8,760 hours. Lighter shows its last settled rate; the others show the
           rate for the running interval.{d.assumptions && <> “On capital”: both legs need their own margin
@@ -192,6 +208,7 @@ export function FundingArb({ d }: { d: FundingBoard }) {
           {` ${d.assumptions.history_days}`}-day average minus {d.assumptions.stability_k}× its swing, so a gap that pays every hour beats a bigger one that comes and goes.
           “Now vs avg” beyond ±2σ is an extreme that usually fades.</>} {d.note}</p>
       </section>
+      <FundingStart d={d} pick={pick} onPick={setPick} />
       <p className="tb-disclose">Not financial advice. Funding rates change every interval, gaps close, and holding two positions on two venues carries
         fees, liquidation and venue risk.</p>
     </section>

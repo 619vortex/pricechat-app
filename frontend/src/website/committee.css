@@ -7,7 +7,7 @@
 .cm-empty { color: var(--site-soft); padding: 18px; border: 1px dashed var(--site-line); border-radius: 14px; text-align: center; }
 .cm-stale { color: #ffc93c; font-size: 13px; margin: 4px 0; }
 
-.cm-chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; min-height: 28px; }
+.cm-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; min-height: 28px; }
 .cm-chip { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
   border: 1px solid var(--site-line); color: var(--site-soft); white-space: nowrap; }
 .cm-chip.is-ok { color: var(--tb-green); border-color: rgba(0, 229, 143, 0.4); }
@@ -16,6 +16,7 @@
 
 .cm-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 16px; border-radius: 18px; border: 1px solid var(--site-line);
   background: var(--tb-card); min-height: 92px; }
+.cm-form-out { align-items: center; }
 .cm-form p { margin: 0; flex: 1 1 260px; }
 .cm-form label { display: grid; gap: 4px; font-size: 12px; color: var(--site-soft); text-transform: uppercase; letter-spacing: 0.06em; }
 .cm-form input, .cm-form select { font: 600 16px/1 var(--site-sans); color: var(--site-text); background: #0b0e0d; border: 1px solid var(--site-line-strong, rgba(255,255,255,.2));
@@ -25,8 +26,9 @@
 .cm-form-skel { opacity: 0.4; }
 
 .cm-block { display: grid; gap: 10px; }
-.cm-block h2, .cm-run h2 { margin: 0; font-size: 20px; }
-.cm-block h2 small { font-size: 13px; font-weight: 500; }
+.cm-block h2, .cm-run h2 { margin: 0; font-size: 21px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.cm-run > .cm-block { padding-top: 18px; border-top: 1px solid var(--site-line); }
+.cm-block h2 small { font-size: 13px; font-weight: 500; color: var(--site-soft); }
 .cm-detail-slot { min-height: 220px; }
 .cm-skel { min-height: 120px; border-radius: 16px; background: linear-gradient(90deg, rgba(255,255,255,.03), rgba(255,255,255,.07), rgba(255,255,255,.03));
   background-size: 200% 100%; animation: cm-shimmer 1.4s linear infinite; }
@@ -35,7 +37,8 @@
 
 .cm-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .cm-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.cm-table th, .cm-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--site-line); vertical-align: top; }
+.cm-table th, .cm-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--site-line); vertical-align: middle; font-variant-numeric: tabular-nums; }
+.cm-table tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
 .cm-table thead th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--site-soft); white-space: nowrap; }
 .cm-table tr.is-on { background: rgba(155, 92, 255, 0.1); }
 .cm-table small { color: var(--site-soft); }
@@ -51,7 +54,10 @@
 .cm-verdict.v-wait { background: rgba(255, 201, 60, 0.14); color: #ffc93c; }
 
 .cm-run { display: grid; gap: 20px; }
-.cm-card { padding: 14px 16px; border-radius: 16px; border: 1px solid var(--site-line); background: var(--tb-card); min-width: 0; }
+.cm-card { padding: 16px 18px; border-radius: 16px; border: 1px solid var(--site-line); background: var(--tb-card); min-width: 0; }
+.cm-card > :last-child { margin-bottom: 0; }
+.cm-card-meta { margin: 0 0 8px !important; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+.cm-analyst p:not(.cm-card-meta) { line-height: 1.55; }
 .cm-card h3 { margin: 0 0 6px; font-size: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .cm-card p { margin: 6px 0; overflow-wrap: anywhere; }
 .cm-card h4 { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; color: var(--site-soft); }
@@ -66,16 +72,22 @@
 .cm-dl { padding: 10px 14px; text-decoration: none; font-size: 13px; }
 .cm-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 16px; margin: 12px 0 0; }
 .cm-facts dt { font-size: 12px; color: var(--site-soft); }
-.cm-facts dd { margin: 2px 0 0; font-weight: 600; }
+.cm-facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
 .cm-summary { font-size: 15px; }
-.cm-grid4 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.cm-grid4 { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cm-grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .cm-grid4 { grid-template-columns: minmax(0, 1fr); } }
 .cm-grid3 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .cm-grid2 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
 .cm-lean { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--site-line); color: var(--site-soft); }
 .cm-lean.l-bullish { color: var(--tb-green); border-color: rgba(0, 229, 143, 0.4); }
 .cm-lean.l-bearish { color: #ff5468; border-color: rgba(255, 84, 104, 0.4); }
-.cm-points { margin: 6px 0; padding-left: 18px; }
-.cm-points li { margin: 4px 0; overflow-wrap: anywhere; }
+.cm-points { margin: 6px 0; padding-left: 0; }
+.cm-points li { position: relative; margin: 6px 0; padding-left: 16px; overflow-wrap: anywhere; line-height: 1.5; }
+.cm-points li::before { content: ""; position: absolute; left: 2px; top: 0.62em; width: 5px; height: 5px; border-radius: 50%; background: var(--site-soft); opacity: 0.7; }
+.cm-long .cm-points li::before { background: var(--tb-green); opacity: 1; }
+.cm-short .cm-points li::before { background: #ff5468; opacity: 1; }
+.cm-notrade .cm-points li::before { background: #ffc93c; opacity: 1; }
 details > summary { cursor: pointer; color: var(--site-soft); font-weight: 600; padding: 4px 0; }
 details > summary:focus-visible { outline: 2px solid var(--site-green); outline-offset: 2px; }
 .cm-derive p { font-size: 13px; color: var(--site-soft); }
@@ -100,6 +112,7 @@ details > summary:focus-visible { outline: 2px solid var(--site-green); outline-
   .cm-form input, .cm-form select { width: 100%; }
   .cm-form label { flex: 1 1 120px; }
   .cm-form .tb-btn { flex: 1 1 100%; }
+  .cm-card { padding: 14px; }
   .cm-table { font-size: 13px; }
   .cm-table th, .cm-table td { padding: 7px 6px; }
 }
