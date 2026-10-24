@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     http_timeout: float = Field(15.0, gt=0)
     fee_refresh_seconds: int = Field(3600, ge=60)
     interval_refresh_seconds: int = Field(6 * 3600, ge=60)
+    # universe discovery (Module 1): full Hyperliquid perp universe, native + every HIP-3 builder dex
+    universe_refresh_seconds: int = Field(300, ge=30)
+    universe_schema_path: Path = Path("fundarb_universe_schema.json")  # the field-name hash a human last confirmed
 
     @field_validator("hl_account_address")
     @classmethod

@@ -2,6 +2,7 @@
 
   python -m fundarb quotes BTC-PERP ETH-PERP [--venues hyperliquid,lighter] [--save] [--json]
   python -m fundarb intervals [--symbol BTC-PERP]
+  python -m fundarb universe [--live-only] [--dex xyz] [--class EQUITY] [--csv out.csv] [--json] [--accept-schema] [--watch]
 
 Every venue answers or says why it couldn't; nothing is ever shown as a silent zero. (`scan` and `status` come in
 Phases 2 and 3.)"""
@@ -134,6 +135,85 @@ def cmd_scan(a: argparse.Namespace) -> int:
     return 0
 
 
+def _universe_table(snap: Any, rows: list[Any]) -> None:
+    from collections import Counter
+
+    def money(x: float | None) -> str:
+        return "-" if x is None else f"${x / 1e6:,.1f}M" if x >= 1e6 else f"${x / 1e3:,.0f}k"
+
+    hdr = ["market", "dex", "class", "coll", "funding/int", "int", "APR", "mark", "basis bp", "OI", "vol 24h", "maxLev", "margin",
+           "impact spr bp", "OI cap", "live"]
+    out = [hdr]
+    for m in rows:
+        out.append([m.raw_name, m.namespace or "native", m.asset_class.value, m.collateral_token,
+                    "-" if m.funding_rate_raw is None else f"{m.funding_rate_raw:+.6%}",
+                    "-" if m.funding_interval_hours is None else f"{m.funding_interval_hours:g}h",
+                    "-" if m.funding_apr is None else f"{m.funding_apr:+.1%}", "-" if m.mark_price is None else f"{m.mark_price:,.6g}",
+                    "-" if m.mark_oracle_basis_bps is None else f"{m.mark_oracle_basis_bps:+.1f}", money(m.open_interest_usd),
+                    money(m.volume_24h_usd), f"{m.max_leverage:g}x", ("iso " if m.only_isolated else "") + m.margin_mode,
+                    "-" if m.spread_bps is None else f"{m.spread_bps:.1f}", money(m.oi_cap_usd), "yes" if m.listing_live else "DELISTED"])
+    widths = [max(len(str(r[i])) for r in out) for i in range(len(hdr))]
+    for r in out:
+        print("  ".join(str(v).ljust(w) for v, w in zip(r, widths)))
+    allm = snap.markets
+    live = [m for m in allm if m.listing_live]
+    print()
+    print(f"{len(allm)} markets on {len(snap.dexes)} dexes ({len(live)} live, {len(allm) - len(live)} delisted); "
+          f"{snap.calls} API calls in {snap.elapsed_s:.2f}s; shown: {len(rows)}")
+    print("by dex (live/all markets):")
+    for d, i in snap.dexes.items():
+        every = "?" if i["interval_hours"] is None else f"{i['interval_hours']:g}h"
+        print(f"  {d or 'native'}: {i['full_name']}, margin {i['collateral_token']}, funding every {every}, "
+              f"{sum(1 for m in live if m.namespace == d)}/{i['markets']}")
+    print("by class (live):", dict(Counter(m.asset_class.value for m in live).most_common()))
+    print("class rules (live):", dict(Counter(m.class_rule for m in live).most_common()))
+    unc = sorted(m.raw_name for m in live if m.asset_class.value == "UNCLASSIFIED")
+    if unc:
+        print(f"UNCLASSIFIED live markets ({len(unc)}): {', '.join(unc)}")
+    for k, v in snap.failures.items():
+        print(f"FAILED {k}: {v}")
+    sc = snap.schema
+    print(f"schema: {sc.status} (hash {sc.hash[:12]}{'' if sc.confirmed_hash in (None, sc.hash) else f', confirmed {sc.confirmed_hash[:12]}'})"
+          f"{'' if snap.ranking_allowed else ': ranking REFUSED until a human runs `fundarb universe --accept-schema`'}")
+    for k, v in sc.added.items():
+        print(f"  schema added   {k}: {v}")
+    for k, v in sc.removed.items():
+        print(f"  schema removed {k}: {v}")
+
+
+def cmd_universe(a: argparse.Namespace) -> int:
+    from fundarb.universe import HyperliquidUniverse, market_row
+
+    uni = HyperliquidUniverse(load())
+
+    def show(snap: Any) -> None:
+        rows = [m for m in snap.markets if (m.listing_live or not a.live_only) and (a.dex is None or (m.namespace or "native") == a.dex)
+                and (a.asset_class is None or m.asset_class.value == a.asset_class.upper())]
+        rows.sort(key=lambda m: (m.namespace, m.asset_class.value, -(m.volume_24h_usd or 0)))
+        if a.csv:
+            import csv
+            with open(a.csv, "w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=list(market_row(rows[0])) if rows else ["raw_name"])
+                w.writeheader()
+                w.writerows(market_row(m) for m in rows)
+        if a.json:
+            print(json.dumps({"markets": [market_row(m) for m in rows], "dexes": snap.dexes, "failures": snap.failures,
+                              "schema": {"status": snap.schema.status, "hash": snap.schema.hash, "added": snap.schema.added,
+                                         "removed": snap.schema.removed}, "calls": snap.calls, "elapsed_s": snap.elapsed_s}, indent=2))
+        else:
+            _universe_table(snap, rows)
+        if a.accept_schema and snap.schema.status != "ok":
+            uni.guard.accept(snap.schema)
+            print(f"schema {snap.schema.hash[:12]} confirmed and saved to {uni.guard.path}")
+
+    if a.watch:
+        asyncio.run(uni.run(show))
+        return 0
+    snap = asyncio.run(uni.fetch())
+    show(snap)
+    return 0 if len(snap.markets) > 100 and not snap.failures else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
     p = argparse.ArgumentParser(prog="fundarb", description="Funding-rate arbitrage scanner (read-only)")
@@ -157,6 +237,15 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--venues")
     sc.add_argument("--json", action="store_true")
     sc.set_defaults(fn=cmd_scan)
+    u = sub.add_parser("universe", help="every Hyperliquid perp (native + HIP-3 builder dexes), classified, with live context")
+    u.add_argument("--live-only", action="store_true", help="hide delisted markets")
+    u.add_argument("--dex", help="one dex: native, xyz, flx, ...")
+    u.add_argument("--class", dest="asset_class", help="one class: CRYPTO, EQUITY, INDEX, COMMODITY, FX, PREIPO, RATES, UNCLASSIFIED")
+    u.add_argument("--csv", help="also write the rows to this CSV file")
+    u.add_argument("--json", action="store_true")
+    u.add_argument("--accept-schema", action="store_true", help="confirm the field-name schema seen now (a human decision)")
+    u.add_argument("--watch", action="store_true", help="refresh every FUNDARB_UNIVERSE_REFRESH_SECONDS (default 300)")
+    u.set_defaults(fn=cmd_universe)
     a = p.parse_args(argv)
     return a.fn(a)
 
