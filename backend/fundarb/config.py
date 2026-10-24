@@ -49,6 +49,23 @@ class Settings(BaseSettings):
     # universe discovery (Module 1): full Hyperliquid perp universe, native + every HIP-3 builder dex
     universe_refresh_seconds: int = Field(300, ge=30)
     universe_schema_path: Path = Path("fundarb_universe_schema.json")  # the field-name hash a human last confirmed
+    universe_overrides_path: Path = Path(__file__).with_name("classification_overrides.json")  # operator classification decisions
+    universe_db_path: Path = Path("fundarb_universe.sqlite3")  # markets, quotes, gate runs, pairs, scan results
+
+    # Module 2 gates (every one overridable: FUNDARB_MIN_VOLUME_24H_USD, ...)
+    min_volume_24h_usd: float = Field(5_000_000, ge=0)
+    min_oi_usd: float = Field(2_000_000, ge=0)
+    max_spread_bps: float = Field(10.0, gt=0)
+    min_depth_usd: float = Field(250_000, ge=0)
+    max_oi_cap_share: float = Field(0.8, gt=0, le=1)
+    oracle_min_samples: int = Field(100, ge=10)  # basis samples before a market's own 99th percentile is trusted
+    oracle_persistent_bps: float = Field(50.0, gt=0)  # |basis| above this on every recent sample = a thin or lagging oracle
+    oracle_stable_std_bps: float = Field(10.0, gt=0)  # ...and this steady (std of those samples)
+    oracle_recent_samples: int = Field(20, ge=3)
+    book_concurrency: int = Field(4, ge=1, le=16)
+
+    # capital model (fundarb.capital)
+    capital_buffer: float = Field(0.25, ge=0)  # idle collateral on top of initial margin, share of that margin
 
     @field_validator("hl_account_address")
     @classmethod

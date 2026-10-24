@@ -2,6 +2,7 @@
 
   python -m fundarb quotes BTC-PERP ETH-PERP [--venues hyperliquid,lighter] [--save] [--json]
   python -m fundarb intervals [--symbol BTC-PERP]
+  python -m fundarb gates [--watch] [--replay RUN_ID] [--json]
   python -m fundarb universe [--live-only] [--dex xyz] [--class EQUITY] [--csv out.csv] [--json] [--accept-schema] [--watch]
 
 Every venue answers or says why it couldn't; nothing is ever shown as a silent zero. (`scan` and `status` come in
@@ -12,6 +13,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -214,6 +216,134 @@ def cmd_universe(a: argparse.Namespace) -> int:
     return 0 if len(snap.markets) > 100 and not snap.failures else 1
 
 
+async def _gates_once(uni: Any, store: Any, cfg: Any) -> dict[str, Any] | None:
+    """One gate run: universe -> cheap gates -> books for the survivors -> every gate -> persisted. None if the schema
+    isn't confirmed (gating on an unconfirmed schema is how a renamed field becomes a column of zeroes)."""
+    from fundarb.gates import cheap_pass, market_inputs, new_run_id, read_books, run_gates
+    from fundarb.universe import market_row
+
+    t0 = time.monotonic()
+    snap = await uni.fetch()
+    if not snap.ranking_allowed:
+        print(f"REFUSED: universe schema is {snap.schema.status} (hash {snap.schema.hash[:12]}); added {snap.schema.added}, "
+              f"removed {snap.schema.removed}. A human must run `fundarb universe --accept-schema` first.")
+        return None
+    ts = snap.fetched_at.isoformat()
+    by = {m.raw_name: m for m in snap.markets}
+    hist = store.basis_history(by, before_ts=ts)
+    pre = [market_inputs(m, None, None, hist[m.raw_name], cfg) for m in snap.markets]
+    cands = [x["raw_name"] for x in pre if cheap_pass(x, cfg)]
+    books, book_err, book_calls = await read_books(uni.settings, cands, min_depth=cfg.min_depth_usd)
+    inputs = [market_inputs(m, books.get(m.raw_name), book_err.get(m.raw_name), hist[m.raw_name], cfg) for m in snap.markets]
+    rep = run_gates(inputs, cfg, new_run_id(), ts, {m.raw_name: m.volume_24h_usd or 0 for m in snap.markets})
+    store.save_markets(ts, ({**market_row(m), "pairing_eligible": int(m.pairing_eligible), "listing_live": int(m.listing_live)}
+                            for m in snap.markets))
+
+    def quote(m: Any) -> dict[str, Any]:
+        b = books.get(m.raw_name)
+        return {"ts": ts, "raw_name": m.raw_name, "funding_rate_raw": m.funding_rate_raw, "funding_interval_hours": m.funding_interval_hours,
+                "funding_apr": m.funding_apr, "premium": m.premium, "mark_price": m.mark_price, "oracle_price": m.oracle_price,
+                "basis_bps": m.mark_oracle_basis_bps, "open_interest_usd": m.open_interest_usd, "volume_24h_usd": m.volume_24h_usd,
+                "max_leverage": m.max_leverage, "spread_bps": b.spread_bps if b else m.spread_bps,
+                "spread_source": "l2Book top of book" if b else m.spread_source, "depth_usd_1pct": b.depth_usd_1pct if b else None,
+                "depth_source": b.source if b else None}
+
+    store.save_quotes(quote(m) for m in snap.markets if m.listing_live)
+    elapsed = round(time.monotonic() - t0, 2)
+    store.save_gate_run({"run_id": rep.run_id, "ts": ts, "schema_hash": snap.schema.hash, "config": asdict(cfg), "counts": rep.counts,
+                         "elapsed_s": elapsed, "calls": snap.calls + book_calls}, rep.results)
+    return {"report": rep, "snap": snap, "books": books, "book_errors": book_err, "candidates": cands, "calls": snap.calls + book_calls,
+            "elapsed_s": elapsed}
+
+
+def _num(v: Any) -> Any:
+    return f"{v:,.2f}" if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+
+
+def _print_gates(out: dict[str, Any], store: Any) -> None:
+    from collections import Counter
+
+    from fundarb.gates import GATES
+
+    rep, snap = out["report"], out["snap"]
+    by = {m.raw_name: m for m in snap.markets}
+    print(f"gate run {rep.run_id}  {rep.ts}")
+    print(f"markets: {rep.total} total, {sum(1 for m in snap.markets if m.listing_live)} live; order books read for "
+          f"{len(out['candidates'])} that passed the cheap gates ({len(out['book_errors'])} book failures)")
+    print(f"{'gate':<18}{'pass':>6}{'fail':>6}{'not measured':>14}")
+    for g in GATES:
+        c = rep.counts[g]
+        print(f"{g:<18}{c['pass']:>6}{c['fail']:>6}{c['not_measured']:>14}")
+    print(f"PASSED ALL GATES: {len(rep.passed)}")
+    res = {r["raw_name"]: r for r in rep.results}
+    for name in sorted(rep.passed, key=lambda n: -(by[n].volume_24h_usd or 0)):
+        m, r = by[name], res[name]
+        ch = {c["gate"]: c for c in r["checks"]}
+        print(f"  {name:<14}{m.asset_class.value:<10}{m.capital_bucket:<34}vol ${(m.volume_24h_usd or 0) / 1e6:>8,.1f}M"
+              f"  OI ${(m.open_interest_usd or 0) / 1e6:>7,.1f}M  spread {ch['spread']['value']:>5.2f}bp"
+              f"  depth1% ${ch['depth']['value'] / 1e6:>6,.2f}M  {'; '.join(r['flags'])}")
+    print(f"capital buckets among the passers: {dict(Counter(by[n].capital_bucket.split(':')[0] for n in rep.passed))}; "
+          f"by account: {dict(Counter(by[n].capital_bucket for n in rep.passed))}")
+    print(f"passers by class: {dict(Counter(by[n].asset_class.value for n in rep.passed))}")
+    print("TOP 20 REJECTS (by 24h volume), first gate failed:")
+    for r in rep.top_rejects:
+        print(f"  {r['raw_name']:<16}{r['gate']:<18}value {_num(r.get('value'))}  limit {_num(r.get('limit'))}  {r.get('note') or ''}")
+    excluded = sorted(n for n, m in by.items() if not m.pairing_eligible and m.listing_live)
+    if excluded:
+        print("excluded from pairing (live): " + "; ".join(f"{n} ({by[n].pairing_note})" for n in excluded))
+    fl = Counter(f.split(" (")[0].split(" ~")[0] for r in rep.results for f in r["flags"])
+    if fl:
+        print(f"flags: {dict(fl)}")
+    for n, e in list(out["book_errors"].items())[:10]:
+        print(f"BOOK FAILED {n}: {e}")
+    for k, v in snap.failures.items():
+        print(f"FAILED {k}: {v}")
+    print(f"cost: {out['calls']} API calls, {out['elapsed_s']:.2f}s wall clock; store {store.path}: {store.counts()}")
+
+
+def _replay(store: Any, run_id: str | None) -> int:
+    from fundarb.gates import GateConfig, decide
+
+    if run_id is None:
+        print("no stored gate run to replay")
+        return 1
+    run, results = store.load_gate_run(run_id)
+    cfg = GateConfig(**run["config"])
+    diff = [r["raw_name"] for r in results if decide(r["inputs"], cfg) !=
+            {"passed": bool(r["passed"]), "failed_gate": r["failed_gate"], "checks": r["checks"], "flags": r["flags"]}]
+    print(f"replayed gate run {run_id}: {len(results)} markets, {len(results) - len(diff)} identical, {len(diff)} different"
+          + (f": {', '.join(diff[:20])}" if diff else ""))
+    return 0 if not diff else 1
+
+
+def cmd_gates(a: argparse.Namespace) -> int:
+    from fundarb.gates import GateConfig
+    from fundarb.store import UniverseStore
+    from fundarb.universe import HyperliquidUniverse
+
+    s = load()
+    store = UniverseStore(s.universe_db_path)
+    if a.replay:
+        return _replay(store, store.latest_gate_run() if a.replay == "latest" else a.replay)
+    uni, cfg = HyperliquidUniverse(s), GateConfig.from_settings(s)
+
+    async def loop() -> int:
+        while True:
+            out = await _gates_once(uni, store, cfg)
+            if out is None:
+                return 2
+            if a.json:
+                r = out["report"]
+                print(json.dumps({"run_id": r.run_id, "ts": r.ts, "total": r.total, "counts": r.counts, "passed": r.passed,
+                                  "top_rejects": r.top_rejects, "calls": out["calls"], "elapsed_s": out["elapsed_s"]}, indent=2, default=str))
+            else:
+                _print_gates(out, store)
+            if not a.watch:
+                return 0
+            await asyncio.sleep(s.universe_refresh_seconds)
+    return asyncio.run(loop())
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
     p = argparse.ArgumentParser(prog="fundarb", description="Funding-rate arbitrage scanner (read-only)")
@@ -237,6 +367,11 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("--venues")
     sc.add_argument("--json", action="store_true")
     sc.set_defaults(fn=cmd_scan)
+    g = sub.add_parser("gates", help="Module 2: liquidity / quality / oracle gates over the whole universe, persisted (read-only)")
+    g.add_argument("--watch", action="store_true", help="repeat every FUNDARB_UNIVERSE_REFRESH_SECONDS (builds the oracle history)")
+    g.add_argument("--replay", metavar="RUN_ID", help="re-decide a stored run from its stored inputs ('latest' for the newest)")
+    g.add_argument("--json", action="store_true")
+    g.set_defaults(fn=cmd_gates)
     u = sub.add_parser("universe", help="every Hyperliquid perp (native + HIP-3 builder dexes), classified, with live context")
     u.add_argument("--live-only", action="store_true", help="hide delisted markets")
     u.add_argument("--dex", help="one dex: native, xyz, flx, ...")

@@ -32,6 +32,7 @@ from typing import Any
 
 import httpx
 
+from fundarb.capital import market_bucket
 from fundarb.config import Settings
 from fundarb.models import HOURS_PER_YEAR
 from fundarb.venues.base import VenueUnavailable, interval_from_timestamps, with_backoff
@@ -59,8 +60,30 @@ REGISTRY_CLASS: dict[str, AssetClass] = {
 }
 
 
-def classify(namespace: str, raw_name: str, categories: dict[str, str]) -> tuple[AssetClass, str]:
+Override = dict[str, Any]  # {"class": "EQUITY", "pairing": bool, "reason": str, "decided": str}
+
+
+def load_overrides(path: Path) -> dict[str, Override]:
+    """The operator's classification decisions (classification_overrides.json). A malformed file fails fast: an override
+    that silently didn't apply would put an excluded market back in the pairing pool."""
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out: dict[str, Override] = {}
+    for name, o in (data.get("markets") or {}).items():
+        AssetClass(o["class"])  # raises on an unknown class
+        if not str(o.get("reason") or "").strip():
+            raise ValueError(f"{path}: override for {name} needs a reason")
+        out[name] = {"class": o["class"], "pairing": bool(o.get("pairing", True)), "reason": o["reason"], "decided": o.get("decided", "")}
+    return out
+
+
+def classify(namespace: str, raw_name: str, categories: dict[str, str], overrides: dict[str, Override] | None = None) -> tuple[AssetClass, str]:
     """(class, the rule that decided it). Exactly one class per market."""
+    o = (overrides or {}).get(raw_name)
+    if o is not None:
+        # Rule 0: an operator decision (classification_overrides.json), with its stated reason.
+        return AssetClass(o["class"]), f"override: {o['reason']}"
     if namespace == "":
         # Rule 1: the native dex lists only crypto perps (HIP-1 governance listings); the registry has no native entries.
         return AssetClass.CRYPTO, "native dex"
@@ -74,6 +97,16 @@ def classify(namespace: str, raw_name: str, categories: dict[str, str]) -> tuple
         return AssetClass.UNCLASSIFIED, f"unknown registry category {cat!r}"
     # Rule 2a: builder market -> Hyperliquid's perpCategories registry.
     return cls, f"perpCategories={cat}"
+
+
+def pairing_rule(raw_name: str, cls: AssetClass, overrides: dict[str, Override] | None = None) -> tuple[bool, str]:
+    """Whether the market may enter the funding-arb pairing pool at all (the gates and pair selection come after)."""
+    o = (overrides or {}).get(raw_name)
+    if o is not None and not o["pairing"]:
+        return False, f"excluded by override: {o['reason']}"
+    if cls is AssetClass.UNCLASSIFIED:
+        return False, "unclassified: excluded until the registry or an override classifies it"
+    return True, "eligible"
 
 
 @dataclass(frozen=True)
@@ -105,6 +138,9 @@ class Market:
     oi_cap_usd: float | None  # builder dex: perpDexs.assetToStreamingOiCap; native: not published as a number
     at_oi_cap: bool | None  # native: perpsAtOpenInterestCap; builder: None (not published by that endpoint)
     timestamp_utc: datetime
+    pairing_eligible: bool = True
+    pairing_note: str = "eligible"
+    capital_bucket: str = ""  # fundarb.capital: "cross:<collateral>" or "isolated:<collateral>"
 
 
 @dataclass
@@ -186,6 +222,7 @@ class HyperliquidUniverse:
         self.settings = settings
         self._transport = transport
         self.guard = SchemaGuard(settings.universe_schema_path)
+        self.overrides = load_overrides(settings.universe_overrides_path)
         self._intervals: dict[str, tuple[float, float, str]] = {}  # dex -> (monotonic time, hours, source)
         self.calls = 0
 
@@ -276,7 +313,7 @@ class HyperliquidUniverse:
                 caps = {str(c): _f(v) for c, v in ((d or {}).get("assetToStreamingOiCap") or [])}
                 builder = None if d is None else d.get("fullName")
                 for u, c in zip(universe, ctxs):
-                    markets.append(self._market(name, builder, coll, u, c, hours, src, caps, at_cap, categories, now))
+                    markets.append(self._market(name, builder, coll, u, c, hours, src, caps, at_cap, categories, self.overrides, now))
                 dex_info[name] = {"full_name": builder or "Hyperliquid (native)", "collateral_token": coll, "markets": len(universe),
                                   "interval_hours": hours, "interval_source": src}
             parts.update({"meta": sorted(meta_keys), "meta.universe": sorted(uni_keys), "assetCtx": sorted(ctx_keys)})
@@ -288,9 +325,12 @@ class HyperliquidUniverse:
 
     @staticmethod
     def _market(dex: str, builder: str | None, coll: str, u: dict[str, Any], c: dict[str, Any], hours: float | None, src: str,
-                caps: dict[str, float | None], at_cap: set[str] | None, categories: dict[str, str], now: datetime) -> Market:
+                caps: dict[str, float | None], at_cap: set[str] | None, categories: dict[str, str], overrides: dict[str, Override],
+                now: datetime) -> Market:
         name = str(u["name"])
-        cls, rule = classify(dex, name, categories)
+        cls, rule = classify(dex, name, categories, overrides)
+        pairing, pairing_note = pairing_rule(name, cls, overrides)
+        only_iso, mode = bool(u.get("onlyIsolated", False)), str(u.get("marginMode") or "unset")
         # a missing field stays None (reported as such), never a silent zero
         rate, mark, oracle, oi = _f(c.get("funding")), _f(c.get("markPx")), _f(c.get("oraclePx")), _f(c.get("openInterest"))
         hourly = rate / hours if (rate is not None and hours) else None
@@ -305,10 +345,10 @@ class HyperliquidUniverse:
             funding_apr=None if hourly is None else hourly * HOURS_PER_YEAR, premium=_f(c.get("premium")),
             oracle_price=oracle, mark_price=mark, mark_oracle_basis_bps=(mark - oracle) / oracle * 1e4 if (mark is not None and oracle) else None,
             open_interest_usd=oi * oracle if (oi is not None and oracle is not None) else None, volume_24h_usd=_f(c.get("dayNtlVlm")),
-            max_leverage=float(u.get("maxLeverage") or 0), only_isolated=bool(u.get("onlyIsolated", False)),
-            margin_mode=str(u.get("marginMode") or "unset"), spread_bps=spread, spread_source="impactPxs" if spread is not None else "unavailable",
+            max_leverage=float(u.get("maxLeverage") or 0), only_isolated=only_iso, margin_mode=mode, spread_bps=spread, spread_source="impactPxs" if spread is not None else "unavailable",
             depth_usd_1pct=None, listing_live=not u.get("isDelisted", False), oi_cap_usd=caps.get(name),
-            at_oi_cap=(name in at_cap) if (dex == "" and at_cap is not None) else None, timestamp_utc=now)
+            at_oi_cap=(name in at_cap) if (dex == "" and at_cap is not None) else None, timestamp_utc=now,
+            pairing_eligible=pairing, pairing_note=pairing_note, capital_bucket=market_bucket(only_iso, mode, coll, dex=dex))
 
     async def run(self, on_snapshot: Callable[[UniverseSnapshot], Awaitable[None] | None], stop: asyncio.Event | None = None) -> None:
         """Fetch now, then every universe_refresh_seconds, until `stop` is set. A failed pass is logged and retried next tick."""
