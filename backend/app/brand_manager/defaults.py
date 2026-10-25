@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from app.content import voices
+
 # The pipeline, in order. `where` = who runs it: the backend (light work) or an AI worker (LLM, voice, video).
 STAGES: tuple[tuple[str, str, str], ...] = (
     ("discover", "Discover topic", "backend"),
@@ -100,7 +102,9 @@ CREATIVE_OPTIONS: dict[str, dict[str, str]] = {
     "tone": {"auto": "Auto", "breaking": "Breaking news", "funny": "Funny / sarcastic", "dramatic": "Dramatic", "educational": "Educational",
              "collectible": "Collectible discovery"},
     "narrator": {"auto": "Auto", "natural": "Natural (warm, US)", "steady": "Steady (calm, US)", "anchor": "News anchor (crisp, US)", "documentary": "Documentary (calm, British)",
-                 "hype": "Fast and punchy (US)", "wry": "Dry and funny (US)", "warm": "Warm and friendly (US)", "bright": "Bright and upbeat (US)"},
+                 "hype": "Fast and punchy (US)", "wry": "Dry and funny (US)", "warm": "Warm and friendly (US)", "bright": "Bright and upbeat (US)",
+                 # any single voice too (the editorial engine reads it with the production style's pacing)
+                 **{k: f"Voice: {label}" for k, label in voices.ALL.items()}},
     "intensity": {"auto": "Auto", "calm": "Calm", "normal": "Normal", "high": "High energy"},
     "music": {"auto": "Auto", "documentary": "Calm documentary pad", "viral": "Driving beat", "playful": "Playful plucks",
               "market": "Minimal market pulse", "none": "No music"},
@@ -182,13 +186,8 @@ COINS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-# Kokoro narrators the worker can use (strategy.voice_name), best first.
-VOICES: dict[str, str] = {
-    "am_michael": "Michael · US male, warm news voice", "am_adam": "Adam · US male, deep", "am_fenrir": "Fenrir · US male, energetic",
-    "am_puck": "Puck · US male, upbeat", "am_eric": "Eric · US male, calm", "af_heart": "Heart · US female, warm", "af_bella": "Bella · US female, lively",
-    "af_nicole": "Nicole · US female, soft", "af_sarah": "Sarah · US female, clear", "bm_george": "George · UK male, classic narrator",
-    "bm_fable": "Fable · UK male, storyteller", "bf_emma": "Emma · UK female, crisp",
-}
+# Kokoro narrators the worker can use (strategy.voice_name), best first; mixes blend two of them.
+VOICES: dict[str, str] = voices.ALL
 # The first defaults, replaced as a whole when a brand still has them saved (they put #crypto on Pokémon videos and
 # never used the category tags).
 _OLD_ALWAYS = ["#crypto", "#pricechat"]

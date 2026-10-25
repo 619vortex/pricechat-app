@@ -145,7 +145,7 @@ def validate(v: BmVideo, tl: dict[str, Any]) -> dict[str, Any]:
     return {"version": 1, "style": str(tl.get("style") or old.get("style") or "real_news")[:20], "duration": round(body + 1.4, 3), "end_card": 1.4,
             "video": clips, "overlays": sorted(overlays, key=lambda o: o["start"]),
             "captions": {"style": cap if cap in CAPTIONS else "clean", "words": (old.get("captions") or {}).get("words") or []},
-            "narration": {"mode": nar.get("mode") if nar.get("mode") in ("ai", "upload", "none") else "ai", "narrator": str(nar.get("narrator") or "")[:16],
+            "narration": {"mode": nar.get("mode") if nar.get("mode") in ("ai", "upload", "none") else "ai", "narrator": str(nar.get("narrator") or "")[:40],
                           "gain": round(_num(nar.get("gain") if nar.get("gain") is not None else 1, 0, 1.5, "Narration volume"), 3)},
             "music": {"track": mus.get("track") if mus.get("track") in ("documentary", "market", "playful", "viral") else None,
                       "gain": round(_num(mus.get("gain") or 0, 0, 0.6, "Music volume"), 3)},

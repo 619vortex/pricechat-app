@@ -59,6 +59,14 @@ KICKER = {"stocks": "Markets", "ai": "Technology", "cars": "Cars", "real_estate"
 NARRATORS = {"natural": {"label": "Natural (warm, US)", "voice": "af_heart", "speed": 1.0, "sentence_gap": 0.3, "beat_gap": 0.55},
              "steady": {"label": "Steady (calm, US)", "voice": "am_michael", "speed": 0.98, "sentence_gap": 0.32, "beat_gap": 0.6},
              "documentary": {"label": "Documentary (calm, British)", "voice": "bm_george", "speed": 0.95, "sentence_gap": 0.4, "beat_gap": 0.75}}
+_VOICE = re.compile(r"^[ab][fm]_[a-z]+(?::\d{1,3})?(?:\+[ab][fm]_[a-z]+(?::\d{1,3})?){0,2}$")
+
+
+def is_voice(key: str) -> bool:
+    """A Kokoro voice ("af_bella") or a mix ("am_michael:60+bm_george:40"), as Content Studio's narrator menu offers them."""
+    return bool(_VOICE.match(key))
+
+
 NARRATION_MODES = {"ai": "AI narrator", "upload": "Uploaded human narration", "none": "No narration (on-screen text)"}
 
 

@@ -519,7 +519,7 @@ class CreativeIn(StrictInput):
     engine: str | None = Field(None, max_length=12)
     style: str | None = Field(None, max_length=16)
     tone: str | None = Field(None, max_length=16)
-    narrator: str | None = Field(None, max_length=16)
+    narrator: str | None = Field(None, max_length=40)  # a preset or a voice key (app/content/voices.py)
     intensity: str | None = Field(None, max_length=8)
     music: str | None = Field(None, max_length=16)
     captions: str | None = Field(None, max_length=8)

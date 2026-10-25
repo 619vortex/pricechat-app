@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from app.content import voices
+
 # The pipeline, in order. `where` = who runs it: the backend (light work) or an AI worker (LLM, voice, video model).
 STAGES: tuple[tuple[str, str, str], ...] = (
     ("idea", "Find the story", "backend"),
@@ -53,14 +55,7 @@ STYLES: dict[str, dict[str, str]] = {
 DEFAULT_STYLE = "cartoon3d"
 
 # Voices of the local Kokoro speech model (the worker falls back to Piper or the system voice if it isn't installed).
-VOICES: dict[str, str] = {
-    "am_michael": "Michael · warm, American",
-    "am_fenrir": "Fenrir · deep, American",
-    "af_heart": "Heart · bright, American",
-    "af_bella": "Bella · energetic, American",
-    "bm_george": "George · calm, British",
-    "bf_emma": "Emma · clear, British",
-}
+VOICES: dict[str, str] = voices.ALL
 DEFAULT_VOICE = "am_michael"
 
 MIN_SECONDS, MAX_SECONDS = 10, 50  # a short is 10 to 50 seconds; one scene is about four seconds

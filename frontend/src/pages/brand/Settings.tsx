@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useApi } from "../../api/useApi";
 import { ApiErrorBanner, Loading, relativeTime } from "../../components/ui";
+import { VoicePreview } from "../../components/VoicePreview";
 import { bm, brandPatch, type Brand, type BrandResponse, type Strategy } from "./api";
 
 type Section = "general" | "content" | "publishing" | "ai" | "safety";
@@ -75,10 +76,10 @@ export function SettingsTab() {
                   .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Row>
-            <Row label="Narrator" hint="the Kokoro voice that reads every video">
+            <Row label="Narrator" hint="the Kokoro voice that reads Motion and Classic videos (Editorial videos use the AI narrator in Creative); ▶ plays a sample">
               <select value={st.voice_name} onChange={(e) => setS("voice_name", e.target.value)}>
                 {Object.entries(data.voices ?? { [st.voice_name]: st.voice_name }).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-              </select>
+              </select> <VoicePreview voice={st.voice_name} />
             </Row>
             <Row label="Speaking speed" hint="1.0 = normal; 1.1 suits short videos">
               <span className="bmx-inline"><input type="range" min={0.8} max={1.4} step={0.05} value={st.voice_speed} onChange={(e) => setS("voice_speed", Number(e.target.value))} /> {st.voice_speed.toFixed(2)}×</span>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useApi } from "../../api/useApi";
 import { ApiErrorBanner, Loading, relativeTime } from "../../components/ui";
+import { VoicePreview } from "../../components/VoicePreview";
 import { AUTO, loadChoices, saveChoices, sm, STATUS, type Choices, type Idea, type Overview, type Short, type ShortDetail } from "./api";
 import "./short.css";
 
@@ -125,7 +126,7 @@ function Home() {
               ))}
             </div>
             <div className="smx-selects">
-              <label>Voice<select value={choices.voice} onChange={(e) => set({ voice: e.target.value })}>{options.voices.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}</select></label>
+              <label>Voice<select value={choices.voice} onChange={(e) => set({ voice: e.target.value })}>{options.voices.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}</select> <VoicePreview voice={choices.voice} /></label>
               <label>Length<select value={choices.seconds} onChange={(e) => set({ seconds: Number(e.target.value) })}>
                 <option value={0}>Automatic · 10 to 50 seconds</option>{options.lengths.map((n) => <option key={n} value={n}>{n} seconds</option>)}</select></label>
               <label>Picture<select value={choices.quality} onChange={(e) => set({ quality: e.target.value })}>{options.qualities.map((q) => <option key={q.key} value={q.key}>{q.label} · {q.detail}</option>)}</select></label>
@@ -308,7 +309,7 @@ function Detail() {
               <p className="smx-fine">Same story, new take: a new script, new voice recording and new scenes. The current video is replaced when the new one is ready.</p>
               <div className="smx-selects">
                 <label>Look<select value={again.style ?? s.style} onChange={(e) => setAgain({ ...again, style: e.target.value })}>{options.styles.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></label>
-                <label>Voice<select value={again.voice ?? s.voice} onChange={(e) => setAgain({ ...again, voice: e.target.value })}>{options.voices.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></label>
+                <label>Voice<select value={again.voice ?? s.voice} onChange={(e) => setAgain({ ...again, voice: e.target.value })}>{options.voices.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select> <VoicePreview voice={again.voice ?? s.voice} /></label>
                 <label>Length<select value={again.seconds ?? s.seconds} onChange={(e) => setAgain({ ...again, seconds: Number(e.target.value) })}>{options.lengths.map((n) => <option key={n} value={n}>{n} seconds</option>)}</select></label>
                 <label>Picture<select value={again.quality ?? s.quality} onChange={(e) => setAgain({ ...again, quality: e.target.value })}>{options.qualities.map((o) => <option key={o.key} value={o.key}>{o.label} · {o.detail}</option>)}</select></label>
               </div>

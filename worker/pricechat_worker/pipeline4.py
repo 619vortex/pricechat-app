@@ -30,6 +30,10 @@ def _narrator(job: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
     creative.NARRATORS.update(editorial.NARRATORS)
     cr = job.get("creative") or {}
     nid = cr.get("narrator") if cr.get("narrator") in editorial.NARRATORS else st["narrator"]
+    voice = str(cr.get("narrator") or "")
+    if voice not in editorial.NARRATORS and editorial.is_voice(voice):  # a Kokoro voice or mix: the style's own pacing, that voice
+        creative.NARRATORS[voice] = {**editorial.NARRATORS[st["narrator"]], "label": voice, "voice": voice}
+        nid = voice
     tone = "documentary" if st["id"] in ("luxury", "collectibles") else "breaking"
     return {"narrator": nid, "tone": tone, "pace": "normal", "pronunciations": dict(cr.get("pronunciations") or {})}
 

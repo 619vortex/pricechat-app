@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApi } from "../../api/useApi";
+import { VoicePreview } from "../../components/VoicePreview";
 import { bm, type Creative, type QcCheck, type StoryScene, type VideoDetail } from "./api";
 
 const FIELDS: [keyof Creative, string][] = [["preset", "Preset"], ["style", "Visual style"], ["narrator", "Narrator"], ["tone", "Script tone"],
@@ -8,6 +9,8 @@ const FIELDS: [keyof Creative, string][] = [["preset", "Preset"], ["style", "Vis
 const EDITORIAL_FIELDS: [keyof Creative, string][] = [["engine", "Renderer"], ["production", "Production style"], ["narration", "Narration"], ["narrator", "AI narrator"],
   ["writer", "Hook writer"]];
 const V4_NARRATORS = ["auto", "natural", "steady", "documentary"];
+// a Kokoro voice or mix (backend app/content/voices.py): only the editorial engine reads one
+const isVoice = (v: string) => /^[ab][fm]_/.test(v);
 const ICON: Record<QcCheck["status"], string> = { pass: "✓", warn: "!", fail: "✕", skipped: "–" };
 
 /** Content Studio v2: how this video looks and sounds, scene by scene, and the creative quality check of the last render.
@@ -44,9 +47,9 @@ export function CreativePanel({ v, busy, act }: { v: VideoDetail; busy: boolean;
             <label key={k}>{label}
               <select value={String(c[k] ?? (k === "preset" ? "" : k === "engine" ? opts.data?.defaults.engine ?? "editorial" : k === "narration" ? "ai" : k === "writer" ? "old" : "auto"))}
                       onChange={(e) => setC({ ...c, [k]: e.target.value })}>
-                {Object.entries(o[k] ?? {}).filter(([val]) => engine !== "editorial" || k !== "narrator" || V4_NARRATORS.includes(val))
+                {Object.entries(o[k] ?? {}).filter(([val]) => k !== "narrator" || (engine === "editorial" ? V4_NARRATORS.includes(val) || isVoice(val) : !isVoice(val)))
                   .map(([val, l]) => <option key={val} value={val}>{l}</option>)}
-              </select>
+              </select>{k === "narrator" && engine === "editorial" && <VoicePreview voice={c.narrator} />}
             </label>
           ))}
           {engine === "editorial" && c.narration === "upload" && (
