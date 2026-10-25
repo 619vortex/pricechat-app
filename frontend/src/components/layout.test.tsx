@@ -57,7 +57,7 @@ describe("Admin layout", () => {
     serve(home({ signals: 2 }));
     const { container } = shell("/trading-os");
     await flush();
-    expect([...container.querySelectorAll(".subnav-link")].map((a) => a.textContent)).toEqual(["Signals", "Bot access", "Affiliate"]);
+    expect([...container.querySelectorAll(".subnav-link")].map((a) => a.textContent)).toEqual(["Signals", "Bot access", "Affiliate", "Kalshi bot"]);
     expect(container.querySelector(".subnav-link.active")!.textContent).toBe("Signals");
     expect(container.querySelector(".area-about")!.textContent).toContain("signals waiting for your OK");
     expect(screen.queryByText("long text")).toBeNull();  // the page's own title / subtitle aren't repeated under the area header

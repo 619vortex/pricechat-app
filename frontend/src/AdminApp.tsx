@@ -43,6 +43,7 @@ const WorkersAdminPage = lazy(() => import("./pages/WorkersAdmin").then((m) => (
 const RewardsAdminPage = lazy(() => import("./pages/RewardsAdmin").then((m) => ({ default: m.RewardsAdminPage })));
 const RealmAdminPage = lazy(() => import("./pages/RealmAdmin").then((m) => ({ default: m.RealmAdminPage })));
 const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ default: m.VpnAdminPage })));
+const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
 const TradingOSPage = lazy(() => import("./pages/TradingOS").then((m) => ({ default: m.TradingOSPage })));
 const pf = () => import("./pages/pokemon/portfolio");
 const PortfolioPage = lazy(() => pf().then((m) => ({ default: m.PortfolioPage })));
@@ -75,6 +76,7 @@ export function AdminApp() {
             <Route path="rank-rewards" element={<RewardsAdminPage />} />
             <Route path="realm" element={<RealmAdminPage />} />
             <Route path="vpn" element={<VpnAdminPage />} />
+            <Route path="kalshi" element={<KalshiAdminPage />} />
             <Route path="arena" element={<Navigate to="/realm" replace />} />
             <Route path="trading-os" element={<TradingOSPage />} />
             <Route path="pokemon" element={<MarketHome />} />

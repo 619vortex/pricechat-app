@@ -12,6 +12,7 @@ export const AREAS: NavArea[] = [
       { to: "/trading-os", label: "Signals", about: "The signal scanner: signals waiting for your OK, open and past signals, and the switches that control them." },
       { to: "/trading-bot", label: "Bot access", about: "Who asked to join the VIP trading bot, and the rules to get in." },
       { to: "/affiliate", label: "Affiliate", about: "Your Hyperliquid referral link: sign-ups, volume and rewards." },
+      { to: "/kalshi", label: "Kalshi bot", about: "Your Kalshi prediction-market bot on your PC: balance, fee curve and the markets it watches. Read-only." },
     ],
   },
   {
