@@ -68,9 +68,9 @@ function Connect({ onDone }: { onDone: () => void }) {
       <h2 id="ks-connect">Connect your Kalshi account</h2>
       <ol className="arb-steps">
         <li className="arb-step">
-          <h3><span className="arb-step-n">1</span>Make a read key on Kalshi</h3>
+          <h3><span className="arb-step-n">1</span>Make an API key on Kalshi</h3>
           <p>On Kalshi open <a href="https://kalshi.com/account/profile" target="_blank" rel="noreferrer">Account → API keys</a> and create a key.
-            Kalshi shows a <b>Key ID</b> and downloads a <b>private key</b> file once. Keep that file; we only need to read with it.</p>
+            Kalshi shows a <b>Key ID</b> and downloads a <b>private key</b> file once. Keep that file.</p>
         </li>
         <li className="arb-step">
           <h3><span className="arb-step-n">2</span>Paste it here</h3>
@@ -97,8 +97,8 @@ function Connect({ onDone }: { onDone: () => void }) {
         </li>
       </ol>
       <ul className="arb-rules ks-rules">
-        <li>We check the key with Kalshi before keeping it, then store it encrypted. It's only used to <b>read</b> your balance and positions.</li>
-        <li>Nothing here can place, change or cancel an order. Disconnect any time; deleting the key on Kalshi also cuts us off.</li>
+        <li>We check the key with Kalshi before keeping it, then store it encrypted, and use it to show your balance and positions.</li>
+        <li>The bot trades its own account, never yours. Disconnect any time; deleting the key on Kalshi also cuts us off.</li>
         <li>Prediction markets can lose your whole stake. This is a view of your account, not advice.</li>
       </ul>
     </section>
@@ -268,8 +268,8 @@ export function KalshiSection() {
         <span className="arb-big" aria-hidden>🎯</span>
         <div>
           <h1>Kalshi</h1>
-          <p>Watch Kiwi's Kalshi bot think in real time, and link your own Kalshi account to see your positions live: what each is worth at the bid
-            right now, after Kalshi's fee. Your link is <b className="arb-paper">READ-ONLY</b>: nothing here trades your account.</p>
+          <p>Kiwi's Kalshi bot, trading live: watch it scan every market, weigh each bet against Kalshi's fees and buy when the numbers pay.
+            Link your own Kalshi account to follow your positions next to it, valued at the bid after Kalshi's fee.</p>
           {s?.owner && !s.open && <p className="arb-stale">Owner preview: members can't see this tab until you open it in Admin › Kalshi bot.</p>}
         </div>
       </header>

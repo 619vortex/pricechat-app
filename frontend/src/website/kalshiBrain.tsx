@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { memberApi } from "./members";
+import { Core, CountUp, EdgeGauge, NextScan, Tape } from "./kalshiFx";
 
 /* Earn › Kalshi: the owner's Kalshi bot, live. Everything shown is what the bot reported for its last cycle (its steps, the
    closest baskets and why each was or wasn't bought); nothing is invented client-side. Account figures and orders only
@@ -16,7 +17,7 @@ export type Activity = {
   counts?: { events: number; markets: number; me_events: number; priced: number; over_one_dollar: number };
   gates?: { min_net_edge_cents: number; min_arb_apr: number; max_trade_fraction: number; max_deployed_fraction: number };
   closest?: Basket[]; steps: Step[]; history: Hist[];
-  equity_usd?: number; deployable_usd?: number; trades?: Trade[]; recent_trades?: Recent[];
+  every_s?: number; equity_usd?: number; deployable_usd?: number; trades?: Trade[]; recent_trades?: Recent[];
 };
 
 const POLL_MS = 5_000;
@@ -126,35 +127,50 @@ export function BotBrain() {
     return () => window.clearInterval(id);
   }, []);
   if (!a) {
-    return err ? <p className="site-error" role="alert">{err}</p> : null;
+    return (
+      <section className="arb-card kb" aria-label="Kiwi's Kalshi bot">
+        <Core markets={0} hot={0} cycle={0} mode="idle" />
+        <header className="kb-head">
+          <span className="kb-mode is-offline">STANDBY</span>
+          <h2>Kiwi's Kalshi bot</h2>
+        </header>
+        <p className="arb-muted kb-what">{err ?? "The bot hasn't reported here yet. Its scans, its reasoning and its trades show up the moment it does."}</p>
+      </section>
+    );
   }
   const state = !a.live ? "offline" : a.mode;
   const c = a.counts;
   const closest = a.closest ?? [];
   return (
-    <section className="arb-card kb" aria-label="Kiwi's Kalshi bot, live">
+    <section className={`arb-card kb is-${state}`} aria-label="Kiwi's Kalshi bot, live">
+      <Core markets={c?.markets ?? 0} hot={c?.over_one_dollar ?? 0} cycle={a.cycle} mode={state} />
       <header className="kb-head">
         <span className={`kb-mode is-${state}`}>{state === "offline" ? "OFFLINE" : state === "live" ? "LIVE · REAL ORDERS" : state === "halted" ? "HALTED" : "PAPER"}</span>
         <h2>Kiwi's Kalshi bot</h2>
         <span className="kb-meta">cycle {a.cycle} · {ago(a.received_at)}{a.elapsed_s ? ` · took ${a.elapsed_s}s` : ""}</span>
       </header>
+      <Tape items={closest} />
       <p className="arb-muted kb-what">Hunting for <b>free bets</b>: events where only one outcome can win, yet the YES bids add up to more than $1. Buying NO on
         every outcome then pays at least one dollar less than the number of outcomes, whatever happens. It only buys when that still pays after Kalshi's fees
         {a.gates ? <> (more than {a.gates.min_net_edge_cents}¢ per basket, {Math.round(a.gates.min_arb_apr * 100)}%+ a year)</> : null}.</p>
       {state === "offline" && <p className="arb-stale">The bot's last report is {ago(a.received_at)} old: it isn't running right now.</p>}
       {state === "halted" && <p className="arb-stale">Kill switch on: the bot stopped trading and needs a human look before it trades again.</p>}
       {a.error && <p className="arb-stale">Last cycle failed: {a.error}</p>}
+      <div className="kx-dash">
+        <EdgeGauge edge={closest[0]?.edge_cents ?? null} gate={a.gates?.min_net_edge_cents ?? 1.5} />
+        {a.live && <NextScan receivedAt={a.received_at} every={a.every_s ?? 60} took={a.elapsed_s ?? 0} />}
+      </div>
       <div className="kb-grid">
         <div className="kb-left">
           <Radar closest={closest} live={a.live} />
           {c && <dl className="kb-counts">
-            <div><dt>markets read</dt><dd>{c.markets.toLocaleString()}</dd></div>
-            <div><dt>one-winner events</dt><dd>{c.me_events.toLocaleString()}</dd></div>
-            <div><dt>priced</dt><dd>{c.priced.toLocaleString()}</dd></div>
+            <div><dt>markets read</dt><dd><CountUp value={c.markets} /></dd></div>
+            <div><dt>one-winner events</dt><dd><CountUp value={c.me_events} /></dd></div>
+            <div><dt>priced</dt><dd><CountUp value={c.priced} /></dd></div>
             <div><dt>bids past $1</dt><dd className={c.over_one_dollar ? "is-warm" : ""}>{c.over_one_dollar}</dd></div>
           </dl>}
           {owner && a.equity_usd != null && <dl className="kb-counts">
-            <div><dt>equity</dt><dd>${a.equity_usd.toFixed(2)}</dd></div>
+            <div><dt>equity</dt><dd><CountUp value={a.equity_usd} digits={2} prefix="$" /></dd></div>
             <div><dt>may deploy</dt><dd>${(a.deployable_usd ?? 0).toFixed(2)}</dd></div>
           </dl>}
         </div>

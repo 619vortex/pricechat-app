@@ -29,7 +29,7 @@ export const PAGE_HEADS = {
   "earn/lunch": { title: "Earn: Lunch Bot · Price Chat", description: "Lunch Bot paper-trades pump.fun launches at real on-chain prices." },
   "earn/funding": { title: "Earn: Funding Arb · Price Chat", description: "Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them." },
   "earn/committee": { title: "Earn: AI Investment Committee · Price Chat", description: "Kiwi's AI Investment Committee researches one market at a time: analysts, bull vs bear, risk checks. Research only: nothing is traded." },
-  "earn/kalshi": { title: "Earn: Kalshi · Price Chat", description: "Link your own Kalshi account and watch your prediction-market positions live, marked at the current bid after Kalshi's fees. Read-only: nothing is traded." },
+  "earn/kalshi": { title: "Earn: Kalshi · Price Chat", description: "Watch Kiwi's Kalshi bot scan every market and trade live, and follow your own Kalshi positions marked at the current bid after Kalshi's fees." },
   learn: { title: "Beginner content · Price Chat", description: "Exclusive beginner lessons for Kiwi Chicks and above." },
   vpn: { title: "Kiwi VPN · Price Chat", description: "A private WireGuard VPN for Kiwi Passport members. No traffic logs." },
   "website/privacy": { title: "Privacy · Price Chat", description: "How Price Chat handles member data, connected accounts and Kiwi XP." },

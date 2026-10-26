@@ -43,10 +43,11 @@
 @media (max-width: 640px) { .ks-bar-actions { margin-left: 0; } .ks-cats div { grid-template-columns: minmax(80px, 120px) 1fr 56px; } }
 
 /* Bot brain (kalshiBrain.tsx): the owner's bot, live. All motion stops under prefers-reduced-motion. */
-.kb { display: grid; gap: 14px; overflow: hidden; position: relative; }
+.kb { display: grid; gap: 14px; overflow: hidden; position: relative; padding: 20px; }
+@media (max-width: 640px) { .kb { padding: 16px; } }
 .kb::before { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(600px 220px at 12% 0%, rgba(0, 229, 143, 0.08), transparent 70%), radial-gradient(500px 200px at 100% 100%, rgba(139, 92, 246, 0.08), transparent 70%); }
-.kb > * { position: relative; }
+.kb > * { position: relative; min-width: 0; }
 .kb-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .kb-head h2 { margin: 0; }
 .kb-meta { margin-left: auto; font-size: 13px; color: var(--site-soft); font-variant-numeric: tabular-nums; }
@@ -138,3 +139,45 @@
   .kb-radar.is-live .kb-sweep, .kb-radar.is-live .kb-blip, .kb-packet, .kb-pipe li, .kb-line, .kb-caret span { animation: none; }
   .kb-radar.is-live .kb-sweep { opacity: 0.35; }
 }
+
+/* Visuals (kalshiFx.tsx) */
+.kx-core { display: block; width: calc(100% + 40px); height: 190px; margin: -20px -20px 0; border-radius: 16px 16px 0 0;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.035), transparent 65%), linear-gradient(180deg, #050807, transparent);
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent); mask-image: linear-gradient(180deg, #000 70%, transparent); }
+.kb.is-live { border-color: rgba(0, 229, 143, 0.45); box-shadow: 0 0 0 1px rgba(0, 229, 143, 0.2), 0 0 40px rgba(0, 229, 143, 0.12); }
+.kb.is-halted { border-color: rgba(255, 92, 110, 0.5); }
+.kb-mode.is-live { animation: kx-glow 1.6s ease-in-out infinite; }
+@keyframes kx-glow { 50% { box-shadow: 0 0 26px rgba(0, 229, 143, 0.75); } }
+
+.kx-dash { display: flex; flex-wrap: wrap; align-items: center; gap: 18px 28px; }
+.kx-gauge { margin: 0; display: flex; align-items: center; gap: 12px; }
+.kx-gauge svg { width: 150px; height: 90px; overflow: visible; }
+.kx-arc { fill: none; stroke-width: 7; stroke-linecap: round; opacity: 0.9; }
+.kx-zero { stroke: rgba(255, 255, 255, 0.55); stroke-width: 1.2; }
+.kx-gate { stroke: #ffd166; stroke-width: 2.2; }
+.kx-needle { transform-origin: 50px 52px; transition: transform 1.2s cubic-bezier(.3, 1.6, .5, 1); }
+.kx-needle line { stroke: #fff; stroke-width: 2; stroke-linecap: round; }
+.kx-needle circle { fill: #fff; }
+.kx-gauge figcaption { display: grid; gap: 2px; }
+.kx-gauge figcaption b { font: 800 24px/1 var(--site-sans); font-variant-numeric: tabular-nums; }
+.kx-gauge figcaption span { font-size: 12px; color: var(--site-soft); }
+.is-warm { color: #ffd166; }
+
+.kx-ring { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--site-soft); }
+.kx-ring svg { width: 46px; height: 46px; transform: rotate(-90deg); }
+.kx-ring-bg { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 3.5; }
+.kx-ring-fg { fill: none; stroke: var(--tb-green); stroke-width: 3.5; stroke-linecap: round; transition: stroke-dashoffset 0.25s linear; }
+.kx-ring b { color: var(--site-text); font-variant-numeric: tabular-nums; }
+.kx-scanning { animation: kx-blink 0.9s ease-in-out infinite; color: var(--tb-green) !important; }
+@keyframes kx-blink { 50% { opacity: 0.35; } }
+
+.kx-tape { overflow: hidden; border-block: 1px solid var(--site-line); margin-inline: -20px; padding: 7px 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+.kx-tape-track { display: flex; width: max-content; animation: kx-tape linear infinite; }
+.kx-tape-track > span { display: flex; }
+.kx-tape-item { white-space: nowrap; padding: 0 22px; font-size: 12.5px; color: var(--site-soft); border-right: 1px solid var(--site-line); }
+.kx-tape-item b { color: var(--site-text); font-weight: 700; margin-right: 4px; }
+.kx-tape-item em { font-style: normal; font-weight: 800; margin-left: 8px; font-variant-numeric: tabular-nums; }
+@keyframes kx-tape { to { transform: translateX(-50%); } }
+@media (max-width: 640px) { .kx-core { height: 150px; width: calc(100% + 32px); margin: -16px -16px 0; } .kx-tape { margin-inline: -16px; } }
+@media (prefers-reduced-motion: reduce) { .kx-tape-track, .kb-mode.is-live, .kx-scanning { animation: none; } .kx-needle { transition: none; } }

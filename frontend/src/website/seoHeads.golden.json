@@ -44,7 +44,7 @@
   },
   "earn/kalshi": {
    "title": "Earn: Kalshi · Price Chat",
-   "description": "Link your own Kalshi account and watch your prediction-market positions live, marked at the current bid after Kalshi's fees. Read-only: nothing is traded."
+   "description": "Watch Kiwi's Kalshi bot scan every market and trade live, and follow your own Kalshi positions marked at the current bid after Kalshi's fees."
   },
   "learn": {
    "title": "Beginner content · Price Chat",
