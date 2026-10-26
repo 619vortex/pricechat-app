@@ -1,0 +1,43 @@
+/* Earn › Kalshi. Uses the Earn page's .tb tokens and the .arb-* building blocks. */
+.ks-form { display: grid; gap: 12px; max-width: 640px; }
+.ks-form > label { display: grid; gap: 4px; font-size: 12px; color: var(--site-soft); text-transform: uppercase; letter-spacing: 0.06em; }
+.ks-form input:not([type="radio"]):not([type="checkbox"]):not([type="file"]), .ks-form textarea {
+  font: 600 15px/1.35 var(--site-sans); color: var(--site-text); background: #0b0e0d; border: 1px solid var(--site-line-strong, rgba(255, 255, 255, 0.2));
+  border-radius: 10px; padding: 10px 12px; width: 100%; min-width: 0; text-transform: none; letter-spacing: 0; }
+.ks-form textarea { font: 500 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
+.ks-form .ks-file { text-transform: none; letter-spacing: 0; font-size: 13px; }
+.ks-form .ks-file input { font-size: 13px; color: var(--site-soft); max-width: 100%; }
+.ks-form .tb-btn { justify-self: start; }
+.ks-form .tb-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.ks-env { display: inline-flex; gap: 6px; padding: 4px; border-radius: 12px; border: 1px solid var(--site-line); justify-self: start; }
+.ks-env label { padding: 8px 14px; border-radius: 9px; cursor: pointer; font-weight: 700; font-size: 14px; color: var(--site-soft); }
+.ks-env label.is-on { background: rgba(0, 229, 143, 0.14); color: var(--tb-green); }
+.ks-env input { position: absolute; opacity: 0; pointer-events: none; }
+.ks-env label:has(input:focus-visible) { outline: 2px solid var(--tb-green); outline-offset: 2px; }
+.ks-check { display: flex !important; gap: 10px; align-items: flex-start; text-transform: none !important; letter-spacing: 0 !important; font-size: 14px !important;
+  color: var(--site-text) !important; cursor: pointer; }
+.ks-check input { margin-top: 3px; width: 18px; height: 18px; flex: none; accent-color: var(--tb-green); }
+.ks-rules { margin-top: 16px; }
+
+.ks-live { display: grid; gap: 16px; }
+.ks-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--site-line);
+  background: var(--tb-card); font-size: 14px; color: var(--site-soft); }
+.ks-bar b { color: var(--site-text); }
+.ks-bar-actions { margin-left: auto; display: flex; gap: 10px; }
+.ks-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--tb-green); box-shadow: 0 0 0 0 rgba(0, 229, 143, 0.6); animation: ks-pulse 2s infinite; flex: none; }
+.ks-dot.is-bad { background: #ff5c5c; animation: none; }
+@keyframes ks-pulse { 0% { box-shadow: 0 0 0 0 rgba(0, 229, 143, 0.55); } 70% { box-shadow: 0 0 0 9px rgba(0, 229, 143, 0); } 100% { box-shadow: 0 0 0 0 rgba(0, 229, 143, 0); } }
+@media (prefers-reduced-motion: reduce) { .ks-dot { animation: none; } }
+.ks-table td.ks-market { white-space: normal; min-width: 220px; }
+.ks-market b { display: block; }
+.ks-market small, .ks-sub { display: block; color: var(--site-soft); font-size: 12px; }
+.ks-side { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; padding: 3px 7px; border-radius: 6px; }
+.ks-side.is-yes { color: var(--tb-green); background: rgba(0, 229, 143, 0.12); }
+.ks-side.is-no { color: #ff7a8a; background: rgba(255, 84, 104, 0.12); }
+.ks-h2 { margin-top: 18px !important; }
+.ks-cats { display: grid; gap: 6px; margin-top: 10px; }
+.ks-cats div { display: grid; grid-template-columns: minmax(90px, 170px) 1fr 64px; gap: 8px; align-items: center; font-size: 13px; }
+.ks-cats span { color: var(--site-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ks-cats i { display: block; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--tb-green), var(--tb-purple)); }
+.ks-cats b { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .ks-bar-actions { margin-left: 0; } .ks-cats div { grid-template-columns: minmax(80px, 120px) 1fr 56px; } }

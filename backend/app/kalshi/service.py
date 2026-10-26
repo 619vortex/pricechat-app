@@ -105,3 +105,19 @@ def overview(db: Session, now: datetime | None = None) -> dict[str, Any]:
                     for r in reversed(history)],
         "reports": db.scalar(select(func.count(KalshiReport.id))) or 0,
     }
+
+
+def public_watch(db: Session) -> dict[str, Any] | None:
+    """What Earn › Kalshi may show anyone from the bot's reports: market counts, categories and the fee curve. Never the
+    owner's balance, positions or account details."""
+    disc, status = _latest(db, "discovery"), _latest(db, "status")
+    if disc is None and status is None:
+        return None
+    d, st = (disc.payload if disc else {}), (status.payload if status else {})
+    return {
+        "received_at": (disc or status).received_at.isoformat(),  # type: ignore[union-attr]
+        "markets": d.get("markets"), "events": d.get("events"), "two_sided": d.get("two_sided"), "with_volume_24h": d.get("with_volume_24h"),
+        "categories": dict(list((d.get("categories") or {}).items())[:12]),
+        "fee_curve": st.get("fee_curve") or [], "fee_gate_min_cents": st.get("fee_gate_min_cents"),
+        "phases": st.get("phases") or [],
+    }

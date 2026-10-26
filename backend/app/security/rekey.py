@@ -56,6 +56,7 @@ def columns() -> list[tuple[Any, str, tuple[Callable[[str], bytes], Callable[[by
     from app.models.rewards import RewardSettings
     from app.models.trading import TrAccount
     from app.models.tradingbot import TbApplication
+    from app.models.kalshi import KalshiLink
     from app.models.vpn import VpnServer
 
     return [
@@ -69,6 +70,7 @@ def columns() -> list[tuple[Any, str, tuple[Callable[[str], bytes], Callable[[by
         (TrAccount, "testnet_agent_key", _B64),  # Hyperliquid API-wallet keys (tradingos/exchange.py enc)
         (TrAccount, "mainnet_agent_key", _B64),
         (VpnServer, "agent_token_enc", _B64),  # Kiwi VPN node agent tokens (vpn/service.py)
+        (KalshiLink, "key_enc", _B64),  # members' Kalshi API keys (kalshi/member.py)
     ]
 
 

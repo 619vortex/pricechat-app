@@ -1,6 +1,6 @@
 /* Earn tabs + Earn › Arbitrage (Lunch Bot). Uses the Earn page's .tb tokens. */
 /* the big product tabs, above everything else on Earn */
-.earn-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: clamp(8px, 1.5vw, 16px); margin-top: 8px; }
+.earn-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: clamp(8px, 1.5vw, 16px); margin-top: 8px; }
 .earn-tabs a { display: flex; align-items: center; gap: clamp(8px, 1.4vw, 16px); min-height: 92px; padding: clamp(14px, 2vw, 22px) clamp(12px, 2vw, 24px);
   container-type: inline-size; min-width: 0;
   border-radius: 22px; border: 2px solid var(--site-line); background: var(--tb-card, #0d100f); color: var(--site-text); text-decoration: none;
@@ -17,6 +17,7 @@
 .earn-tabs a.is-on .earn-tab-text b { color: var(--tb-green, #00e58f); }
 /* too narrow for icon + title side by side: stack them, so the title gets the tab's full width */
 @media (max-width: 900px) {
+  .earn-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .earn-tabs a { flex-direction: column; justify-content: center; text-align: center; min-height: 104px; padding: 12px 8px; }
   .earn-tab-text b { font-size: clamp(14px, 11cqi, 20px); }
 }

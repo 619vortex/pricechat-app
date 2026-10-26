@@ -34,6 +34,7 @@ const KiwiBrainPage = lazy(() => import("./website/kiwibrain").then((m) => ({ de
 const LunchPage = lazy(() => import("./website/arbitrage").then((m) => ({ default: m.LunchPage })));
 const FundingPage = lazy(() => import("./website/arbitrage").then((m) => ({ default: m.FundingPage })));
 const CommitteePage = lazy(() => import("./website/committee").then((m) => ({ default: m.CommitteePage })));
+const KalshiPage = lazy(() => import("./website/kalshi").then((m) => ({ default: m.KalshiPage })));
 const LearnPage = lazy(() => import("./website/rewards").then((m) => ({ default: m.LearnPage })));
 const VpnPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.VpnPage })));
 
@@ -56,6 +57,7 @@ function PublicSite() {
         <Route path="earn/lunch" element={page(<LunchPage />)} />
         <Route path="earn/funding" element={page(<FundingPage />)} />
         <Route path="earn/committee" element={page(<CommitteePage />)} />
+        <Route path="earn/kalshi" element={page(<KalshiPage />)} />
         <Route path="earn/arbitrage" element={<Navigate to="/earn/lunch" replace />} />
         <Route path="trading-bot" element={page(<TradingBotPage />)} />
         <Route path="learn" element={page(<LearnPage />)} />

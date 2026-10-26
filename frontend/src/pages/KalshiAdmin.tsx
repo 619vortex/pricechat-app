@@ -28,6 +28,7 @@ export type KalshiOverview = {
   connected: boolean; token_created_at: string | null; last_seen_at: string | null; stale: boolean;
   bot: { version: string; env: string; host: string } | null; status: KalshiStatus | null; discovery: KalshiDiscovery | null;
   history: HistoryRow[]; reports: number;
+  members?: { open: boolean; linked: number; production: number; erroring: number };
 };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -72,6 +73,36 @@ function Connect({ connected, onDone }: { connected: boolean; onDone: () => void
       ) : (
         <button className="btn btn-primary" onClick={() => void make()} disabled={busy}>{connected ? "Make a new token" : "Create bot token"}</button>
       )}
+      <ErrorBanner message={err} />
+    </Card>
+  );
+}
+
+function Members({ m, onDone }: { m: NonNullable<KalshiOverview["members"]>; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function flip() {
+    if (!m.open && !window.confirm("Open Earn › Kalshi to every member? They'll be able to link their own Kalshi keys (read-only).")) return;
+    setBusy(true); setErr(null);
+    try {
+      await request("/kalshi/admin/members", { method: "POST", body: JSON.stringify({ open: !m.open }) });
+      onDone();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Earn › Kalshi (members)"
+          actions={<button className={`btn ${m.open ? "btn-ghost" : "btn-primary"}`} onClick={() => void flip()} disabled={busy}>{m.open ? "Close to members" : "Open to members"}</button>}>
+      <div className="stats">
+        <Stat label="Tab" value={m.open ? "Open to all" : "Owner only"} tone={m.open ? "good" : "neutral"} hint="pricechat.live/earn/kalshi" />
+        <Stat label="Linked accounts" value={m.linked} hint={`${m.production} real money`} />
+        <Stat label="Failing reads" value={m.erroring} tone={m.erroring ? "warn" : "good"} hint="key deleted on Kalshi, or a location block" />
+      </div>
+      <p className="muted small">Members paste their own Kalshi API key; it's checked with Kalshi, stored encrypted and only used for read-only GETs.
+        Nothing on Price Chat can place a Kalshi order. While the tab is owner-only you can still link your own account there to try it.</p>
       <ErrorBanner message={err} />
     </Card>
   );
@@ -177,6 +208,7 @@ export function KalshiAdminPage() {
         {st && <Phases phases={st.phases} />}
         {d.discovery && <Discovery d={d.discovery} history={d.history} />}
         {st && <FeeCurve st={st} />}
+        {d.members && <Members m={d.members} onDone={() => void r.reload()} />}
         <Connect connected={d.connected} onDone={() => void r.reload()} />
       </>}
     </div>
