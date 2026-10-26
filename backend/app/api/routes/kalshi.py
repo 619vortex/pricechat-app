@@ -120,6 +120,14 @@ def member_disconnect(db: DbSession, pc_session: SessionToken = None) -> dict[st
     return {"link": None}
 
 
+@router.get("/members/kalshi/activity", dependencies=[Depends(rate_limit.limit("earn"))])
+def member_activity(request: Request, db: DbSession) -> dict[str, Any]:
+    """The owner's bot, live: its last cycle's steps, the closest baskets and why it didn't (or did) buy. Account figures and
+    orders only for the signed-in owner."""
+    owner = admin_auth.current(db, request.cookies.get(admin_auth.COOKIE)) is not None
+    return {"owner": owner, "activity": service.activity(db, owner)}
+
+
 @router.get("/members/kalshi/account", dependencies=[Depends(rate_limit.limit("earn"))])
 async def member_account(request: Request, db: DbSession, pc_session: SessionToken = None, fresh: bool = False) -> dict[str, Any]:
     _gate(db, request)

@@ -91,3 +91,43 @@ describe("Earn › Kalshi", () => {
     expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
   });
 });
+
+describe("Earn › Kalshi bot brain", () => {
+  const ACT = {
+    received_at: now, live: true, cycle: 12, mode: "paper", elapsed_s: 22.4,
+    counts: { events: 13684, markets: 143446, me_events: 5597, priced: 5171, over_one_dollar: 46 },
+    gates: { min_net_edge_cents: 1.5, min_arb_apr: 0.1, max_trade_fraction: 0.1, max_deployed_fraction: 0.5 },
+    closest: [{ event: "KXATTYGENCO-26", title: "Colorado Attorney General", legs: 2, count: 0, sum_yes_bids: 1.007, gap_cents: 0.7, edge_cents: -0.121,
+      edge_usd: -0.001, cost_usd: 1, apr: -0.01, days_to_close: 373, reason: "no edge: the YES bids don't sum past $1 plus fees", checked_book: false }],
+    steps: [{ ms: 0, stage: "wake", text: "cycle 12: mode PAPER (no real orders)" }, { ms: 21857, stage: "scan", text: "read 13,684 open events, 143,446 markets" }],
+    history: [{ ts: now, mode: "paper", best_edge_cents: -0.2, over_one_dollar: 40, trades: null, error: false },
+      { ts: now, mode: "paper", best_edge_cents: -0.121, over_one_dollar: 46, trades: null, error: false }],
+  };
+
+  it("shows the bot's mode, its own steps, the closest basket and the scan counts", async () => {
+    serve((key) => key.includes("/activity") ? [200, { owner: false, activity: ACT }] : [200, state({ link: null })]);
+    render(<KalshiSection />);
+    await flush();
+    const t = document.body.textContent!;
+    expect(t).toContain("PAPER");
+    expect(t).toContain("cycle 12");
+    expect(t).toContain("read 13,684 open events");
+    expect(t).toContain("Colorado Attorney General");
+    expect(t).toContain("-0.12¢");
+    expect(t).toContain("143,446");
+    expect(t).not.toContain("Orders (you only)");
+  });
+
+  it("says offline when the bot stopped reporting, and shows the owner its orders", async () => {
+    const recent = [{ ts: now, event_ticker: "E", ticker: "E-0", count: 3, no_price: "0.55", status: "filled" }];
+    serve((key) => key.includes("/activity") ? [200, { owner: true, activity: { ...ACT, live: false, equity_usd: 348.18, deployable_usd: 174.09, recent_trades: recent } }]
+      : [200, state({ link: null })]);
+    render(<KalshiSection />);
+    await flush();
+    const t = document.body.textContent!;
+    expect(t).toContain("OFFLINE");
+    expect(t).toContain("isn't running right now");
+    expect(t).toContain("3 NO @ 55¢");
+    expect(t).toContain("$174.09");
+  });
+});

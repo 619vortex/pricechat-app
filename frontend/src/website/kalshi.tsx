@@ -4,12 +4,14 @@ import { pageHead } from "./seo";
 import { memberApi } from "./members";
 import { openLogin } from "./emailLogin";
 import { EarnTabs } from "./arbitrage";
+import { BotBrain } from "./kalshiBrain";
 import "./tradingbot.css";
 import "./arbitrage.css";
 import "./kalshi.css";
 
-/* Earn › Kalshi (/earn/kalshi): a member links their own Kalshi API key and watches their account live. READ-ONLY: the
-   server only sends Kalshi GET requests with the key; nothing here can place, change or cancel an order. */
+/* Earn › Kalshi (/earn/kalshi): a member links their own Kalshi API key and watches their account live. A member's link is
+   READ-ONLY: the server only sends Kalshi GET requests with it; nothing here can place, change or cancel their orders.
+   Above it, BotBrain shows the owner's own bot (it trades the owner's account from the owner's PC, never members'). */
 
 type Link = { env: "production" | "demo"; key_id: string; key_type: string; connected_at: string; last_ok_at: string | null; last_error: string | null };
 type FeeRow = { P: number; taker_1_cents: number; need_hold_cents: number; fee_pct_of_price: number };
@@ -266,12 +268,13 @@ export function KalshiSection() {
         <span className="arb-big" aria-hidden>🎯</span>
         <div>
           <h1>Kalshi</h1>
-          <p>Link your Kalshi account and watch your prediction-market positions live: what each is worth at the bid right now, after Kalshi's fee.
-            <b className="arb-paper"> READ-ONLY</b>: nothing here trades.</p>
+          <p>Watch Kiwi's Kalshi bot think in real time, and link your own Kalshi account to see your positions live: what each is worth at the bid
+            right now, after Kalshi's fee. Your link is <b className="arb-paper">READ-ONLY</b>: nothing here trades your account.</p>
           {s?.owner && !s.open && <p className="arb-stale">Owner preview: members can't see this tab until you open it in Admin › Kalshi bot.</p>}
         </div>
       </header>
       {err && <p className="site-error" role="alert">{err}</p>}
+      <BotBrain />
       {!s ? (!err && <div className="tb-skel" aria-busy="true" />)
         : !s.available ? <section className="arb-card"><h2>Coming soon</h2><p>Kalshi on Earn opens to members soon.</p></section>
         : !s.signed_in ? <section className="arb-card"><h2>Sign in first</h2><p>Your Kalshi link belongs to your Kiwi Passport.</p>

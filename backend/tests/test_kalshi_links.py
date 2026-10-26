@@ -172,3 +172,24 @@ def test_exit_fee_rounds_up_to_the_balance_grid_and_follows_the_series() -> None
     assert links.exit_fee("quadratic_with_maker_fees", "0.5", Decimal("0.5"), Decimal(10)) == Decimal("0.0875")
     assert links.exit_fee("flat", 1, Decimal("0.5"), Decimal(1)) is None
     assert links.exit_fee("quadratic", 1, Decimal("0"), Decimal(5)) == 0
+
+
+def test_bot_activity_is_public_without_the_owners_account(client: TestClient, db: Session) -> None:
+    from app.kalshi import service
+
+    token = service.new_token(db)
+    act = {"cycle": 7, "mode": "paper", "equity_usd": 348.18, "deployable_usd": 174.09, "trades": [{"event": "E", "status": "paper"}],
+           "recent_trades": [{"ticker": "E-0"}], "counts": {"over_one_dollar": 46}, "closest": [{"event": "KXA", "edge_cents": -0.121}],
+           "steps": [{"ms": 0, "stage": "wake", "text": "cycle 7"}, {"ms": 444, "stage": "account", "text": "equity $348.18"},
+                     {"ms": 21857, "stage": "scan", "text": "read 13,684 open events"}]}
+    r = client.post("/api/kalshi/bot/report", json={"kind": "activity", "payload": act, "bot": {"env": "production"}},
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    pub = client.get("/api/members/kalshi/activity").json()
+    a = pub["activity"]
+    assert pub["owner"] is False and a["live"] is True and a["cycle"] == 7 and a["closest"][0]["event"] == "KXA"
+    assert "equity_usd" not in a and "trades" not in a and "recent_trades" not in a
+    assert [s["stage"] for s in a["steps"]] == ["wake", "scan"] and "348" not in str(a)  # the owner's balance never leaks
+    assert a["history"][-1]["over_one_dollar"] == 46 and a["history"][-1]["trades"] is None
+    full = service.activity(db, owner=True)
+    assert full["equity_usd"] == 348.18 and full["trades"][0]["status"] == "paper" and full["history"][-1]["trades"] == 1

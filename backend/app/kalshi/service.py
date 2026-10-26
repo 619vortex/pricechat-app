@@ -14,9 +14,9 @@ from app.db.base import utcnow
 from app.models.kalshi import KalshiBot, KalshiReport
 
 TOKEN_PREFIX = "pck_"
-KINDS = ("status", "discovery")
+KINDS = ("status", "discovery", "activity")
 MAX_PAYLOAD = 256 * 1024
-KEEP_PER_KIND = 300  # ~3 days of 15-minute sweeps
+KEEP_PER_KIND = 300  # ~3 days of 15-minute sweeps; ~5 hours of 1-minute trading cycles
 STALE_AFTER = timedelta(minutes=45)  # three missed 15-minute sweeps
 
 
@@ -120,4 +120,30 @@ def public_watch(db: Session) -> dict[str, Any] | None:
         "categories": dict(list((d.get("categories") or {}).items())[:12]),
         "fee_curve": st.get("fee_curve") or [], "fee_gate_min_cents": st.get("fee_gate_min_cents"),
         "phases": st.get("phases") or [],
+    }
+
+
+ACTIVITY_LIVE_FOR = timedelta(minutes=5)  # the bot runs a cycle a minute; older than this = it's not running
+PRIVATE_STAGES = ("account",)  # step lines that carry the owner's balance
+
+
+def activity(db: Session, owner: bool, now: datetime | None = None, history: int = 60) -> dict[str, Any] | None:
+    """The trading loop's latest cycle (its steps = what the bot did and why) and a short history for the pulse chart.
+    Everyone sees the scan, the closest baskets and the gates; only the owner sees equity, orders and trades."""
+    now = now or utcnow()
+    rows = db.scalars(select(KalshiReport).where(KalshiReport.kind == "activity").order_by(KalshiReport.id.desc()).limit(history)).all()
+    if not rows:
+        return None
+    last = rows[0]
+    p = dict(last.payload)
+    if not owner:
+        p = {k: v for k, v in p.items() if k not in ("equity_usd", "held_usd", "deployable_usd", "trades", "recent_trades", "calls")}
+        p["steps"] = [s for s in p.get("steps") or [] if s.get("stage") not in PRIVATE_STAGES]
+    return {
+        "received_at": last.received_at.isoformat(), "live": now - last.received_at <= ACTIVITY_LIVE_FOR, **p,
+        "history": [{"ts": r.received_at.isoformat(), "mode": r.payload.get("mode"), "elapsed_s": r.payload.get("elapsed_s"),
+                     "over_one_dollar": (r.payload.get("counts") or {}).get("over_one_dollar"),
+                     "best_edge_cents": ((r.payload.get("closest") or [{}])[0] or {}).get("edge_cents"),
+                     "trades": len(r.payload.get("trades") or []) if owner else None, "error": bool(r.payload.get("error"))}
+                    for r in reversed(rows)],
     }
