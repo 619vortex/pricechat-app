@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { memberApi } from "./members";
 import { Core, CountUp, EdgeGauge, NextScan, Tape } from "./kalshiFx";
+import { WeatherDesk, type WeatherBrief } from "./kalshiWeather";
 
 /* Earn › Kalshi: the owner's Kalshi bot, live. Everything shown is what the bot reported for its last cycle (its steps, the
    closest baskets and why each was or wasn't bought); nothing is invented client-side. Account figures and orders only
@@ -17,7 +18,7 @@ export type Activity = {
   counts?: { events: number; markets: number; me_events: number; priced: number; over_one_dollar: number };
   gates?: { min_net_edge_cents: number; min_arb_apr: number; max_trade_fraction: number; max_deployed_fraction: number };
   closest?: Basket[]; steps: Step[]; history: Hist[];
-  every_s?: number; equity_usd?: number; deployable_usd?: number; trades?: Trade[]; recent_trades?: Recent[];
+  every_s?: number; equity_usd?: number; deployable_usd?: number; trades?: Trade[]; recent_trades?: Recent[]; weather?: WeatherBrief | null;
 };
 
 const POLL_MS = 5_000;
@@ -179,6 +180,7 @@ export function BotBrain() {
           <Thoughts steps={a.steps} cycle={a.cycle} />
         </div>
       </div>
+      {a.weather && <WeatherDesk w={a.weather} />}
       {closest.length > 0 && <>
         <h3 className="kb-h3">Closest to a free bet right now</h3>
         <ul className="kb-baskets">{closest.slice(0, 6).map((b) => {

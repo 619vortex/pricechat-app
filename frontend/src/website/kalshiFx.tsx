@@ -11,16 +11,17 @@ const MODE_RGB: Record<string, [number, number, number]> = {
   live: [0, 229, 143], paper: [255, 209, 102], halted: [255, 92, 110], offline: [120, 135, 130], idle: [120, 135, 130],
 };
 
-/** Animated number: eases from the last value to the new one. */
-export function CountUp({ value, digits = 0, prefix = "" }: { value: number; digits?: number; prefix?: string }) {
-  const [shown, setShown] = useState(value);
-  const from = useRef(value);
+/** Animated number: eases from the last value to the new one (from `start` on first show, when given). */
+export function CountUp({ value, digits = 0, prefix = "", start }: { value: number; digits?: number; prefix?: string; start?: number }) {
+  const [shown, setShown] = useState(start ?? value);
+  const from = useRef(start ?? value);
   useEffect(() => {
     if (reduced() || isTestDom()) { setShown(value); from.current = value; return; }
     const a = from.current, t0 = performance.now();
     let raf = 0;
     const step = (t: number) => {
-      const k = Math.min(1, (t - t0) / 900), e = 1 - Math.pow(1 - k, 3);
+      // a frame's timestamp can precede t0: clamp so the number never runs backwards past its start
+      const k = Math.max(0, Math.min(1, (t - t0) / 900)), e = 1 - Math.pow(1 - k, 3);
       setShown(a + (value - a) * e);
       if (k < 1) raf = requestAnimationFrame(step); else from.current = value;
     };

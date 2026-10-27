@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KalshiSection, type Account, type KalshiState } from "./kalshi";
+import { WeatherDesk, type WeatherBrief } from "./kalshiWeather";
 
 /** TEST FIXTURES only: a fake Earn › Kalshi API. No real account or key. */
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -129,5 +130,32 @@ describe("Earn › Kalshi bot brain", () => {
     expect(t).toContain("isn't running right now");
     expect(t).toContain("3 NO @ 55¢");
     expect(t).toContain("$174.09");
+  });
+});
+
+describe("Earn › Kalshi weather desk", () => {
+  const brief = (over: Partial<WeatherBrief> = {}): WeatherBrief => ({
+    enabled: false, reason: "model adds no skill over the market alone", version: "v1", computed_at: new Date(Date.now() - 864e5).toISOString(),
+    recheck_at: new Date(Date.now() + 29 * 864e5 + 3 * 36e5 + 30e3).toISOString(), stale_at: now, bss: 0.004, bss_ci90: [0.0018, 0.0061], floor: 0,
+    contribution_ci90: [-0.0006, 0.0032], market_only: 0.0026, model_alone: -0.21,
+    tested: { markets: 43488, events: 7248, from: "2026-04-29", to: "2026-10-25", days: 180, history_markets: 89636 },
+    pnl: [{ min_edge: 0.06, trades: 630, mean_cents: 3.395, total_usd: 21.39, total_ci90_by_day: [3.49, 40.85], hit_rate: 0.57 }], ...over,
+  });
+
+  it("tells the viewer to expect no weather trades yet, with the counts and a ticking re-test countdown", () => {
+    render(<WeatherDesk w={brief()} />);
+    expect(screen.getByText("WATCHING · NOT TRADING")).toBeTruthy();
+    expect(screen.getByText("no weather trades yet.")).toBeTruthy();
+    expect(screen.getByText("43,488")).toBeTruthy();
+    expect(screen.getByText("-0.06% to +0.32%")).toBeTruthy();
+    expect(screen.getByRole("timer").textContent).toMatch(/next re-test in29d03h/);
+    expect(screen.getByText(/630 one-contract trades/).textContent).toMatch(/gate stays shut/);
+  });
+
+  it("says weather trades can appear once the gate opens", () => {
+    render(<WeatherDesk w={brief({ enabled: true, contribution_ci90: [0.001, 0.004] })} />);
+    expect(screen.getByText("CLEARED TO TRADE")).toBeTruthy();
+    expect(screen.getByText(/weather trades can now appear/)).toBeTruthy();
+    expect(screen.queryByText(/gate stays shut/)).toBeNull();
   });
 });

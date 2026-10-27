@@ -181,3 +181,42 @@
 @keyframes kx-tape { to { transform: translateX(-50%); } }
 @media (max-width: 640px) { .kx-core { height: 150px; width: calc(100% + 32px); margin: -16px -16px 0; } .kx-tape { margin-inline: -16px; } }
 @media (prefers-reduced-motion: reduce) { .kx-tape-track, .kb-mode.is-live, .kx-scanning { animation: none; } .kx-needle { transition: none; } }
+
+/* Weather desk (kalshiWeather.tsx): the weather strategy's calibration verdict, counts and the re-test countdown. */
+.kw { display: grid; gap: 12px; padding: 16px; min-width: 0; border-radius: 14px; border: 1px solid var(--site-line); position: relative;
+  background: linear-gradient(160deg, rgba(90, 160, 255, 0.07), rgba(255, 209, 102, 0.04) 60%, transparent); }
+.kw .is-good { color: var(--tb-green); }
+.kw .is-bad { color: #ff5c6e; }
+.kw-head { display: flex; align-items: center; gap: 12px; }
+.kw-head .kb-h3 { margin: 6px 0 0; }
+.kw-sky { width: 64px; height: 48px; flex: none; overflow: visible; }
+.kw-sun circle { fill: #ffd166; }
+.kw-sun line { stroke: #ffd166; stroke-width: 2.5; stroke-linecap: round; }
+.kw-sun { transform-origin: 24px 20px; animation: kw-spin 14s linear infinite; }
+.kw-cloud { fill: #c9d6e8; opacity: 0.92; animation: kw-drift 6s ease-in-out infinite alternate; }
+.kw-sky.is-clear .kw-cloud { animation: kw-clear 1.6s ease forwards; }
+@keyframes kw-spin { to { transform: rotate(360deg); } }
+@keyframes kw-drift { from { transform: translateX(-3px); } to { transform: translateX(5px); } }
+@keyframes kw-clear { to { transform: translateX(26px); opacity: 0; } }
+.kw-expect { margin: 0; font-size: 14px; line-height: 1.5; }
+.kw-counts { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 640px) { .kw { padding: 12px; } .kw-counts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .kw-head .kb-h3 { font-size: 14px; } }
+.kw-bar { margin: 0; display: grid; gap: 6px; }
+.kw-track { position: relative; height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.kw-range { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: linear-gradient(90deg, #ff5c6e, #ffd166);
+  transform-origin: left; animation: kw-grow 1.2s cubic-bezier(.2, .8, .2, 1) both; }
+.kw-range.is-good { background: linear-gradient(90deg, #ffd166, var(--tb-green)); }
+.kw-track em { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #ffd166; box-shadow: 0 0 8px #ffd166; }
+@keyframes kw-grow { from { transform: scaleX(0); } }
+.kw-bar figcaption { font-size: 13px; color: var(--site-soft); }
+.kw-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.kw-paper { margin: 0; flex: 1 1 260px; font-size: 12px; }
+.kw-count { display: flex; align-items: center; gap: 10px; }
+.kw-count svg { width: 52px; height: 52px; transform: rotate(-90deg); flex: none; }
+.kw-ring-fg { fill: none; stroke: #5aa0ff; stroke-width: 3.5; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
+.kw-count small { font-size: 11px; color: var(--site-soft); text-transform: uppercase; letter-spacing: 0.05em; }
+.kw-count p { margin: 2px 0 0; display: flex; gap: 6px; font: 600 12px/1 var(--site-sans); color: var(--site-soft); }
+.kw-count b { display: inline-block; font: 800 20px/1 var(--site-sans); color: var(--site-text); font-variant-numeric: tabular-nums;
+  animation: kw-flip 0.35s ease; }
+@keyframes kw-flip { from { transform: translateY(-40%); opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) { .kw-sun, .kw-cloud, .kw-range, .kw-count b { animation: none; } .kw-ring-fg { transition: none; } }
