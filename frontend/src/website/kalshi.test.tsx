@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KalshiSection, type Account, type KalshiState } from "./kalshi";
 import { WeatherDesk, type WeatherBrief } from "./kalshiWeather";
+import { isStale } from "./kalshiBrain";
 
 /** TEST FIXTURES only: a fake Earn › Kalshi API. No real account or key. */
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -119,15 +120,20 @@ describe("Earn › Kalshi bot brain", () => {
     expect(t).not.toContain("Orders (you only)");
   });
 
-  it("says offline when the bot stopped reporting, and shows the owner its orders", async () => {
+  it("says STALE (with the absolute last-seen time and pid) when the bot ran and stopped, and shows the owner its orders", async () => {
     const recent = [{ ts: now, event_ticker: "E", ticker: "E-0", count: 3, no_price: "0.55", status: "filled" }];
-    serve((key) => key.includes("/activity") ? [200, { owner: true, activity: { ...ACT, live: false, equity_usd: 348.18, deployable_usd: 174.09, recent_trades: recent } }]
-      : [200, state({ link: null })]);
+    const seen = "2026-10-20T06:29:15.000Z";  // days ago: far more than 2 x (60 s + 22.4 s)
+    const scan_record = { scan_id: "s1", status: "ok", halt_reason: null, finished_at_utc: seen, duration_ms: 26114,
+      instance: { pid: 15100, started_at_utc: "2026-10-28T06:28:21Z", host: "DESKTOP" } };
+    serve((key) => key.includes("/activity") ? [200, { owner: true, activity: { ...ACT, received_at: seen, live: false, every_s: 60, scan_record,
+      equity_usd: 348.18, deployable_usd: 174.09, recent_trades: recent } }] : [200, state({ link: null })]);
     render(<KalshiSection />);
     await flush();
     const t = document.body.textContent!;
-    expect(t).toContain("OFFLINE");
-    expect(t).toContain("isn't running right now");
+    expect(t).toContain("STALE");
+    expect(t).not.toContain("STANDBY");
+    expect(t).toContain("Last report 2026-10-20 06:29:15 UTC");
+    expect(t).toContain("pid 15100 on DESKTOP");
     expect(t).toContain("3 NO @ 55¢");
     expect(t).toContain("$174.09");
   });
@@ -157,5 +163,29 @@ describe("Earn › Kalshi weather desk", () => {
     expect(screen.getByText("CLEARED TO TRADE")).toBeTruthy();
     expect(screen.getByText(/weather trades can now appear/)).toBeTruthy();
     expect(screen.queryByText(/gate stays shut/)).toBeNull();
+  });
+});
+
+describe("Earn › Kalshi liveness", () => {
+  const base = { received_at: new Date().toISOString(), live: true, cycle: 3, mode: "paper" as const, steps: [], history: [], every_s: 60, elapsed_s: 25 };
+
+  it("STANDBY only when the bot never reported; a fresh report is not STALE", async () => {
+    serve((key) => key.includes("/activity") ? [200, { owner: false, activity: null }] : [200, state({ link: null })]);
+    render(<KalshiSection />);
+    await flush();
+    expect(document.body.textContent).toContain("STANDBY");
+    cleanup();
+    serve((key) => key.includes("/activity") ? [200, { owner: false, activity: base }] : [200, state({ link: null })]);
+    render(<KalshiSection />);
+    await flush();
+    expect(document.body.textContent).toContain("PAPER");
+    expect(document.body.textContent).not.toContain("STALE");
+  });
+
+  it("goes STALE after more than 2 scan intervals (sleep + scan time)", () => {
+    const t0 = Date.parse("2026-10-28T06:00:00Z");
+    const a = { ...base, received_at: "2026-10-28T06:00:00Z" };
+    expect(isStale(a, t0 + 2 * 85 * 1000)).toBe(false);
+    expect(isStale(a, t0 + 2 * 85 * 1000 + 1)).toBe(true);
   });
 });

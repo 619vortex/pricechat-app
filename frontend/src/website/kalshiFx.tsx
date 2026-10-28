@@ -8,7 +8,7 @@ const reduced = () => typeof window !== "undefined" && !!window.matchMedia?.("(p
 const isTestDom = () => typeof navigator !== "undefined" && navigator.userAgent.includes("jsdom");
 
 const MODE_RGB: Record<string, [number, number, number]> = {
-  live: [0, 229, 143], paper: [255, 209, 102], halted: [255, 92, 110], offline: [120, 135, 130], idle: [120, 135, 130],
+  live: [0, 229, 143], paper: [255, 209, 102], halted: [255, 92, 110], offline: [120, 135, 130], stale: [120, 135, 130], idle: [120, 135, 130],
 };
 
 /** Animated number: eases from the last value to the new one (from `start` on first show, when given). */
@@ -80,7 +80,7 @@ export function Core({ markets, hot, cycle, mode }: { markets: number; hot: numb
       }
       for (const [x, y] of pts) { ctx.fillStyle = col(0.5); ctx.beginPath(); ctx.arc(x, y, 1.4, 0, 6.283); ctx.fill(); }
       // particles: markets streaming in
-      const rate = L.mode === "offline" || L.mode === "idle" ? 4 : 10 + Math.log10(Math.max(10, L.markets)) * 9;
+      const rate = L.mode === "offline" || L.mode === "stale" || L.mode === "idle" ? 4 : 10 + Math.log10(Math.max(10, L.markets)) * 9;
       spawn += rate * dt;
       while (spawn > 1) {
         spawn -= 1;

@@ -12,6 +12,8 @@ type Basket = { event: string; title: string; legs: number; count: number; sum_y
   edge_usd: number; cost_usd: number; apr: number; days_to_close: number; reason: string; checked_book: boolean };
 type Trade = { event: string; title?: string; status: string; edge_usd: number; cost_usd: number; orders: unknown[] };
 type Recent = { ts: string; event_ticker: string; ticker: string; count: number; no_price: string; status: string };
+type ScanRec = { scan_id: string; status: "ok" | "degraded" | "halted"; halt_reason: string | null; finished_at_utc: string; duration_ms: number;
+  instance?: { pid: number; started_at_utc: string; host: string } };
 type Hist = { ts: string; mode: string; best_edge_cents: number | null; over_one_dollar: number | null; trades: number | null; error: boolean };
 export type Activity = {
   received_at: string; live: boolean; cycle: number; mode: "paper" | "live" | "halted"; strategy?: string; elapsed_s?: number; error?: string;
@@ -19,7 +21,18 @@ export type Activity = {
   gates?: { min_net_edge_cents: number; min_arb_apr: number; max_trade_fraction: number; max_deployed_fraction: number };
   closest?: Basket[]; steps: Step[]; history: Hist[];
   every_s?: number; equity_usd?: number; deployable_usd?: number; trades?: Trade[]; recent_trades?: Recent[]; weather?: WeatherBrief | null;
+  scan_record?: ScanRec | null;
 };
+
+/** Absolute UTC, to the second: "2026-10-28 06:29:15 UTC". */
+export const utc = (iso: string) => `${new Date(iso).toISOString().slice(0, 19).replace("T", " ")} UTC`;
+
+/** STALE = it reported before and stopped: nothing for more than 2 scan intervals (sleep + the last scan's duration).
+    STANDBY is only ever shown when the bot never reported at all. */
+export function isStale(a: Activity, now = Date.now()) {
+  const interval = (a.every_s ?? 60) + (a.elapsed_s ?? 0);
+  return now - new Date(a.received_at).getTime() > 2 * interval * 1000;
+}
 
 const POLL_MS = 5_000;
 const STAGES: [string, string][] = [["account", "Account"], ["scan", "Scan"], ["filter", "Filter"], ["think", "Think"], ["gate", "Fee gate"],
@@ -139,31 +152,36 @@ export function BotBrain() {
       </section>
     );
   }
-  const state = !a.live ? "offline" : a.mode;
+  const stale = isStale(a);
+  const state = stale ? "stale" : a.mode;
+  const inst = a.scan_record?.instance;
   const c = a.counts;
   const closest = a.closest ?? [];
   return (
     <section className={`arb-card kb is-${state}`} aria-label="Kiwi's Kalshi bot, live">
       <Core markets={c?.markets ?? 0} hot={c?.over_one_dollar ?? 0} cycle={a.cycle} mode={state} />
       <header className="kb-head">
-        <span className={`kb-mode is-${state}`}>{state === "offline" ? "OFFLINE" : state === "live" ? "LIVE · REAL ORDERS" : state === "halted" ? "HALTED" : "PAPER"}</span>
+        <span className={`kb-mode is-${state}`}>{state === "stale" ? "STALE" : state === "live" ? "LIVE · REAL ORDERS" : state === "halted" ? "HALTED" : "PAPER"}</span>
         <h2>Kiwi's Kalshi bot</h2>
-        <span className="kb-meta">cycle {a.cycle} · {ago(a.received_at)}{a.elapsed_s ? ` · took ${a.elapsed_s}s` : ""}</span>
+        <span className="kb-meta">cycle {a.cycle} · last report {utc(a.received_at)}{a.elapsed_s ? ` · took ${a.elapsed_s}s` : ""}
+          {inst ? ` · pid ${inst.pid} since ${utc(inst.started_at_utc)}` : ""}</span>
       </header>
       <Tape items={closest} />
       <p className="arb-muted kb-what">Hunting for <b>free bets</b>: events where only one outcome can win, yet the YES bids add up to more than $1. Buying NO on
         every outcome then pays at least one dollar less than the number of outcomes, whatever happens. It only buys when that still pays after Kalshi's fees
         {a.gates ? <> (more than {a.gates.min_net_edge_cents}¢ per basket, {Math.round(a.gates.min_arb_apr * 100)}%+ a year)</> : null}.</p>
-      {state === "offline" && <p className="arb-stale">The bot's last report is {ago(a.received_at)} old: it isn't running right now.</p>}
+      {stale && <p className="arb-stale">STALE: the bot ran and stopped. Last report {utc(a.received_at)} ({ago(a.received_at)}), more than two scan
+        intervals ago{inst ? ` (pid ${inst.pid} on ${inst.host})` : ""}. Nothing on this page is current until it reports again.</p>}
+      {!stale && a.scan_record?.status === "degraded" && <p className="arb-stale">Last scan degraded: {a.scan_record.halt_reason}</p>}
       {state === "halted" && <p className="arb-stale">Kill switch on: the bot stopped trading and needs a human look before it trades again.</p>}
       {a.error && <p className="arb-stale">Last cycle failed: {a.error}</p>}
       <div className="kx-dash">
         <EdgeGauge edge={closest[0]?.edge_cents ?? null} gate={a.gates?.min_net_edge_cents ?? 1.5} />
-        {a.live && <NextScan receivedAt={a.received_at} every={a.every_s ?? 60} took={a.elapsed_s ?? 0} />}
+        {!stale && <NextScan receivedAt={a.received_at} every={a.every_s ?? 60} took={a.elapsed_s ?? 0} />}
       </div>
       <div className="kb-grid">
         <div className="kb-left">
-          <Radar closest={closest} live={a.live} />
+          <Radar closest={closest} live={!stale} />
           {c && <dl className="kb-counts">
             <div><dt>markets read</dt><dd><CountUp value={c.markets} /></dd></div>
             <div><dt>one-winner events</dt><dd><CountUp value={c.me_events} /></dd></div>

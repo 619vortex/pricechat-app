@@ -56,6 +56,7 @@
 .kb-mode.is-live { color: #04140d; background: var(--tb-green); box-shadow: 0 0 18px rgba(0, 229, 143, 0.45); }
 .kb-mode.is-halted { color: #fff; background: #d93a4a; }
 .kb-mode.is-offline { color: var(--site-soft); background: rgba(255, 255, 255, 0.06); }
+.kb-mode.is-stale { color: #ff5c6e; background: rgba(255, 92, 110, 0.14); }
 .kb-what { margin: 0; }
 .kb-grid { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 18px; align-items: start; }
 .kb-left, .kb-right { display: grid; gap: 12px; min-width: 0; }
