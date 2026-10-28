@@ -29,7 +29,7 @@ PAGES: dict[str, tuple[str, str]] = {
     "earn/brain": ("Kiwi Brain · Price Chat", "How the Kiwi trading bot reads the market, signal by signal, live."),
     "earn/lunch": ("Earn: Lunch Bot · Price Chat", "Lunch Bot paper-trades pump.fun launches at real on-chain prices."),
     "earn/funding": ("Earn: Funding Arb · Price Chat", "Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them."),
-    "earn/kalshi": ("Earn: Kalshi · Price Chat", "Watch Kiwi's Kalshi bot scan every market and trade live, and follow your own Kalshi positions marked at the current bid after Kalshi's fees."),
+    "earn/kalshi": ("Earn: Kalshi · Price Chat", "Watch Kiwi's Kalshi bot scan every market against Kalshi's fees, and follow your own Kalshi positions marked at the current bid after Kalshi's fees."),
     "learn": ("Beginner content · Price Chat", "Exclusive beginner lessons for Kiwi Chicks and above."),
     "vpn": ("Kiwi VPN · Price Chat", "A private WireGuard VPN for Kiwi Passport members. No traffic logs."),
     "website/privacy": ("Privacy · Price Chat", "How Price Chat handles member data, connected accounts and Kiwi XP."),

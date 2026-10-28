@@ -3,6 +3,7 @@
 series' own fee, an unknown fee model is shown as unknown, jurisdiction/auth answers stop the read, and the tab is
 owner-only until opened."""
 
+import asyncio
 import base64
 from decimal import Decimal
 from typing import Any
@@ -76,6 +77,7 @@ class FakeKalshi:
 def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
     links._cache.clear()
     links._series.clear()
+    links._lifetime.clear()
     monkeypatch.delenv("KALSHI_FEE_COEFFICIENT", raising=False)
 
 
@@ -116,6 +118,8 @@ def test_connect_checks_the_key_seals_it_and_reads_the_account_live(client: Test
     no = next(p for p in a["positions"] if p["ticker"] == "M-NO")
     assert no["side"] == "no" and no["bid"] == 0.67 and no["exit_fee_usd"] is None and no["fee_model"] == "flat"  # never guessed
     assert a["totals"]["unpriced"] == 1 and a["orders"][0]["price"] == 0.35 and a["settlements"][0]["revenue_usd"] == 2.0
+    # 2 YES won $2.00 on $1.20 cost + $0.03 fee
+    assert a["lifetime"] == {"realized_pnl_usd": 0.77, "settled": 1, "wins": 1, "losses": 0, "win_rate": 1.0, "complete": True}
     n = len(fake.calls)
     client.get("/api/members/kalshi/account")
     assert len(fake.calls) == n  # cached: tabs polling don't multiply Kalshi calls
@@ -193,3 +197,28 @@ def test_bot_activity_is_public_without_the_owners_account(client: TestClient, d
     assert a["history"][-1]["over_one_dollar"] == 46 and a["history"][-1]["trades"] is None
     full = service.activity(db, owner=True)
     assert full["equity_usd"] == 348.18 and full["trades"][0]["status"] == "paper" and full["history"][-1]["trades"] == 1
+
+
+def test_lifetime_pages_every_settlement_and_counts_matched_pairs() -> None:
+    lula = {"ticker": "KXBRPRES-26-LULA", "market_result": "no", "settled_time": "2026-10-26T01:09:02Z", "yes_count_fp": "166.00",
+            "no_count_fp": "166.00", "yes_total_cost_dollars": "78.00", "no_total_cost_dollars": "96.96", "fee_cost": "5.73", "revenue": 0}
+    win = {"ticker": "W", "market_result": "yes", "settled_time": "2026-10-20T00:00:00Z", "yes_count_fp": "2.00", "no_count_fp": "0.00",
+           "yes_total_cost_dollars": "1.20", "no_total_cost_dollars": "0", "fee_cost": "0.03", "revenue": 200}
+    pages = {None: {"settlements": [win], "cursor": "p2"}, "p2": {"settlements": [lula], "cursor": ""}}
+
+    class K:
+        calls: list[Any] = []
+
+        async def get(self, path: str, **params: Any) -> dict[str, Any]:
+            self.calls.append(params.get("cursor"))
+            return pages[params.get("cursor")]
+
+    class L:
+        id = 1
+
+    k = K()
+    rows, complete = asyncio.run(links._all_settled(k, L()))  # type: ignore[arg-type]
+    assert k.calls == [None, "p2"] and complete and [r["ticker"] for r in rows] == ["KXBRPRES-26-LULA", "W"]  # newest first
+    assert (rows[0]["payout_usd"], rows[0]["pnl_usd"]) == (166.0, -14.69)  # 166 matched pairs paid $1 each when they netted
+    assert links.lifetime(rows, complete) == {"realized_pnl_usd": -13.92, "settled": 2, "wins": 1, "losses": 1, "win_rate": 0.5, "complete": True}
+    assert links.lifetime([], True)["win_rate"] is None

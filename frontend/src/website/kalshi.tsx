@@ -4,7 +4,7 @@ import { pageHead } from "./seo";
 import { memberApi } from "./members";
 import { openLogin } from "./emailLogin";
 import { EarnTabs } from "./arbitrage";
-import { BotBrain } from "./kalshiBrain";
+import { BotBrain, type BotState } from "./kalshiBrain";
 import "./tradingbot.css";
 import "./arbitrage.css";
 import "./kalshi.css";
@@ -26,7 +26,10 @@ export type Account = { env: string; as_of: string; balance_usd: number; portfol
   orders: { ticker: string; side: string; action: string; type: string; price: number; remaining: number; created_time: string | null }[];
   fills: { ticker: string; side: string; action: string; count: number; price: number; is_taker: boolean | null; created_time: string | null }[];
   settlements: Settled[];
+  lifetime?: Lifetime;
   fee_coefficient: number };
+/** Every settlement on the account (the server pages through all of them; `complete` false = more than it reads). */
+export type Lifetime = { realized_pnl_usd: number; settled: number; wins: number; losses: number; win_rate: number | null; complete: boolean };
 
 const POLL_MS = 10_000;
 
@@ -168,9 +171,7 @@ export function LiveAccount({ link, onDisconnect }: { link: Link; onDisconnect: 
         <div className="arb-stats">
           <div className="arb-stat"><span>Cash</span><b>{usd(a.balance_usd)}</b><small>available on Kalshi</small></div>
           <div className="arb-stat"><span>Positions</span><b>{a.positions_total}</b><small>cost {usd(a.totals.cost_usd)}</small></div>
-          <div className="arb-stat"><span>If you sold now</span><b>{usd(a.totals.net_if_sold_usd)}</b><small>at the bid, after Kalshi's fee</small></div>
-          <div className={`arb-stat ${tone(a.totals.pnl_if_sold_usd)}`}><span>Profit if sold now</span><b>{usd(a.totals.pnl_if_sold_usd, true)}</b>
-            <small>{a.totals.unpriced ? `${a.totals.unpriced} position(s) without a known fee left out` : "vs what you paid"}</small></div>
+          <LifetimeStats a={a} />
         </div>
         <section className="arb-card">
           <h2>Open positions</h2>
@@ -195,9 +196,25 @@ export function LiveAccount({ link, onDisconnect }: { link: Link; onDisconnect: 
             </table>
           )}
           {a.positions_total > a.positions.length && <p className="arb-fine">Showing {a.positions.length} of {a.positions_total}.</p>}
+          {a.positions.length > 0 && <p className="arb-fine">If you sold everything now: {usd(a.totals.net_if_sold_usd)} at the bid after Kalshi's fee,{" "}
+            <span className={tone(a.totals.pnl_if_sold_usd)}>{usd(a.totals.pnl_if_sold_usd, true)}</span> vs what you paid
+            {a.totals.unpriced ? ` (${a.totals.unpriced} position(s) without a known fee left out)` : ""}.</p>}
         </section>
-        <div className="arb-cols">
-          <section className="arb-card">
+        <section className="arb-card">
+          <h2>Settled</h2>
+          {a.settlements.length === 0 ? <p className="arb-muted">Nothing settled yet.</p> : (
+            <table className="arb-table"><thead><tr><th>Market</th><th>Result</th><th>Held</th><th>Realized P&amp;L</th><th>Payout</th><th>Cost</th><th>Fees</th></tr></thead>
+              <tbody>{a.settlements.map((s, i) => { const r = settledPnl(s); return (
+                <tr key={i}><td>{s.ticker}<small className="ks-sub">{when(s.settled_time)}</small></td><td>{s.result.toUpperCase()}</td>
+                  <td>{[s.yes_count ? `${s.yes_count} YES` : "", s.no_count ? `${s.no_count} NO` : ""].filter(Boolean).join(" · ") || "—"}</td>
+                  <td className={tone(r.pnl)}>{usd(r.pnl, true)}</td><td>{usd(r.payout)}</td>
+                  <td>{usd(s.cost_usd)}</td><td>{usd(s.fee_usd)}</td></tr>
+              ); })}</tbody></table>
+          )}
+          <p className="arb-fine">Kalshi's own numbers, latest {a.settlements.length}. Payout includes $1 for every YES you also held NO on (a matched pair
+            pays $1 when it nets); Realized P&amp;L is payout minus cost and fees.</p>
+        </section>
+        <section className="arb-card">
             <h2>Resting orders</h2>
             {a.orders.length === 0 ? <p className="arb-muted">None.</p> : (
               <table className="arb-table"><thead><tr><th>Market</th><th>Order</th><th>Price</th><th>Left</th></tr></thead>
@@ -208,26 +225,37 @@ export function LiveAccount({ link, onDisconnect }: { link: Link; onDisconnect: 
               <table className="arb-table"><thead><tr><th>When</th><th>Market</th><th>Trade</th><th>Price</th></tr></thead>
                 <tbody>{a.fills.map((f, i) => <tr key={i}><td>{when(f.created_time)}</td><td>{f.ticker}</td><td>{f.action} {f.count} {f.side.toUpperCase()}</td><td>{cents(f.price)}</td></tr>)}</tbody></table>
             )}
-          </section>
-          <section className="arb-card">
-            <h2>Settled</h2>
-            {a.settlements.length === 0 ? <p className="arb-muted">Nothing settled yet.</p> : (
-              <table className="arb-table"><thead><tr><th>Market</th><th>Result</th><th>Held</th><th>Cost</th><th>Fees</th><th>Payout</th><th>Realized P&amp;L</th></tr></thead>
-                <tbody>{a.settlements.map((s, i) => { const r = settledPnl(s); return (
-                  <tr key={i}><td>{s.ticker}<small className="ks-sub">{when(s.settled_time)}</small></td><td>{s.result.toUpperCase()}</td>
-                    <td>{[s.yes_count ? `${s.yes_count} YES` : "", s.no_count ? `${s.no_count} NO` : ""].filter(Boolean).join(" · ") || "—"}</td>
-                    <td>{usd(s.cost_usd)}</td><td>{usd(s.fee_usd)}</td><td>{usd(r.payout)}</td>
-                    <td className={tone(r.pnl)}>{usd(r.pnl, true)}</td></tr>
-                ); })}</tbody></table>
-            )}
-            <p className="arb-fine">Kalshi's own numbers. Payout includes $1 for every YES you also held NO on (a matched pair pays $1 when it nets); Realized P&amp;L is payout minus cost and fees.</p>
-          </section>
-        </div>
+        </section>
         <p className="arb-fine">Fees use each market's own Kalshi fee model ({a.fee_coefficient} × P × (1 − P) per contract, rounded up). Updates every
           {" "}{POLL_MS / 1000}s while this tab is open.</p>
       </>}
     </section>
   );
+}
+
+/** Lifetime realized P&L, settled bets and win rate: the server's totals over every settlement, or (older server) the rows sent. */
+export function LifetimeStats({ a }: { a: Account }) {
+  const rows = a.settlements.map(settledPnl);
+  const lt = a.lifetime ?? { realized_pnl_usd: Math.round(rows.reduce((t, r) => t + r.pnl, 0) * 100) / 100, settled: rows.length,
+    wins: rows.filter((r) => r.pnl > 0).length, losses: rows.filter((r) => r.pnl < 0).length,
+    win_rate: rows.length ? rows.filter((r) => r.pnl > 0).length / rows.length : null, complete: false };
+  const more = lt.complete ? "" : "+";
+  return <>
+    <div className={`arb-stat ${tone(lt.realized_pnl_usd)}`}><span>Realized P&amp;L</span><b>{usd(lt.realized_pnl_usd, true)}</b>
+      <small>{lt.complete ? "lifetime, every settled market" : `latest ${lt.settled} settled markets`}</small></div>
+    <div className="arb-stat"><span>Settled bets</span><b>{lt.settled.toLocaleString()}{more}</b><small>{lt.wins} won · {lt.losses} lost</small></div>
+    <div className="arb-stat"><span>Win rate</span><b>{lt.win_rate == null ? "—" : `${Math.round(lt.win_rate * 100)}%`}</b>
+      <small>settled at a profit after fees</small></div>
+  </>;
+}
+
+/** The header line, from the bot's own reported mode (never hard-coded). */
+export function botLine(state: BotState): string {
+  return state === "live" ? "Kiwi's Kalshi bot is trading live with real money: it scans every market, weighs each bet against Kalshi's fees and buys when the numbers pay."
+    : state === "paper" ? "Kiwi's Kalshi bot is in paper mode: it scans every market and weighs each bet against Kalshi's fees, but places no real orders."
+    : state === "halted" ? "Kiwi's Kalshi bot is halted: its kill switch is on and it places no orders."
+    : state === "stale" ? "Kiwi's Kalshi bot has stopped reporting; nothing below is current until it reports again."
+    : "Kiwi's Kalshi bot hasn't reported yet.";
 }
 
 function WatchBoard({ w }: { w: NonNullable<Watch> }) {
@@ -270,6 +298,7 @@ export function KalshiPage() {
 export function KalshiSection() {
   const [s, setS] = useState<KalshiState | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [bot, setBot] = useState<BotState>(null);
   const load = useCallback(() => {
     memberApi<KalshiState>("/members/kalshi").then((d) => { setS(d); setErr(null); }).catch((e: unknown) => setErr(errText(e)));
   }, []);
@@ -280,13 +309,12 @@ export function KalshiSection() {
         <span className="arb-big" aria-hidden>🎯</span>
         <div>
           <h1>Kalshi</h1>
-          <p>Kiwi's Kalshi bot, trading live: watch it scan every market, weigh each bet against Kalshi's fees and buy when the numbers pay.
-            Link your own Kalshi account to follow your positions next to it, valued at the bid after Kalshi's fee.</p>
+          <p>{botLine(bot)} Link your own Kalshi account to follow your positions next to it, valued at the bid after Kalshi's fee.</p>
           {s?.owner && !s.open && <p className="arb-stale">Owner preview: members can't see this tab until you open it in Admin › Kalshi bot.</p>}
         </div>
       </header>
       {err && <p className="site-error" role="alert">{err}</p>}
-      <BotBrain />
+      <BotBrain onState={setBot} />
       {!s ? (!err && <div className="tb-skel" aria-busy="true" />)
         : !s.available ? <section className="arb-card"><h2>Coming soon</h2><p>Kalshi on Earn opens to members soon.</p></section>
         : !s.signed_in ? <section className="arb-card"><h2>Sign in first</h2><p>Your Kalshi link belongs to your Kiwi Passport.</p>

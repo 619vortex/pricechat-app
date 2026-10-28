@@ -206,10 +206,57 @@ describe("Earn › Kalshi settled rows", () => {
     render(<KalshiSection />);
     await flush();
     const row = screen.getByText("KXBRPRES-26-LULA").closest("tr")!;
-    expect(row.textContent).toContain("$166.00");
-    const pnl = Array.from(row.querySelectorAll("td")).pop()!;
+    const heads = Array.from(row.closest("table")!.querySelectorAll("th")).map((th) => th.textContent);
+    // P&L right after what was held, before the cost columns: never scrolled off the right edge
+    expect(heads).toEqual(["Market", "Result", "Held", "Realized P&L", "Payout", "Cost", "Fees"]);
+    const pnl = row.querySelectorAll("td")[3];
     expect(pnl.textContent).toBe("−$14.69");
     expect(pnl.className).toBe("is-bad");
-    expect(document.body.textContent).toContain("Realized P&L");
+    expect(row.querySelectorAll("td")[4].textContent).toBe("$166.00");
+  });
+
+  it("puts lifetime realized P&L, settled bets and win rate in the stat row instead of the sold-now pair", async () => {
+    const lifetime = { realized_pnl_usd: -13.92, settled: 2, wins: 1, losses: 1, win_rate: 0.5, complete: true };
+    serve((key) => key.includes("/account") ? [200, { ...ACCOUNT, positions: [], positions_total: 0, settlements: [LULA], lifetime }]
+      : key.includes("/activity") ? [200, { owner: false, activity: null }] : [200, state({ link: LINK })]);
+    render(<KalshiSection />);
+    await flush();
+    const stats = Array.from(document.querySelectorAll(".arb-stat")).map((s) => s.textContent);
+    expect(stats.some((s) => s!.includes("Realized P&L") && s!.includes("−$13.92") && s!.includes("lifetime"))).toBe(true);
+    expect(stats.some((s) => s!.includes("Settled bets") && s!.includes("1 won · 1 lost"))).toBe(true);
+    expect(stats.some((s) => s!.includes("Win rate") && s!.includes("50%"))).toBe(true);
+    expect(document.body.textContent).not.toMatch(/if (you )?sold now/i);  // flat: nothing to sell, so no $0.00 pair
+  });
+
+  it("falls back to the rows sent, marked as not lifetime, when the server has no totals", async () => {
+    serve((key) => key.includes("/account") ? [200, { ...ACCOUNT, settlements: [LULA] }]
+      : key.includes("/activity") ? [200, { owner: false, activity: null }] : [200, state({ link: LINK })]);
+    render(<KalshiSection />);
+    await flush();
+    expect(document.body.textContent).toContain("latest 1 settled markets");
+    expect(document.body.textContent).toContain("1+");
+  });
+});
+
+describe("Earn › Kalshi header", () => {
+  const act = (mode: string, received_at = new Date().toISOString()) =>
+    ({ received_at, live: true, cycle: 1, mode, steps: [], history: [], every_s: 60, elapsed_s: 25 });
+  const head = async (activity: unknown) => {
+    serve((key) => key.includes("/activity") ? [200, { owner: false, activity }] : [200, state({ link: null })]);
+    render(<KalshiSection />);
+    await flush();
+    return document.querySelector(".arb-head p")!.textContent!;
+  };
+
+  it("reads the mode from the bot instead of claiming it trades live", async () => {
+    expect(await head(act("paper"))).toMatch(/paper mode.*places no real orders/);
+    cleanup();
+    expect(await head(act("live"))).toMatch(/trading live with real money/);
+    cleanup();
+    expect(await head(act("halted"))).toMatch(/halted/);
+    cleanup();
+    expect(await head(act("live", "2026-10-20T00:00:00Z"))).toMatch(/stopped reporting/);
+    cleanup();
+    expect(await head(null)).toMatch(/hasn't reported/);
   });
 });

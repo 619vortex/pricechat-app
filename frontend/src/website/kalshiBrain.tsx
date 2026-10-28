@@ -123,7 +123,10 @@ function Pulse({ history }: { history: Hist[] }) {
   );
 }
 
-export function BotBrain() {
+/** What the bot says it is doing right now (null = it hasn't reported). */
+export type BotState = "paper" | "live" | "halted" | "stale" | null;
+
+export function BotBrain({ onState }: { onState?: (s: BotState) => void } = {}) {
   const [a, setA] = useState<Activity | null>(null);
   const [owner, setOwner] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -140,6 +143,8 @@ export function BotBrain() {
     const id = window.setInterval(() => { if (document.visibilityState !== "hidden") load(); }, POLL_MS);
     return () => window.clearInterval(id);
   }, []);
+  const reported: BotState = a ? (isStale(a) ? "stale" : a.mode) : null;
+  useEffect(() => { onState?.(reported); }, [reported, onState]);
   if (!a) {
     return (
       <section className="arb-card kb" aria-label="Kiwi's Kalshi bot">

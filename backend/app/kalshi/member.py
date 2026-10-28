@@ -44,6 +44,9 @@ MAX_PEM = 8192
 CACHE_S = 8.0  # one Kalshi read per member per 8 s however many tabs poll
 SERIES_TTL_S = 3600.0
 MAX_POSITIONS = 40  # positions priced live per refresh
+SETTLED_PAGES = 10  # x 200: lifetime totals page through every settlement up to 2,000 (Kalshi has no historical settlements endpoint)
+LIFETIME_TTL_S = 60.0
+RECENT_SETTLED = 10
 # TODO(verify): Kalshi documents no error code for geographic restrictions; HTTP 451 or these words in a 400/403 halt.
 JURISDICTION_MARKERS = ("jurisdiction", "geo", "region", "country", "restricted location", "not available in your", "prohibited")
 QUADRATIC = {"quadratic", "quadratic_with_maker_fees", "quadratic_with_combo_maker_fees"}
@@ -287,14 +290,54 @@ async def _position(k: Reader, env: str, p: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _settled(s: dict[str, Any]) -> dict[str, Any]:
+    """One settlement row. Kalshi books closing one side as buying the other, so each matched YES/NO pair paid $1 when it
+    netted and isn't in `revenue`: payout = revenue + min(YES, NO) x $1; realized P&L = payout - cost - fees."""
+    yes, no = _d(s.get("yes_count_fp")), _d(s.get("no_count_fp"))
+    cost, fee = _d(s.get("yes_total_cost_dollars")) + _d(s.get("no_total_cost_dollars")), _d(s.get("fee_cost"))
+    revenue = Decimal(int(s.get("revenue") or 0)) / 100
+    payout = revenue + min(yes, no)
+    return {"ticker": s.get("ticker"), "result": s.get("market_result"), "settled_time": s.get("settled_time"),
+            "yes_count": float(yes), "no_count": float(no), "cost_usd": float(cost), "fee_usd": float(fee), "revenue_usd": float(revenue),
+            "payout_usd": float(payout), "pnl_usd": float(round(payout - cost - fee, 2))}
+
+
+_lifetime: dict[int, tuple[float, list[dict[str, Any]], bool]] = {}
+
+
+async def _all_settled(k: Reader, link: KalshiLink) -> tuple[list[dict[str, Any]], bool]:
+    """Every settlement on the account, newest first (→ rows, complete). Cached a minute per link: it pages."""
+    hit = _lifetime.get(link.id)
+    if hit and time.monotonic() - hit[0] < LIFETIME_TTL_S:
+        return hit[1], hit[2]
+    rows: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _ in range(SETTLED_PAGES):
+        d = await k.get("/portfolio/settlements", limit=200, cursor=cursor)
+        rows += [_settled(s) for s in (d.get("settlements") or [])]
+        cursor = d.get("cursor") or None
+        if not cursor:
+            break
+    rows.sort(key=lambda r: r.get("settled_time") or "", reverse=True)
+    _lifetime[link.id] = (time.monotonic(), rows, cursor is None)
+    return rows, cursor is None
+
+
+def lifetime(rows: list[dict[str, Any]], complete: bool) -> dict[str, Any]:
+    wins = sum(1 for r in rows if r["pnl_usd"] > 0)
+    losses = sum(1 for r in rows if r["pnl_usd"] < 0)
+    return {"realized_pnl_usd": round(sum(r["pnl_usd"] for r in rows), 2), "settled": len(rows), "wins": wins, "losses": losses,
+            "win_rate": wins / len(rows) if rows else None, "complete": complete}
+
+
 async def _read(link: KalshiLink) -> dict[str, Any]:
     from app.tradingos.exchange import dec
 
     key, _ = load_key(dec(link.key_enc))
     async with Reader(link.env, link.key_id, key) as k:
-        bal, pos, orders, fills, settles = await asyncio.gather(
+        bal, pos, orders, fills, (settled, complete) = await asyncio.gather(
             k.get("/portfolio/balance"), k.get("/portfolio/positions", limit=200), k.get("/portfolio/orders", status="resting", limit=100),
-            k.get("/portfolio/fills", limit=20), k.get("/portfolio/settlements", limit=10))
+            k.get("/portfolio/fills", limit=20), _all_settled(k, link))
         open_rows = [p for p in (pos.get("market_positions") or []) if _d(p.get("position_fp")) != 0]
         positions = await asyncio.gather(*(_position(k, link.env, p) for p in open_rows[:MAX_POSITIONS]))
     known = [p for p in positions if p.get("net_if_sold_usd") is not None]
@@ -314,11 +357,7 @@ async def _read(link: KalshiLink) -> dict[str, Any]:
                    "count": float(_d(f.get("count_fp") or f.get("count"))),
                    "price": float(_d(f.get("yes_price_dollars") if f.get("side") == "yes" else f.get("no_price_dollars"))),
                    "is_taker": f.get("is_taker"), "created_time": f.get("created_time")} for f in (fills.get("fills") or [])],
-        "settlements": [{"ticker": s.get("ticker"), "result": s.get("market_result"), "settled_time": s.get("settled_time"),
-                         "yes_count": float(_d(s.get("yes_count_fp"))), "no_count": float(_d(s.get("no_count_fp"))),
-                         "cost_usd": float(_d(s.get("yes_total_cost_dollars")) + _d(s.get("no_total_cost_dollars"))),
-                         "fee_usd": float(_d(s.get("fee_cost"))), "revenue_usd": int(s.get("revenue") or 0) / 100}
-                        for s in (settles.get("settlements") or [])],
+        "settlements": settled[:RECENT_SETTLED], "lifetime": lifetime(settled, complete),
         "fee_coefficient": float(coefficient()),
     }
 
