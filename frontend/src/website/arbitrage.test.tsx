@@ -27,8 +27,8 @@ describe("Earn › Arbitrage", () => {
   it("has five tabs, the trading bot first", () => {
     render(<EarnTabs current="lunch" />);
     const tabs = screen.getAllByRole("link");
-    expect(tabs.map((t) => t.querySelector("b")?.textContent)).toEqual(["Trading Bot", "Lunch Bot", "Funding Arb", "AI Committee", "Kalshi"]);
-    expect(tabs.map((t) => t.getAttribute("href"))).toEqual(["/earn", "/earn/lunch", "/earn/funding", "/earn/committee", "/earn/kalshi"]);
+    expect(tabs.map((t) => t.querySelector("b")?.textContent)).toEqual(["Trading Bot", "Lunch Bot", "Funding Arb", "Kalshi"]);
+    expect(tabs.map((t) => t.getAttribute("href"))).toEqual(["/earn", "/earn/lunch", "/earn/funding", "/earn/kalshi"]);
     expect(tabs[1].getAttribute("aria-current")).toBe("page");
   });
 

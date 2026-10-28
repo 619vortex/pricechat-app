@@ -38,10 +38,6 @@
    "title": "Earn: Funding Arb · Price Chat",
    "description": "Live perp funding rates across Hyperliquid, Lighter, Orderly and Backpack, and the biggest gaps between them."
   },
-  "earn/committee": {
-   "title": "Earn: AI Investment Committee · Price Chat",
-   "description": "Kiwi's AI Investment Committee researches one market at a time: analysts, bull vs bear, risk checks. Research only: nothing is traded."
-  },
   "earn/kalshi": {
    "title": "Earn: Kalshi · Price Chat",
    "description": "Watch Kiwi's Kalshi bot scan every market and trade live, and follow your own Kalshi positions marked at the current bid after Kalshi's fees."

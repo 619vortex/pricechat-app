@@ -6,12 +6,11 @@ import "./tradingbot.css";
 import "./arbitrage.css";
 import { FundingAverages, FundingStart } from "./fundingstart";
 
-export type EarnTab = "bot" | "lunch" | "funding" | "committee" | "kalshi";
+export type EarnTab = "bot" | "lunch" | "funding" | "kalshi";
 const TABS: { key: EarnTab; href: string; icon: string; title: string; sub: string }[] = [
   { key: "bot", href: "/earn", icon: "🥝", title: "Trading Bot", sub: "Kiwi's signals on Hyperliquid" },
   { key: "lunch", href: "/earn/lunch", icon: "🍱", title: "Lunch Bot", sub: "pump.fun launches · paper" },
   { key: "funding", href: "/earn/funding", icon: "⚖️", title: "Funding Arb", sub: "funding gaps across 4 DEXs" },
-  { key: "committee", href: "/earn/committee", icon: "🏛️", title: "AI Committee", sub: "research only · no trades" },
   { key: "kalshi", href: "/earn/kalshi", icon: "🎯", title: "Kalshi", sub: "your predictions, live · read-only" },
 ];
 
