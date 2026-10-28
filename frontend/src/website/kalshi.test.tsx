@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { KalshiSection, type Account, type KalshiState } from "./kalshi";
+import { KalshiSection, settledPnl, type Account, type KalshiState } from "./kalshi";
 import { WeatherDesk, type WeatherBrief } from "./kalshiWeather";
 import { isStale } from "./kalshiBrain";
 
@@ -187,5 +187,29 @@ describe("Earn › Kalshi liveness", () => {
     const a = { ...base, received_at: "2026-10-28T06:00:00Z" };
     expect(isStale(a, t0 + 2 * 85 * 1000)).toBe(false);
     expect(isStale(a, t0 + 2 * 85 * 1000 + 1)).toBe(true);
+  });
+});
+
+describe("Earn › Kalshi settled rows", () => {
+  // Kalshi GET /portfolio/settlements for the owner's account (2026-10-26)
+  const LULA = { ticker: "KXBRPRES-26-LULA", result: "yes", settled_time: "2026-10-26T01:09:02Z", yes_count: 166, no_count: 166, cost_usd: 174.96,
+    fee_usd: 5.73, revenue_usd: 0 };
+
+  it("shows a matched YES/NO round trip as the loss it was", () => {
+    expect(settledPnl(LULA)).toEqual({ payout: 166, pnl: -14.69 });
+    expect(settledPnl({ ...LULA, yes_count: 2, no_count: 0, cost_usd: 1.2, fee_usd: 0.03, revenue_usd: 2 })).toEqual({ payout: 2, pnl: 0.77 });
+  });
+
+  it("renders Payout and Realized P&L columns, the loss in red", async () => {
+    serve((key) => key.includes("/account") ? [200, { ...ACCOUNT, settlements: [LULA] }] : key.includes("/activity") ? [200, { owner: false, activity: null }]
+      : [200, state({ link: LINK })]);
+    render(<KalshiSection />);
+    await flush();
+    const row = screen.getByText("KXBRPRES-26-LULA").closest("tr")!;
+    expect(row.textContent).toContain("$166.00");
+    const pnl = Array.from(row.querySelectorAll("td")).pop()!;
+    expect(pnl.textContent).toBe("−$14.69");
+    expect(pnl.className).toBe("is-bad");
+    expect(document.body.textContent).toContain("Realized P&L");
   });
 });

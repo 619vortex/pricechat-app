@@ -25,10 +25,21 @@ export type Account = { env: string; as_of: string; balance_usd: number; portfol
   totals: { cost_usd: number; net_if_sold_usd: number; pnl_if_sold_usd: number; unpriced: number };
   orders: { ticker: string; side: string; action: string; type: string; price: number; remaining: number; created_time: string | null }[];
   fills: { ticker: string; side: string; action: string; count: number; price: number; is_taker: boolean | null; created_time: string | null }[];
-  settlements: { ticker: string; result: string; settled_time: string | null; yes_count: number; no_count: number; cost_usd: number; fee_usd: number; revenue_usd: number }[];
+  settlements: Settled[];
   fee_coefficient: number };
 
 const POLL_MS = 10_000;
+
+export type Settled = { ticker: string; result: string; settled_time: string | null; yes_count: number; no_count: number; cost_usd: number;
+  fee_usd: number; revenue_usd: number };
+
+/** Kalshi books closing one side as buying the other, so a settled row holding both YES and NO counts each matched pair
+    once: it paid $1 when it was netted (revenue only covers what was still unmatched at settlement).
+    payout = revenue + min(YES, NO) x $1; realized P&L = payout - cost - fees. KXBRPRES-26-LULA: 166 + 0 - 174.96 - 5.73 = -14.69. */
+export function settledPnl(s: Settled) {
+  const payout = s.revenue_usd + Math.min(s.yes_count, s.no_count);
+  return { payout, pnl: Math.round((payout - s.cost_usd - s.fee_usd) * 100) / 100 };
+}
 const usd = (n: number | null | undefined, sign = false) => n == null ? "—"
   : `${sign && n > 0 ? "+" : n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const cents = (p: number | undefined) => p == null ? "—" : `${Math.round(p * 100)}¢`;
@@ -201,14 +212,15 @@ export function LiveAccount({ link, onDisconnect }: { link: Link; onDisconnect: 
           <section className="arb-card">
             <h2>Settled</h2>
             {a.settlements.length === 0 ? <p className="arb-muted">Nothing settled yet.</p> : (
-              <table className="arb-table"><thead><tr><th>Market</th><th>Result</th><th>Held</th><th>Cost</th><th>Fees</th><th>Paid out</th></tr></thead>
-                <tbody>{a.settlements.map((s, i) => (
+              <table className="arb-table"><thead><tr><th>Market</th><th>Result</th><th>Held</th><th>Cost</th><th>Fees</th><th>Payout</th><th>Realized P&amp;L</th></tr></thead>
+                <tbody>{a.settlements.map((s, i) => { const r = settledPnl(s); return (
                   <tr key={i}><td>{s.ticker}<small className="ks-sub">{when(s.settled_time)}</small></td><td>{s.result.toUpperCase()}</td>
                     <td>{[s.yes_count ? `${s.yes_count} YES` : "", s.no_count ? `${s.no_count} NO` : ""].filter(Boolean).join(" · ") || "—"}</td>
-                    <td>{usd(s.cost_usd)}</td><td>{usd(s.fee_usd)}</td><td>{usd(s.revenue_usd)}</td></tr>
-                ))}</tbody></table>
+                    <td>{usd(s.cost_usd)}</td><td>{usd(s.fee_usd)}</td><td>{usd(r.payout)}</td>
+                    <td className={tone(r.pnl)}>{usd(r.pnl, true)}</td></tr>
+                ); })}</tbody></table>
             )}
-            <p className="arb-fine">Kalshi's own numbers. "Paid out" is what settlement credited; contracts you closed before settlement were paid when you sold.</p>
+            <p className="arb-fine">Kalshi's own numbers. Payout includes $1 for every YES you also held NO on (a matched pair pays $1 when it nets); Realized P&amp;L is payout minus cost and fees.</p>
           </section>
         </div>
         <p className="arb-fine">Fees use each market's own Kalshi fee model ({a.fee_coefficient} × P × (1 − P) per contract, rounded up). Updates every
