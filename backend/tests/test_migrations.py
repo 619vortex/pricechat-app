@@ -131,3 +131,50 @@ def test_perf_indexes_upgrade_and_downgrade(tmp_path: Path) -> None:
         command.upgrade(config, "head")
         assert "ix_telegram_messages_source_sent" in indexes(conn, "telegram_messages")
     engine.dispose()
+
+
+def test_no_migration_switches_auto_trading_on() -> None:
+    """AUTO trading is the member's own choice: a deploy (its migrations) must never turn it on for an existing account."""
+    import re
+
+    versions = Path(alembic_config().get_main_option("script_location") or "migrations") / "versions"
+    files = sorted(versions.glob("*.py")) or sorted((Path(__file__).parents[1] / "migrations" / "versions").glob("*.py"))
+    assert files
+    for f in files:
+        src = f.read_text(encoding="utf-8")
+        assert not re.search(r"auto_enabled\s*=\s*(1|true)", src, re.I), f"{f.name} sets auto_enabled on"
+
+
+def test_upgrading_keeps_every_accounts_auto_setting(tmp_path: Path) -> None:
+    """Accounts as they are in production before this deploy (AUTO off, AUTO on with an end date, paused): upgrading to head
+    leaves AUTO, its end date and STOP NEW TRADES exactly as they were."""
+    url = f"sqlite:///{(tmp_path / 'auto.db').as_posix()}"
+    engine = build_engine(url, enforce_foreign_keys=False)
+    with engine.begin() as conn:
+        config = alembic_config()
+        config.attributes["connection"] = conn
+        command.upgrade(config, "0094_kalshi_links")
+        now = "2026-10-30 12:00:00"
+        rows = [  # id, mode, live_enabled_at, agent approved, auto_enabled, auto_until, paused
+            (1, "LIVE", now, True, 0, None, 0),  # connected LIVE, AUTO off
+            (2, "LIVE", now, True, 0, None, 1),  # connected LIVE, paused
+            (3, "LIVE", now, True, 1, "2026-11-01 00:00:00", 0),  # AUTO on until a date
+            (4, "PAPER", None, False, 0, None, 0),
+        ]
+        for i, mode, live_at, approved, auto, until, paused in rows:
+            conn.execute(text(
+                "INSERT INTO tr_accounts (id, member_id, mode, master_address, mainnet_agent, mainnet_agent_key, mainnet_approved_at, "
+                "live_checks, live_enabled_at, auto_enabled, auto_until, paused, created_at, updated_at) "
+                "VALUES (:i, :i, :mode, '0xabc', :agent, :key, :appr, '{}', :live_at, :auto, :until, :paused, :now, :now)"),
+                {"i": i, "mode": mode, "agent": "0xdef" if approved else None, "key": "sealed" if approved else None,
+                 "appr": now if approved else None, "live_at": live_at, "auto": auto, "until": until, "paused": paused, "now": now})
+    engine.dispose()
+
+    upgrade_database(url)
+
+    check = create_engine(url)
+    with check.connect() as conn:
+        got = conn.execute(text("SELECT id, auto_enabled, auto_until, paused FROM tr_accounts ORDER BY id")).all()
+    check.dispose()
+    assert [(r[0], bool(r[1]), r[2] is not None, bool(r[3])) for r in got] == [
+        (1, False, False, False), (2, False, False, True), (3, True, True, False), (4, False, False, False)]

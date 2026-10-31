@@ -421,7 +421,7 @@ def choose_paper(db: DbSession, pc_session: SessionToken = None) -> dict[str, An
 
 @router.post("/members/trading/connection/activate")
 async def connection_activate(payload: ActivateIn, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
-    """ENABLE BOT TRADING once the API wallet is approved: consent + every pre-live check, then LIVE with AUTO on. No order."""
+    """ENABLE BOT TRADING once the API wallet is approved: consent + every pre-live check, then LIVE with AUTO off. No order."""
     m = _member(db, pc_session)
     try:
         return await asyncio.to_thread(accounts.activate, db, m, payload.consent)

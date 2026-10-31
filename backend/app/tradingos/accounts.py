@@ -422,8 +422,7 @@ def recheck_referral(db: Session, member: Member, client: Any) -> dict[str, Any]
 
 def activate(db: Session, member: Member, consent: bool, ex: Any = None) -> dict[str, Any]:
     """ENABLE BOT TRADING, after the API wallet is approved: the member's explicit consent, every pre-live check on real state
-    (no order is placed), then LIVE with AUTO on until the member turns it off (the owner's call, 2026-10-31): a connected account
-    follows every published signal within its limits. Connecting itself never places an order."""
+    (no order is placed), then LIVE with AUTO off. Nothing trades until the member confirms a signal (or turns AUTO on later)."""
     if not consent:
         raise AccountError("Confirm that you understand Kiwi can place real orders that can lose money.")
     checks = live_checks(db, member, ex)
@@ -432,9 +431,8 @@ def activate(db: Session, member: Member, consent: bool, ex: Any = None) -> dict
         raise AccountError("Not ready yet: " + "; ".join(failed[:3]))
     enable_live(db, member, "ENABLE LIVE")  # consent given above; enable_live re-checks eligibility and the fresh checks
     acc = execution.account(db, member)
-    acc.auto_enabled, acc.auto_until = True, None
+    acc.auto_enabled, acc.auto_until = False, None
     signals.audit(db, f"m:{member.id}", "bot_trading_enabled", None, via="website")
-    signals.audit(db, f"m:{member.id}", "auto_on", None, mode=acc.mode, until=None, via="connect")
     db.commit()
     return connection(db, member)
 
@@ -446,7 +444,7 @@ def connect_api_key(db: Session, member: Member, address: str | None, secret: st
     Only the key is needed: Hyperliquid says which account an API wallet trades for (info "userRole" → agent → user). Only the
     owner of that account can approve an API wallet for it, so this proves the member controls the account. (`address` is
     optional and only cross-checked.) Then the referral and deposit are read from
-    Hyperliquid for that address, and, with the member's consent and every Passport rule met, LIVE is enabled with AUTO on.
+    Hyperliquid for that address, and, with the member's consent and every Passport rule met, LIVE is enabled with AUTO off.
     The key is stored encrypted, never returned, never logged. A main-wallet key is refused and never stored."""
     import eth_account
 
