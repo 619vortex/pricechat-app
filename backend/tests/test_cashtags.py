@@ -237,8 +237,9 @@ def test_signal_with_cashtags_and_for_coins_hyperliquid_doesnt_list(db: Session,
     out = tg.sent[-1][2]
     assert "$DOGEUSD" in out and "Hyperliquid Perpetual" in out and ("<b>WAIT</b>" in out or "setup</b>" in out) and "RSI(14)" in out
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal $KAS", group=True, reply_to=2))
-    photo = next(s for s in reversed(tg.sent) if s[0] == "photo")
-    assert "Hyperliquid" not in photo[2].split("\n\n📢")[0] and "$KASUSDT</b> | 1H | Bybit Spot" in photo[2] and "WATCH" in photo[2] and "chart-based read only" in photo[2]  # said without fuss
+    kas = tg.sent[-1][2]
+    assert "Hyperliquid" not in kas.split("\n\n📢")[0] and "$KASUSDT</b> | 1H | Bybit Spot" in kas and "NO TRADE" in kas and "chart-based read only" in kas  # said without fuss
+    assert "Entry" not in kas and "WATCH" not in kas  # the full rules don't run there: never a made-up plan
 
 
 def test_scan_lists_every_market_and_what_couldnt_be_read(db: Session, md: FakeMD, ex: FakeExchanges) -> None:

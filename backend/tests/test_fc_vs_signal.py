@@ -114,5 +114,8 @@ def test_signal_without_a_setup_says_why_with_both_links(db: Session, md: StudyM
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal FLAT", group=True, reply_to=1))
     text = _sent_text(tg, 0)
-    assert ("Not a full signal" in text or "WAIT" in text) and ("Why:" in text or "Not a full signal:" in text) and _has_links(text)
+    assert re.search(r"NO TRADE|WAIT", text) and "Why:" in text and _has_links(text)
     assert "setup</b> · passes every rule" not in text  # never presented as a signal
+    for pat in (r"\bEntry\b", r"\bStop\b", r"\bTarget\b", r"R/R", r"WATCH", "🎯", "🛑", "✅"):  # no invented prices on NO TRADE
+        assert not re.search(pat, text), f"NO TRADE sent {pat!r}:\n{text}"
+    assert not [x for x in tg.sent if x[0] == "photo"]  # no plan drawn either

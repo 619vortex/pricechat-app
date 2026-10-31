@@ -196,7 +196,7 @@ def test_commands_public_and_private(db: Session, md: FakeMD) -> None:
     assert tg.sent[-1][0] == "photo" and "not a published signal" in tg.sent[-1][2]  # analysis: anyone, no account needed
     kiwi(db, 4, "557")
     asyncio.run(bot.handle_command(db, tg, 3, 557, "/signal FLAT"))
-    assert "WATCH" in tg.sent[-1][2] and "Not a full signal" in tg.sent[-1][2]  # no full setup: still the best idea
+    assert "NO TRADE" in tg.sent[-1][2] and "Entry" not in tg.sent[-1][2]  # no full setup: NO TRADE, never a made-up plan
     asyncio.run(bot.handle_command(db, tg, 3, 557, "/signal SOL"))
     assert tg.sent[-1][0] == "photo" and "LONG setup" in tg.sent[-1][2]
     asyncio.run(bot.handle_command(db, tg, 3, 557, "/auto"))

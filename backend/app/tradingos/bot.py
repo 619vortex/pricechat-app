@@ -492,7 +492,7 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
         if sym is None:
             return "Usage: /signal (the best setup now) · /signal DOGE · /signal $DOGE 1h"
         listing = await _md(venues.resolve, sym, md, venues.client())
-        # always a setup: the full rules where they run (Hyperliquid perps), else the best idea the chart offers
+        # the full rules where they run (Hyperliquid perps); elsewhere a chart read: NO TRADE, never a made-up plan
         if listing.venue != "hyperliquid":
             candles = await _md(venues.candles, listing, tf, 200, md, venues.client())
             a = signals.Analysis(coin=listing.tag, decision="NO TRADE", reasons=["chart-based read only on this market"])
@@ -639,9 +639,9 @@ async def _indicator(md: Any, args: list[str]) -> str:
 
 
 def signal_text(listing: Any, tf: str, a: Any, candles: list[Any]) -> str:
-    """/signal on a Hyperliquid perpetual, in Telegram HTML: the setup when every rule passes; otherwise the best setup the
-    chart offers anyway (WATCH, lower conviction) with what's missing, or WAIT when there's no read at all. Analysis on
-    request: never a published signal, never traded."""
+    """/signal on a Hyperliquid perpetual, in Telegram HTML: the setup when every rule passes; otherwise NO TRADE with why
+    and what would change it (no entry, stop or target), or WAIT when there's no read at all. Analysis on request: never a
+    published signal, never traded."""
     from app.tradingos import indicators
 
     price = a.indicators.get("price") or (candles[-1].c if candles else None)
@@ -660,17 +660,12 @@ def signal_text(listing: Any, tf: str, a: Any, candles: list[Any]) -> str:
             return f"{(px - base) / base * 100:+.1f}%"
         return [f"🎯 Entry  {f(lo)} – {f(hi)}" + ("" if lo <= ref <= hi else f"  ({pct(mid, ref)} from now)"),
                 f"🛑 Stop   {f(stop)}  ({pct(stop, mid)})", f"✅ Target {f(target)}  ({pct(target, mid)}) · R/R 1:{rr:.1f}"]
-    if a.decision == "NO TRADE":
-        w = signals.watch_setup(a)
+    if a.decision == "NO TRADE":  # the owner's rule (2026-10-31): no entry, stop or target the rules didn't produce
         why = "; ".join(esc(r) for r in a.reasons[:2]) or "no setup"
-        if w is None:
+        if not price:
             return "\n".join([*head, "", "⏸ <b>WAIT</b> · no clean read on this chart", f"Why: {why}", *block, "", "<i>Not financial advice.</i>"])
-        lo, hi = w.entry
-        near = price and lo <= price <= hi
-        return "\n".join([*head, "", f"🟡 <b>WATCH · {w.side} idea</b> · {esc(w.idea)}",
-                           *plan(lo, hi, w.stop, w.target, w.rr, price or (lo + hi) / 2),
-                           "⏱ Price is in the entry zone now" if near else f"⏱ Wait for {f(lo)} – {f(hi)}, don't chase",
-                           f"⚠️ Not a full signal: {why}", *block, "", "<i>Lower conviction, size small. Not financial advice.</i>"])
+        return "\n".join([*head, "", "⏸ <b>NO TRADE</b> · no setup passes every rule", f"Why: {why}",
+                          f"What would change it: {_what_changes(a)}", *block, "", "<i>Not financial advice.</i>"])
     lo, hi = min(a.entry), max(a.entry)
     lev = f"{a.lev[0]}x" if a.lev[0] == a.lev[1] else f"{a.lev[0]}–{a.lev[1]}x"
     return "\n".join([*head, "", f"{'🟢' if a.decision == 'LONG' else '🔴'} <b>{a.decision} setup</b> · passes every rule (not a published signal)",
@@ -678,11 +673,27 @@ def signal_text(listing: Any, tf: str, a: Any, candles: list[Any]) -> str:
                        f"💬 {esc(a.reasons[0].replace(' (closed candles)', ''))}" if a.reasons else "", "<i>Not financial advice.</i>"])
 
 
+def _what_changes(a: Any) -> str:
+    """NO TRADE: the chart's own levels a setup would need, never a made-up plan."""
+    i, f = a.indicators, market.fmt_price
+    need = " or ".join(x for x in (f"a close above resistance {f(i['resistance'])} (long side)" if i.get("resistance") else "",
+                                   f"a close below support {f(i['support'])} (short side)" if i.get("support") else "") if x)
+    if not need:
+        return "the failing rules above passing on a closed candle"
+    return need + (", with EMA20 / EMA50 lining up with the move" if i.get("ema20") and i.get("ema50") else "")
+
+
+def _full_plan(a: Any) -> Any:
+    """/signal's plan only when every rule passes: a NO TRADE never gets prices, a chart plan or a track-record entry."""
+    p = signals.best_plan(a)
+    return p if p is not None and p.full else None
+
+
 SCAN_TOP = 15  # /signal without a coin: how many of the most traded Hyperliquid markets are compared
 
 
 async def best_signal(db: Session, md: Any, tf: str, chat_type: str = "group") -> tuple[str, bytes | None]:
-    """The most promising plan across the top markets (a setup that passes every rule beats any WATCH idea; then by score):
+    """The most promising setup that passes every rule across the top markets (by score), else NO TRADE:
     its text and chart. /signal alone and the daily brief. Analysis on request, never published or traded."""
     st = signals.settings(db)
     gate = asyncio.Semaphore(4)
@@ -693,13 +704,16 @@ async def best_signal(db: Session, md: Any, tf: str, chat_type: str = "group") -
                 a = await _md(signals.analyze, md, coin, tf, st.min_volume_usd, st.max_spread_bps, st.min_rr)
             except market.MarketError:
                 return None
-        p = signals.best_plan(a)
-        return (a, p) if p else None
+        return a, _full_plan(a)
 
     coins = [m.coin for m in await _md(md.top, SCAN_TOP, st.min_volume_usd)]
-    got = [g for g in await asyncio.gather(*(one(c) for c in coins)) if g]
-    if not got:
+    read = [g for g in await asyncio.gather(*(one(c) for c in coins)) if g]
+    got = [g for g in read if g[1]]
+    if not read:
         return "Couldn't read the markets right now. Try /signal BTC.", None
+    if not got:
+        return (f"⏸ <b>NO TRADE</b> · none of the {len(coins)} most traded markets has a setup that passes every rule "
+                "right now. /signal BTC for one coin's read.\n\n<i>Not financial advice.</i>"), None
     a, _ = max(got, key=lambda g: g[1].score)
     listing = await _md(venues.resolve, tickers.symbol_args([a.coin])[0], md, venues.client())
     candles = await _md(md.candles, a.coin, tf, 200)
@@ -727,7 +741,7 @@ async def signal_post(db: Session, listing: Any, tf: str, a: Any, candles: list[
     from app.tradingos.market import INTERVALS
 
     text = (f"{lead}\n\n" if lead else "") + signal_text(listing, tf, a, candles)
-    plan = signals.best_plan(a)
+    plan = _full_plan(a)
     if plan is None:
         return text, None
     try:  # the record never blocks a reply
@@ -750,7 +764,7 @@ async def _send_signal(db: Session, client: Any, chat_id: int | str, reply_to: i
     text, png = await signal_post(db, listing, tf, a, candles, chat_type=_chat_type(chat_id))
     if png is None:
         return text
-    plan = signals.best_plan(a)
+    plan = _full_plan(a)
     btns = alerts.button(a.coin, plan, tf) if listing.venue == "hyperliquid" and plan else None  # 🔔 Alert me at entry
     await client.send_photo(chat_id, png, text, buttons=btns, reply_to=reply_to, html=True)
     return None

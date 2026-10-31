@@ -53,8 +53,7 @@ def test_signal_logs_each_plan_once_an_hour_without_user_ids(db: Session, md: St
     assert rows[0].family == "full" and rows[0].full and rows[0].tag == "$SOLUSD"
     assert not any("user" in c or "member" in c for c in TsSignalIdea.__table__.columns.keys())  # no user ids, ever
     asyncio.run(bot.handle_command(db, tg, 1, 10, "/signal FLAT"))
-    flat_row = db.scalars(select(TsSignalIdea).where(TsSignalIdea.coin == "FLAT")).one()
-    assert flat_row.chat_type == "private" and not flat_row.full and flat_row.family in record.LABEL
+    assert db.scalar(select(TsSignalIdea).where(TsSignalIdea.coin == "FLAT")) is None  # NO TRADE: no plan shown, none logged
     rows[0].created_at = utcnow() - timedelta(hours=2)  # an hour later the same plan is a new record
     db.commit()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal SOL", group=True))
