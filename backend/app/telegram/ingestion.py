@@ -13,7 +13,7 @@ from app.connectors.state import get_connector_state
 from app.models.enums import Platform
 from app.models.telegram import TelegramBotState, TelegramMessage, TelegramSource
 from app.telegram.client import TelegramBotClient
-from app.telegram.errors import MalformedUpdateError
+from app.telegram.errors import MalformedUpdateError, TelegramError
 from app.telegram.parser import MembershipChange, ParsedMessage, parse_update
 from app.telegram.state import TelegramRuntime
 
@@ -218,15 +218,22 @@ class TelegramIngestor:
             report.ignored_other += 1  # a website sign-in; never stored as a message
             return
         fc = None
-        if isinstance(parsed, ParsedMessage) and not parsed.author_is_bot and parsed.author_id:
+        # an anonymous admin / a post as the group or channel comes "from" Telegram's stand-in bot: in a group it may use the
+        # public market commands (never linked to a member; account and trading commands stay private, see bot.handle_command)
+        anonymous = isinstance(parsed, ParsedMessage) and parsed.author_is_anonymous and parsed.chat.chat_type != "private"
+        person = isinstance(parsed, ParsedMessage) and (not parsed.author_is_bot or anonymous) and parsed.author_id
+        if person:
             from app.tradingos.bot import fc_command
 
             fc = fc_command(parsed.text)  # "fc gold": a plain-text price request, as another price bot takes them
-        if isinstance(parsed, ParsedMessage) and not parsed.author_is_bot and parsed.author_id and (fc or parsed.text.strip().startswith("/")):
-            from app.tradingos.bot import is_ours
+        if person and (fc or parsed.text.strip().startswith("/")):
+            from app.tradingos.bot import PUBLIC, is_ours
 
             group = parsed.chat.chat_type != "private"
-            if fc or not group or is_ours(parsed.text, get_bot_state(self.db).bot_username):
+            word = (fc or parsed.text.strip()).split()[0].split("@")[0].lower()
+            if (fc or not group or is_ours(parsed.text, get_bot_state(self.db).bot_username)) and (not anonymous or word in PUBLIC):
+                logger.info("Bot command received: %s in %s chat %s%s (update %s)", "fc" if fc else word, "a group" if group else "a private",
+                            parsed.chat.chat_id if group else "-", " from an anonymous admin / the group" if anonymous else "", parsed.update_id)
                 self._commands.append((parsed.chat.chat_id, parsed.author_id, (fc or parsed.text.strip())[:400], group,
                                        getattr(parsed, "message_id", None), parsed.chat.username, parsed.author_name))  # answered after the commit
                 report.ignored_other += 1  # a command to the bot; never stored as a message
@@ -361,7 +368,9 @@ class TelegramIngestor:
                                          chat_username=chat_username, author=author)
             except Exception as exc:  # noqa: BLE001
                 self.db.rollback()
-                logger.warning("Bot command not answered (%s)", type(exc).__name__)
+                # TelegramError messages are written by our client and never carry the token (see client._call)
+                logger.warning("Bot command not answered in chat %s (%s%s)", chat_id if group else "-", type(exc).__name__,
+                               f": {str(exc)[:200]}" if isinstance(exc, TelegramError) else "")
         followups, self._followups = self._followups, []
         if followups:
             from app.tradingos import assist

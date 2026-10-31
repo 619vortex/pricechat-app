@@ -44,6 +44,9 @@ class ParsedMessage:
     media_type: str | None
     forward_from: str | None
     forward_date: datetime | None
+    # sent "as the group" or by an admin with "Remain anonymous" (Telegram shows @GroupAnonymousBot) or as the linked channel
+    # (@Channel_Bot): `from` is one of Telegram's stand-in bots and `sender_chat` the group or channel; there is no person
+    author_is_anonymous: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +143,7 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         author_id=author_id if isinstance(author_id, int) else None,
         author_name=author_name,
         author_is_bot=bool(sender.get("is_bot")),
+        author_is_anonymous=bool(sender.get("is_bot")) and bool(sender_chat.get("id")),
         sent_at=_ts(msg["date"]) or datetime.now(timezone.utc),
         edited_at=_ts(msg.get("edit_date")),
         text=text[:MAX_TEXT],

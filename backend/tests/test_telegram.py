@@ -378,3 +378,33 @@ async def test_the_long_poll_never_waits_inside_a_write_transaction(db: Session,
         report = await ing.sync(long_poll_seconds=1, listen_seconds=1.2)
     assert report.stored == 1 and held == []
     assert db.scalar(select(TelegramSource).where(TelegramSource.chat_id == -100999)) is not None
+
+
+ANON = {"id": 1087968824, "is_bot": True, "first_name": "Group", "username": "GroupAnonymousBot"}  # Telegram's stand-in sender
+
+
+async def test_anonymous_admins_get_public_answers_but_never_account_commands(db: Session, fake_telegram: FakeTelegram,
+                                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """An admin with "Remain anonymous" (or a post as the group) arrives "from" @GroupAnonymousBot with sender_chat = the group.
+    "FC BTC" and "/price btc" are answered; account / trading commands, other bots and channel posts stay unanswered."""
+    from app.tradingos import bot
+
+    handled: list[tuple[str, bool]] = []
+
+    async def record(db_: Session, client: object, chat_id: int, user_id: int, text: str, group: bool = False, **kw: object) -> None:
+        handled.append((text, group))
+
+    monkeypatch.setattr(bot, "handle_command", record)
+    _source(db)
+    anon = {"from": ANON, "sender_chat": CHAT}
+    fake_telegram.message(-100111, "FC BTC", extra=anon)
+    fake_telegram.message(-100111, "/price btc", extra=anon)
+    fake_telegram.message(-100111, "/close 3", extra=anon)  # account command: never from an anonymous sender
+    fake_telegram.message(-100111, "/auto on", extra=anon)
+    fake_telegram.message(-100111, "/price eth", extra={"from": {"id": 55, "is_bot": True, "first_name": "Other bot"}})  # another bot
+    fake_telegram.message(-100111, "FC SOL")  # a person, as always
+    await TelegramIngestor(db, _client(fake_telegram), TelegramRuntime()).sync()
+    assert handled == [("/fc BTC", True), ("/price btc", True), ("/fc SOL", True)]
+    parsed = parse_update({"update_id": 1, "message": {"message_id": 9, "date": 1_790_000_000, "chat": CHAT, "from": ANON,
+                                                       "sender_chat": CHAT, "text": "hi"}})
+    assert isinstance(parsed, ParsedMessage) and parsed.author_is_anonymous and parsed.author_is_bot

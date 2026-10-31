@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # median of its last DURATION_HISTORY successful runs (at least SLOW_MIN_SAMPLES of them, and >= SLOW_MIN_MS so a 20 ms
 # job taking 80 ms is not news), SLOW_RUNS times in a row. In memory only: a restart re-learns the median.
 DURATION_HISTORY, SLOW_MIN_SAMPLES, SLOW_FACTOR, SLOW_RUNS, SLOW_MIN_MS = 20, 5, 3.0, 3, 2000.0
+LISTENER_WAIT_LOG_S = 30.0  # telegram.ingest waiting longer than this for its turn is logged (the bot is silent meanwhile)
 
 
 class JobSkipped(Exception):
@@ -178,12 +179,19 @@ class Scheduler:
         lock = self._locks[name]
         if lock.locked():
             return JobOutcome(name, "busy", {}, "Already running" if self._active == name else "Already queued: it runs after the current background job")
-        async with lock, self._serial:
+        async with lock:
+            asked = time.perf_counter()
+            ahead = self._active
+            await self._serial.acquire()
+            waited = time.perf_counter() - asked
+            if name == "telegram.ingest" and waited >= LISTENER_WAIT_LOG_S:  # the bot answers nothing while it waits its turn
+                logger.warning("Telegram listener waited %.0fs for its turn (behind %s)", waited, ahead or "other jobs")
             self._active = name
             try:
                 return await self._execute(spec, name, trigger)
             finally:
                 self._active = None
+                self._serial.release()
 
     def _begin(self, name: str, trigger: str) -> datetime | None:
         """Mark the job running. Returns None when it is disabled."""
@@ -222,6 +230,7 @@ class Scheduler:
                 status, error = "failed", (f"Timed out after {spec.timeout_seconds}s" if limit.expired()
                                            else redact_text(f"{type(exc).__name__}: {exc}")[:1000])
                 db.rollback()
+                logger.warning("Job %s failed: %s", name, error)
             except Exception as exc:  # noqa: BLE001 - a job must never crash the scheduler
                 status, error = "failed", redact_text(f"{type(exc).__name__}: {exc}")[:1000]
                 db.rollback()
