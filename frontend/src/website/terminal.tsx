@@ -574,7 +574,8 @@ export function ConnectDialog({ onClose, onChanged }: { onClose: () => void; onC
             <div><dt>Bot</dt><dd className="is-up">Online</dd></div>
             <div><dt>Auto trading</dt><dd>{c.auto ? "ON" : "OFF"}</dd></div>
           </dl>
-          <p className="tb-sub">Kiwi trades only when you press ENTER TRADE and confirm. AUTO stays off until you turn it on in ⚙ settings.
+          <p className="tb-sub">{c.auto ? "AUTO is on: Kiwi enters each new signal within your limits, every trade with its stop-loss. Turn AUTO off in ⚙ settings to trade only when you press ENTER TRADE."
+              : "Kiwi trades only when you press ENTER TRADE and confirm. Turn AUTO on in ⚙ settings to follow every signal."}
             {c.authorization.valid_until ? ` Your API key expires ${new Date(c.authorization.valid_until).toLocaleDateString()}: create a new one on Hyperliquid before then.` : ""}</p>
           <button className="kt-btn is-go is-wide" onClick={onClose}>OPEN TRADING TERMINAL</button>
           <button className="kt-btn is-wide" onClick={() => setEdit(true)}>REPLACE API KEY</button>
@@ -632,7 +633,7 @@ export function ConnectDialog({ onClose, onChanged }: { onClose: () => void; onC
               {keyOk && c.eligible && !c.connected && (
                 <p className="kt-row-btns">
                   <label className="tt-check"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} /> I understand live trading
-                    places real orders on my Hyperliquid account and can lose money.</label>
+                    places real orders on my Hyperliquid account and can lose money. AUTO turns on: Kiwi enters every signal within my limits.</label>
                   <button className="kt-btn is-go" disabled={busy !== null || !consent} onClick={() => void activate()}>{busy === "enable" ? "Checking…" : "ENABLE LIVE TRADING"}</button>
                 </p>
               )}

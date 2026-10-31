@@ -724,7 +724,7 @@ def test_enable_bot_trading_needs_consent_and_real_checks_then_goes_live_with_au
     items = execution.account(db, m).live_checks["items"]
     assert not items["balance"]["ok"] and "trading balance" in items["balance"]["detail"]  # shown to the member, not a blocker
     acc = execution.account(db, m)
-    assert acc.mode == "LIVE" and acc.live_enabled_at and not acc.auto_enabled  # AUTO stays off until turned on on purpose
+    assert acc.mode == "LIVE" and acc.live_enabled_at and acc.auto_enabled and acc.auto_until is None  # connecting turns AUTO on, no end date
     assert c["connected"] and c["authorization"]["status"] == "ACTIVE" and c["referral"]["status"] == "VERIFIED"
     assert not db.scalars(select(TrOrder)).all()  # connecting never places an order
 
@@ -800,7 +800,7 @@ def test_connect_with_an_api_key_proves_the_account_through_hyperliquid_and_neve
     assert earn.wallet_of(db, m).address == master and acc.master_address == master  # account queries use the master address
     assert acc.mainnet_agent == api.address and api.key.hex().removeprefix("0x") not in (acc.mainnet_agent_key or "")  # stored encrypted
     assert xch.dec(acc.mainnet_agent_key).removeprefix("0x") == api.key.hex().removeprefix("0x")
-    assert c["connected"] and acc.mode == "LIVE" and not acc.auto_enabled and "secret" not in str(c).lower()
+    assert c["connected"] and acc.mode == "LIVE" and acc.auto_enabled and "secret" not in str(c).lower()
     assert c["balances"]["spot_usdc"] == 9.99 and c["wallet"]["address"] == master  # the account's money, not the key's
     assert not db.scalars(select(TrOrder)).all()  # connecting never places an order
     other = kiwi(db, 4, "932")
