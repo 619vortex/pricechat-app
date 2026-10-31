@@ -136,7 +136,7 @@ def test_one_auto_accounts_exchange_surprise_does_not_skip_the_others(db: Sessio
     assert execution.run_auto(db, active_signal(db, md)) == [execution.account(db, b).id]
 
 
-def test_the_footer_is_dropped_never_sliced_into_the_html() -> None:
+def test_the_footer_is_never_sliced_into_the_html_and_never_lost_under_a_photo() -> None:
     tg = FakeTG()
     foot = "\n\n📢 Bot channel: @botpricechat\n🎁 Trade on Hyperliquid · 4% off fees with our link: https://api.pricechat.live/api/r/footer?src=tg"
     c = bot._Footed(tg, foot)
@@ -146,9 +146,10 @@ def test_the_footer_is_dropped_never_sliced_into_the_html() -> None:
     asyncio.run(c.send_photo(1, png, "<b>short</b>"))
     long = "\n".join(["<b>line</b> " + "y" * 30] * 100)  # ~4100: over the message limit by itself
     asyncio.run(c.send_message(1, long))
-    assert tg.sent[0][2] == near  # whole, without the footer
-    assert tg.sent[1][2] == "<b>short</b>" + foot
-    sent = tg.sent[2][2]
+    assert tg.sent[0][2] == near  # whole caption, without the footer...
+    assert tg.sent[1][0] == "msg" and tg.sent[1][2] == foot.strip()  # ...which follows as its own message (the links are never lost)
+    assert tg.sent[2][2] == "<b>short</b>" + foot
+    sent = tg.sent[3][2]
     assert len(sent) <= 4096 and long.startswith(sent) and sent.endswith("y") and sent.count("<b>") == sent.count("</b>")
 
 

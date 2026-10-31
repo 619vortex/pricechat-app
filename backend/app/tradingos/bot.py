@@ -306,7 +306,12 @@ class _Footed:
         return await self._c.send_message(chat_id, self._footed(text, 4096), *a, **kw)
 
     async def send_photo(self, chat_id: int | str, png: bytes, caption: str, *a: Any, **kw: Any) -> Any:
-        return await self._c.send_photo(chat_id, png, self._footed(caption, 1024), *a, **kw)
+        if not self._foot.strip() or _u16(caption + self._foot) <= 1024:
+            return await self._c.send_photo(chat_id, png, caption + self._foot, *a, **kw)
+        # a full caption: the bot channel and referral links follow as their own message, so a reply never goes without them
+        out = await self._c.send_photo(chat_id, png, _whole_lines(caption, 1024), *a, **kw)
+        await self._c.send_message(chat_id, self._foot.strip(), html=True)
+        return out
 
 
 def _u16(s: str) -> int:
@@ -802,7 +807,8 @@ async def _chart(db: Session, client: Any, chat_id: int | str, md: Any, args: li
         req = chartcmd.parse(args, set((await _md(md.markets))[1]))
     except chartcmd.ChartUsageError as e:
         return esc(str(e))
-    png, caption, details = await asyncio.to_thread(chartcmd.build_full, db, md, req, venues.client(), signals.settings(db), brief)
+    build = chartcmd.build_chart_response if brief else chartcmd.build_full  # fc: chart only; /chart: chart + signal line
+    png, caption, details = await asyncio.to_thread(build, db, md, req, venues.client(), signals.settings(db))
     if note:  # on top of the caption when it fits, else first in the details message
         line = f"ℹ️ {esc(note)}\n"
         if len(line) + len(caption) <= chartcmd.CAPTION_LIMIT:

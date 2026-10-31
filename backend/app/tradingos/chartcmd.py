@@ -192,7 +192,7 @@ def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = 
                f"24h vol {readout.usd_short(m.day_volume)}")  # the 24h move is the badge after the title
     else:
         sub = f"Last {fmt_price(listing.price)}" + (f" · 24h vol {readout.usd_short(listing.volume_24h)}" if listing.volume_24h else "")
-    r = readout.read(listing, candles, req.tf, md, settings)
+    r = readout.read(listing, candles, req.tf, md, settings, signal=not brief)  # fc never runs the signal rules
     busy = bool(layers.get("zones") or layers.get("walls"))  # structure levels already crowd the price panel
     change = m.change_24h if m else listing.change_24h
     png = chart.render_study(candles, title, sub, show=show, interval_ms=INTERVALS[req.tf] * 1000, wide=req.wide,
@@ -222,6 +222,13 @@ def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = 
         kept.append(line)
         size += len(line) + 1
     return png, caption, f"<b>{esc(listing.tag)}</b> {readout.tf_label(req.tf)} · chart details\n" + "\n".join(kept)
+
+
+def build_chart_response(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None, settings: Any = None) -> tuple[bytes, str, str | None]:
+    """"fc btc": the chart and its read (price, trend, RSI / MACD / EMAs, support / resistance, Kiwi Take). Never a trade
+    recommendation: the signal rules don't run and no plan is drawn or written. /signal builds the trade analysis
+    (bot._send_signal). The bot channel and referral links are added by the bot's footer on every reply."""
+    return build_full(db, md, req, vs, settings, brief=True)
 
 
 def _hl_coin(md: MarketData, base: str) -> str | None:

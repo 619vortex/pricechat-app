@@ -105,8 +105,10 @@ def kiwi_take(price: float, trend: str, rsi: float | None, support: float | None
     return "No clear direction on this timeframe."
 
 
-def read(listing: Any, candles: list[Candle], tf: str, md: MarketData | None = None, settings: Any = None) -> Readout:
-    """The readout for one market. `listing` is a venues.Listing; on Hyperliquid the signal comes from signals.analyze."""
+def read(listing: Any, candles: list[Candle], tf: str, md: MarketData | None = None, settings: Any = None,
+         signal: bool = True) -> Readout:
+    """The readout for one market. `listing` is a venues.Listing; on Hyperliquid the signal comes from signals.analyze.
+    `signal=False` ("fc"): the chart read only. The signal rules, chart rules and best plan are never run (signal "", plan None)."""
     c = closed(candles, tf)
     closes, highs, lows = [x.c for x in c], [x.h for x in c], [x.l for x in c]
     trend, e20, e50 = _trend(closes) if len(c) >= MIN_CANDLES else ("Neutral", [], [])
@@ -116,7 +118,6 @@ def read(listing: Any, candles: list[Candle], tf: str, md: MarketData | None = N
     from app.tradingos import signals
 
     price = listing.price or (candles[-1].c if candles else 0.0)
-    a = signals.Analysis(coin=listing.tag, decision="NO TRADE")
     market: list[str] = []
     if listing.venue == "hyperliquid" and md is not None:
         try:
@@ -124,6 +125,15 @@ def read(listing: Any, candles: list[Candle], tf: str, md: MarketData | None = N
             market = [f"funding {m.funding * 100:+.4f}%/h", f"OI {usd_short(m.oi_usd)}", f"24h vol {usd_short(m.day_volume)}"]
         except MarketError:
             pass
+    elif listing.volume_24h:
+        market = [f"24h vol {usd_short(listing.volume_24h)}"]
+    take = kiwi_take(price, trend, rsi, support, resistance, atr, e20[-1] if e20 else None, listing.change_24h)
+    if not signal:
+        return Readout(price=price, change_24h=listing.change_24h, trend=trend, rsi=round(rsi, 1) if rsi is not None else None, support=support,
+                       resistance=resistance, signal="", signal_note="", rules="", take=take, updated=datetime.now(timezone.utc),
+                       indicators=tuple(ind.main_three_lines(ind.main_three(closes))), plan=None, market=market)
+    a = signals.Analysis(coin=listing.tag, decision="NO TRADE")
+    if listing.venue == "hyperliquid" and md is not None:
         try:
             kw = {} if settings is None else {"min_volume": settings.min_volume_usd, "max_spread_bps": settings.max_spread_bps, "min_rr": settings.min_rr}
             a = signals.analyze(md, listing.symbol, tf, **kw)
@@ -136,11 +146,9 @@ def read(listing: Any, candles: list[Candle], tf: str, md: MarketData | None = N
     else:
         sig, note = chart_rules(c)
         rules = "chart rules"
-        if listing.volume_24h:
-            market = [f"24h vol {usd_short(listing.volume_24h)}"]
     a.indicators = {**signals.chart_indicators(candles, tf), **a.indicators}
     plan = signals.best_plan(a)
-    take = kiwi_take(price, trend, rsi, support, resistance, atr, e20[-1] if e20 else None, listing.change_24h)
+    take = kiwi_take(price, trend, rsi, support, resistance, atr, e20[-1] if e20 else None, listing.change_24h)  # the rules' levels
     return Readout(price=price, change_24h=listing.change_24h, trend=trend, rsi=round(rsi, 1) if rsi is not None else None, support=support,
                    resistance=resistance, signal=sig, signal_note=note, rules=rules, take=take, updated=datetime.now(timezone.utc),
                    indicators=tuple(ind.main_three_lines(ind.main_three(closes))), plan=plan, market=market)
@@ -169,9 +177,9 @@ def caption(listing: Any, tf: str, r: Readout, brief: bool = False) -> str:
               *(f"{icons[k] if k < 3 else ''}{x}" for k, x in enumerate(r.indicators or ([f"RSI: {r.rsi:.1f}"] if r.rsi is not None else ["RSI: n/a"]))),
               f"🧱 Support: {fmt_price(r.support)}{away(r.support)}" if r.support else "🧱 Support: n/a",
               f"🧱 Resistance: {fmt_price(r.resistance)}{away(r.resistance)}" if r.resistance else "🧱 Resistance: n/a", ""]
-    if brief:
-        lines += [f"🥝 Kiwi Take: {esc(r.take)}", f"🎯 Trade setup: /signal {esc(listing.symbol if listing.venue == 'hyperliquid' else listing.tag.lstrip('$'))}",
-                  f"🕒 Updated: {r.updated:%H:%M} UTC"]
+    if brief:  # "fc": the chart read only. No signal, side, entry, stop, target or R/R ever (that's /signal)
+        lines += [f"🥝 Kiwi Take: {esc(r.take)}", f"🕒 Updated: {r.updated:%H:%M} UTC",
+                  f"ℹ️ Trade analysis: /signal {esc(listing.symbol if listing.venue == 'hyperliquid' else listing.tag.lstrip('$'))}"]
         return "\n".join(lines)
     lines.append(f"🎯 Signal: {r.signal} ({r.rules})" + (f" · {esc(r.signal_note)}" if r.signal == "WAIT" else " · passes every rule"))
     p = r.plan
