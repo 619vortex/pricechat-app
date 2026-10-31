@@ -259,7 +259,11 @@ def test_fc_accepts_cashtags_timeframes_and_options_but_not_chat(db: Session, md
     assert bot.fc_command("fc gold now please") is None and bot.fc_command("fc barcelona won 3-0") is None
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, bot.fc_command("Fc $SOL 4h") or "", group=True, reply_to=1))
-    assert "$SOLUSD</b> | 4H | Hyperliquid Perpetual" in tg.sent[-1][2]
+    fc = tg.sent[-1][2]
+    assert "$SOLUSD</b> | 4H | Hyperliquid Perpetual" in fc
+    assert "Kiwi Take" in fc and "/signal SOL" in fc and "Signal:" not in fc and "Plan:" not in fc and "Best idea" not in fc  # fc: chart + read
+    asyncio.run(bot.handle_command(db, tg, -5, 9, "/chart SOL 4h", group=True, reply_to=1))
+    assert "Signal:" in tg.sent[-1][2] and "/signal SOL" not in tg.sent[-1][2]  # /chart keeps the signal line
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/fc $BTCUSDT 15m rsi", group=True, reply_to=2))
     assert "$BTCUSDT</b> | 15m | OKX Spot" in tg.sent[-1][2] and "Layers: rsi" in tg.sent[-1][2]
 

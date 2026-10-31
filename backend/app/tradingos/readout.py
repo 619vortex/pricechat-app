@@ -150,9 +150,10 @@ def tf_label(tf: str) -> str:
     return tf.upper() if tf[-1] in "hd" else tf  # 4H, 1D, 15m (TradingView style: minutes stay lowercase)
 
 
-def caption(listing: Any, tf: str, r: Readout) -> str:
+def caption(listing: Any, tf: str, r: Readout, brief: bool = False) -> str:
     """The chart caption, Telegram HTML: price and market, the trend and the three main indicators, the levels, the signal
-    and the plan (the rules' setup, or the most promising idea), one Kiwi Take. Fits a photo caption with the footer."""
+    and the plan (the rules' setup, or the most promising idea), one Kiwi Take. Fits a photo caption with the footer.
+    `brief` ("fc sui"): the chart and the read only; the signal and plan are left to /signal, which the caption points to."""
     from app.tradingos.bot import esc
 
     def away(p: float) -> str:
@@ -168,6 +169,10 @@ def caption(listing: Any, tf: str, r: Readout) -> str:
               *(f"{icons[k] if k < 3 else ''}{x}" for k, x in enumerate(r.indicators or ([f"RSI: {r.rsi:.1f}"] if r.rsi is not None else ["RSI: n/a"]))),
               f"🧱 Support: {fmt_price(r.support)}{away(r.support)}" if r.support else "🧱 Support: n/a",
               f"🧱 Resistance: {fmt_price(r.resistance)}{away(r.resistance)}" if r.resistance else "🧱 Resistance: n/a", ""]
+    if brief:
+        lines += [f"🥝 Kiwi Take: {esc(r.take)}", f"🎯 Trade setup: /signal {esc(listing.symbol if listing.venue == 'hyperliquid' else listing.tag.lstrip('$'))}",
+                  f"🕒 Updated: {r.updated:%H:%M} UTC"]
+        return "\n".join(lines)
     lines.append(f"🎯 Signal: {r.signal} ({r.rules})" + (f" · {esc(r.signal_note)}" if r.signal == "WAIT" else " · passes every rule"))
     p = r.plan
     if p is not None:

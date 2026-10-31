@@ -123,10 +123,12 @@ def build(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None)
     return png, caption + (f"\n\n{details}" if details else "")
 
 
-def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None, settings: Any = None) -> tuple[bytes, str, str | None]:
+def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None, settings: Any = None,
+               brief: bool = False) -> tuple[bytes, str, str | None]:
     """(PNG, caption, details). The caption is the compact readout (Telegram HTML); the layer list, data-basis lines and
     notes go under it when everything fits a photo caption, otherwise into `details` for a message right after the chart
-    (nothing is cut off). Raises venues.NotFound / venues.Ambiguous / MarketError. Blocking: call it in a thread."""
+    (nothing is cut off). `brief` ("fc sui"): no signal or plan on the chart or in the caption (/signal gives those).
+    Raises venues.NotFound / venues.Ambiguous / MarketError. Blocking: call it in a thread."""
     from app.tradingos.bot import esc
 
     vs = vs or venues.client()
@@ -195,17 +197,17 @@ def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = 
     change = m.change_24h if m else listing.change_24h
     png = chart.render_study(candles, title, sub, show=show, interval_ms=INTERVALS[req.tf] * 1000, wide=req.wide,
                              ma="ma" in req.opts, bb="bb" in req.opts, panels=panels, depth=depth, source=listing.label,
-                             levels=None if busy else (r.support, r.resistance), plan=r.plan, change=change, **layers)
+                             levels=None if busy else (r.support, r.resistance), plan=None if brief else r.plan, change=change, **layers)
     drawn = {k for k, _ in panels} | {k for k in ("zones", "walls", "twap") if layers.get(k)} | ({"heatmap"} if layers.get("heat") else set())
     shown = [o for o in ("rsi", "bb", "macd", "ma", "volume", "funding", "oi", "depth", *STRUCTURE_ORDER) if o in req.opts
              and (o not in ("funding", "oi", *STRUCTURE_ORDER) or o in drawn) and (o != "depth" or depth)]
-    caption = readout.caption(listing, req.tf, r)
+    caption = readout.caption(listing, req.tf, r, brief)
     extra = ([f"Layers: {' · '.join(shown)}"] if shown else []) + [esc(b) for b in basis] + [f"ℹ️ {esc(n)}" for n in notes]
     if listing.alternatives:
         extra.append(f"Also trades on: {esc(', '.join(listing.alternatives))}")
     if listing.venue == "dex":
         extra.append(f"Pool {esc(listing.pool_name or '')} · token <code>{esc(listing.token_address or '')}</code> · liquidity {readout.usd_short(listing.liquidity)}")
-    if r.rules == "chart rules":
+    if r.rules == "chart rules" and not brief:
         extra.append("Chart rules: trend, pullback, RSI, MACD and levels from this market's candles")
     if not extra:
         return png, caption, None

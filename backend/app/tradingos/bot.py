@@ -332,6 +332,7 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
     cmd = parts[0].split("@")[0].lower()
     # market commands keep the words as typed (a Solana contract address is case-sensitive); the parsers ignore case
     args = parts[1:] if cmd in MARKET_ARGS else [p.upper() for p in parts[1:]]
+    brief = cmd == "/fc"  # "fc sui": the chart and its read, no signal (that's /signal sui)
     if cmd == "/fc":  # "fc bitcoin": another price bot's habit, answered with our 4h chart (any /chart option still works)
         from app.tradingos.chartcmd import _timeframe
 
@@ -381,11 +382,11 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         elif cmd == "/vpn":  # device names keep the case they were typed in
             reply = await vpn_command(db, client, chat_id, user_id, parts[1:])
         elif redirect:  # the chart goes to Bot Chat; the main chat gets one short line pointing there
-            reply = await _command(db, client, bot_chat, user_id, cmd, args, None)
+            reply = await _command(db, client, bot_chat, user_id, cmd, args, None, brief=brief)
             if reply is None:
                 reply = f"📊 Posted in Bot Chat to keep this chat readable: t.me/{esc(bot_chat.lstrip('@'))}"
         else:
-            reply = await _command(db, client, chat_id, user_id, cmd, args, reply_to)
+            reply = await _command(db, client, chat_id, user_id, cmd, args, reply_to, brief=brief)
     except market.MarketError as e:
         reply = f"Couldn't read the market data right now: {esc(str(e))}"
     except venues.Ambiguous as e:
@@ -397,6 +398,7 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         reply = "Something went wrong, try again in a moment."
     if reply:
         await client.send_message(chat_id, reply, html=True, reply_to=reply_to)
+    logger.info("Bot answered %s in %s chat %s", "fc" if brief else cmd, "a group" if group else "a private", chat_id if group else "-")
 
 
 async def _trade_check(db: Session, client: Any, chat_id: int, user_id: int, text: str, reply_to: int | None) -> bool:
@@ -420,7 +422,8 @@ async def _trade_check(db: Session, client: Any, chat_id: int, user_id: int, tex
     return True
 
 
-async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: str, args: list[str], reply_to: int | None = None) -> str | None:
+async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: str, args: list[str], reply_to: int | None = None,
+                   brief: bool = False) -> str | None:
     md = market.data()
     m = member_for(db, user_id)
     if cmd in ("/start", "/help"):
@@ -454,7 +457,7 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
     if cmd == "/indicator":
         return await _indicator(md, args)
     if cmd == "/chart":
-        return await _chart(db, client, chat_id, md, args, reply_to)
+        return await _chart(db, client, chat_id, md, args, reply_to, brief=brief)
     if cmd == "/scan":
         return await _scan(db, md, args)
     if cmd == "/signals":
@@ -790,7 +793,8 @@ async def daily_brief(db: Session, client: Any, md: Any = None, now: Any = None)
     return "sent"
 
 
-async def _chart(db: Session, client: Any, chat_id: int | str, md: Any, args: list[str], reply_to: int | None, note: str | None = None) -> str | None:
+async def _chart(db: Session, client: Any, chat_id: int | str, md: Any, args: list[str], reply_to: int | None, note: str | None = None,
+                 brief: bool = False) -> str | None:
     """A chart with the compact readout caption; details that don't fit a photo caption follow as one message."""
     from app.tradingos import chartcmd
 
@@ -798,7 +802,7 @@ async def _chart(db: Session, client: Any, chat_id: int | str, md: Any, args: li
         req = chartcmd.parse(args, set((await _md(md.markets))[1]))
     except chartcmd.ChartUsageError as e:
         return esc(str(e))
-    png, caption, details = await asyncio.to_thread(chartcmd.build_full, db, md, req, venues.client(), signals.settings(db))
+    png, caption, details = await asyncio.to_thread(chartcmd.build_full, db, md, req, venues.client(), signals.settings(db), brief)
     if note:  # on top of the caption when it fits, else first in the details message
         line = f"ℹ️ {esc(note)}\n"
         if len(line) + len(caption) <= chartcmd.CAPTION_LIMIT:
