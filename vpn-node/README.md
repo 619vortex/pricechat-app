@@ -90,6 +90,13 @@ write without changing anything (no root needed).
 - **New token:** delete the `TOKEN=` line in `/etc/kiwi-vpn/agent.env`, re-run the installer
   (with `--adblock` if it is on), paste the new token in Admin → VPN → server → edit.
 
+## A server that already runs another tunnel
+
+`install.sh` owns the whole firewall and `wg0`, so never use it next to another tunnel: it stops if it finds a `wg0` it didn't create.
+`install-shared.sh` adds a separate `wg1` (10.66.0.1/16, UDP 51821) and the agent on 8443, and leaves `wg0`, its peers and SSH alone.
+It only adds rules that match `wg1`, and `--uninstall` removes all of it. No resolver is installed: customers use `DNS` (1.1.1.1) and IPv6 is
+dropped. Never point the agent at another tunnel's interface, because the backend removes any peer it doesn't own. Allow 51821/udp and 8443/tcp in the provider's firewall.
+
 ## Customers and payments (Price Chat backend, `app/vpn/billing.py`)
 
 - $9.99 buys 30 days and any amount buys its share. Passport accounts pay by card or USDT; anonymous keys pay by USDT only.

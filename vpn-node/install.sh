@@ -639,6 +639,9 @@ if [ ! -s "/etc/wireguard/$WG_IF.key" ]; then
   say "Generating WireGuard server key"
   (umask 077; wg genkey > "/etc/wireguard/$WG_IF.key")
 fi
+if [ -f "/etc/wireguard/$WG_IF.conf" ] && ! grep -q "Managed by kiwi-vpn install.sh" "/etc/wireguard/$WG_IF.conf"; then
+  die "/etc/wireguard/$WG_IF.conf isn't ours. This installer takes over the firewall and $WG_IF: on a server with another tunnel, use install-shared.sh"
+fi
 WG_CONF_NEW="$(render_wg_conf)"
 WG_CHANGED=0
 if [ "$(cat "/etc/wireguard/$WG_IF.conf" 2>/dev/null)" != "$WG_CONF_NEW" ]; then
