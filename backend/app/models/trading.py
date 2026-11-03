@@ -68,7 +68,8 @@ class TrPosition(IdMixin, TimestampMixin, Base):
     """A bot-managed position. One per account per signal (that's the duplicate-trade guard)."""
 
     __tablename__ = "tr_positions"
-    __table_args__ = (UniqueConstraint("account_id", "signal_id", name="uq_tr_positions_account_signal"), Index("ix_tr_positions_status", "status"))
+    __table_args__ = (UniqueConstraint("account_id", "signal_id", name="uq_tr_positions_account_signal"), Index("ix_tr_positions_status", "status"),
+                      Index("ix_tr_positions_signal", "signal_id"))
 
     account_id: Mapped[int] = mapped_column(ForeignKey("tr_accounts.id", ondelete="CASCADE"), nullable=False)
     signal_id: Mapped[int] = mapped_column(ForeignKey("ts_signals.id", ondelete="CASCADE"), nullable=False)

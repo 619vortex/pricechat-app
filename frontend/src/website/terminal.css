@@ -260,3 +260,38 @@ button.kt-row-main:hover { background: rgba(255, 255, 255, 0.025); }
 .kt-autobtn.is-on i { background: var(--tb-green); } .kt-autobtn.is-on i::after { transform: translateX(11px); }
 .kt-kiwis { padding: 3px 8px; border-radius: 999px; font: 800 11px/1 var(--site-sans); background: rgba(255, 255, 255, 0.07); color: var(--site-soft); }
 .kt-kiwis.is-in { background: rgba(0, 229, 143, 0.14); color: var(--tb-green); }
+
+/* ---- what's behind a signal ---- */
+.kt-record { margin: 0; font-size: 13px; line-height: 1.45; color: var(--site-soft); }
+.kt-record b { color: var(--site-text); } .kt-record b.is-up { color: var(--tb-green); } .kt-record b.is-down { color: #ff5468; }
+.kt-record em { font-style: normal; color: #ffc93c; }
+.kt-record small { display: block; font-size: 11.5px; color: var(--site-muted); }
+p.kt-kiwis { margin: 0; justify-self: start; }
+
+/* ---- signal desk: chart, discussion and the trade on one screen (dialogs stay above it) ---- */
+.sd { position: fixed; inset: 0; z-index: 70; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: #070908; color: var(--site-text); }
+.sd-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--site-line); }
+.sd-title { font: 900 17px/1.1 var(--site-display); letter-spacing: 0.04em; }
+.sd-title.is-long { color: var(--tb-green); } .sd-title.is-short { color: #ff5468; }
+.sd-mode { font-size: 11.5px; font-weight: 800; letter-spacing: 0.04em; color: var(--site-soft); }
+.sd-x { position: static; margin-left: auto; }
+.sd-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); min-height: 0; }
+.sd-chart-wrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
+.sd-chart { min-height: 0; min-width: 0; }
+.sd-chat { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; border-left: 1px solid var(--site-line); }
+.sd-msgs { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; padding: 12px; min-height: 0; }
+.sd-intro { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--site-soft); }
+.sd-sug { display: flex; flex-wrap: wrap; gap: 6px; }
+.sd-sug button { min-height: 36px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--site-line); background: none; color: var(--site-text); font: 600 12.5px/1.25 var(--site-sans); text-align: left; cursor: pointer; }
+.sd-msg { margin: 0; max-width: 92%; padding: 8px 11px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sd-msg.is-me { align-self: flex-end; background: rgba(0, 229, 143, 0.14); }
+.sd-msg.is-kiwi { align-self: flex-start; background: rgba(255, 255, 255, 0.06); }
+.sd-msg.is-err { color: #ff5468; }
+.sd-in { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--site-line); }
+.sd-in input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--site-line); background: rgba(0, 0, 0, 0.25); color: inherit; font: 16px var(--site-sans); }
+.sd-foot { display: grid; gap: 8px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--site-line); background: #0b0e0d; }
+.sd-proof { display: grid; gap: 6px; }
+@media (max-width: 760px) {
+  .sd-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 38%) minmax(0, 1fr); }
+  .sd-chat { border-left: 0; border-top: 1px solid var(--site-line); }
+}

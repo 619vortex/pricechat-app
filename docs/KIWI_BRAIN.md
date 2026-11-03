@@ -243,3 +243,12 @@ ML + risk team, honest backtests with selection/holdout). The gaps closed here:
 Not changed: strategies, filters, member limits, live switches. Next stages (not started): calibration-based sizing (only
 once a score is validated), Kitchen WAITING / SERVED / FINISHED states from real fills, the research pipeline
 (proposal → backtest → out-of-sample → walk-forward → paper → approval), TradingView webhooks as untrusted inputs.
+
+## Signal desk (2026-11-03): chart, discussion and trade on one screen
+From member feedback: discuss the chart and trade together, see how a signal's setup has done and how many people are in.
+- **Desk** (`/earn`, a signal's "Open chart & ask Kiwi"; `signaldesk.tsx`): live candles with entry, stop and targets always in range, Ask Kiwi scoped to the signal
+  (`POST /members/kiwi-brain/ask` with `signal_id` + up to 6 earlier turns), and the card's own ENTER TRADE (the normal preview, then confirm). Without an AI model it returns the signal's records, labelled.
+- **Record** (`performance.track_record`, on the feed, the Telegram card and the confirm dialog): wins, losses and average per trade after fees and slippage for the signal's strategy + timeframe. It is
+  a past record of model signals, not executed trades, and never a chance of winning for the next one. Below `MIN_SAMPLE` closed signals it says "too few to judge". Losing numbers are shown as they are.
+- **Who is in** (`signals.participation`: `live`, `practice`, `live_open_usd`): from filled positions, real money and paper/testnet never added together. The dollar total is LIVE notional still open, rounded
+  to $100, hidden under 3 holders. It is not evidence that a trade is good, and Kiwi is told not to present it as such.

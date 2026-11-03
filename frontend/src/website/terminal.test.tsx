@@ -35,7 +35,7 @@ const pos = (o: Partial<Pos> = {}): Pos => ({
   tp2_status: "ACTIVE", fees: 0.13, funding: 0.02, realized: 0, opened_at: "2026-10-15T09:00:00+00:00", warnings: [], error: null, ...o,
 });
 const sig = (o: Partial<Sig> = {}): Sig => ({ id: 9, number: 4, coin: "SOL", side: "LONG", status: "ACTIVE", status_label: "ACTIVE", entry: [144, 146], stop: 140,
-  target: 155, rr: 2.1, leverage: [2, 3], last_price: 150, published_at: "2026-10-15T08:00:00+00:00", participation: { enter: 3 }, strategy: "trend_pullback_v1", ...o });
+  target: 155, rr: 2.1, leverage: [2, 3], last_price: 150, published_at: "2026-10-15T08:00:00+00:00", participation: { enter: 3, live: 2, practice: 1 }, strategy: "trend_pullback_v1", ...o });
 const term = (o: Partial<Terminal> = {}): Terminal => ({
   overview: { mode: "LIVE", auto: true, auto_until: null, paused: false, realized_today: 4.2, simulated: false, equity: 1520.5, available: 1300, margin_used: 96.67,
               unrealized: 10, exposure: 300 },
@@ -52,6 +52,63 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const open = async (routes: Record<string, unknown>) => { serve(routes); const r = render(<TradingTerminal conn={conn} />); await flush(); return r; };
 
+vi.mock("lightweight-charts", () => {
+  const series = { setData: vi.fn(), createPriceLine: vi.fn(() => ({})), removePriceLine: vi.fn() };
+  const chart = { addSeries: vi.fn(() => series), remove: vi.fn() };
+  return { createChart: vi.fn(() => chart), CandlestickSeries: {}, ColorType: { Solid: "solid" }, CrosshairMode: { Normal: 0 }, LineStyle: { Dashed: 2 } };
+});
+
+describe("Signal desk", () => {
+  const CAND = { "GET /api/members/kiwi-brain/candles": { candles: [[1, 1, 2, 0.5, 1.5, 9]] } };
+  const rec = { closed: 12, wins: 5, losses: 7, win_rate: 41.7, avg_pct_after_costs: -0.12, enough: false, min_sample: 30, label: "Model signal results" };
+  const openDesk = async (routes: Record<string, unknown>) => {
+    await open({ [T]: term({ positions: [], signals: {} }), [S]: { items: [sig({ record: rec, participation: { live: 3, practice: 2, live_open_usd: 1200 } })] }, ...CAND, ...routes });
+    fireEvent.click(screen.getAllByRole("button", { name: /Open chart & ask Kiwi/ })[0]);
+    await flush(20);
+    return screen.findByRole("dialog", { name: "SOL LONG chart, discussion and trade" });
+  };
+
+  it("shows the record honestly: wins and losses, the result after costs, too few to judge, never a win chance", async () => {
+    const d = await openDesk({});
+    const t = d.textContent!;
+    expect(t).toMatch(/5 wins, 7 losses/); expect(t).toMatch(/-0\.12% average per trade after costs/); expect(t).toMatch(/too few to judge \(12 of 30\+\)/);
+    expect(t).toMatch(/not real trades/); expect(t).toMatch(/3 real money · ≈\$1,200 open · 2 practice/);
+    expect(t).not.toMatch(/probability|guarantee|chance/i);
+    expect(t).toMatch(/LIVE · REAL MONEY/);
+  });
+
+  it("discusses this signal with the earlier turns, on the same screen as the trade", async () => {
+    const d = await openDesk({ "POST /api/members/kiwi-brain/ask": { answer: "The stop is under the pullback." } });
+    fireEvent.click(within(d).getByRole("button", { name: "What would prove this signal wrong?" }));
+    await flush();
+    expect(calls.find((c) => c.key.endsWith("/ask"))!.body).toEqual({ question: "What would prove this signal wrong?", signal_id: 9, history: [] });
+    expect(d.textContent).toMatch(/The stop is under the pullback\./);
+    fireEvent.change(within(d).getByLabelText("Your question"), { target: { value: "and the target?" } });
+    fireEvent.click(within(d).getByRole("button", { name: "Ask" }));
+    await flush();
+    const second = calls.filter((c) => c.key.endsWith("/ask"))[1].body as { history: unknown[] };
+    expect(second.history).toEqual([{ who: "me", text: "What would prove this signal wrong?" }, { who: "kiwi", text: "The stop is under the pullback." }]);
+    expect(within(d).getByRole("button", { name: "ENTER TRADE" })).toBeTruthy();
+  });
+
+  it("ENTER TRADE from the desk uses the normal preview and confirm, and a refusal shows on the desk", async () => {
+    const d = await openDesk({ "POST /api/members/trading/preview": { token: "tok12345", mode: "LIVE", text: "", plan: { entry: 145, size: 0.69, notional: 100, leverage: 3, margin: 33.3, stop: 140, tp1: 155, tp2: 160, max_loss_usd: 4.9 } } });
+    fireEvent.click(within(d).getByRole("button", { name: "ENTER TRADE" }));
+    await flush();
+    const dlg = screen.getByRole("dialog", { name: "Confirm trade" }).textContent!;
+    expect(dlg).toMatch(/5 wins, 7 losses/);  // seen right before the decision
+    expect(calls.some((c) => c.key.endsWith("/confirm"))).toBe(false);
+    fireEvent.keyDown(window, { key: "Escape" });
+    await flush();
+    expect(screen.getByRole("dialog", { name: "SOL LONG chart, discussion and trade" })).toBeTruthy();  // Esc closes the confirmation, not the desk
+    cleanup();
+    const d2 = await openDesk({ "POST /api/members/trading/preview": new Response(JSON.stringify({ detail: "Max positions reached." }), { status: 400 }) });
+    fireEvent.click(within(d2).getByRole("button", { name: "ENTER TRADE" }));
+    await flush();
+    expect(d2.textContent).toMatch(/Max positions reached\./);
+  });
+});
+
 describe("Kiwi trading bot", () => {
   it("leads with Kiwi's chat: the real signal as a message, Kiwi's own reason, and no developer controls", async () => {
     const { container } = await open({ [T]: term(), [S]: { items: [sig({ reason: "Uptrend on 1h, pullback to EMA20.", timeframe: "1h", tp2: 160.5 })] } });
@@ -62,7 +119,8 @@ describe("Kiwi trading bot", () => {
     expect(card).toMatch(/Entry\$144–\$146/); expect(card).toMatch(/Stop Loss\$140/); expect(card).toMatch(/Take Profit 1\$155/);
     expect(card).toMatch(/Take Profit 2≈ \$160\.5/); expect(card).toMatch(/Leverage2–3x/); expect(card).toMatch(/Risk\/Reward1:2\.1/);
     expect(card).toMatch(/Kiwi says: “Uptrend on 1h, pullback to EMA20\.”/);
-    expect(card).toMatch(/👥 3 Kiwis in/);  // live entry count (participation.enter)
+    expect(card).toMatch(/👥 2 real money · 1 practice/);  // real money and practice never added together
+    expect(card).toMatch(/New setup: no closed signals yet/);  // no record is said plainly, nothing is made up
     expect(within(chat).getAllByRole("link", { name: "VIEW POSITION" })[0].getAttribute("href")).toBe("#kt-pos-5");  // already entered
     expect(container.textContent).not.toMatch(/TESTNET|TRADING CONTROLS|Risk limits|TRADING TERMINAL/);
     expect(screen.queryByRole("radiogroup")).toBeNull();  // no mode selector

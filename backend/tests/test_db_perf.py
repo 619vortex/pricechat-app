@@ -72,7 +72,7 @@ def test_signal_out_reads_participation_once(db: Session) -> None:
     db.commit()
     with statements(db) as sql:
         out = sig_out(db, s)
-    assert out["participation"] == {"enter": 1}
+    assert out["participation"] == {"enter": 1, "live": 0, "practice": 0}
     assert sum("FROM ts_signal_actions" in q for q in sql) == 1
 
 

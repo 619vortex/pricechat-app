@@ -214,7 +214,7 @@ def test_buttons_need_access_and_never_count_twice(db: Session, md: FakeMD) -> N
     for cid in ("b", "c"):  # a double tap
         asyncio.run(bot.handle_callback(db, tg, {"id": cid, "data": f"sig:{sig.id}:reject", "from": {"id": 602}}))
     assert len(db.scalars(select(TsSignalAction)).all()) == 1 and tg.sent[-1][2] == "Already noted."
-    assert signals.participation(db, sig) == {"reject": 1}
+    assert signals.participation(db, sig) == {"reject": 1, "live": 0, "practice": 0}
 
 
 def test_chart_is_a_real_png(md: FakeMD) -> None:

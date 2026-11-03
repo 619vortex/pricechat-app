@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
+from app.models.trading import TrPosition
 from app.models.tradingos import TsAudit, TsSettings, TsSignal, TsSignalAction
 from app.tradingos import indicators as ind
 from app.tradingos.market import MarketData, MarketError, fmt_price
@@ -549,11 +550,31 @@ def track(db: Session, md: MarketData) -> list[TsSignal]:
     return changed
 
 
+MIN_BACKERS_FOR_USD = 3  # below this a dollar total would come close to showing one member's position size
+
+
 def participation(db: Session, sig: TsSignal) -> dict[str, int]:
-    """How many verified Kiwis pressed each button (counts only; never who)."""
+    """How many verified Kiwis pressed each button, plus who really has a filled position, real money and practice apart (counts
+    and a rounded total only; never who). live_open_usd is the LIVE notional still open, to the nearest $100, and only once
+    MIN_BACKERS_FOR_USD accounts hold it."""
     rows = db.execute(select(TsSignalAction.action, func.count()).where(TsSignalAction.signal_id == sig.id, TsSignalAction.verified.is_(True))
                       .group_by(TsSignalAction.action)).all()
-    return {a: int(n) for a, n in rows}
+    out = {a: int(n) for a, n in rows}
+    live = practice = holders = 0
+    open_usd = 0.0
+    for mode, status, size, entry in db.execute(select(TrPosition.mode, TrPosition.status, TrPosition.size, TrPosition.entry_px).where(
+            TrPosition.signal_id == sig.id, TrPosition.entry_px.is_not(None), TrPosition.status.in_(("OPEN", "PROTECTION_FAILED", "CLOSED")))):
+        if mode != "LIVE":
+            practice += 1
+            continue
+        live += 1
+        if status != "CLOSED" and size > 0:
+            holders += 1
+            open_usd += size * entry
+    out |= {"live": live, "practice": practice}
+    if holders >= MIN_BACKERS_FOR_USD and open_usd >= 100:
+        out["live_open_usd"] = int(round(open_usd, -2))
+    return out
 
 
 def stats(db: Session) -> dict[str, Any]:
@@ -581,7 +602,19 @@ STATUS_LABEL = {"PENDING_REVIEW": "IN REVIEW", "WAITING": "WAITING", "ACTIVE": "
                 "CLOSED": "CLOSED", "EXPIRED": "EXPIRED", "CANCELLED": "CANCELLED"}
 
 
-def card(sig: TsSignal, counts: dict[str, int] | None = None) -> str:
+def crowd_line(counts: dict[str, int]) -> str | None:
+    """Filled entries (manual or AUTO), real money and practice never added together."""
+    live, practice = counts.get("live", 0), counts.get("practice", 0)
+    parts = []
+    if live:
+        usd = f" (≈${counts['live_open_usd']:,} open)" if counts.get("live_open_usd") else ""
+        parts.append(f"{live} Kiwi{'s' if live != 1 else ''} with real money{usd}")
+    if practice:
+        parts.append(f"{practice} practising")
+    return "👥 " + " · ".join(parts) if parts else None
+
+
+def card(sig: TsSignal, counts: dict[str, int] | None = None, record: str | None = None) -> str:
     """The Telegram card: a compact trade ticket. Every number is the signal record's; the % are distances from the entry
     zone's middle. A manual (owner) signal says so instead of showing strategy reasons it doesn't have."""
     mid = (sig.entry_lo + sig.entry_hi) / 2
@@ -609,7 +642,9 @@ def card(sig: TsSignal, counts: dict[str, int] | None = None) -> str:
     lines += ["", f"📍 {status}" + (f" · now {fmt_price(sig.last_price)}" if sig.last_price else "")]
     if sig.model_pnl_pct is not None:
         lines.append(f"🏁 Result {sig.model_pnl_pct:+.2f}% (no leverage, after fees)")
-    if counts and counts.get("enter"):
-        lines.append(f"👥 {counts['enter']} Kiwi{'s' if counts['enter'] != 1 else ''} in")  # filled entries only (manual or AUTO)
+    if record:
+        lines.append(record)
+    if counts and (crowd := crowd_line(counts)):
+        lines.append(crowd)
     lines += ["", "Price Chat · not financial advice"]
     return "\n".join(lines)

@@ -645,6 +645,39 @@ def evidence(db: Session, member: Member, md: market.MarketData) -> tuple[str, s
     return "\n".join(lines), ids
 
 
+def signal_facts(db: Session, md: market.MarketData, sig: TsSignal) -> dict[str, str]:
+    """One published signal as evidence lines, for discussing it on its chart: the levels, this setup's record, who is in and the
+    market now. Keyed by the ids Ask Kiwi cites."""
+    from app.tradingos import performance
+
+    mid = (sig.entry_lo + sig.entry_hi) / 2
+
+    def pct(px: float) -> str:
+        return f"{(px - mid) / mid * 100:+.2f}%"
+
+    facts = {"SIG": f"Signal #{sig.number:03d} {sig.coin} {sig.side}, {sig.timeframe}, strategy {STRATEGIES.get(sig.strategy, sig.strategy)}, status {sig.status}. "
+                    f"Entry {sig.entry_lo}-{sig.entry_hi}, stop {sig.stop} ({pct(sig.stop)}), TP1 {sig.target} ({pct(sig.target)}), R/R 1:{sig.rr:.1f}, "
+                    f"leverage {sig.lev_lo}-{sig.lev_hi}x, last tracked price {sig.last_price}. Kiwi's reason: {sig.reason or 'manual setup, none recorded'}."}
+    rec = performance.record_of(db, sig)
+    if rec:
+        judge = "" if rec["enough"] else f"Too few to judge (needs {rec['min_sample']}+). "
+        facts["REC"] = (f"This setup's record: {rec['wins']} wins, {rec['losses']} losses of {rec['closed']} closed ({rec['win_rate']}%), average "
+                        f"{rec['avg_pct_after_costs']:+.3f}% per trade after costs. {judge}{rec['label']}")
+    else:
+        facts["REC"] = "This setup has no closed signals yet, so it has no record. Nothing can be said about how it performs."
+    n = signals.participation(db, sig)
+    facts["CROWD"] = (f"{n['live']} members entered with real money, {n['practice']} on practice accounts"
+                      + (f"; about ${n['live_open_usd']:,} of real money is open" if n.get("live_open_usd") else "") + ". Others being in says nothing about the outcome.")
+    try:
+        sn = brain.market_snapshot(md, sig.coin, sig.timeframe)
+        i = sn["indicators"]
+        facts["CHART"] = (f"{sig.coin} {sig.timeframe} now: mark {sn['market']['mark']}, RSI {i['rsi14']}, MACD histogram {i['macd_hist']}, EMA20 {i['ema20']}, "
+                          f"EMA50 {i['ema50']}, trend {i['trend']}, ATR {i['atr14']}, funding {sn['market']['funding_h']}/h{' (STALE)' if sn['stale'] else ''}.")
+    except market.MarketError:
+        facts["CHART"] = f"{sig.coin} market data unavailable right now."
+    return facts
+
+
 def direct_answer(db: Session, member: Member, md: market.MarketData, question: str) -> dict[str, Any] | None:
     """Ask Kiwi without a language model: the common questions answered straight from the records (same evidence ids). None
     when the question isn't one of these (then only the AI model can answer it)."""

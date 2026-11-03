@@ -15,7 +15,7 @@ from app.api.schemas import StrictInput
 from app.arbitrage import funding_alerts
 from app.models.tradingos import TsAudit, TsSignal
 from app.security import admin_auth, rate_limit
-from app.tradingos import assist, autodelete, bot, kitchen, market, risk, signals
+from app.tradingos import assist, autodelete, bot, kitchen, market, performance, risk, signals
 
 router = APIRouter(tags=["trading-os"])
 
@@ -326,7 +326,10 @@ def site_signals(db: DbSession) -> dict[str, Any]:
     # finished owner pipeline checks (strategy "test") stay out of members' feed; an open one is shown (labelled TEST)
     rows = db.scalars(select(TsSignal).where(TsSignal.published_at.is_not(None), (TsSignal.strategy != "test") | TsSignal.status.in_(signals.OPEN))
                       .order_by(TsSignal.number.desc()).limit(10)).all()
-    return {"items": [{k: v for k, v in sig_out(db, s).items() if k != "tg_error"} for s in reversed(rows)], "stats": signals.stats(db)}
+    records = performance.track_record(db)
+    return {"items": [{**{k: v for k, v in sig_out(db, s).items() if k != "tg_error"},
+                       "record": None if s.strategy == "test" else records.get((s.strategy, s.timeframe))} for s in reversed(rows)],
+            "stats": signals.stats(db)}
 
 
 _charts: dict[tuple[int, int], bytes] = {}

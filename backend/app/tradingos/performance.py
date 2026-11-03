@@ -145,6 +145,40 @@ def report(db: Session, now: datetime | None = None, days: int | None = None) ->
             "findings": notes, "recommendations": recs, "backtest_reference": BACKTEST_NOTE}
 
 
+RECORD_LABEL = "Model signal results (no leverage, after estimated fees and slippage): not executed trades. Past results don't predict the next signal."
+
+
+def track_record(db: Session, only: tuple[str, str] | None = None) -> dict[tuple[str, str], dict[str, Any]]:
+    """What members see next to a signal: how this setup's published signals ended so far, losers included. A record, never a
+    probability for the next one; `enough` is False until MIN_SAMPLE closed signals exist."""
+    q = select(TsSignal.strategy, TsSignal.timeframe, TsSignal.coin, TsSignal.model_pnl_pct).where(
+        TsSignal.published_at.is_not(None), TsSignal.strategy != "test", TsSignal.status.in_(CLOSED), TsSignal.model_pnl_pct.is_not(None))
+    if only:
+        q = q.where(TsSignal.strategy == only[0], TsSignal.timeframe == only[1])
+    groups: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
+    for strategy, tf, coin, pnl in db.execute(q):
+        groups[(strategy, tf)].append((pnl, pnl - 2 * slip(coin) * 100))
+    out = {}
+    for key, rows in groups.items():
+        wins = sum(1 for pnl, _ in rows if pnl > 0)
+        out[key] = {"closed": len(rows), "wins": wins, "losses": len(rows) - wins, "win_rate": round(wins / len(rows) * 100, 1),
+                    "avg_pct_after_costs": round(sum(net for _, net in rows) / len(rows), 3), "enough": len(rows) >= MIN_SAMPLE,
+                    "min_sample": MIN_SAMPLE, "label": RECORD_LABEL}
+    return out
+
+
+def record_of(db: Session, sig: TsSignal) -> dict[str, Any] | None:
+    return None if sig.strategy == "test" else track_record(db, (sig.strategy, sig.timeframe)).get((sig.strategy, sig.timeframe))
+
+
+def record_line(rec: dict[str, Any] | None) -> str | None:
+    """The record on a Telegram card."""
+    if not rec:
+        return None
+    judge = "" if rec["enough"] else " · too few to judge"
+    return f"📊 This setup so far: {rec['wins']}W {rec['losses']}L · {rec['avg_pct_after_costs']:+.2f}%/trade after costs (model){judge}"
+
+
 def text(rep: dict[str, Any]) -> str:
     o = rep["overall"]
     lines = [rep["label"], f"generated {rep['generated_at']}", "",

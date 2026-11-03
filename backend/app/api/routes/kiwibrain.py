@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession, Runtime
 from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
-from app.models.tradingos import KbEvent
+from app.models.tradingos import KbEvent, TsSignal
 from app.tradingos import brain, brainx, market
 
 router = APIRouter(tags=["kiwi-brain"])
@@ -303,8 +303,23 @@ ASK_SYSTEM = (
 LIMIT_FIELDS = {"max_leverage", "max_loss_per_trade_usd", "max_positions", "daily_loss_limit_usd", "allowed_coins", "paused"}
 
 
+SIGNAL_SYSTEM = (
+    "\nThe member is looking at the signal [SIG] on its chart and may be new to trading. Use plain words and explain any term you use. "
+    "Lay out what supports it, what would prove it wrong and what the stop would cost. Don't tell them to enter or skip: the decision is theirs. "
+    "[REC] is a past record, not a chance of winning: never state a probability for this signal, and if it says too few to judge, say that. "
+    "[CROWD] is not evidence the trade is good. Leave `proposal` empty here."
+)
+
+
+class AskTurn(StrictInput):
+    who: Literal["me", "kiwi"]
+    text: str = Field(max_length=2000)
+
+
 class AskIn(StrictInput):
     question: str = Field(min_length=2, max_length=500)
+    signal_id: int | None = None  # discussing this published signal on its chart
+    history: list[AskTurn] = Field(default_factory=list, max_length=6)  # earlier turns of this discussion
 
 
 @router.post("/members/kiwi-brain/ask")
@@ -314,12 +329,25 @@ async def ask(payload: AskIn, db: DbSession, runtime: Runtime, pc_session: Sessi
     m = _require(db, pc_session)
     if not brainx.ask_allowed(m.id):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Kiwi needs a break: try again in a few minutes.")
+    sig = None
+    if payload.signal_id is not None:
+        sig = db.get(TsSignal, payload.signal_id)
+        if sig is None or sig.published_at is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such signal.")
     text, ids = await asyncio.to_thread(brainx.evidence, db, m, market.data())
+    facts = await asyncio.to_thread(brainx.signal_facts, db, market.data(), sig) if sig else {}
+    if facts:
+        text = "\n".join(f"[{k}] {v}" for k, v in facts.items()) + "\n" + text
+        ids |= set(facts)
+    earlier = "".join(f"{'Member' if t.who == 'me' else 'Kiwi'}: {t.text}\n" for t in payload.history)
+    prompt = (f"Earlier in this discussion (not evidence):\n{earlier}\n" if earlier else "") + f"Question: {payload.question}\n\nEvidence:\n{text}"
     try:
         async with runtime.gate.interactive():
-            out, result, route = await complete_structured(runtime.router(db, background=False), "kiwi.ask", ASK_SYSTEM,
-                                                           f"Question: {payload.question}\n\nEvidence:\n{text}", _Ask)
+            out, result, route = await complete_structured(runtime.router(db, background=False), "kiwi.ask", ASK_SYSTEM + (SIGNAL_SYSTEM if sig else ""), prompt, _Ask)
     except Exception as e:  # noqa: BLE001 - no AI model: the common questions are answered straight from the records
+        if sig:  # this signal's own records, labelled as what they are: a question can't be reasoned about without a model
+            return {"answer": "Kiwi's AI is offline, so this is what's on record for this signal:\n" + "\n".join(facts.values()),
+                    "cited": list(facts), "sufficient": True, "proposal": None, "events": [], "model": "direct (records only, no AI model)"}
         direct = await asyncio.to_thread(brainx.direct_answer, db, m, market.data(), payload.question)
         if direct is None:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, (
@@ -332,7 +360,9 @@ async def ask(payload: AskIn, db: DbSession, runtime: Runtime, pc_session: Sessi
     cited = [c.strip("[] ") for c in out.cited if c.strip("[] ") in ids]
     proposal = None
     p = out.proposal
-    if p.kind == "config" and p.changes:
+    if sig:
+        pass  # the signal discussion has no settings proposals: those stay in the Brain's Ask Kiwi
+    elif p.kind == "config" and p.changes:
         cur = brainx.current_config(db, m)["config"]
         try:
             new = brainx.validate_config({**cur, **{k: v for k, v in p.changes.items() if k in brainx.DEFAULT_CONFIG}})

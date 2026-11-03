@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.models.members import LinkedIdentity, Member
 from app.models.tradingos import TsSignal, TsSignalAction
-from app.tradingos import alerts, chart, market, readout, signals, tickers, venues
+from app.tradingos import alerts, chart, market, performance, readout, signals, tickers, venues
 
 logger = logging.getLogger(__name__)
 
@@ -1084,6 +1084,10 @@ async def _trade_callback(db: Session, client: Any, cq: dict[str, Any], uid: int
 
 
 # ---------------------------------------------------------------- publishing
+def _card(db: Session, sig: TsSignal) -> str:
+    return signals.card(sig, signals.participation(db, sig), performance.record_line(performance.record_of(db, sig)))
+
+
 async def publish(db: Session, client: Any, sig: TsSignal, actor: str) -> TsSignal:
     """Post the signal card (chart + caption + buttons) to the signal group. Idempotent: a published signal isn't reposted."""
     s = signals.settings(db)
@@ -1096,7 +1100,7 @@ async def publish(db: Session, client: Any, sig: TsSignal, actor: str) -> TsSign
     if sig.status == "PENDING_REVIEW":
         sig.status = "WAITING"
     try:
-        msg = await client.send_photo(s.publish_chat, png, with_referral(db, signals.card(sig, signals.participation(db, sig)), "card"),
+        msg = await client.send_photo(s.publish_chat, png, with_referral(db, _card(db, sig), "card"),
                                       buttons(sig, tracked_url(db, "card")))
     except Exception as e:  # noqa: BLE001
         sig.tg_error = f"{type(e).__name__}: {str(e)[:200]}"
@@ -1119,7 +1123,7 @@ async def refresh(db: Session, client: Any, sig: TsSignal) -> None:
     if not (sig.tg_chat and sig.tg_message_id):
         return
     try:
-        await client.edit_caption(sig.tg_chat, sig.tg_message_id, with_referral(db, signals.card(sig, signals.participation(db, sig)), "card"),
+        await client.edit_caption(sig.tg_chat, sig.tg_message_id, with_referral(db, _card(db, sig), "card"),
                                   buttons(sig, tracked_url(db, "card")))
     except Exception as e:  # noqa: BLE001 - "message is not modified" and friends: the card stays as it was
         logger.info("card update skipped for #%s: %s", sig.number, e)

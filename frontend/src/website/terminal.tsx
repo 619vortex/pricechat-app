@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MemberApiError, memberApi, trackedRef } from "./members";
 import { reducedMotion } from "./motion";
 import { okToSaveLimits } from "./riskLimits";
 import { playSound } from "./sound";
 import { walletError } from "./wallet";
+import { CrowdLine, RecordLine, type Sig } from "./signalProof";
 import { site } from "./websiteData";
 import "./terminal.css";
+
+export type { Sig } from "./signalProof";
+
+const SignalDesk = lazy(() => import("./signaldesk"));  // brings the chart library, only when opened
 
 /** KIWI TRADING BOT: what a connected trader sees on /earn. Three things, top to bottom: Kiwi's chat (the real published
  *  signals as messages, plus what actually happened to them and to your own positions), your positions (exchange style, with
@@ -110,10 +115,6 @@ export interface Terminal {
   positions: Pos[]; other_positions: Other[]; history: Hist[]; signals: Record<string, { status: MyStatus; position_id?: number; mode?: Mode; detail?: string }>;
   account: Account; global_paused: boolean;
 }
-export interface Sig { id: number; number: number; coin: string; side: string; status: string; status_label: string; entry: number[]; stop: number;
-  target: number; rr: number; leverage: number[]; last_price: number | null; published_at: string | null; participation: Record<string, number>;
-  strategy: string; timeframe?: string; reason?: string; tp2?: number; activated_at?: string | null; closed_at?: string | null;
-  model_pnl_pct?: number | null; exit_price?: number | null; created_at?: string }
 export interface Connection { rankLevel: number | null; rankOk: boolean; minRank: number; wallet: string | null; referral: boolean; group: boolean;
   bot: boolean; botUsername: string; groupUrl: string }
 
@@ -390,36 +391,32 @@ function feed(sigs: Sig[], t: Terminal | null, chat: GroupChat | null = null): M
   return out.sort((a, b) => a.at.localeCompare(b.at)).slice(-50);
 }
 
-function SignalMsg({ x, my, closedPnl, canEnter, busy, onEnter, onSkip }: {
-  x: Sig; my?: Terminal["signals"][string]; closedPnl: number | null; canEnter: boolean; busy: boolean; onEnter: () => void; onSkip: () => void;
-}) {
-  const [chart, setChart] = useState(false);
+type SignalActs = { x: Sig; my?: Terminal["signals"][string]; closedPnl: number | null; canEnter: boolean; busy: boolean; onEnter: () => void; onSkip: () => void; onView?: () => void };
+
+function SignalAction({ x, my, closedPnl, canEnter, busy, onEnter, onSkip, onView }: SignalActs) {
   const status = my?.status ?? "NOT_ENTERED";
   const open = x.status === "ACTIVE" || x.status === "WAITING";
-  const test = x.strategy === "test";
-  let action: ReactNode;
   if ((status === "POSITION_OPEN" || status === "ORDER_PENDING") && my?.position_id) {
-    action = <a className="kt-btn" href={`#kt-pos-${my.position_id}`}>VIEW POSITION</a>;
-  } else if (status === "POSITION_CLOSED") {
-    action = <span className={`kt-state${tone(closedPnl)}`}>CLOSED{closedPnl != null ? ` · ${usd(closedPnl, true)}` : ""}</span>;
-  } else if (!open) {
-    action = <span className="kt-state">{x.status === "EXPIRED" ? "EXPIRED" : x.status_label}</span>;
-  } else if (status === "REJECTED") {
-    action = <span className="kt-state">SKIPPED</span>;
-  } else {
-    action = (
-      <>
-        <button className="kt-btn is-go" disabled={busy || !canEnter} onClick={onEnter}>ENTER TRADE</button>
-        <button className="kt-btn" disabled={busy} onClick={onSkip}>SKIP</button>
-      </>
-    );
+    return <a className="kt-btn" href={`#kt-pos-${my.position_id}`} onClick={onView}>VIEW POSITION</a>;
   }
+  if (status === "POSITION_CLOSED") return <span className={`kt-state${tone(closedPnl)}`}>CLOSED{closedPnl != null ? ` · ${usd(closedPnl, true)}` : ""}</span>;
+  if (!open) return <span className="kt-state">{x.status === "EXPIRED" ? "EXPIRED" : x.status_label}</span>;
+  if (status === "REJECTED") return <span className="kt-state">SKIPPED</span>;
+  return (
+    <>
+      <button className="kt-btn is-go" disabled={busy || !canEnter} onClick={onEnter}>ENTER TRADE</button>
+      <button className="kt-btn" disabled={busy} onClick={onSkip}>SKIP</button>
+    </>
+  );
+}
+
+function SignalMsg({ onDesk, ...acts }: SignalActs & { onDesk: () => void }) {
+  const { x } = acts;
+  const test = x.strategy === "test";
   return (
     <div className={`kt-card is-${x.side.toLowerCase()}`} aria-label={`Signal ${num(x.number)} ${x.coin} ${x.side}`}>
       <p className="kt-card-title"><span aria-hidden>{x.side === "LONG" ? "🟢" : "🔴"}</span> <b>{x.coin} {x.side}</b>
         {test && <span className="kt-tag">Manual setup</span>}
-        <span className={`kt-kiwis${(x.participation.enter ?? 0) > 0 ? " is-in" : ""}`} title="Kiwis with a position in this signal (live)">
-          👥 {x.participation.enter ?? 0} {(x.participation.enter ?? 0) === 1 ? "Kiwi" : "Kiwis"} in</span>
         <span className="kt-num">#{num(x.number)}</span></p>
       <dl className="kt-levels">
         <div><dt>Entry</dt><dd>${px(x.entry[0])}–${px(x.entry[1])}</dd></div>
@@ -429,11 +426,11 @@ function SignalMsg({ x, my, closedPnl, canEnter, busy, onEnter, onSkip }: {
         <div><dt>Leverage</dt><dd>{lev(x.leverage)}</dd></div>
         <div><dt>Risk/Reward</dt><dd>1:{x.rr.toFixed(1)}</dd></div>
       </dl>
-      <button className="kt-chart-btn" aria-expanded={chart} onClick={() => setChart(!chart)}>📊 {x.timeframe ?? ""} chart</button>
-      {chart && <img className="kt-chart" src={`/api/members/trading-os/signals/${x.id}/chart.png`} alt={`${x.coin} chart with the signal's entry, stop and target`}
-                     loading="lazy" width={1200} height={675} />}
+      <RecordLine record={x.record} strategy={x.strategy} />
+      <CrowdLine x={x} />
+      <button className="kt-chart-btn" onClick={onDesk}>📈 Open chart & ask Kiwi</button>
       {x.reason && <p className="kt-says"><b>Kiwi says:</b> “{x.reason}”</p>}
-      <div className="kt-actions">{action}</div>
+      <div className="kt-actions"><SignalAction {...acts} /></div>
     </div>
   );
 }
@@ -774,6 +771,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
   const [autoHours, setAutoHours] = useState(24);
   useEffect(() => { if (typeof location !== "undefined" && location.hash === "#settings") setSettings(true); }, []);
   const [pv, setPv] = useState<{ token: string; mode: Mode; plan: Plan; sig: Sig } | null>(null);
+  const [deskId, setDeskId] = useState<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const lastKey = useRef<string | null>(null);
 
@@ -846,6 +844,12 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
     }
   }, [msgs]);
 
+  const signalActs = (x: Sig): SignalActs => ({
+    x, my: t?.signals[String(x.id)], busy: busy !== null, canEnter: !paused && restricted.length === 0 && !authBad,
+    closedPnl: hist.find((h) => h.signal_id === x.id)?.net_pnl ?? null, onEnter: () => void enter(x),
+    onSkip: () => void run("reject", () => memberApi(`/members/trading/signals/${x.id}/reject`, { method: "POST" }), `Skipped #${num(x.number)}`),
+  });
+  const deskSig = deskId == null ? undefined : sigs.find((x) => x.id === deskId);
   async function enter(s: Sig) {
     const p = await run("preview", () => memberApi<{ token: string; mode: Mode; plan: Plan }>("/members/trading/preview",
       { method: "POST", body: JSON.stringify({ signal_id: s.id }) }));
@@ -910,9 +914,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
             </div>
             {pinOpen ? (
               <div className="kt-pin-card">
-                <SignalMsg x={pinned} my={t?.signals[String(pinned.id)]} busy={busy !== null} canEnter={!paused && restricted.length === 0 && !authBad}
-                           closedPnl={hist.find((h) => h.signal_id === pinned.id)?.net_pnl ?? null} onEnter={() => void enter(pinned)}
-                           onSkip={() => void run("reject", () => memberApi(`/members/trading/signals/${pinned.id}/reject`, { method: "POST" }), `Skipped #${num(pinned.number)}`)} />
+                <SignalMsg {...signalActs(pinned)} onDesk={() => { setErr(null); setDeskId(pinned.id); }} />
               </div>
             ) : (
               <p className="kt-pin-line"><b>#{num(pinned.number)} {pinned.coin} {pinned.side}</b> · Entry ${px(pinned.entry[0])}–${px(pinned.entry[1])} · SL ${px(pinned.stop)} · TP ${px(pinned.target)}</p>
@@ -935,10 +937,7 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
               <div className="kt-bubble">
                 <p className="kt-meta">KIWI BOT · {clock(m.at)}</p>
                 {m.sig ? (
-                  <SignalMsg x={m.sig} my={t?.signals[String(m.sig.id)]} busy={busy !== null} canEnter={!paused && restricted.length === 0 && !authBad}
-                             closedPnl={hist.find((h) => h.signal_id === m.sig!.id)?.net_pnl ?? null}
-                             onEnter={() => void enter(m.sig!)}
-                             onSkip={() => void run("reject", () => memberApi(`/members/trading/signals/${m.sig!.id}/reject`, { method: "POST" }), `Skipped #${num(m.sig!.number)}`)} />
+                  <SignalMsg {...signalActs(m.sig)} onDesk={() => { setErr(null); setDeskId(m.sig!.id); }} />
                 ) : <p className="kt-text">{m.text}</p>}
               </div>
             </div>
@@ -1038,9 +1037,18 @@ export function TradingTerminal({ conn, after }: { conn: Connection; after?: Rea
       {after}
 
       {/* dialogs */}
+      {deskSig && (
+        <Suspense fallback={null}>
+          <SignalDesk sig={deskSig} modeTag={mode === "LIVE" ? "LIVE · REAL MONEY" : NOT_LIVE[mode]} error={err}
+                      notice={authBad ? "Kiwi's trading permission isn't active on Hyperliquid: new trades are blocked." : restricted.length > 0 ? `New trades need: ${restricted.join(" · ")}.` : paused ? "New trades are paused." : null}
+                      actions={<SignalAction {...signalActs(deskSig)} onView={() => setDeskId(null)} />}
+                      onClose={() => { if (!pv) setDeskId(null); }} />
+        </Suspense>
+      )}
       {pv && (
         <Modal label="Confirm trade" onClose={cancelPreview}>
           <h3 className={`kt-confirm-title is-${pv.sig.side.toLowerCase()}`}>{pv.sig.coin} {pv.sig.side}</h3>
+          <RecordLine record={pv.sig.record} strategy={pv.sig.strategy} />
           <p className={`kt-mode is-${pv.mode.toLowerCase()}`}>{pv.mode === "LIVE" ? "LIVE · REAL MONEY" : NOT_LIVE[pv.mode]}</p>
           <dl className="kt-confirm">
             <div><dt>Entry (market)</dt><dd>≈ ${px(pv.plan.entry)}</dd></div>
