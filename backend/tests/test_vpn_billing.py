@@ -325,3 +325,47 @@ def test_closed_means_nobody_buys_except_the_owner_testing(client: TestClient, d
     c.cookies.delete(admin_auth.COOKIE)
     assert c.get("/api/members/vpn/public").json()["enabled"] is False  # without the cookie: closed again
     assert vpn.settings(db).enabled is False
+
+
+def test_admin_sees_customers_and_payments_and_can_block(client: TestClient, db: Session, fake: Any, keys: None) -> None:  # noqa: F811
+    server = add_server(db, fake)
+    open_vpn(db)
+    anon, key = billing.new_anonymous(db)
+    billing.start_usdt(db, anon, 9.99, "solana")
+    order = db.scalars(select(VpnPayment)).one().order_ref
+    assert ipn(client, order, "finished", 9.99, "usdtsol").status_code == 200
+    db.expire_all()
+    dev = vpn.create_device(db, db.get(VpnAccount, anon.id), "phone", server.id)[0]
+    public_key, dev_id = dev.public_key, dev.id
+    named = member_at(db, "egg", "alice")  # a manual grant, no payment, no device: not a customer yet
+    vpn.create_device(db, named, "laptop", server.id)
+    vpn.account_of(db, member_at(db, "egg", "looker", paid=False))  # only looked at the page
+    db.commit()
+    items = client.get("/api/vpn/admin/customers").json()["items"]
+    assert [i["label"] for i in items] == ["alice", f"Anonymous #{anon.id}"]
+    a = items[1]
+    assert a["anonymous"] and a["state"] == "active" and a["payments"] == 1 and a["paid_usd"] == 9.99 and a["paid_until"]
+    assert a["devices"][0]["name"] == "phone" and a["devices"][0]["server"] == "Frankfurt"
+    body = json.dumps(items)
+    assert key not in body and public_key not in body and "key_hash" not in body  # no secrets, no keys
+    pays = client.get("/api/vpn/admin/payments").json()["items"]
+    assert pays[0]["account"] == f"Anonymous #{anon.id}" and pays[0]["status"] == "credited" and pays[0]["days"] == 30.0 and pays[0]["network"] == "solana"
+    assert client.get("/api/vpn/admin/overview").json()["billing"]["revenue_30d_usd"] == 9.99
+    # block by pasting the abusive key: off the node at once, can't come back, and paying doesn't undo it
+    assert client.post("/api/vpn/admin/block-key", json={"key": "KIWI-NOT-A-REAL-KEY"}).status_code == 404
+    out = client.post("/api/vpn/admin/block-key", json={"key": key}).json()
+    assert out["status"] == "blocked" and out["devices_removed"] == 1 and public_key not in fake.peers
+    db.expire_all()
+    assert db.get(VpnDevice, dev_id) is None
+    head = {"x-kiwi-key": key}
+    assert client.post("/api/members/vpn/anon/devices", json={"name": "x", "server_id": server.id}, headers=head).status_code == 403
+    assert [i for i in client.get("/api/vpn/admin/customers").json()["items"] if i["id"] == anon.id][0]["state"] == "blocked"
+    # unblock by account number
+    assert client.post(f"/api/vpn/admin/accounts/{anon.id}/block", json={"blocked": False}).json()["status"] == "active"
+    assert client.post("/api/members/vpn/anon/devices", json={"name": "x", "server_id": server.id}, headers=head).status_code == 201
+    assert client.post("/api/vpn/admin/accounts/99999/block", json={"blocked": True}).status_code == 404
+    # revoke one device
+    d = db.scalars(select(VpnDevice).where(VpnDevice.name == "laptop")).one()
+    k = d.public_key
+    assert client.delete(f"/api/vpn/admin/devices/{d.id}").status_code == 204 and k not in fake.peers
+    assert client.delete(f"/api/vpn/admin/devices/{d.id}").status_code == 404

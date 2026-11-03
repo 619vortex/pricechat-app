@@ -215,6 +215,49 @@ def admin_settings(payload: SettingsUpdate, db: DbSession) -> dict[str, Any]:
         raise _fail(e) from e
 
 
+@router.get("/vpn/admin/customers")
+def admin_customers(db: DbSession) -> dict[str, Any]:
+    return {"items": service.admin_customers(db)}
+
+
+@router.get("/vpn/admin/payments")
+def admin_payments(db: DbSession) -> dict[str, Any]:
+    return {"items": service.admin_payments(db)}
+
+
+class BlockInput(StrictInput):
+    blocked: bool
+
+
+@router.post("/vpn/admin/accounts/{account_id}/block")
+def admin_block(account_id: int, payload: BlockInput, db: DbSession) -> dict[str, Any]:
+    try:
+        return service.set_blocked(db, account_id, payload.blocked)
+    except VpnError as e:
+        raise _fail(e) from e
+
+
+class BlockKeyInput(StrictInput):
+    key: str = Field(min_length=8, max_length=80)
+
+
+@router.post("/vpn/admin/block-key")
+def admin_block_key(payload: BlockKeyInput, db: DbSession) -> dict[str, Any]:
+    try:
+        return service.block_key(db, payload.key)
+    except VpnError as e:
+        raise _fail(e) from e
+
+
+@router.delete("/vpn/admin/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_device(device_id: int, db: DbSession) -> Response:
+    try:
+        service.admin_delete_device(db, device_id)
+    except VpnError as e:
+        raise _fail(e) from e
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 class ServerInput(StrictInput):
     name: str = Field(min_length=1, max_length=48)
     region: str = Field("", max_length=48)

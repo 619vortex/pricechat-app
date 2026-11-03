@@ -21,7 +21,6 @@ export const AREAS: NavArea[] = [
       { to: "/members", label: "Members", about: "Everyone with a Kiwi Passport: their rank, XP and linked accounts." },
       { to: "/rank-rewards", label: "Rank rewards", about: "What each Kiwi rank unlocks, and reward claims waiting for you." },
       { to: "/workers", label: "Workers", about: "Paid helpers who invite people, and their reports." },
-      { to: "/vpn", label: "VPN", about: "Kiwi VPN: who can use it, devices per member, and the WireGuard servers." },
       { to: "/realm", label: "Realm (test)", about: "Play Vortex Realm, the Warrior Kiwi game, to test it. Members play it in Passport → Realm." },
     ],
   },
@@ -62,6 +61,7 @@ export const AREAS: NavArea[] = [
   {
     key: "system", label: "System", icon: "⚙",
     pages: [
+      { to: "/vpn", label: "VPN", about: "Kiwi VPN: public sales, servers, customers, payments and blocking keys." },
       { to: "/settings", label: "Settings", about: "The emergency stop, background jobs and AI models." },
       { to: "/api-keys", label: "API keys", about: "Passwords and keys for the services Price Chat connects to." },
       { to: "/activity", label: "Activity log", about: "Everything Price Chat did, newest first." },

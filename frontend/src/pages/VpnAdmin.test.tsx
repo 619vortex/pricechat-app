@@ -25,17 +25,85 @@ function serve(handler: (key: string, body: string | undefined) => [number, unkn
   }));
 }
 
+describe("VPN admin: sales, customers and blocking", () => {
+  const CUSTOMER = { id: 4, anonymous: true, label: "Anonymous #4", state: "active", paid_until: "2026-12-03T00:00:00Z", lapsed_at: null, has_card: false, payments: 1, paid_usd: 9.99,
+    devices: [{ id: 8, name: "phone", server: "Helsinki 1", ip: "10.66.0.2", last_handshake: new Date().toISOString(), rx_bytes: 5, tx_bytes: 5 }] };
+  const PAYMENT = { id: 2, provider: "nowpayments", network: "solana", amount_usd: 9.99, paid_usd: 9.99, status: "credited", days: 30, created_at: "2026-11-03T00:00:00Z", credited_at: "2026-11-03T00:00:00Z", account: "Anonymous #4" };
+  const api = (key: string): [number, unknown] => {
+    if (key.endsWith("/customers")) return [200, { items: [CUSTOMER] }];
+    if (key.endsWith("/payments")) return [200, { items: [PAYMENT, { ...PAYMENT, id: 1, account: null }] }];
+    if (key.includes("/block") || key.startsWith("DELETE")) return [200, { id: 4, status: "blocked", devices_removed: 1 }];
+    return [200, overview()];
+  };
+
+  it("shows sales off and test mode, and asks before opening to the public", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("confirm", (m: string) => { seen.push(m); return false; });
+    serve(api);
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    expect(container.textContent).toMatch(/Public sales.*off · test mode/);
+    fireEvent.click(screen.getByLabelText("VPN enabled"));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await flush();
+    expect(seen[0]).toMatch(/Open Kiwi VPN to the public/);
+    expect(calls.some((c) => c.startsWith("PUT"))).toBe(false);  // declined: nothing sent
+  });
+
+  it("lists customers with status, devices and payments; older anonymous payments stay unlinked", async () => {
+    serve(api);
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    const t = container.textContent!;
+    expect(t).toMatch(/Anonymous #4/); expect(t).toMatch(/active/); expect(t).toMatch(/phone · Helsinki 1/); expect(t).toMatch(/connected/);
+    expect(t).toMatch(/\$9\.99 \(1\)/); expect(t).toMatch(/USDT solana/); expect(t).toMatch(/30 days/); expect(t).toMatch(/unlinked after 7 days/);
+  });
+
+  it("blocks and revokes only after asking, and blocks a pasted key", async () => {
+    let answer = false;
+    vi.stubGlobal("confirm", () => answer);
+    serve(api);
+    render(<VpnAdminPage />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Block" }));
+    await flush();
+    expect(calls.some((c) => c.includes("/block"))).toBe(false);
+    answer = true;
+    fireEvent.click(screen.getByRole("button", { name: "Block" }));
+    await flush();
+    expect(calls).toContain('POST /api/vpn/admin/accounts/4/block {"blocked":true}');
+    fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    await flush();
+    expect(calls.some((c) => c.startsWith("DELETE /api/vpn/admin/devices/8"))).toBe(true);
+    fireEvent.change(screen.getByLabelText("Key to block"), { target: { value: "KIWI-AAAA-BBBB" } });
+    fireEvent.click(screen.getByRole("button", { name: "Block key" }));
+    await flush();
+    expect(calls).toContain('POST /api/vpn/admin/block-key {"key":"KIWI-AAAA-BBBB"}');
+  });
+
+  it("edits a server and leaves the token alone unless a new one is typed", async () => {
+    serve(api);
+    render(<VpnAdminPage />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Edit capacity"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save server" }));
+    await flush();
+    expect(calls).toContain('PATCH /api/vpn/admin/servers/3 {"name":"Auckland 1","region":"New Zealand","capacity":50}');
+  });
+});
+
 describe("VPN admin", () => {
   it("shows totals and the servers table", async () => {
     serve(() => [200, overview()]);
     const { container } = render(<VpnAdminPage />);
     await flush();
-    expect(container.textContent).toContain("Members using it");
+    expect(container.textContent).toContain("Customers with devices");
     const row = container.querySelector("tbody tr")!.textContent!;
     expect(row).toContain("Auckland 1");
     expect(row).toContain("online");
     expect(row).toContain("12 / 250");
-    expect(container.textContent).toContain("Run vpn-node/install.sh on a fresh Ubuntu VPS and paste what it prints.");
+    expect(container.textContent).toMatch(/install-shared\.sh on a server with another tunnel/);
     expect(row).not.toContain("ad blocking");
   });
 
@@ -61,6 +129,7 @@ describe("VPN admin", () => {
     });
     render(<VpnAdminPage />);
     await flush();
+    vi.stubGlobal("confirm", () => true);
     fireEvent.click(screen.getByLabelText("VPN enabled"));
     fireEvent.change(screen.getByLabelText("Max devices"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Monthly cap GB"), { target: { value: "50" } });

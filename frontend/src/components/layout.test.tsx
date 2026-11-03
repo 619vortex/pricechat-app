@@ -50,6 +50,7 @@ describe("Admin layout", () => {
     }
     expect(locate("/telegram/topics/4").page.to).toBe("/telegram");
     expect(locate("/pokemon/cards/9").area.key).toBe("pokemon");
+    expect(locate("/vpn").area.key).toBe("system");
     expect(locate("/invite-bot/send").page.label).toBe("Send invites");
   });
 

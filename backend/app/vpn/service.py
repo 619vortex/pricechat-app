@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
-from app.models.vpn import VpnAccount, VpnDevice, VpnServer, VpnSettings
+from app.models.vpn import VpnAccount, VpnDevice, VpnPayment, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
 from app.vpn import billing, keys, node
 
@@ -506,6 +506,71 @@ def admin_overview(db: Session) -> dict[str, Any]:
            "billing": billing.totals(db)}
     db.commit()
     return out
+
+
+def admin_customers(db: Session, limit: int = 200, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Accounts that have paid or have devices, newest first. An anonymous account shows only its number: nothing else exists."""
+    now = now or utcnow()
+    accounts = list(db.scalars(select(VpnAccount).where(
+        (VpnAccount.paid_until.is_not(None)) | (VpnAccount.status != "active") | VpnAccount.id.in_(select(VpnDevice.account_id))).order_by(VpnAccount.id.desc()).limit(limit)))
+    ids = [a.id for a in accounts]
+    devices: dict[int, list[VpnDevice]] = {}
+    for d in db.scalars(select(VpnDevice).where(VpnDevice.account_id.in_(ids)).order_by(VpnDevice.id)) if ids else []:
+        devices.setdefault(d.account_id, []).append(d)
+    names = dict(db.execute(select(VpnServer.id, VpnServer.name)).all())
+    paid = {a: (n, t) for a, n, t in db.execute(select(VpnPayment.account_id, func.count(), func.sum(VpnPayment.paid_usd))
+                                                .where(VpnPayment.account_id.in_(ids), VpnPayment.status == "credited").group_by(VpnPayment.account_id))} if ids else {}
+    r = rules(db, sorted({a.member_id for a in accounts if a.member_id is not None}))
+    out = []
+    for a in accounts:
+        m = r.people.get(a.member_id) if a.member_id is not None and r.people else None
+        n, total = paid.get(a.id, (0, 0.0))
+        out.append({"id": a.id, "anonymous": a.member_id is None, "label": (m.username if m else "(member gone)") if a.member_id is not None else f"Anonymous #{a.id}",
+                    "state": access(db, a, r, now), "paid_until": _iso(a.paid_until), "lapsed_at": _iso(a.lapsed_at), "has_card": bool(a.stripe_customer),
+                    "payments": int(n), "paid_usd": round(float(total or 0), 2),
+                    "devices": [{"id": d.id, "name": d.name, "server": names.get(d.server_id, "?"), "ip": d.ip, "last_handshake": _iso(d.last_handshake),
+                                 "rx_bytes": d.rx_bytes, "tx_bytes": d.tx_bytes} for d in devices.get(a.id, [])]})
+    return out
+
+
+def admin_payments(db: Session, limit: int = 50) -> list[dict[str, Any]]:
+    """Recent payments. Older anonymous ones have lost their account link on purpose (billing.scrub)."""
+    rows = db.execute(select(VpnPayment, VpnAccount).join(VpnAccount, VpnAccount.id == VpnPayment.account_id, isouter=True)
+                      .order_by(VpnPayment.id.desc()).limit(limit)).all()
+    people = dict(db.execute(select(Member.id, Member.username).where(Member.id.in_([a.member_id for _, a in rows if a is not None and a.member_id]))).all())
+    return [{"id": p.id, "provider": p.provider, "network": p.network, "amount_usd": p.amount_usd, "paid_usd": p.paid_usd, "status": p.status,
+             "days": round(p.seconds / 86400, 1), "created_at": _iso(p.created_at), "credited_at": _iso(p.credited_at),
+             "account": None if a is None else (people.get(a.member_id, "(member gone)") if a.member_id else f"Anonymous #{a.id}")} for p, a in rows]
+
+
+def set_blocked(db: Session, account_id: int, blocked: bool) -> dict[str, Any]:
+    """Block: every device comes off the node now and is deleted, whatever time is left. Unblock: can add devices again."""
+    acct = db.get(VpnAccount, account_id)
+    if acct is None:
+        raise VpnError("Account not found.", 404)
+    acct.status = "blocked" if blocked else "active"
+    removed = 0
+    if blocked:
+        for dev in list(db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id))):
+            _remove(db, dev)
+            removed += 1
+    db.commit()
+    return {"id": acct.id, "status": acct.status, "devices_removed": removed}
+
+
+def block_key(db: Session, key: str) -> dict[str, Any]:
+    acct = billing.by_key(db, key)
+    if acct is None:
+        raise VpnError("No account has that key.", 404)
+    return set_blocked(db, acct.id, True)
+
+
+def admin_delete_device(db: Session, device_id: int) -> None:
+    dev = db.get(VpnDevice, device_id)
+    if dev is None:
+        raise VpnError("Device not found.", 404)
+    _remove(db, dev)
+    db.commit()
 
 
 # --- sync (the vpn.sync job) -------------------------------------------------------------------------------------------
