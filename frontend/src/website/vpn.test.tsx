@@ -14,7 +14,7 @@ const DEVICE: VpnDevice = { id: 7, name: "My iPhone", server_id: 1, ip: "10.66.0
                  paused_until: null };
 const USAGE: VpnState["usage"] = { month: "2026-10", used_bytes: 0, cap_bytes: 0, paused_until: null };
 const state = (over: Partial<VpnState> = {}): VpnState => ({
-  enabled: true, eligible: true, reason: null, required_rank: "Scout Kiwi", max_devices: 3, servers: SERVERS, devices: [], usage: USAGE, ...over,
+  enabled: true, eligible: true, reason: null, max_devices: 3, servers: SERVERS, devices: [], usage: USAGE, ...over,
 });
 
 let calls: string[] = [];
@@ -36,14 +36,13 @@ async function settle() {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("Kiwi VPN page", () => {
-  it("shows the rank needed and a nudge to rank up when locked", async () => {
+  it("shows the price, and no rank talk, when locked", async () => {
     serve({ "/api/website/home": [200, HOME],
-            "GET /api/members/vpn": [200, state({ eligible: false, reason: "Reach Kiwi Rank 4 (Scout Kiwi) to unlock", devices: [] })] });
+            "GET /api/members/vpn": [200, state({ eligible: false, reason: "Kiwi VPN is $9.99 a month. Subscriptions by card or crypto open soon.", devices: [] })] });
     const { container } = render(<VpnPage />);
     await settle();
-    expect(screen.getByText("Reach Kiwi Rank 4 (Scout Kiwi) to unlock")).toBeTruthy();
-    expect(container.querySelector(".vpn-locked strong")!.textContent).toBe("Scout Kiwi");
-    expect(screen.getByText(/Rank up in your Passport/).getAttribute("href")).toBe("/passport");
+    expect(screen.getByText(/Kiwi VPN is \$9\.99 a month\. Subscriptions by card or crypto open soon\./)).toBeTruthy();
+    expect(container.textContent).not.toMatch(/Kiwi Rank|Rank up/);
     expect(container.querySelector(".vpn-form")).toBeNull();  // no device form while locked
   });
 

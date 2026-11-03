@@ -3,25 +3,23 @@ import { request } from "../api/client";
 import { useApi } from "../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Field, Loading, PageHeader, Stat, relativeTime } from "../components/ui";
 
-/* Kiwi VPN (OWNER ONLY): who may use it (min Kiwi Rank, devices per member), and the WireGuard servers members connect to.
+/* Kiwi VPN (OWNER ONLY): who may use it (a Kiwi VPN grant, devices per member), and the WireGuard servers members connect to.
    Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
 
-export type VpnSettings = { enabled: boolean; min_rank: string; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
-/** A Kiwi Rank the minimum can be set to, in ladder order: `key` is what's saved, `name` what's shown. */
-export type VpnRank = { key: string; name: string };
+export type VpnSettings = { enabled: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean };
-export type VpnOverview = { settings: VpnSettings; ranks: VpnRank[]; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number } };
+export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number } };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function SettingsCard({ s, ranks, onSaved }: { s: VpnSettings; ranks: VpnRank[]; onSaved: () => void }) {
+function SettingsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
   const [v, setV] = useState(s);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => setV(s), [s]);
-  const dirty = v.enabled !== s.enabled || v.min_rank !== s.min_rank || v.max_devices !== s.max_devices || v.monthly_cap_gb !== s.monthly_cap_gb;
+  const dirty = v.enabled !== s.enabled || v.max_devices !== s.max_devices || v.monthly_cap_gb !== s.monthly_cap_gb;
   async function save() {
     setBusy(true); setMsg(null);
     try {
@@ -38,18 +36,12 @@ function SettingsCard({ s, ranks, onSaved }: { s: VpnSettings; ranks: VpnRank[];
     <Card title="Settings">
       <div className="form">
         <div className="row">
-          <span><b>Kiwi VPN open to members</b><br /><span className="muted small">Off: the page says "coming soon" and nobody can add devices.</span></span>
+          <span><b>Kiwi VPN open to members</b><br /><span className="muted small">Off: the page says "coming soon" and nobody can add devices. On: only members with a Kiwi VPN grant can (Members › entitlements); everyone else sees the price.</span></span>
           <label className="toggle" title={v.enabled ? "On" : "Off"}>
             <input type="checkbox" aria-label="VPN enabled" checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} /><span />
           </label>
         </div>
         <div className="row-fields">
-          <Field label="Minimum Kiwi Rank" hint="Members below it see the locked page; devices of members who drop below are revoked.">
-            <select className="input" aria-label="Minimum rank" value={v.min_rank} onChange={(e) => setV({ ...v, min_rank: e.target.value })}>
-              {(ranks.some((r) => r.key === v.min_rank) ? ranks : [{ key: v.min_rank, name: v.min_rank }, ...ranks])
-                .map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
-            </select>
-          </Field>
           <Field label="Devices per member" hint="1 to 10.">
             <input className="input" type="number" min={1} max={10} aria-label="Max devices" value={v.max_devices}
                    onChange={(e) => setV({ ...v, max_devices: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })} />
@@ -166,7 +158,7 @@ export function VpnAdminPage() {
   const d = r.data;
   return (
     <div className="stack">
-      <PageHeader title="Kiwi VPN" subtitle="The WireGuard VPN members unlock with their Kiwi Rank: who can use it, and the servers. No traffic is logged. Owner only."
+      <PageHeader title="Kiwi VPN" subtitle="The paid WireGuard VPN ($9.99 a month): who can use it, and the servers. No traffic is logged. Owner only."
         actions={<button className="btn" onClick={() => void r.reload()} disabled={r.loading}>Refresh</button>} />
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
       {r.loading && !d ? <Loading /> : null}
@@ -178,7 +170,7 @@ export function VpnAdminPage() {
           <Stat label="Servers online" value={`${d.servers.filter((x) => x.online).length} / ${d.servers.length}`}
                 tone={d.servers.some((x) => x.enabled && !x.online) ? "warn" : "good"} />
         </div>
-        <SettingsCard s={d.settings} ranks={d.ranks} onSaved={() => void r.reload()} />
+        <SettingsCard s={d.settings} onSaved={() => void r.reload()} />
         <Card title={`Servers (${d.servers.length})`}>
           {!d.servers.length ? <Empty>No servers yet. Add one below.</Empty> : (
             <div className="table-wrap"><table className="table">

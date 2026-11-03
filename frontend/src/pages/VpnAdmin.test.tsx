@@ -10,8 +10,7 @@ const SERVER = { id: 3, name: "Auckland 1", region: "New Zealand", country_code:
   agent_url: "https://203.0.113.10:8443", capacity: 250, enabled: true, online: true, last_seen: new Date().toISOString(), last_error: null,
   devices: 12, active_24h: 5, adblock: false };
 const overview = (over: Partial<VpnOverview> = {}): VpnOverview => ({
-  settings: { enabled: false, min_rank: "scout", max_devices: 3, monthly_cap_gb: 0 },
-  ranks: [{ key: "chick", name: "Kiwi Chick" }, { key: "kiwi", name: "Kiwi" }, { key: "scout", name: "Scout Kiwi" }, { key: "warrior", name: "Warrior Kiwi" }],
+  settings: { enabled: false, max_devices: 3, monthly_cap_gb: 0 },
   servers: [SERVER], totals: { devices: 12, members: 9, active_24h: 5 }, ...over,
 });
 
@@ -47,14 +46,11 @@ describe("VPN admin", () => {
     expect(container.querySelector("tbody tr")!.textContent).toContain("ad blocking");
   });
 
-  it("shows rank names in the picker and saves the rank key", async () => {
+  it("has no rank setting", async () => {
     serve(() => [200, overview()]);
     render(<VpnAdminPage />);
     await flush();
-    const select = screen.getByLabelText("Minimum rank") as HTMLSelectElement;
-    expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
-      ["chick", "Kiwi Chick"], ["kiwi", "Kiwi"], ["scout", "Scout Kiwi"], ["warrior", "Warrior Kiwi"]]);
-    expect(select.value).toBe("scout");
+    expect(screen.queryByLabelText("Minimum rank")).toBeNull();
   });
 
   it("saves the settings", async () => {
@@ -66,12 +62,11 @@ describe("VPN admin", () => {
     render(<VpnAdminPage />);
     await flush();
     fireEvent.click(screen.getByLabelText("VPN enabled"));
-    fireEvent.change(screen.getByLabelText("Minimum rank"), { target: { value: "warrior" } });
     fireEvent.change(screen.getByLabelText("Max devices"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Monthly cap GB"), { target: { value: "50" } });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     await flush();
-    expect(calls).toContain('PUT /api/vpn/admin/settings {"enabled":true,"min_rank":"warrior","max_devices":5,"monthly_cap_gb":50}');
+    expect(calls).toContain('PUT /api/vpn/admin/settings {"enabled":true,"max_devices":5,"monthly_cap_gb":50}');
     expect(screen.getByText("Saved")).toBeTruthy();
   });
 

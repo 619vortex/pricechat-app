@@ -1,4 +1,4 @@
-"""Kiwi VPN: the rank gate, the device limit, IP allocation (unique under a racing insert), the config, the private key never
+"""Kiwi VPN: the access gate, the device limit, IP allocation (unique under a racing insert), the config, the private key never
 stored, own devices only, owner-only admin routes, the sync (revoke / re-add / remove unknown), certificate pinning and /vpn
 only in private chats. No network except a local TLS server for the pinning test; the node agent is faked."""
 
@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.db.base import utcnow
 from app.members import service as members
 from app.members import xp as ledger
 from app.members.catalog import ensure_catalog
@@ -77,7 +78,20 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeNode:
     return f
 
 
-def member_at(db: Session, rank_key: str, name: str = "kiwi") -> Member:
+def grant(db: Session, m: Member, **over: Any) -> MemberEntitlement:
+    ent = db.scalar(select(Entitlement).where(Entitlement.key == vpn.ENTITLEMENT))
+    row = MemberEntitlement(member_id=m.id, entitlement_id=ent.id, granted_by="test", **over)
+    db.add(row)
+    db.commit()
+    return row
+
+
+def ungrant(db: Session, m: Member) -> None:
+    db.delete(db.scalar(select(MemberEntitlement).where(MemberEntitlement.member_id == m.id)))
+    db.commit()
+
+
+def member_at(db: Session, rank_key: str, name: str = "kiwi", paid: bool = True) -> Member:
     ensure_catalog(db)
     m = members.create_member(db)
     m.username, m.username_key = name, name.lower()
@@ -86,6 +100,8 @@ def member_at(db: Session, rank_key: str, name: str = "kiwi") -> Member:
     if need:
         ledger.adjust(db, m, need, actor="test", reason="rank", ref=f"r-{name}")
     db.refresh(m)
+    if paid:
+        grant(db, m)
     return m
 
 
@@ -127,25 +143,23 @@ def test_keys_and_config_contents() -> None:
 # --- member API -----------------------------------------------------------------------------------------------------
 
 
-def test_closed_and_rank_gate(client: TestClient, db: Session, fake: FakeNode) -> None:
+def test_closed_and_paid_access_only(client: TestClient, db: Session, fake: FakeNode) -> None:
     server = add_server(db, fake)
-    low, high = member_at(db, "scout", "low"), member_at(db, "warrior", "high")
-    r = signed_in(client, db, high).get("/api/members/vpn").json()
+    unpaid, paid = member_at(db, "legend", "unpaid", paid=False), member_at(db, "egg", "paid")  # rank decides nothing: top rank locked, lowest in
+    r = signed_in(client, db, paid).get("/api/members/vpn").json()
     assert r["enabled"] is False and r["eligible"] is False and r["max_devices"] == 3  # closed by default
     assert client.post("/api/members/vpn/devices", json={"name": "phone", "server_id": server.id}).status_code == 403
     open_vpn(db)
     r = client.get("/api/members/vpn").json()
-    assert r["eligible"] and r["reason"] is None and r["required_rank"] == "Warrior Kiwi"
+    assert r["eligible"] and r["reason"] is None and "required_rank" not in r
     assert r["servers"] == [{"id": server.id, "name": "Frankfurt", "region": "Europe", "country_code": "DE", "online": True, "load": 0.0,
                             "adblock": False, "recommended": True}]
     assert r["usage"]["used_bytes"] == 0 and r["usage"]["cap_bytes"] == 0 and r["usage"]["paused_until"] is None
-    r = signed_in(client, db, low).get("/api/members/vpn").json()
-    assert not r["eligible"] and "Warrior Kiwi" in r["reason"]
+    r = signed_in(client, db, unpaid).get("/api/members/vpn").json()
+    assert not r["eligible"] and "$9.99 a month" in r["reason"] and "ank" not in r["reason"]
     assert client.post("/api/members/vpn/devices", json={"name": "phone", "server_id": server.id}).status_code == 403
-    # a manual grant of the kiwi_vpn entitlement unlocks it, like the other perks
-    ent = db.scalar(select(Entitlement).where(Entitlement.key == "kiwi_vpn"))
-    db.add(MemberEntitlement(member_id=low.id, entitlement_id=ent.id, granted_by="test"))
-    db.commit()
+    assert db.scalar(select(Entitlement.required_rank).where(Entitlement.key == "kiwi_vpn")) is None  # never unlocked by rank
+    grant(db, unpaid)  # a grant unlocks it (by hand now; a subscription later)
     assert client.get("/api/members/vpn").json()["eligible"] is True
     assert client.get("/api/members/vpn").status_code == 200
     client.cookies.clear()
@@ -257,17 +271,14 @@ def test_admin_routes(client: TestClient, db: Session, fake: FakeNode) -> None:
     assert row.cert_sha256 == FP and TOKEN not in row.agent_token_enc and vpn.agent_token(row) == TOKEN
     assert row.public_key == fake.server_key and row.address == "10.66.0.1/16"
     o = client.get("/api/vpn/admin/overview").json()
-    assert o["settings"] == {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0}
-    assert o["ranks"][0] == {"key": "egg", "name": "The Egg"} and {"key": "warrior", "name": "Warrior Kiwi"} in o["ranks"]
-    assert [r["key"] for r in o["ranks"]] == [r.key for r in ledger.ranks(db)]  # ladder order
+    assert o["settings"] == {"enabled": False, "max_devices": 3, "monthly_cap_gb": 0} and "ranks" not in o
     assert o["servers"][0]["online"] is True and o["servers"][0]["capacity"] == 50 and "agent_token" not in json.dumps(o)
     assert o["totals"] == {"devices": 0, "members": 0, "active_24h": 0}
-    assert client.put("/api/vpn/admin/settings", json={"min_rank": "knight", "max_devices": 5, "enabled": True}).json() == \
-        {"enabled": True, "min_rank": "knight", "max_devices": 5, "monthly_cap_gb": 0}
+    assert client.put("/api/vpn/admin/settings", json={"max_devices": 5, "enabled": True}).json() == \
+        {"enabled": True, "max_devices": 5, "monthly_cap_gb": 0}
     assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": 50}).json()["monthly_cap_gb"] == 50
     assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": -1}).status_code == 422
-    assert db.scalar(select(Entitlement.required_rank).where(Entitlement.key == "kiwi_vpn")) == 6  # the entitlement follows
-    assert client.put("/api/vpn/admin/settings", json={"min_rank": "nope"}).status_code == 400
+    assert client.put("/api/vpn/admin/settings", json={"min_rank": "knight"}).status_code == 422  # no such setting any more
     assert client.put("/api/vpn/admin/settings", json={"max_devices": 11}).status_code == 422
     assert client.patch(f"/api/vpn/admin/servers/{sid}", json={"name": "FRA", "enabled": False}).json()["name"] == "FRA"
     assert client.post(f"/api/vpn/admin/servers/{sid}/test").json() == {"ok": True, "error": None, "peers": 0}
@@ -324,9 +335,8 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
     assert (k.rx_bytes, k.tx_bytes) == (1500, 2100)
     o = vpn.admin_overview(db)
     assert o["totals"] == {"devices": 2, "members": 1, "active_24h": 1}
-    # rank dropped (XP taken back): revoked too
-    ledger.adjust(db, keep, -keep.rank_score, actor="test", reason="reset", ref="down")
-    db.commit()
+    # access removed: revoked too
+    ungrant(db, keep)
     assert vpn.sync_all(db)["revoked"] == 2 and fake.peers == {}
     # an unreachable agent marks the server offline, keeps everything else
     fake.fail = True
@@ -337,23 +347,18 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
 
 
 def test_sync_checks_members_without_a_query_per_member(db: Session, fake: FakeNode) -> None:
-    """Same decisions as qualifies() one by one (rank, manual grant, expired grant), but ranks / grants are read once a server."""
+    """Same decisions as qualifies() one by one (grant, expired grant), but grants are read once a server."""
     from sqlalchemy import event
 
     server = add_server(db, fake)
     open_vpn(db)
-    ranked = [member_at(db, "warrior", f"w{i}") for i in range(5)]
-    granted, expired = member_at(db, "warrior", "granted"), member_at(db, "warrior", "expired")
-    devices = {m.username: vpn.create_device(db, m, "d", server.id)[0].public_key for m in [*ranked, granted, expired]}
-    ent = db.scalar(select(Entitlement).where(Entitlement.key == vpn.ENTITLEMENT))
-    now = dt.datetime.now(dt.timezone.utc)
-    db.add_all([MemberEntitlement(member_id=granted.id, entitlement_id=ent.id), MemberEntitlement(member_id=expired.id, entitlement_id=ent.id,
-                                                                                                  expires_at=now - dt.timedelta(days=1))])
-    for m in (granted, expired):
-        ledger.adjust(db, m, -m.rank_score, actor="test", reason="reset", ref=f"down-{m.id}")  # below the VPN rank
+    paid = [member_at(db, "egg", f"w{i}") for i in range(6)]
+    expired = member_at(db, "egg", "expired")
+    devices = {m.username: vpn.create_device(db, m, "d", server.id)[0].public_key for m in [*paid, expired]}
+    db.scalar(select(MemberEntitlement).where(MemberEntitlement.member_id == expired.id)).expires_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
     db.commit()
-    expected = {m.username: vpn.qualifies(db, m)[0] for m in [*ranked, granted, expired]}
-    assert expected == {**{f"w{i}": True for i in range(5)}, "granted": True, "expired": False}
+    expected = {m.username: vpn.qualifies(db, m)[0] for m in [*paid, expired]}
+    assert expected == {**{f"w{i}": True for i in range(6)}, "expired": False}
     sql: list[str] = []
     engine = db.get_bind()
 
@@ -366,7 +371,6 @@ def test_sync_checks_members_without_a_query_per_member(db: Session, fake: FakeN
     finally:
         event.remove(engine, "before_cursor_execute", on)
     assert out["revoked"] == 1 and set(fake.peers) == {k for n, k in devices.items() if expected[n]}
-    assert sum("FROM ranks" in q for q in sql) <= 3  # once a server (catalog check + the ranks); was ~4 per member
     assert sum("FROM member_entitlements" in q for q in sql) == 1
     assert sum("FROM members" in q for q in sql) <= 2
 
@@ -487,14 +491,14 @@ def test_vpn_command_private_only_and_sends_the_config(db: Session, fake: FakeNo
     assert f"#{dev.id}" in tg.sent[-1][2] and "1 of 3 devices" in tg.sent[-1][2]
     asyncio.run(bot.handle_command(db, tg, 4242, 4242, f"/vpn delete {dev.id}"))
     assert "deleted" in tg.sent[-1][2] and db.scalars(select(VpnDevice)).all() == []
-    # an unlinked Telegram user / a member below the rank
+    # an unlinked Telegram user / a member without access
     asyncio.run(bot.handle_command(db, tg, 777, 777, "/vpn"))
     assert "Link your Kiwi Passport" in tg.sent[-1][2]
-    low = member_at(db, "egg", "egg")
+    low = member_at(db, "legend", "egg", paid=False)
     members.link_identity(db, low, "telegram", "555", "egg", None)
     db.commit()
     asyncio.run(bot.handle_command(db, tg, 555, 555, "/vpn add phone"))
-    assert "Warrior Kiwi" in tg.sent[-1][2] and db.scalars(select(VpnDevice)).all() == []
+    assert "$9.99 a month" in tg.sent[-1][2] and db.scalars(select(VpnDevice)).all() == []
 
 
 # --- best server, ad blocking, the monthly cap ----------------------------------------------------------------------
@@ -558,7 +562,8 @@ def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Sess
     d1, d2 = vpn.create_device(db, m, "phone", server.id)[0], vpn.create_device(db, m, "laptop", server.id)[0]
     d3 = vpn.create_device(db, other, "phone", server.id)[0]
     k1, k2, k3, id1 = d1.public_key, d2.public_key, d3.public_key, d1.id
-    now = dt.datetime(2026, 10, 20, 12, tzinfo=dt.timezone.utc)
+    now = utcnow().replace(day=20, hour=12, minute=0, second=0, microsecond=0)  # this month: create_device below reads the real clock
+    month_after = vpn.next_month(now)
     fake.peers[k1].update(rx_bytes=600 * 1024 ** 2, tx_bytes=10)
     fake.peers[k2].update(rx_bytes=500 * 1024 ** 2)  # the two devices together pass 1 GB
     fake.peers[k3].update(rx_bytes=100)
@@ -566,9 +571,9 @@ def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Sess
     assert out["paused"] == 2 and out["resumed"] == 0
     assert k1 not in fake.peers and k2 not in fake.peers and k3 in fake.peers  # peers removed at the node, devices kept
     db.expire_all()
-    assert db.get(VpnDevice, id1).paused_until == dt.datetime(2026, 11, 1, tzinfo=dt.timezone.utc)
+    assert db.get(VpnDevice, id1).paused_until == month_after
     use = vpn.usage_out(db, m, vpn.settings(db), now)
-    assert use["used_bytes"] == 1100 * 1024 ** 2 + 10 and use["cap_bytes"] == 1024 ** 3 and use["paused_until"].startswith("2026-11-01")
+    assert use["used_bytes"] == 1100 * 1024 ** 2 + 10 and use["cap_bytes"] == 1024 ** 3 and use["paused_until"].startswith(month_after.strftime("%Y-%m-01"))
     c = signed_in(client, db, m)
     body = c.get("/api/members/vpn").json()
     assert len(body["devices"]) == 2 and body["usage"]["cap_bytes"] == 1024 ** 3
@@ -577,12 +582,12 @@ def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Sess
     # still paused on the next sync: the peers stay off
     assert vpn.sync_all(db, now + dt.timedelta(minutes=5))["readded"] == 0 and k1 not in fake.peers
     # the month rolls over: re-added automatically, counting from zero
-    out = vpn.sync_all(db, dt.datetime(2026, 11, 1, 0, 5, tzinfo=dt.timezone.utc))
+    out = vpn.sync_all(db, month_after + dt.timedelta(minutes=5))
     assert out["readded"] == 2 and out["paused"] == 0 and k1 in fake.peers and k2 in fake.peers
     db.expire_all()
     assert db.get(VpnDevice, id1).paused_until is None
     # the owner removes the cap mid-month: a paused member resumes on the next sync
-    vpn.sync_all(db, now)  # (back in October's numbers: paused again)
+    vpn.sync_all(db, now)  # (back in this month's numbers: paused again)
     assert k1 not in fake.peers
     vpn.update_settings(db, {"monthly_cap_gb": 0})
     assert vpn.sync_all(db, now)["resumed"] == 2 and k1 in fake.peers

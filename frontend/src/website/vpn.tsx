@@ -5,7 +5,7 @@ import { pageHead } from "./seo";
 import "./vpn.css";
 
 /**
- * Kiwi VPN: a WireGuard VPN that is a Kiwi Rank perk. The server decides who may use it (/api/members/vpn); this page
+ * Kiwi VPN: a paid WireGuard VPN ($9.99 a month). The server decides who may use it (/api/members/vpn); this page
  * only shows it. A new device's config (the only copy of its private key) comes back ONCE: it is shown as a QR code and a
  * .conf download, then forgotten. Lost it → delete the device and add a new one.
  */
@@ -16,13 +16,13 @@ export interface VpnDevice { id: number; name: string; server_id: number; ip: st
   rx_bytes: number; tx_bytes: number; paused_until: string | null }
 /** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
 export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number; paused_until: string | null }
-export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; required_rank: string; max_devices: number;
+export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number;
   servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage }
 export interface NewDevice { device: VpnDevice; config: string; filename: string }
 
 const FALLBACK: Record<number, string> = {
   401: "Sign in to your Kiwi Passport to use Kiwi VPN.",
-  403: "Your Kiwi Rank doesn't unlock Kiwi VPN yet.",
+  403: "Your account doesn't have Kiwi VPN yet.",
   404: "That device no longer exists.",
   409: "You've reached your device limit. Delete a device to add a new one.",
   503: "That server is offline right now. Pick another server or try again in a few minutes.",
@@ -93,7 +93,7 @@ export function VpnPage() {
           <span className="vpn-shield" aria-hidden>🛡️</span>
           <div>
             <h1>Kiwi VPN</h1>
-            <p className="site-muted">A private WireGuard VPN, unlocked by your Kiwi Rank. We never log what you do or where you go.</p>
+            <p className="site-muted">A private WireGuard VPN for $9.99 a month. We never log what you do or where you go.</p>
           </div>
         </header>
         {!state ? <p className="site-empty">Loading…</p>
@@ -115,9 +115,7 @@ function Locked({ s }: { s: VpnState }) {
   return (
     <div className="vpn-locked">
       <span className="vpn-lock" aria-hidden>🔒</span>
-      <b>{s.reason || `Reach ${s.required_rank} to unlock Kiwi VPN`}</b>
-      <p>Kiwi VPN unlocks at <strong>{s.required_rank}</strong>. Earn XP with missions, videos and the Telegram chat to rank up.</p>
-      <a className="site-button" href="/passport">Rank up in your Passport →</a>
+      <b>{s.reason || "Kiwi VPN is $9.99 a month."}</b>
     </div>
   );
 }
@@ -346,8 +344,8 @@ export function VpnStatus() {
     <a className={`pp-vip${open ? " is-open" : ""}`} href="/vpn" aria-label="Kiwi VPN">
       <span className="pp-vip-icon" aria-hidden>{open ? "✓" : "🔒"}</span>
       <span className="pp-vip-text"><b>Kiwi VPN</b>
-        <small>{open ? `Unlocked: ${s.devices.length} / ${s.max_devices} devices` : s.reason || `Unlocks at ${s.required_rank}`}</small></span>
-      <span className="pp-vip-go">{open ? "Open →" : "View requirements →"}</span>
+        <small>{open ? `Unlocked: ${s.devices.length} / ${s.max_devices} devices` : s.reason || "$9.99 a month"}</small></span>
+      <span className="pp-vip-go">{open ? "Open →" : "View →"}</span>
     </a>
   );
 }

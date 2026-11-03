@@ -1,8 +1,7 @@
 """Kiwi VPN: who may use it, members' devices, servers and the 5-minute sync with each node agent.
 
-The gate follows the Kiwi Passport rule used by the other perks: the member's CURRENT rank from the ledger (never a stored
-flag) against the `kiwi_vpn` entitlement (its required rank mirrors Admin › Kiwi VPN's minimum rank), or a manual grant of
-that entitlement; banned members never qualify. A device is created by allocating a tunnel IP, adding the peer on the
+Kiwi VPN is a paid product ($9.99 a month), not a rank perk: access is an unexpired grant of the `kiwi_vpn` entitlement, given
+by hand for now and by a subscription once billing exists. Kiwi Rank plays no part; banned members never qualify. A device is created by allocating a tunnel IP, adding the peer on the
 node, then committing; if the node call fails nothing is kept. Only the public key is ever stored.
 """
 
@@ -18,9 +17,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
-from app.members import xp as ledger
 from app.members.catalog import ensure_catalog
-from app.models.members import Entitlement, Member, MemberEntitlement, Rank
+from app.models.members import Entitlement, Member, MemberEntitlement
 from app.models.vpn import VpnDevice, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
 from app.vpn import keys, node
@@ -31,7 +29,8 @@ ENTITLEMENT = "kiwi_vpn"
 MAX_DEVICES_LIMIT = 10
 MAX_CAP_GB = 100000
 GB = 1024 ** 3  # the website shows sizes in powers of 1024
-SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0}
+SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0}  # min_rank: unused column, kept
+NOT_SUBSCRIBED = "Kiwi VPN is $9.99 a month. Subscriptions by card or crypto open soon."
 
 
 class VpnError(ValueError):
@@ -66,18 +65,7 @@ def settings(db: Session) -> VpnSettings:
 
 
 def settings_out(s: VpnSettings) -> dict[str, Any]:
-    return {"enabled": s.enabled, "min_rank": s.min_rank, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb}
-
-
-def _ranks(db: Session) -> list[Rank]:
-    ensure_catalog(db)
-    return ledger.ranks(db)
-
-
-def required_rank(db: Session, s: VpnSettings | None = None) -> Rank:
-    s = s or settings(db)
-    all_ranks = _ranks(db)
-    return next((r for r in all_ranks if r.key == s.min_rank), all_ranks[-1])
+    return {"enabled": s.enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb}
 
 
 def _entitlement(db: Session) -> Entitlement | None:
@@ -90,25 +78,20 @@ class Rules:
     """What qualifies() needs that is the same for every member: read once per server sync, not once per member."""
 
     ent: Entitlement | None
-    all_ranks: list[Rank]
-    need: Rank
     grants: dict[int, MemberEntitlement] | None = None  # member id -> the VPN grant, for the members being checked
 
 
-def rules(db: Session, s: VpnSettings | None = None, member_ids: list[int] | None = None) -> Rules:
-    s = s or settings(db)
-    ent, all_ranks = _entitlement(db), _ranks(db)
-    need = next((r for r in all_ranks if r.key == s.min_rank), all_ranks[-1])
+def rules(db: Session, member_ids: list[int] | None = None) -> Rules:
+    ent = _entitlement(db)
     grants = None
     if member_ids is not None:
         grants = {} if ent is None else {g.member_id: g for g in db.scalars(select(MemberEntitlement).where(
             MemberEntitlement.entitlement_id == ent.id, MemberEntitlement.member_id.in_(member_ids)))}
-    return Rules(ent, all_ranks, need, grants)
+    return Rules(ent, grants)
 
 
-def qualifies(db: Session, member: Member, s: VpnSettings | None = None, r: Rules | None = None) -> tuple[bool, str | None]:
-    """The member-level rule (rank / manual grant / not banned), regardless of whether the VPN is open."""
-    s = s or settings(db)
+def qualifies(db: Session, member: Member, r: Rules | None = None) -> tuple[bool, str | None]:
+    """The member-level rule (an unexpired grant, not banned), regardless of whether the VPN is open."""
     if member.status != "active":
         return False, "Your account can't use Kiwi VPN."
     ent = r.ent if r is not None else _entitlement(db)
@@ -123,29 +106,18 @@ def qualifies(db: Session, member: Member, s: VpnSettings | None = None, r: Rule
                                                               MemberEntitlement.entitlement_id == ent.id))
         if grant is not None and (grant.expires_at is None or grant.expires_at > now):
             return True, None
-    need = r.need if r is not None else required_rank(db, s)
-    if ledger.rank_for(db, member.rank_score, r.all_ranks if r is not None else None).level >= need.level:
-        return True, None
-    return False, f"Reach Kiwi Rank {need.name} to unlock Kiwi VPN."
+    return False, NOT_SUBSCRIBED
 
 
 def eligibility(db: Session, member: Member) -> tuple[bool, str | None]:
     s = settings(db)
     if not s.enabled:
         return False, "Kiwi VPN isn't open yet."
-    return qualifies(db, member, s)
+    return qualifies(db, member)
 
 
 def update_settings(db: Session, changes: dict[str, Any]) -> dict[str, Any]:
     s = settings(db)
-    if "min_rank" in changes and changes["min_rank"] is not None:
-        rank = next((r for r in _ranks(db) if r.key == changes["min_rank"]), None)
-        if rank is None:
-            raise VpnError("Unknown rank.", 400)
-        s.min_rank = rank.key
-        ent = _entitlement(db)
-        if ent is not None:
-            ent.required_rank = rank.level  # the entitlement mirrors the VPN's minimum rank
     if changes.get("max_devices") is not None:
         n = int(changes["max_devices"])
         if not 1 <= n <= MAX_DEVICES_LIMIT:
@@ -248,7 +220,7 @@ def overview(db: Session, member: Member) -> dict[str, Any]:
     servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
     best = recommended_id(servers, counts)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.member_id == member.id).order_by(VpnDevice.created_at, VpnDevice.id))
-    out = {"enabled": s.enabled, "eligible": ok, "reason": reason, "required_rank": required_rank(db, s).name, "max_devices": s.max_devices,
+    out = {"enabled": s.enabled, "eligible": ok, "reason": reason, "max_devices": s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, member, s)}
@@ -489,7 +461,7 @@ def admin_overview(db: Session) -> dict[str, Any]:
                 "adblock": v.adblock,
                 "last_seen": _iso(v.last_seen), "last_error": v.last_error, "devices": counts.get(v.id, 0), "active_24h": active.get(v.id, 0)}
                for v in db.scalars(select(VpnServer).order_by(VpnServer.name, VpnServer.id))]
-    out = {"settings": settings_out(s), "ranks": [{"key": r.key, "name": r.name} for r in _ranks(db)], "servers": servers,
+    out = {"settings": settings_out(s), "servers": servers,
            "totals": {"devices": sum(counts.values()),
                       "members": db.scalar(select(func.count(func.distinct(VpnDevice.member_id)))) or 0,
                       "active_24h": sum(active.values())}}
@@ -532,14 +504,14 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             members: dict[int, bool] = {}
             devices = list(db.scalars(select(VpnDevice).where(VpnDevice.server_id == server.id)))
             ids = sorted({d.member_id for d in devices})
-            # members, ranks, the entitlement and grants read once for the server, not ~15 queries per member
+            # members, the entitlement and grants read once for the server, not a query per member
             people = {m.id: m for m in db.scalars(select(Member).where(Member.id.in_(ids)))} if ids else {}
-            r = rules(db, s, ids)
+            r = rules(db, ids)
             for dev in devices:
                 if dev.member_id not in members:
                     m = people.get(dev.member_id)
-                    members[dev.member_id] = m is not None and qualifies(db, m, s, r)[0]
-                if not members[dev.member_id]:  # rank dropped / banned / grant expired: revoke
+                    members[dev.member_id] = m is not None and qualifies(db, m, r)[0]
+                if not members[dev.member_id]:  # banned / grant expired or removed: revoke
                     try:
                         agent.delete_peer(dev.public_key)
                     except node.NodeError:

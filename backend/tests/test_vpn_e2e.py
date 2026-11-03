@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.members import xp as ledger
 from app.models.vpn import VpnDevice, VpnServer
 from app.vpn import keys, service as vpn
-from tests.test_vpn import member_at, open_vpn, signed_in
+from tests.test_vpn import member_at, open_vpn, signed_in, ungrant
 
 AGENT_PY = Path(__file__).resolve().parents[2] / "vpn-node" / "agent.py"
 TOKEN = "kiwi-agent-token-" + "x" * 32
@@ -276,7 +276,7 @@ def test_sync_against_the_agent(client: TestClient, db: Session, agent: RunningA
     assert dt.datetime.fromisoformat(dev["last_handshake"]).timestamp() == hs
 
     # a member who loses eligibility is revoked at the agent
-    ledger.adjust(db, drop, -drop.rank_score, actor="test", reason="reset", ref="down-e2e")
+    ungrant(db, drop)
     db.commit()
     out = vpn.sync_all(db)
     assert out["revoked"] == 1 and out["errors"] == 0
