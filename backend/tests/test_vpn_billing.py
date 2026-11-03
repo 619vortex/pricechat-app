@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import get_settings
 from app.db.base import utcnow
 from app.models.vpn import VpnAccount, VpnDevice, VpnPayment
+from app.security import admin_auth
 from app.vpn import billing, service as vpn
 from tests.test_vpn import add_server, fake, grant, member_at, open_vpn, signed_in  # noqa: F401
 from tests.test_production import prod  # noqa: F401
@@ -282,3 +283,45 @@ def test_scrub_cuts_the_link_for_anonymous_payments_only(db: Session, fake: Any,
     db.expire_all()
     assert anon_pay.account_id is None and anon_pay.pay_address is None and anon_pay.provider_ref is None and anon_pay.paid_usd == 5.0  # the books keep the amount
     assert named_pay.account_id == named.id and named_pay.pay_address == "TAddr"
+
+
+def test_closed_means_nobody_buys_except_the_owner_testing(client: TestClient, db: Session, fake: Any, keys: None, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    server = add_server(db, fake)
+    assert vpn.settings(db).enabled is False
+    db.commit()
+    # a visitor and a signed-in member: no key, no payment, no card, no device, and the page says closed
+    pub = client.get("/api/members/vpn/public").json()
+    assert pub["enabled"] is False and pub["test_mode"] is False
+    assert client.post("/api/members/vpn/anon").status_code == 403
+    m = member_at(db, "legend", "buyer", paid=False)
+    c = signed_in(client, db, m)
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code == 403
+    assert c.post("/api/members/vpn/card").status_code == 403
+    assert c.get("/api/members/vpn").json()["enabled"] is False
+    existing, key = billing.new_anonymous(db)  # a key from before it closed can't start a payment either
+    head = {"x-kiwi-key": key}
+    assert c.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana"}, headers=head).status_code == 403
+    assert not SENT and db.scalars(select(VpnPayment)).all() == []  # the provider was never called
+    existing.paid_until = utcnow() + dt.timedelta(days=30)
+    db.commit()
+    assert c.post("/api/members/vpn/anon/devices", json={"name": "x", "server_id": server.id}, headers=head).status_code == 403
+    # a made-up Admin cookie opens nothing
+    c.cookies.set(admin_auth.COOKIE, "not-a-session")
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code == 403
+    c.cookies.delete(admin_auth.COOKIE)
+    # the owner's real Admin session: the whole flow works, labelled as a test, and it's still closed to everyone else
+    monkeypatch.setattr(admin_auth, "current", lambda _db, token: object() if token == "owner" else None)
+    c.cookies.set(admin_auth.COOKIE, "owner")
+    assert c.get("/api/members/vpn/public").json() == {**pub, "enabled": True, "test_mode": True}
+    fresh = c.post("/api/members/vpn/anon").json()["key"]
+    head = {"x-kiwi-key": fresh}
+    view = c.get("/api/members/vpn/anon", headers=head).json()
+    assert view["test_mode"] is True and view["enabled"] is True and view["eligible"] is False  # no time yet: test mode doesn't give any
+    assert c.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "solana"}, headers=head).status_code == 200
+    order = db.scalars(select(VpnPayment)).one().order_ref
+    assert ipn(c, order, "finished", 5, "usdtsol").status_code == 200
+    r = c.post("/api/members/vpn/anon/devices", json={"name": "phone", "server_id": server.id}, headers=head)
+    assert r.status_code == 201
+    c.cookies.delete(admin_auth.COOKIE)
+    assert c.get("/api/members/vpn/public").json()["enabled"] is False  # without the cookie: closed again
+    assert vpn.settings(db).enabled is False

@@ -18,7 +18,7 @@ export interface VpnDevice { id: number; name: string; server_id: number; ip: st
 /** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
 export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number; paused_until: string | null }
 export interface VpnBilling { price_usd: number; period_days: number; min_usd: number; max_usd: number; usdt: boolean; card: boolean; networks: { key: string; name: string; min_usd?: number }[] }
-export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling;
+export interface VpnState { enabled: boolean; test_mode?: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling;
   servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage }
 export interface NewDevice { device: VpnDevice; config: string; filename: string }
 
@@ -91,7 +91,7 @@ const CallCtx = createContext<Call>(callFor(null));
 function readKey(): string | null { try { return sessionStorage.getItem(KEY_STORE); } catch { return null; } }
 function saveKey(k: string | null): void { try { if (k) sessionStorage.setItem(KEY_STORE, k); else sessionStorage.removeItem(KEY_STORE); } catch { /* the key stays in memory only */ } }
 
-type Loaded = VpnState | { error: string; status: number } | { visitor: true; enabled: boolean; billing: VpnBilling };
+type Loaded = VpnState | { error: string; status: number } | { visitor: true; enabled: boolean; test_mode?: boolean; billing: VpnBilling };
 
 export function VpnPage() {
   const [key, setKeyState] = useState<string | null>(readKey);
@@ -104,7 +104,7 @@ export function VpnPage() {
       const status = e instanceof MemberApiError ? e.status : 0;
       if (key && status === 401) { setKey(null); setState({ error: "That key isn't valid.", status: 0 }); return; }
       if (status === 401) {
-        try { setState({ visitor: true, ...(await memberApi<{ enabled: boolean; billing: VpnBilling }>("/members/vpn/public")) }); return; } catch { /* the plain error below */ }
+        try { setState({ visitor: true, ...(await memberApi<{ enabled: boolean; test_mode?: boolean; billing: VpnBilling }>("/members/vpn/public")) }); return; } catch { /* the plain error below */ }
       }
       setState({ error: vpnError(e), status });
     }
@@ -120,6 +120,9 @@ export function VpnPage() {
             <p className="site-muted">A private WireGuard VPN for $9.99 a month. We never log what you do or where you go.</p>
           </div>
         </header>
+        {state && "test_mode" in state && state.test_mode && (
+          <p className="vpn-paused" role="status"><b>🧪 Test mode</b> Kiwi VPN is closed to everyone else. You see this because you're signed in to Admin. Payments here are real.</p>
+        )}
         {fresh ? <KeyOnce k={fresh} onDone={() => { setKey(fresh); setFresh(null); }} />
           : !state ? <p className="site-empty">Loading…</p>
           : "visitor" in state ? (

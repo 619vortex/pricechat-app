@@ -139,9 +139,10 @@ def qualifies(db: Session, who: Who, r: Rules | None = None) -> tuple[bool, str 
     return False, "Your account can't use Kiwi VPN." if state == "blocked" else NOT_SUBSCRIBED
 
 
-def eligibility(db: Session, member: Who) -> tuple[bool, str | None]:
+def eligibility(db: Session, member: Who, preview: bool = False) -> tuple[bool, str | None]:
+    """preview: the owner, signed in to Admin, testing while the VPN is closed to everyone else."""
     s = settings(db)
-    if not s.enabled:
+    if not s.enabled and not preview:
         return False, "Kiwi VPN isn't open yet."
     return qualifies(db, member)
 
@@ -244,16 +245,16 @@ def _v6_pool(value: str) -> str:
         return ""
 
 
-def overview(db: Session, who: Who) -> dict[str, Any]:
+def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     bill = billing.options()  # may ask the provider: before anything here can hold a write transaction
     s = settings(db)
     acct = account_of(db, who)
-    ok, reason = eligibility(db, acct)
+    ok, reason = eligibility(db, acct, preview)
     counts = _device_counts(db)
     servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
     best = recommended_id(servers, counts)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
-    out = {"enabled": s.enabled, "eligible": ok, "reason": reason, "max_devices": s.max_devices,
+    out = {"enabled": s.enabled or preview, "test_mode": preview and not s.enabled, "eligible": ok, "reason": reason, "max_devices": s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
@@ -306,7 +307,7 @@ def _checked_server(db: Session, acct_id: int, server_id: int, max_devices: int)
     return server
 
 
-def create_device(db: Session, who: Who, name: str, server_id: int) -> tuple[VpnDevice, str, str]:
+def create_device(db: Session, who: Who, name: str, server_id: int, preview: bool = False) -> tuple[VpnDevice, str, str]:
     """(device, config text, filename). The config, holding the private key, exists only in this return value.
 
     The tunnel IP is protected by the unique (server_id, ip) constraint: if a concurrent creation took the same IP first,
@@ -315,7 +316,7 @@ def create_device(db: Session, who: Who, name: str, server_id: int) -> tuple[Vpn
     acct = account_of(db, who)
     db.commit()
     acct_id = acct.id
-    ok, reason = eligibility(db, acct)
+    ok, reason = eligibility(db, acct, preview)
     if not ok:
         raise VpnError(reason or "Kiwi VPN isn't available.", 403)
     s = settings(db)

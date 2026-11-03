@@ -15,7 +15,7 @@ from app.api.deps import DbSession
 from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
 from app.models.vpn import VpnAccount
-from app.security import rate_limit
+from app.security import admin_auth, rate_limit
 from app.security.rate_limit import LIMITS
 from app.vpn import billing, service
 from app.vpn.billing import BillingError
@@ -28,12 +28,23 @@ def _fail(e: VpnError | BillingError) -> HTTPException:
     return HTTPException(e.status, str(e))
 
 
+def _preview(db: DbSession, request: Request) -> bool:
+    """The owner's own browser, signed in to Admin: may test while the VPN is closed to everyone else."""
+    return admin_auth.current(db, request.cookies.get(admin_auth.COOKIE)) is not None
+
+
+def _open_or_preview(db: DbSession, request: Request) -> None:
+    """Nobody buys or gets a key while the VPN is closed, except the owner testing it."""
+    if not service.settings(db).enabled and not _preview(db, request):
+        raise HTTPException(403, "Kiwi VPN isn't open yet.")
+
+
 # --- member -------------------------------------------------------------------------------------------------------
 
 
 @router.get("/members/vpn")
-def my_vpn(db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
-    return service.overview(db, _require(db, pc_session))
+def my_vpn(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    return service.overview(db, _require(db, pc_session), _preview(db, request))
 
 
 class DeviceInput(StrictInput):
@@ -42,13 +53,13 @@ class DeviceInput(StrictInput):
 
 
 @router.post("/members/vpn/devices", status_code=status.HTTP_201_CREATED)
-def create_device(payload: DeviceInput, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+def create_device(payload: DeviceInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     member = _require(db, pc_session)
     wait = LIMITS["vpn_device"].hit(str(member.id))
     if wait is not None:
         raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:
-        dev, config, filename = service.create_device(db, member, payload.name, payload.server_id)
+        dev, config, filename = service.create_device(db, member, payload.name, payload.server_id, _preview(db, request))
     except VpnError as e:
         raise _fail(e) from e
     return {"device": service.device_out(dev), "config": config, "filename": filename}
@@ -79,23 +90,26 @@ def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]
 
 
 @router.get("/members/vpn/public")
-def public_info(db: DbSession) -> dict[str, Any]:
+def public_info(request: Request, db: DbSession) -> dict[str, Any]:
     """For a signed-out visitor: is it open and how can they pay."""
     bill = billing.options()
-    out = {"enabled": service.settings(db).enabled, "billing": bill}
+    enabled, preview = service.settings(db).enabled, _preview(db, request)
+    out = {"enabled": enabled or preview, "test_mode": preview and not enabled, "billing": bill}
     db.commit()
     return out
 
 
 @router.post("/members/vpn/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
-def member_usdt(payload: UsdtInput, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+def member_usdt(payload: UsdtInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    _open_or_preview(db, request)
     acct = service.account_of(db, _require(db, pc_session))
     db.commit()
     return _usdt(db, acct, payload)
 
 
 @router.post("/members/vpn/card", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
-def member_card(db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
+def member_card(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
+    _open_or_preview(db, request)
     acct = service.account_of(db, _require(db, pc_session))
     db.commit()
     try:
@@ -141,25 +155,24 @@ def _anon(db: DbSession, x_kiwi_key: str | None = Header(None)) -> VpnAccount:
 
 
 @router.post("/members/vpn/anon", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_new"))])
-def anon_create(db: DbSession) -> dict[str, str]:
+def anon_create(request: Request, db: DbSession) -> dict[str, str]:
     """A new key. Shown this once: there is no way to recover it."""
-    if not service.settings(db).enabled:
-        raise HTTPException(403, "Kiwi VPN isn't open yet.")
+    _open_or_preview(db, request)
     return {"key": billing.new_anonymous(db)[1]}
 
 
 @router.get("/members/vpn/anon", dependencies=[Depends(rate_limit.limit("vpn_key"))])
-def anon_view(db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
-    return service.overview(db, acct)
+def anon_view(request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+    return service.overview(db, acct, _preview(db, request))
 
 
 @router.post("/members/vpn/anon/devices", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_key"))])
-def anon_device(payload: DeviceInput, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+def anon_device(payload: DeviceInput, request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
     wait = LIMITS["vpn_device"].hit(f"a{acct.id}")
     if wait is not None:
         raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:
-        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id)
+        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id, _preview(db, request))
     except VpnError as e:
         raise _fail(e) from e
     return {"device": service.device_out(dev), "config": config, "filename": filename}
@@ -175,7 +188,8 @@ def anon_device_delete(device_id: int, db: DbSession, acct: VpnAccount = Depends
 
 
 @router.post("/members/vpn/anon/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
-def anon_usdt(payload: UsdtInput, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+def anon_usdt(payload: UsdtInput, request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+    _open_or_preview(db, request)
     return _usdt(db, acct, payload)
 
 

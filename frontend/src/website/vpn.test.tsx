@@ -94,6 +94,13 @@ describe("Paying and anonymous keys", () => {
     expect((sent!.headers as Record<string, string>)["X-Kiwi-Key"]).toBe("KIWI-TEST");
   });
 
+  it("labels the owner's test mode, and payments in it as real", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ test_mode: true, billing: BILL })] });
+    render(<VpnPage />);
+    await settle();
+    expect(document.body.textContent).toMatch(/Test mode.*closed to everyone else.*Payments here are real/);
+  });
+
   it("refuses an amount outside the limits before asking the server", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: BILL, anonymous: false })] });
     render(<VpnPage />);
