@@ -50,6 +50,8 @@ class VpnServer(IdMixin, TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     adblock: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # its resolver blocks ads & trackers
     fail_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # syncs in a row that couldn't reach it
+    proxy_host: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)  # its browser proxy's public name; "" = none
+    proxy_port: Mapped[int] = mapped_column(Integer, default=443, server_default="443", nullable=False)
 
 
 class VpnAccount(IdMixin, TimestampMixin, Base):
@@ -83,6 +85,23 @@ class VpnPayment(IdMixin, TimestampMixin, Base):
     pay_address: Mapped[str | None] = mapped_column(String(128))
     pay_amount: Mapped[float | None] = mapped_column(Float)
     credited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class VpnBrowser(IdMixin, TimestampMixin, Base):
+    """One browser using the extension: a login on one server's proxy. Only the password's hash is kept; bytes for the data cap, no destinations."""
+
+    __tablename__ = "vpn_browsers"
+
+    account_id: Mapped[int] = mapped_column(ForeignKey("vpn_accounts.id", ondelete="CASCADE"), index=True, nullable=False)
+    server_id: Mapped[int] = mapped_column(ForeignKey("vpn_servers.id", ondelete="CASCADE"), index=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_active: Mapped[datetime | None] = mapped_column(UTCDateTime())  # to the sync's 5 minutes: when its counters last grew
+    usage_month: Mapped[str] = mapped_column(String(7), default="", server_default="", nullable=False)
+    rx_bytes: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)  # this month
+    tx_bytes: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
+    rx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)  # the proxy's last raw counters
+    tx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
 
 
 class VpnDevice(IdMixin, TimestampMixin, Base):

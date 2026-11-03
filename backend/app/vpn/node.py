@@ -137,6 +137,10 @@ class NodeClient:
                    "dns": [str(d) for d in data.get("dns") or []], "peers": peers,
                    "adblock": data.get("adblock") is True,  # an agent that doesn't report it doesn't block
                    "address6": str(data.get("address6") or "")}  # the v6 pool ("fd66:66::1/64"); "" = IPv4 only
+            proxy = data.get("proxy") or {}  # an agent without the browser proxy reports none
+            out["proxy"] = {"host": str(proxy["host"]), "port": int(proxy["port"])} if proxy else None
+            out["proxy_users"] = {str(u["username"]): {"rx_bytes": int(u.get("rx_bytes") or 0), "tx_bytes": int(u.get("tx_bytes") or 0)}
+                                  for u in data.get("proxy_users") or []}
         except (KeyError, TypeError, ValueError, AttributeError):
             raise NodeError("The VPN agent's status is malformed") from None
         if not is_key(out["public_key"]):
@@ -148,6 +152,12 @@ class NodeClient:
 
     def delete_peer(self, public_key: str) -> None:
         self._call("DELETE", f"/v1/peers/{url_key(public_key)}")
+
+    def put_proxy_user(self, username: str, secret_hash: str) -> None:
+        self._call("PUT", f"/v1/proxy-users/{username}", {"secret_hash": secret_hash})
+
+    def delete_proxy_user(self, username: str) -> None:
+        self._call("DELETE", f"/v1/proxy-users/{username}")
 
 
 def connect(agent_url: str, token: str, cert_sha256: str) -> NodeClient:

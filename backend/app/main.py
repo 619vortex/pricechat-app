@@ -267,7 +267,8 @@ def create_app(
         if method != "OPTIONS" and path.startswith("/api/"):
             if app_settings.is_production and method in ("POST", "PUT", "PATCH", "DELETE"):
                 origin = request.headers.get("origin")
-                if origin and origin.rstrip("/") not in allowed_origins:  # a form or script on another site
+                extension = origin in app_settings.vpn_extension_origins and path.startswith("/api/members/vpn/browser")  # our own extension, this one route
+                if origin and origin.rstrip("/") not in allowed_origins and not extension:  # a form or script on another site
                     return JSONResponse(status_code=403, content={"detail": "Cross-site request refused.", "code": "bad_origin"})
             if app_settings.admin_auth_required and not admin_auth.is_public(method, path):
                 from app.pokemon import public as market_public

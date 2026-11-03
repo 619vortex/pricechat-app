@@ -43,6 +43,11 @@ DEFAULTS = {
     "TLS_KEY": "/etc/kiwi-vpn/tls.key",
     "WG_INTERFACE": "wg0",
     "STATE_FILE": "/var/lib/kiwi-vpn/peers.json",
+    # The browser proxy (proxy.py), if this node runs one: its public name and port, and the files shared with it. Empty = none.
+    "PROXY_HOST": "",
+    "PROXY_PORT": "443",
+    "PROXY_USERS_FILE": "/var/lib/kiwi-vpn-proxy/users.json",
+    "PROXY_USAGE_FILE": "/var/lib/kiwi-vpn-proxy/usage.json",
 }
 
 Runner = Callable[[list], str]
@@ -264,9 +269,63 @@ class Agent:
             if self.peers.pop(key, None) is not None:
                 self.save_state()
 
+    # ----- browser proxy logins (proxy.py reads this file; only hashes, never a password) -----
+    def _proxy_users(self) -> dict:
+        try:
+            with open(self.cfg["PROXY_USERS_FILE"], encoding="utf-8") as f:
+                return json.load(f).get("users") or {}
+        except FileNotFoundError:
+            return {}
+
+    def _save_proxy_users(self, users: dict) -> None:
+        path = self.cfg["PROXY_USERS_FILE"]
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".users.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"users": users}, f, sort_keys=True)
+            os.chmod(tmp, 0o640)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    def put_proxy_user(self, username: str, body: dict) -> None:
+        secret_hash = body.get("secret_hash") if isinstance(body, dict) else None
+        if not isinstance(secret_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", secret_hash):
+            raise BadRequest("bad hash")
+        with self.lock:
+            users = self._proxy_users()
+            if users.get(username) != secret_hash:
+                users[username] = secret_hash
+                self._save_proxy_users(users)
+
+    def delete_proxy_user(self, username: str) -> None:
+        with self.lock:
+            users = self._proxy_users()
+            if users.pop(username, None) is not None:
+                self._save_proxy_users(users)
+
+    def proxy_status(self) -> list:
+        """Every login on this node with the bytes the proxy counted since it started (like a WireGuard peer's counters)."""
+        try:
+            with open(self.cfg["PROXY_USAGE_FILE"], encoding="utf-8") as f:
+                usage = json.load(f).get("users") or {}
+        except (FileNotFoundError, ValueError):
+            usage = {}
+        out = []
+        for name in sorted(self._proxy_users()):
+            u = usage.get(name) or {}
+            out.append({"username": name, "rx_bytes": int(u.get("rx_bytes") or 0), "tx_bytes": int(u.get("tx_bytes") or 0)})
+        return out
+
     def status(self) -> dict:
         iface, peers = parse_dump(self.run(["show", self.iface, "dump"]))
+        proxy = {"proxy": {"host": self.cfg["PROXY_HOST"], "port": int(self.cfg["PROXY_PORT"])}, "proxy_users": self.proxy_status()} if self.cfg["PROXY_HOST"] else {}
         return {
+            **proxy,
             "public_key": iface["public_key"],
             "listen_port": iface["listen_port"] or int(self.cfg["LISTEN_PORT"]),
             "endpoint_host": self.cfg["ENDPOINT_HOST"],
@@ -296,6 +355,19 @@ class Agent:
                 if method != "GET":
                     return 405, {"error": "method"}
                 return 200, self.status()
+            pm = re.fullmatch(r"/v1/proxy-users/([a-z0-9]{16,40})", path)
+            if pm and self.cfg["PROXY_HOST"]:
+                if method == "PUT":
+                    try:
+                        data = json.loads(body or b"{}")
+                    except ValueError:
+                        raise BadRequest("bad json")
+                    self.put_proxy_user(pm.group(1), data)
+                    return 200, {"ok": True}
+                if method == "DELETE":
+                    self.delete_proxy_user(pm.group(1))
+                    return 200, {"ok": True}
+                return 405, {"error": "method"}
             m = re.fullmatch(r"/v1/peers/([^/]+)", path)
             if not m:
                 return 404, {"error": "not found"}

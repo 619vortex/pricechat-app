@@ -3,13 +3,15 @@
 Kiwi VPN is a paid product ($9.99 a month), not a rank perk. Devices belong to an account: a Passport member's, or an anonymous
 key's (no member at all). An account has access while it has paid time (app/vpn/billing.py) or its member an unexpired manual
 grant of the `kiwi_vpn` entitlement. Out of time, its devices are switched off and kept for KEEP_LAPSED, so paying again just
-works; blocked or banned, they go at once. Kiwi Rank plays no part. A device is created by allocating a tunnel IP, adding the peer on the
+works; blocked or banned, they go at once. The same goes for browsers (the extension's logins on a server's proxy). Kiwi Rank plays no part. A device is created by allocating a tunnel IP, adding the peer on the
 node, then committing; if the node call fails nothing is kept. Only the public key is ever stored.
 """
 
 import base64
+import hashlib
 import ipaddress
 import logging
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
-from app.models.vpn import VpnAccount, VpnDevice, VpnPayment, VpnServer, VpnSettings
+from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
 from app.vpn import billing, keys, node
 
@@ -220,10 +222,10 @@ def _paused(dev: VpnDevice, now: datetime) -> bool:
 
 
 def account_usage(db: Session, account_id: int, now: datetime | None = None) -> int:
-    """Bytes (down + up) the account's devices used this UTC month."""
+    """Bytes (down + up) the account's devices and browsers used this UTC month."""
     month = _month(now or utcnow())
-    return int(db.scalar(select(func.coalesce(func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes), 0))
-                         .where(VpnDevice.account_id == account_id, VpnDevice.usage_month == month)) or 0)
+    return sum(int(db.scalar(select(func.coalesce(func.sum(t.rx_bytes + t.tx_bytes), 0))
+                             .where(t.account_id == account_id, t.usage_month == month)) or 0) for t in (VpnDevice, VpnBrowser))
 
 
 def usage_out(db: Session, who: Who, s: VpnSettings, now: datetime | None = None) -> dict[str, Any]:
@@ -264,7 +266,7 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
     out = {"enabled": s.enabled or preview, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
-                        "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best} for v in servers],
+                        "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
            "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": bill}
     db.commit()  # first call seeds the settings row
@@ -372,6 +374,74 @@ def create_device(db: Session, who: Who, name: str, server_id: int, preview: boo
     return dev, config, keys.filename(server.name, dev.name)
 
 
+def _remove_browser(db: Session, b: VpnBrowser) -> None:
+    """Off the proxy, best effort (the next sync removes a login it can't place), then the row."""
+    server = db.get(VpnServer, b.server_id)
+    if server is not None and server.proxy_host:
+        try:
+            with node.client_for(server) as agent:
+                agent.delete_proxy_user(b.username)
+        except node.NodeError as e:
+            logger.warning("vpn: removing a browser login on server %s failed: %s", server.id, e)
+    db.delete(b)
+
+
+def create_browser(db: Session, who: Who, server_id: int, replace: str | None = None, preview: bool = False) -> dict[str, Any]:
+    """A login for one browser on one server's proxy, returned once: only its hash is kept. Past the device limit the account's oldest browser makes room."""
+    acct = account_of(db, who)
+    db.commit()
+    ok, reason = eligibility(db, acct, preview)
+    if not ok:
+        raise VpnError(reason or "Kiwi VPN isn't available.", 403)
+    s = settings(db)
+    if s.monthly_cap_gb > 0 and not acct.is_owner:
+        use = usage_out(db, acct, s)
+        if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:
+            raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
+    server = db.get(VpnServer, server_id)
+    if server is None or not server.enabled or not server.proxy_host:
+        raise VpnError("That server isn't available for the browser extension.", 404)
+    if not server.online:
+        raise VpnError("This server is offline right now. Pick another one or try again later.", 503)
+    mine = list(db.scalars(select(VpnBrowser).where(VpnBrowser.account_id == acct.id).order_by(VpnBrowser.id)))
+    for old in [b for b in mine if b.username == replace]:
+        _remove_browser(db, old)
+        mine.remove(old)
+    limit = OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
+    while len(mine) >= limit:
+        _remove_browser(db, mine.pop(0))
+    username, password = secrets.token_hex(12), secrets.token_urlsafe(32)
+    row = VpnBrowser(account_id=acct.id, server_id=server.id, username=username, secret_hash=hashlib.sha256(password.encode()).hexdigest(),
+                     usage_month=utcnow().strftime("%Y-%m"))
+    db.add(row)
+    db.commit()
+    try:
+        with node.client_for(server) as agent:
+            agent.put_proxy_user(username, row.secret_hash)
+    except node.NodeError as e:
+        db.delete(row)
+        db.commit()
+        logger.warning("vpn: adding a browser login on server %s failed: %s", server_id, e)
+        raise VpnError("This server is offline right now. Pick another one or try again later.", 503) from None
+    return {"username": username, "password": password, "host": server.proxy_host, "port": server.proxy_port, "server_id": server.id, "server": server.name}
+
+
+def delete_browser(db: Session, who: Who, username: str) -> None:
+    b = db.scalar(select(VpnBrowser).where(VpnBrowser.username == username, VpnBrowser.account_id == account_of(db, who).id))
+    if b is None:
+        raise VpnError("That browser no longer exists.", 404)
+    _remove_browser(db, b)
+    db.commit()
+
+
+def admin_delete_browser(db: Session, browser_id: int) -> None:
+    b = db.get(VpnBrowser, browser_id)
+    if b is None:
+        raise VpnError("Browser not found.", 404)
+    _remove_browser(db, b)
+    db.commit()
+
+
 def delete_device(db: Session, who: Who, device_id: int) -> None:
     dev = db.get(VpnDevice, device_id)
     if dev is None or dev.account_id != account_of(db, who).id:
@@ -400,6 +470,8 @@ def _apply_status(server: VpnServer, st: dict[str, Any], now: datetime) -> None:
     server.endpoint_host, server.address, server.dns = st["endpoint_host"], st["address"], st["dns"]
     server.online, server.last_seen, server.last_error = True, now, None
     server.adblock, server.fail_streak, server.address6 = bool(st.get("adblock")), 0, _v6_pool(str(st.get("address6") or ""))
+    proxy = st.get("proxy") or {}
+    server.proxy_host, server.proxy_port = proxy.get("host", ""), proxy.get("port", 443)
 
 
 def _check_pool(address: str) -> None:
@@ -514,7 +586,8 @@ def admin_overview(db: Session) -> dict[str, Any]:
     servers = [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "endpoint_host": v.endpoint_host,
                 "listen_port": v.listen_port, "agent_url": v.agent_url, "capacity": v.capacity, "enabled": v.enabled, "online": v.online,
                 "adblock": v.adblock,
-                "last_seen": _iso(v.last_seen), "last_error": v.last_error, "devices": counts.get(v.id, 0), "active_24h": active.get(v.id, 0)}
+                "last_seen": _iso(v.last_seen), "last_error": v.last_error, "devices": counts.get(v.id, 0), "active_24h": active.get(v.id, 0),
+                "proxy_host": v.proxy_host}
                for v in db.scalars(select(VpnServer).order_by(VpnServer.name, VpnServer.id))]
     out = {"settings": settings_out(s), "servers": servers,
            "totals": {"devices": sum(counts.values()),
@@ -529,11 +602,14 @@ def admin_customers(db: Session, limit: int = 200, now: datetime | None = None) 
     """Accounts that have paid or have devices, newest first. An anonymous account shows only its number: nothing else exists."""
     now = now or utcnow()
     accounts = list(db.scalars(select(VpnAccount).where(
-        (VpnAccount.paid_until.is_not(None)) | (VpnAccount.status != "active") | VpnAccount.id.in_(select(VpnDevice.account_id))).order_by(VpnAccount.id.desc()).limit(limit)))
+        (VpnAccount.paid_until.is_not(None)) | (VpnAccount.status != "active") | VpnAccount.id.in_(select(VpnDevice.account_id)) | VpnAccount.id.in_(select(VpnBrowser.account_id))).order_by(VpnAccount.id.desc()).limit(limit)))
     ids = [a.id for a in accounts]
     devices: dict[int, list[VpnDevice]] = {}
     for d in db.scalars(select(VpnDevice).where(VpnDevice.account_id.in_(ids)).order_by(VpnDevice.id)) if ids else []:
         devices.setdefault(d.account_id, []).append(d)
+    browsers: dict[int, list[VpnBrowser]] = {}
+    for b in db.scalars(select(VpnBrowser).where(VpnBrowser.account_id.in_(ids)).order_by(VpnBrowser.id)) if ids else []:
+        browsers.setdefault(b.account_id, []).append(b)
     names = dict(db.execute(select(VpnServer.id, VpnServer.name)).all())
     paid = {a: (n, t) for a, n, t in db.execute(select(VpnPayment.account_id, func.count(), func.sum(VpnPayment.paid_usd))
                                                 .where(VpnPayment.account_id.in_(ids), VpnPayment.status == "credited").group_by(VpnPayment.account_id))} if ids else {}
@@ -547,7 +623,9 @@ def admin_customers(db: Session, limit: int = 200, now: datetime | None = None) 
                     "state": access(db, a, r, now), "paid_until": _iso(a.paid_until), "lapsed_at": _iso(a.lapsed_at), "has_card": bool(a.stripe_customer),
                     "payments": int(n), "paid_usd": round(float(total or 0), 2),
                     "devices": [{"id": d.id, "name": d.name, "server": names.get(d.server_id, "?"), "ip": d.ip, "last_handshake": _iso(d.last_handshake),
-                                 "rx_bytes": d.rx_bytes, "tx_bytes": d.tx_bytes} for d in devices.get(a.id, [])]})
+                                 "rx_bytes": d.rx_bytes, "tx_bytes": d.tx_bytes} for d in devices.get(a.id, [])],
+                    "browsers": [{"id": b.id, "server": names.get(b.server_id, "?"), "last_active": _iso(b.last_active), "rx_bytes": b.rx_bytes, "tx_bytes": b.tx_bytes}
+                                 for b in browsers.get(a.id, [])]})
     return out
 
 
@@ -573,6 +651,9 @@ def set_blocked(db: Session, account_id: int, blocked: bool) -> dict[str, Any]:
     if blocked:
         for dev in list(db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id))):
             _remove(db, dev)
+            removed += 1
+        for b in list(db.scalars(select(VpnBrowser).where(VpnBrowser.account_id == acct.id))):
+            _remove_browser(db, b)
             removed += 1
     db.commit()
     return {"id": acct.id, "status": acct.status, "devices_removed": removed}
@@ -612,6 +693,49 @@ def _usage(dev: VpnDevice, peer: dict[str, Any], month: str) -> None:
         dev.last_handshake = hs
 
 
+def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowser], accounts: dict[int, VpnAccount], r: Rules,
+                   users: dict[str, dict[str, int]], states: dict[int, str], out: dict[str, Any], now: datetime) -> None:
+    """Make the proxy's logins match: active accounts under their data cap are on it; out of time or over the cap, off and kept; blocked, gone."""
+    month, cap = _month(now), settings(db).monthly_cap_gb * GB
+    wanted: set[str] = set()
+    for b in browsers:
+        acct = accounts[b.account_id]
+        if b.account_id not in states:
+            states[b.account_id] = access(db, acct, r, now)
+            acct.lapsed_at = (acct.lapsed_at or now) if states[b.account_id] == "lapsed" else None
+        state, seen = states[b.account_id], users.get(b.username)
+        if seen is not None:
+            if b.usage_month != month:
+                b.usage_month, b.rx_bytes, b.tx_bytes = month, 0, 0
+            rx, tx = seen["rx_bytes"], seen["tx_bytes"]
+            if rx != b.rx_counter or tx != b.tx_counter:
+                b.rx_bytes += rx - b.rx_counter if rx >= b.rx_counter else rx  # a smaller counter: the proxy restarted
+                b.tx_bytes += tx - b.tx_counter if tx >= b.tx_counter else tx
+                b.rx_counter, b.tx_counter, b.last_active = rx, tx, now
+        if state != "active" and not (state == "lapsed" and now - _aware(acct.lapsed_at) < KEEP_LAPSED):
+            db.delete(b)  # blocked or banned, or out of time for too long; its login goes with the unknown ones below
+            out["revoked"] += 1
+            continue
+        db.flush()  # the bytes just counted must be in what the cap sees
+        over = cap > 0 and not acct.is_owner and account_usage(db, acct.id, now) >= cap
+        if state != "active" or over:
+            continue  # off for now: not wanted on the proxy, removed below
+        wanted.add(b.username)
+        if seen is None:
+            try:
+                agent.put_proxy_user(b.username, b.secret_hash)
+                b.rx_counter = b.tx_counter = 0
+                out["readded"] += 1
+            except node.NodeError:
+                out["errors"] += 1
+    for name in users.keys() - wanted:
+        try:
+            agent.delete_proxy_user(name)
+            out["suspended"] += 1
+        except node.NodeError:
+            out["errors"] += 1
+
+
 def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> dict[str, Any]:
     now = now or utcnow()
     out = {"server": server.id, "online": False, "updated": 0, "readded": 0, "removed": 0, "revoked": 0, "suspended": 0, "errors": 0}
@@ -627,7 +751,8 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             ours: set[str] = set()
             states: dict[int, str] = {}
             devices = list(db.scalars(select(VpnDevice).where(VpnDevice.server_id == server.id)))
-            ids = sorted({d.account_id for d in devices})
+            browsers = list(db.scalars(select(VpnBrowser).where(VpnBrowser.server_id == server.id))) if server.proxy_host else []
+            ids = sorted({d.account_id for d in devices} | {b.account_id for b in browsers})
             # accounts, members, the entitlement and grants read once for the server, not a query per member
             accounts = {a.id: a for a in db.scalars(select(VpnAccount).where(VpnAccount.id.in_(ids)))} if ids else {}
             r = rules(db, sorted({a.member_id for a in accounts.values() if a.member_id is not None}))
@@ -689,6 +814,8 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
                     out["removed"] += 1
                 except node.NodeError:
                     out["errors"] += 1
+            if server.proxy_host:
+                _sync_browsers(db, agent, browsers, accounts, r, st["proxy_users"], states, out, now)
     except node.NodeError as e:
         server.online, server.last_error = False, str(e)[:500]
         server.fail_streak = (server.fail_streak or 0) + 1
@@ -704,6 +831,9 @@ def enforce_caps(db: Session, now: datetime | None = None) -> dict[str, int]:
     cap = settings(db).monthly_cap_gb * GB
     used = dict(db.execute(select(VpnDevice.account_id, func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes))
                            .where(VpnDevice.usage_month == _month(now)).group_by(VpnDevice.account_id)).all())  # type: ignore[arg-type]
+    for acct_id, n in db.execute(select(VpnBrowser.account_id, func.sum(VpnBrowser.rx_bytes + VpnBrowser.tx_bytes))
+                                 .where(VpnBrowser.usage_month == _month(now)).group_by(VpnBrowser.account_id)).all():
+        used[acct_id] = int(used.get(acct_id) or 0) + int(n or 0)
     lapsed = set(db.scalars(select(VpnAccount.id).where(VpnAccount.lapsed_at.is_not(None))))
     owner = db.scalar(select(VpnAccount.id).where(VpnAccount.is_owner.is_(True)))
     pause: list[VpnDevice] = []

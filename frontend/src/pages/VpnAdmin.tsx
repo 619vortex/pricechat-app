@@ -11,7 +11,7 @@ import "./VpnAdmin.css";
 export type VpnSettings = { enabled: boolean; payments_enabled: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
-  adblock: boolean };
+  adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string };
 export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number };
   billing?: { paying: number; anonymous: number; revenue_30d_usd: number; usdt: boolean; card: boolean } };
 
@@ -120,7 +120,7 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
   return (
     <>
     <tr>
-      <td><b>{x.name}</b>{x.adblock && <> <Badge tone="good">ad blocking</Badge></>}<br /><span className="muted small">{x.country_code.toUpperCase()} · {x.region}</span>
+      <td><b>{x.name}</b>{x.adblock && <> <Badge tone="good">ad blocking</Badge></>}{x.proxy_host && <> <Badge tone="good" title={x.proxy_host}>browser extension</Badge></>}<br /><span className="muted small">{x.country_code.toUpperCase()} · {x.region}</span>
         <br /><span className="muted small mono">{x.endpoint_host ? `${x.endpoint_host}:${x.listen_port ?? ""}` : x.agent_url}</span></td>
       <td><Badge tone={x.online ? "good" : "bad"}>{x.online ? "online" : "offline"}</Badge><br /><span className="muted small">seen {relativeTime(x.last_seen)}</span>
         {x.last_error && <><br /><span className="small" style={{ color: "var(--bad)" }}>{x.last_error}</span></>}</td>
@@ -299,9 +299,10 @@ function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
   );
 }
 
+type AdminBrowser = { id: number; server: string; last_active: string | null; rx_bytes: number; tx_bytes: number };
 type AdminDevice = { id: number; name: string; server: string; ip: string; last_handshake: string | null; rx_bytes: number; tx_bytes: number };
 export type VpnCustomer = { id: number; owner?: boolean; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
-  has_card: boolean; payments: number; paid_usd: number; devices: AdminDevice[] };
+  has_card: boolean; payments: number; paid_usd: number; devices: AdminDevice[]; browsers?: AdminBrowser[] };
 export type VpnPaymentRow = { id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
   created_at: string | null; credited_at: string | null; account: string | null };
 const CONNECTED_MS = 10 * 60_000;  // the sync reads handshakes every 5 minutes
@@ -324,6 +325,10 @@ function Customers({ payments, onChanged }: { payments: boolean; onChanged: () =
     if (!window.confirm(`Revoke "${d.name}" of ${c.label}? Its config stops working now.`)) return;
     void act(() => request(`/vpn/admin/devices/${d.id}`, { method: "DELETE" }), `Revoked ${d.name}.`);
   };
+  const revokeBrowser = (c: VpnCustomer, b: AdminBrowser) => {
+    if (!window.confirm(`Revoke this browser of ${c.label}? It's cut off within seconds, and can sign in again unless you block them.`)) return;
+    void act(() => request(`/vpn/admin/browsers/${b.id}`, { method: "DELETE" }), "Revoked the browser.");
+  };
   return (
     <Card title="People">
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
@@ -340,7 +345,7 @@ function Customers({ payments, onChanged }: { payments: boolean; onChanged: () =
                   <td>{c.owner ? "free" : day(c.paid_until)}</td>
                   <td>${c.paid_usd.toFixed(2)} <span className="muted small">({c.payments})</span></td>
                 </>}
-                <td>{c.devices.length === 0 ? <span className="muted small">none</span> : <div className="vpna-devices">{c.devices.map((d) => {
+                <td>{c.devices.length === 0 && !c.browsers?.length ? <span className="muted small">none</span> : <div className="vpna-devices">{c.devices.map((d) => {
                   const on = d.last_handshake !== null && Date.now() - new Date(d.last_handshake).getTime() < CONNECTED_MS;
                   return (
                     <div key={d.id} className="vpna-device">
@@ -348,7 +353,12 @@ function Customers({ payments, onChanged }: { payments: boolean; onChanged: () =
                       <button className="btn btn-sm" onClick={() => revoke(c, d)}>Revoke</button>
                     </div>
                   );
-                })}</div>}</td>
+                })}{c.browsers?.map((b) => (
+                  <div key={`b${b.id}`} className="vpna-device">
+                    <b>Browser</b> · {b.server} <Badge>{b.last_active ? `active ${relativeTime(b.last_active)}` : "not used yet"}</Badge>{" "}
+                    <button className="btn btn-sm" onClick={() => revokeBrowser(c, b)}>Revoke browser</button>
+                  </div>
+                ))}</div>}</td>
                 <td>{c.owner ? null : c.state === "blocked" ? <button className="btn btn-sm" onClick={() => block(c, false)}>Unblock</button>
                   : <button className="btn btn-sm btn-kill-sm" onClick={() => block(c, true)}>Block</button>}</td>
               </tr>

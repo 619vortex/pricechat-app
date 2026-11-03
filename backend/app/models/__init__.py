@@ -102,7 +102,7 @@ from app.models.trading import TrAccount, TrIntent, TrOrder, TrPosition  # noqa:
 from app.models.workers import WkAssignment, WkAudit, WkCredit, WkJoin, WkLink, WkReport, WkReview, WkRole, WkSettings, WkSubmission  # noqa: E402,F401
 from app.models.rewards import ArenaRun, BeginnerContent, RankReward, RewardAudit, RewardClaim, RewardSettings  # noqa: E402,F401
 from app.models.alerts import OwnerAlert, OwnerAlertSettings  # noqa: E402,F401
-from app.models.vpn import VpnAccount, VpnDevice, VpnPayment, VpnServer, VpnSettings  # noqa: E402,F401
+from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings  # noqa: E402,F401
 from app.models.perf_indexes import PERF_INDEXES  # noqa: E402,F401  (hot-query indexes, migration 0090)
 from app.models.committee import CmBacktest, CmLlmJob, CmOutcome, CmPaperTrade, CmRun, CmUsage  # noqa: E402,F401
 from app.models.kalshi import KalshiBot, KalshiLink, KalshiReport  # noqa: E402,F401

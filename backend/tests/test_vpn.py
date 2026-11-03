@@ -153,7 +153,7 @@ def test_closed_and_paid_access_only(client: TestClient, db: Session, fake: Fake
     r = client.get("/api/members/vpn").json()
     assert r["eligible"] and r["reason"] is None and "required_rank" not in r
     assert r["servers"] == [{"id": server.id, "name": "Frankfurt", "region": "Europe", "country_code": "DE", "online": True, "load": 0.0,
-                            "adblock": False, "recommended": True}]
+                            "adblock": False, "recommended": True, "browser": False}]
     assert r["usage"]["used_bytes"] == 0 and r["usage"]["cap_bytes"] == 0 and r["usage"]["paused_until"] is None
     r = signed_in(client, db, unpaid).get("/api/members/vpn").json()
     assert not r["eligible"] and "$9.99 a month" in r["reason"] and "ank" not in r["reason"]

@@ -97,6 +97,13 @@ write without changing anything (no root needed).
 It only adds rules that match `wg1`, and `--uninstall` removes all of it. No resolver is installed: customers use `DNS` (1.1.1.1) and IPv6 is
 dropped. Never point the agent at another tunnel's interface, because the backend removes any peer it doesn't own. Allow 51821/udp and 8443/tcp in the provider's firewall.
 
+## The browser extension's proxy
+
+`proxy.py` is an HTTPS forward proxy for `vpn-extension/`, because browsers can't run WireGuard. `install-proxy.sh` adds it to a node that already has the agent: its own user, service,
+Let's Encrypt certificate and firewall rules, on 443/tcp (80/tcp for certificate renewals). The name in `PROXY_HOST` must already point at the server. `--uninstall` removes all of it, and neither
+direction touches `wg0`, `wg1` or SSH. The proxy reaches only the public internet: every resolved address is checked, and the firewall repeats that for its user. It keeps no per-connection logs, only bytes per login.
+The agent writes logins (hashes only) to `/var/lib/kiwi-vpn-proxy/users.json`; a removed login loses its open connections within seconds. The backend sees the proxy in the agent's status at the next sync. An agent without one simply reports none.
+
 ## Customers and payments (Price Chat backend, `app/vpn/billing.py`)
 
 - $9.99 buys 30 days and any amount buys its share. Passport accounts pay by card or USDT; anonymous keys pay by USDT only.

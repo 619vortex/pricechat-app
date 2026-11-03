@@ -99,6 +99,22 @@ describe("VPN admin: access, payments, customers and blocking", () => {
     expect(screen.queryByRole("heading", { name: "My phone is ready" })).toBeNull();
   });
 
+  it("lists a browser and revokes it after asking", async () => {
+    vi.stubGlobal("confirm", () => true);
+    serve((key) => {
+      if (key.endsWith("/customers")) return [200, { items: [{ ...CUSTOMER, devices: [], browsers: [{ id: 5, server: "Helsinki 1", last_active: null, rx_bytes: 0, tx_bytes: 0 }] }] }];
+      if (key.startsWith("DELETE")) return [204, null];
+      return [200, overview()];
+    });
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    await open(/People/);
+    expect(container.textContent).toMatch(/Browser · Helsinki 1/);
+    fireEvent.click(screen.getByRole("button", { name: "Revoke browser" }));
+    await flush();
+    expect(calls.some((c) => c.startsWith("DELETE /api/vpn/admin/browsers/5"))).toBe(true);
+  });
+
   it("says what to do first when no server is connected", async () => {
     serve(() => [200, overview({ servers: [] })]);
     const { container } = render(<VpnAdminPage />);

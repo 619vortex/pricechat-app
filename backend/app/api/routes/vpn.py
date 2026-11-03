@@ -80,6 +80,33 @@ def delete_device(device_id: int, db: DbSession, pc_session: SessionToken = None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+class BrowserInput(StrictInput):
+    server_id: int
+    replace: str | None = Field(None, max_length=40)  # this browser's previous login, when it changes server
+
+
+@router.post("/members/vpn/browser", status_code=status.HTTP_201_CREATED)
+def create_browser(payload: BrowserInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    """The browser extension's login for one server. Shown this once; only its hash is kept."""
+    member = _require(db, pc_session)
+    wait = LIMITS["vpn_device"].hit(str(member.id))
+    if wait is not None:
+        raise HTTPException(429, "Too many new connections. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    try:
+        return service.create_browser(db, member, payload.server_id, payload.replace, _preview(db, request))
+    except VpnError as e:
+        raise _fail(e) from e
+
+
+@router.delete("/members/vpn/browser/{username}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_browser(username: str, db: DbSession, pc_session: SessionToken = None) -> Response:
+    try:
+        service.delete_browser(db, _require(db, pc_session), username)
+    except VpnError as e:
+        raise _fail(e) from e
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 # --- paying --------------------------------------------------------------------------------------------------------
 
 
@@ -272,6 +299,15 @@ def admin_create_device(payload: DeviceInput, db: DbSession) -> dict[str, Any]:
     except VpnError as e:
         raise _fail(e) from e
     return {"device": service.device_out(dev), "config": config, "filename": filename}
+
+
+@router.delete("/vpn/admin/browsers/{browser_id}", status_code=status.HTTP_204_NO_CONTENT)
+def admin_delete_browser(browser_id: int, db: DbSession) -> Response:
+    try:
+        service.admin_delete_browser(db, browser_id)
+    except VpnError as e:
+        raise _fail(e) from e
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/vpn/admin/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)

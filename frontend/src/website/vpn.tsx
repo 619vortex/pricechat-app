@@ -14,7 +14,7 @@ import "./vpn.css";
  */
 
 export interface VpnServer { id: number; name: string; region: string; country_code: string; online: boolean; load: number;
-  /** its resolver blocks ads & trackers */ adblock: boolean; /** the pick for a new device (online, least busy) */ recommended: boolean }
+  /** its resolver blocks ads & trackers */ adblock: boolean; /** the pick for a new device (online, least busy) */ recommended: boolean; /** the browser extension can use it */ browser?: boolean }
 export interface VpnDevice { id: number; name: string; server_id: number; ip: string; created_at: string; last_handshake: string | null;
   rx_bytes: number; tx_bytes: number; paused_until: string | null }
 /** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
@@ -339,6 +339,7 @@ function Unlocked({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
           </ul>
         )}
       </section>
+      {s.servers.some((x) => x.browser) && <BrowserCard />}
       <section className="vpn-card" aria-labelledby="vpn-servers">
         <h2 id="vpn-servers">Servers</h2>
         <ul className="vpn-servers">
@@ -357,6 +358,23 @@ function Unlocked({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
         </ul>
       </section>
     </div>
+  );
+}
+
+/** Testers install the extension by hand until it's in the browser stores. */
+function BrowserCard() {
+  return (
+    <section className="vpn-card vpn-browser" aria-labelledby="vpn-browser">
+      <h2 id="vpn-browser">Browser extension</h2>
+      <p className="site-muted">Chrome or Edge, one switch, no app. It covers that browser only. For everything on your device, add it above and use WireGuard.</p>
+      <a className="site-button" href="/downloads/kiwi-vpn-extension.zip" download>Download the extension</a>
+      <ol className="vpn-steps">
+        <li>Unzip it somewhere you'll keep it.</li>
+        <li>Open <b>chrome://extensions</b> or <b>edge://extensions</b> and turn on <b>Developer mode</b>.</li>
+        <li>Click <b>Load unpacked</b> and pick the <b>kiwi-vpn-extension</b> folder.</li>
+        <li>Click the Kiwi VPN icon and press the switch.</li>
+      </ol>
+    </section>
   );
 }
 

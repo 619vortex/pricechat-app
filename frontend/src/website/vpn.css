@@ -21,6 +21,8 @@
 .vpn-summary dd { margin: 4px 0 0; font-size: clamp(14px, 3vw, 19px); font-weight: 800; overflow-wrap: anywhere; }
 .vpn-summary .is-live dd { color: var(--site-green); }
 
+.vpn-browser { grid-column: 1 / -1; }
+.vpn-browser .site-button { justify-self: start; }
 .vpn-start { padding: clamp(20px, 4vw, 30px); }
 .vpn-start > .site-button { justify-self: start; }
 .vpn-path { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: vpn-step; }

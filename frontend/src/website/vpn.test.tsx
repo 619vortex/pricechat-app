@@ -64,6 +64,18 @@ describe("Free while payments are off", () => {
     expect(page).not.toMatch(money);
   });
 
+  it("offers the extension only when a server can take it", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: null })] });
+    let view = render(<VpnPage />);
+    await settle();
+    expect(screen.queryByRole("heading", { name: "Browser extension" })).toBeNull();
+    view.unmount();
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: null, servers: [{ ...SERVERS[0], browser: true }] })] });
+    view = render(<VpnPage />);
+    await settle();
+    expect(screen.getByRole("link", { name: "Download the extension" }).getAttribute("href")).toBe("/downloads/kiwi-vpn-extension.zip");
+  });
+
   it("stays coming soon while closed, however it's priced", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "Sign in" }],
             "GET /api/members/vpn/public": [200, { enabled: false, payments: false, billing: null }] });
