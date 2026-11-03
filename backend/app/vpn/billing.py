@@ -98,6 +98,10 @@ def options() -> dict[str, Any]:
             "networks": [{"key": k, "name": v[1], "min_usd": network_min(k)} for k, v in NETWORKS.items()] if usdt else []}
 
 
+def can_charge() -> bool:
+    return _usdt_on() or _card_on()
+
+
 def seconds_for(usd: float) -> int:
     return int(usd / PRICE_USD * PERIOD_DAYS * 86400)
 

@@ -1,0 +1,32 @@
+/* Admin > VPN (VpnAdmin.tsx): the dashboard's own tokens. */
+
+.vpna-controls { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.vpna-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: start; padding: 18px; min-width: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.vpna-control.is-on { border-color: rgb(34 197 94 / 0.55); background: linear-gradient(160deg, rgb(34 197 94 / 0.09), var(--surface) 60%); }
+.vpna-control-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.vpna-control-state { grid-column: 1; font-size: 20px; font-weight: 700; line-height: 1.25; }
+.vpna-control p { grid-column: 1 / -1; margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.vpna-control .toggle { grid-column: 2; grid-row: 1 / span 2; width: 46px; height: 26px; }
+.vpna-control .toggle span::after { top: 4px; left: 4px; width: 18px; height: 18px; }
+.vpna-control .toggle input:checked + span::after { transform: translateX(20px); }
+.vpna-control .toggle input:disabled + span { opacity: 0.5; cursor: not-allowed; }
+
+.vpna-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: step; }
+.vpna-steps li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; color: var(--muted); font-size: 13.5px; line-height: 1.5; counter-increment: step; }
+.vpna-steps li::before { content: counter(step); display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 700;
+  color: var(--text); background: var(--surface-2); border: 1px solid var(--border); }
+.vpna-steps li.is-done::before { content: "✓"; color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.vpna-steps b { color: var(--text); }
+
+.vpna-config { display: grid; gap: 16px; }
+.vpna-config-qr { justify-self: center; width: min(100%, 260px); aspect-ratio: 1; border-radius: 12px; background: #fff; padding: 8px; box-sizing: border-box; }
+.vpna-config-wait { background: var(--surface-2); }
+.vpna-config-side { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.vpna-warn { margin: 0; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; border: 1px solid rgb(245 158 11 / 0.5); background: rgb(245 158 11 / 0.1); }
+@media (min-width: 720px) { .vpna-config { grid-template-columns: 260px minmax(0, 1fr); } }
+
+.vpna-server-name { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.vpna-devices { display: grid; gap: 6px; }
+.vpna-device { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.vpna-note { margin: 0; }

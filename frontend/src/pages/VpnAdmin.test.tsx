@@ -5,12 +5,13 @@ import { VpnAdminPage, type VpnOverview } from "./VpnAdmin";
 /** TEST FIXTURES only: a fake Kiwi VPN admin API. No real agents, tokens or certificates. */
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const flush = async () => { for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); };
+const open = async (name: RegExp) => { fireEvent.click(screen.getByRole("tab", { name })); await flush(); };
 
 const SERVER = { id: 3, name: "Auckland 1", region: "New Zealand", country_code: "NZ", endpoint_host: "203.0.113.10", listen_port: 51820,
   agent_url: "https://203.0.113.10:8443", capacity: 250, enabled: true, online: true, last_seen: new Date().toISOString(), last_error: null,
   devices: 12, active_24h: 5, adblock: false };
 const overview = (over: Partial<VpnOverview> = {}): VpnOverview => ({
-  settings: { enabled: false, max_devices: 3, monthly_cap_gb: 0 },
+  settings: { enabled: false, payments_enabled: false, max_devices: 3, monthly_cap_gb: 0 },
   servers: [SERVER], totals: { devices: 12, members: 9, active_24h: 5 }, ...over,
 });
 
@@ -25,7 +26,7 @@ function serve(handler: (key: string, body: string | undefined) => [number, unkn
   }));
 }
 
-describe("VPN admin: sales, customers and blocking", () => {
+describe("VPN admin: access, payments, customers and blocking", () => {
   const CUSTOMER = { id: 4, anonymous: true, label: "Anonymous #4", state: "active", paid_until: "2026-12-03T00:00:00Z", lapsed_at: null, has_card: false, payments: 1, paid_usd: 9.99,
     devices: [{ id: 8, name: "phone", server: "Helsinki 1", ip: "10.66.0.2", last_handshake: new Date().toISOString(), rx_bytes: 5, tx_bytes: 5 }] };
   const PAYMENT = { id: 2, provider: "nowpayments", network: "solana", amount_usd: 9.99, paid_usd: 9.99, status: "credited", days: 30, created_at: "2026-11-03T00:00:00Z", credited_at: "2026-11-03T00:00:00Z", account: "Anonymous #4" };
@@ -33,30 +34,105 @@ describe("VPN admin: sales, customers and blocking", () => {
     if (key.endsWith("/customers")) return [200, { items: [CUSTOMER] }];
     if (key.endsWith("/payments")) return [200, { items: [PAYMENT, { ...PAYMENT, id: 1, account: null }] }];
     if (key.includes("/block") || key.startsWith("DELETE")) return [200, { id: 4, status: "blocked", devices_removed: 1 }];
-    return [200, overview()];
+    return [200, overview({ settings: { enabled: false, payments_enabled: true, max_devices: 3, monthly_cap_gb: 0 } })];
   };
+  const CAN_PAY = { paying: 1, anonymous: 2, revenue_30d_usd: 9.99, usdt: true, card: false };
 
-  it("shows sales off and test mode, and asks before opening to the public", async () => {
+  it("shows closed and free by default, and asks before opening it", async () => {
     const seen: string[] = [];
     vi.stubGlobal("confirm", (m: string) => { seen.push(m); return false; });
-    serve(api);
+    serve(() => [200, overview({ billing: CAN_PAY })]);
     const { container } = render(<VpnAdminPage />);
     await flush();
-    expect(container.textContent).toMatch(/Public sales.*off · test mode/);
-    fireEvent.click(screen.getByLabelText("VPN enabled"));
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(container.textContent).toMatch(/Access.*Closed/);
+    expect(container.textContent).toMatch(/Payments.*Off · free/);
+    fireEvent.click(screen.getByLabelText("VPN open"));
     await flush();
-    expect(seen[0]).toMatch(/Open Kiwi VPN to the public/);
+    expect(seen[0]).toMatch(/Open Kiwi VPN\? Anyone with a Passport can use it for free/);
     expect(calls.some((c) => c.startsWith("PUT"))).toBe(false);  // declined: nothing sent
+  });
+
+  it("turns payments on after warning who loses access, and it applies at once", async () => {
+    let s = overview({ billing: CAN_PAY });
+    const seen: string[] = [];
+    vi.stubGlobal("confirm", (m: string) => { seen.push(m); return true; });
+    serve((key, body) => {
+      if (key === "PUT /api/vpn/admin/settings") { s = { ...s, settings: { ...s.settings, ...JSON.parse(body!) } }; return [200, s.settings]; }
+      return [200, s];
+    });
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    fireEvent.click(screen.getByLabelText("Payments on"));
+    await flush();
+    expect(seen[0]).toMatch(/Anyone without paid time loses access within 5 minutes/);
+    expect(calls).toContain('PUT /api/vpn/admin/settings {"payments_enabled":true}');
+    expect(container.textContent).toMatch(/On · \$9\.99 for 30 days/);
+  });
+
+  it("won't let payments be switched on with no way to take one", async () => {
+    serve(() => [200, overview({ billing: { ...CAN_PAY, usdt: false } })]);
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    expect((screen.getByLabelText("Payments on") as HTMLInputElement).disabled).toBe(true);
+    expect(container.textContent).toMatch(/Add the NOWPayments or Stripe keys/);
+  });
+
+  it("makes a device here and shows its config once", async () => {
+    vi.stubGlobal("confirm", () => true);
+    serve((key) => {
+      if (key === "POST /api/vpn/admin/devices") return [201, { device: { id: 9, name: "My phone" }, config: "[Interface]\nPrivateKey = fixture-not-real\n", filename: "kiwi-my-phone.conf" }];
+      return [200, overview()];
+    });
+    render(<VpnAdminPage />);
+    await flush();
+    const create = screen.getByRole("button", { name: "Create device" }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Device name"), { target: { value: " My phone " } });
+    fireEvent.click(create);
+    await flush();
+    expect(calls).toContain('POST /api/vpn/admin/devices {"name":"My phone","server_id":3}');
+    expect(screen.getByRole("heading", { name: "My phone is ready" })).toBeTruthy();
+    expect(document.body.textContent).toMatch(/Shown once/);
+    expect(document.body.textContent).not.toContain("fixture-not-real");  // only in the QR code and the file
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await flush();
+    expect(screen.queryByRole("heading", { name: "My phone is ready" })).toBeNull();
+  });
+
+  it("says what to do first when no server is connected", async () => {
+    serve(() => [200, overview({ servers: [] })]);
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    expect(container.textContent).toMatch(/Get connected/);
+    expect(container.textContent).toMatch(/Connect a server first/);
+    expect(screen.queryByRole("button", { name: "Create device" })).toBeNull();
+  });
+
+  it("hides money from the people list while free, and doesn't offer to block your own devices", async () => {
+    serve((key) => {
+      if (key.endsWith("/customers")) return [200, { items: [{ ...CUSTOMER, id: 1, owner: true, anonymous: false, label: "Admin" }] }];
+      return [200, overview()];
+    });
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    await open(/People/);
+    expect(container.textContent).toMatch(/Admin/);
+    expect(container.textContent).not.toMatch(/Paid until/);
+    expect(screen.queryByRole("button", { name: "Block" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeTruthy();
   });
 
   it("lists customers with status, devices and payments; older anonymous payments stay unlinked", async () => {
     serve(api);
     const { container } = render(<VpnAdminPage />);
     await flush();
-    const t = container.textContent!;
+    await open(/People/);
+    let t = container.textContent!;
     expect(t).toMatch(/Anonymous #4/); expect(t).toMatch(/active/); expect(t).toMatch(/phone · Helsinki 1/); expect(t).toMatch(/connected/);
-    expect(t).toMatch(/\$9\.99 \(1\)/); expect(t).toMatch(/USDT solana/); expect(t).toMatch(/30 days/); expect(t).toMatch(/unlinked after 7 days/);
+    expect(t).toMatch(/\$9\.99 \(1\)/);
+    await open(/Payments/);
+    t = container.textContent!;
+    expect(t).toMatch(/USDT solana/); expect(t).toMatch(/30 days/); expect(t).toMatch(/unlinked after 7 days/);
   });
 
   it("blocks and revokes only after asking, and blocks a pasted key", async () => {
@@ -65,6 +141,7 @@ describe("VPN admin: sales, customers and blocking", () => {
     serve(api);
     render(<VpnAdminPage />);
     await flush();
+    await open(/People/);
     fireEvent.click(screen.getByRole("button", { name: "Block" }));
     await flush();
     expect(calls.some((c) => c.includes("/block"))).toBe(false);
@@ -85,6 +162,7 @@ describe("VPN admin: sales, customers and blocking", () => {
     serve(api);
     render(<VpnAdminPage />);
     await flush();
+    await open(/Servers/);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Edit capacity"), { target: { value: "50" } });
     fireEvent.click(screen.getByRole("button", { name: "Save server" }));
@@ -98,7 +176,8 @@ describe("VPN admin", () => {
     serve(() => [200, overview()]);
     const { container } = render(<VpnAdminPage />);
     await flush();
-    expect(container.textContent).toContain("Customers with devices");
+    expect(container.textContent).toContain("People with devices");
+    await open(/Servers/);
     const row = container.querySelector("tbody tr")!.textContent!;
     expect(row).toContain("Auckland 1");
     expect(row).toContain("online");
@@ -111,6 +190,7 @@ describe("VPN admin", () => {
     serve(() => [200, overview({ servers: [{ ...SERVER, adblock: true }] })]);
     const { container } = render(<VpnAdminPage />);
     await flush();
+    await open(/Servers/);
     expect(container.querySelector("tbody tr")!.textContent).toContain("ad blocking");
   });
 
@@ -121,7 +201,7 @@ describe("VPN admin", () => {
     expect(screen.queryByLabelText("Minimum rank")).toBeNull();
   });
 
-  it("saves the settings", async () => {
+  it("saves the limits", async () => {
     let s = overview();
     serve((key, body) => {
       if (key === "PUT /api/vpn/admin/settings") { s = { ...s, settings: { ...s.settings, ...JSON.parse(body!) } }; return [200, s.settings]; }
@@ -129,13 +209,11 @@ describe("VPN admin", () => {
     });
     render(<VpnAdminPage />);
     await flush();
-    vi.stubGlobal("confirm", () => true);
-    fireEvent.click(screen.getByLabelText("VPN enabled"));
     fireEvent.change(screen.getByLabelText("Max devices"), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText("Monthly cap GB"), { target: { value: "50" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save limits" }));
     await flush();
-    expect(calls).toContain('PUT /api/vpn/admin/settings {"enabled":true,"max_devices":5,"monthly_cap_gb":50}');
+    expect(calls).toContain('PUT /api/vpn/admin/settings {"max_devices":5,"monthly_cap_gb":50}');
     expect(screen.getByText("Saved")).toBeTruthy();
   });
 
@@ -152,6 +230,7 @@ describe("VPN admin", () => {
     });
     const { container } = render(<VpnAdminPage />);
     await flush();
+    await open(/Servers/);
     const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
     type("Name", "Frankfurt 1");
     type("Region", "Germany");
@@ -186,6 +265,7 @@ describe("VPN admin", () => {
     });
     render(<VpnAdminPage />);
     await flush();
+    await open(/Servers/);
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
     await flush();
     expect(screen.getByText("agent unreachable")).toBeTruthy();

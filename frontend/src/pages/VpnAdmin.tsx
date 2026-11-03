@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { request } from "../api/client";
 import { useApi } from "../api/useApi";
-import { ApiErrorBanner, Badge, Card, Empty, Field, Loading, PageHeader, Stat, relativeTime } from "../components/ui";
+import { ApiErrorBanner, Badge, Card, Empty, Field, Loading, PageHeader, Stat, Tabs, relativeTime } from "../components/ui";
+import { configQr, saveConfig } from "../website/vpnConfig";
+import "./VpnAdmin.css";
 
-/* Kiwi VPN (OWNER ONLY): public sales, the WireGuard servers, customers, payments and blocking. An anonymous customer is only a number here.
-   Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
+/* Kiwi VPN (OWNER ONLY): who can use it, whether it costs anything, devices made here, the WireGuard servers, customers and payments.
+   An anonymous customer is only a number here. Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
 
-export type VpnSettings = { enabled: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
+export type VpnSettings = { enabled: boolean; payments_enabled: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean };
@@ -15,14 +17,55 @@ export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; to
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function SettingsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
-  const [v, setV] = useState(s);
+/** The two decisions that matter, each one switch: who can use it, and whether it costs anything. Both apply as soon as they're flipped. */
+function Controls({ s, canCharge, onSaved }: { s: VpnSettings; canCharge: boolean; onSaved: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function flip(change: Partial<VpnSettings>, question: string) {
+    if (!window.confirm(question)) return;
+    setBusy(true); setErr(null);
+    try { await request("/vpn/admin/settings", { method: "PUT", body: JSON.stringify(change) }); await onSaved(); }
+    catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  }
+  const free = !s.payments_enabled;
+  return (
+    <div className="stack">
+      <div className="vpna-controls">
+        <section className={`vpna-control${s.enabled ? " is-on" : ""}`}>
+          <span className="vpna-control-label">Access</span>
+          <span className="vpna-control-state">{s.enabled ? "Open to members" : "Closed"}</span>
+          <label className="toggle" title={s.enabled ? "Open" : "Closed"}>
+            <input type="checkbox" aria-label="VPN open" checked={s.enabled} disabled={busy} onChange={(e) => void flip({ enabled: e.target.checked }, e.target.checked
+              ? `Open Kiwi VPN? ${free ? "Anyone with a Passport can use it for free" : "Anyone can buy it, with real money"}, and their traffic leaves through your servers' IP addresses.`
+              : "Close Kiwi VPN? Nobody new can join and members can't add devices. Devices already connected keep working.")} /><span />
+          </label>
+          <p>{s.enabled ? (free ? "Anyone with a Passport can sign in at /vpn and connect." : "Anyone can pay and connect at /vpn.")
+            : "The public sees “coming soon”. You can still make devices here, and test /vpn in this browser."}</p>
+        </section>
+        <section className={`vpna-control${s.payments_enabled ? " is-on" : ""}`}>
+          <span className="vpna-control-label">Payments</span>
+          <span className="vpna-control-state">{free ? "Off · free" : "On · $9.99 for 30 days"}</span>
+          <label className="toggle" title={free ? "Off" : "On"}>
+            <input type="checkbox" aria-label="Payments on" checked={s.payments_enabled} disabled={busy || (free && !canCharge)} onChange={(e) => void flip({ payments_enabled: e.target.checked }, e.target.checked
+              ? "Turn payments on? Anyone without paid time loses access within 5 minutes (their devices are kept for 30 days). Devices you made here stay free. Payments are real money."
+              : "Turn payments off? Kiwi VPN becomes free and everyone's devices switch back on within 5 minutes. A payment already started still gets credited.")} /><span />
+          </label>
+          <p>{free ? (canCharge ? "Nobody is asked to pay and no payment option is shown. Turn on when you're ready to charge." : "Nobody is asked to pay. Add the NOWPayments or Stripe keys on the server to allow turning this on.")
+            : "Members need paid time to connect. Any amount buys its share of 30 days."}</p>
+        </section>
+      </div>
+      {err && <p className="small vpna-note" role="alert" style={{ color: "var(--bad)" }}>{err}</p>}
+    </div>
+  );
+}
+
+function LimitsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
+  const [v, setV] = useState({ max_devices: s.max_devices, monthly_cap_gb: s.monthly_cap_gb });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => setV(s), [s]);
-  const dirty = v.enabled !== s.enabled || v.max_devices !== s.max_devices || v.monthly_cap_gb !== s.monthly_cap_gb;
+  useEffect(() => setV({ max_devices: s.max_devices, monthly_cap_gb: s.monthly_cap_gb }), [s]);
+  const dirty = v.max_devices !== s.max_devices || v.monthly_cap_gb !== s.monthly_cap_gb;
   async function save() {
-    if (v.enabled && !s.enabled && !window.confirm("Open Kiwi VPN to the public? Anyone can then buy it, with real money.")) return;
     setBusy(true); setMsg(null);
     try {
       await request("/vpn/admin/settings", { method: "PUT", body: JSON.stringify(v) });
@@ -35,14 +78,8 @@ function SettingsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
     }
   }
   return (
-    <Card title="Settings">
+    <Card title="Limits for members">
       <div className="form">
-        <div className="row">
-          <span><b>Public sales</b> <Badge tone={s.enabled ? "good" : "warn"}>{s.enabled ? "on" : "off · test mode"}</Badge><br /><span className="muted small">Off: the public sees "coming soon" and nobody can buy, get a key or add a device. You still can, in this browser, while signed in to Admin: open <a href="/vpn">the VPN page</a> to test (payments there are real). On: anyone can buy.</span></span>
-          <label className="toggle" title={v.enabled ? "On" : "Off"}>
-            <input type="checkbox" aria-label="VPN enabled" checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} /><span />
-          </label>
-        </div>
         <div className="row-fields">
           <Field label="Devices per member" hint="1 to 10.">
             <input className="input" type="number" min={1} max={10} aria-label="Max devices" value={v.max_devices}
@@ -54,7 +91,7 @@ function SettingsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
           </Field>
         </div>
         <div className="btn-group">
-          <button className="btn btn-primary" disabled={busy || !dirty} onClick={() => void save()}>Save settings</button>
+          <button className="btn btn-primary" disabled={busy || !dirty} onClick={() => void save()}>Save limits</button>
           {msg && <Badge tone={msg.ok ? "good" : "bad"}>{msg.text}</Badge>}
         </div>
       </div>
@@ -138,6 +175,78 @@ function EditServer({ x, onDone }: { x: VpnAdminServer; onDone: () => Promise<vo
   );
 }
 
+type Made = { device: { id: number; name: string }; config: string; filename: string };
+
+/** Make a device right here: no account, no key, free whatever the payment setting. The config exists only until this panel is closed. */
+function MakeDevice({ servers, onMade }: { servers: VpnAdminServer[]; onMade: () => Promise<void> }) {
+  const usable = servers.filter((x) => x.enabled && x.online);
+  const [name, setName] = useState("");
+  const [server, setServer] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [made, setMade] = useState<Made | null>(null);
+  const chosen = usable.some((x) => x.id === server) ? server : usable[0]?.id ?? 0;
+  async function go(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try {
+      setMade(await request<Made>("/vpn/admin/devices", { method: "POST", body: JSON.stringify({ name: name.trim(), server_id: chosen }) }));
+      setName("");
+      await onMade();
+    } catch (e2) { setErr(errText(e2)); } finally { setBusy(false); }
+  }
+  if (made) return <ConfigOnce made={made} onDone={() => setMade(null)} />;
+  return (
+    <Card title="Make a device">
+      {!usable.length ? <Empty>{servers.length ? "No server is online right now." : "Connect a server first, in the Servers tab."}</Empty> : (
+        <form className="form" onSubmit={go}>
+          <p className="muted small vpna-note">Connect your phone or laptop, or set one up for someone. Free, and it works even while Kiwi VPN is closed.</p>
+          <div className="form-grid">
+            <Field label="Device name"><input className="input" aria-label="Device name" maxLength={32} value={name} onChange={(e) => setName(e.target.value)} placeholder="My iPhone" /></Field>
+            <Field label="Server">
+              <select className="input" aria-label="Server" value={chosen} onChange={(e) => setServer(Number(e.target.value))}>
+                {usable.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.region}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="btn-group"><button className="btn btn-primary" type="submit" disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create device"}</button></div>
+          {err && <p className="small vpna-note" role="alert" style={{ color: "var(--bad)" }}>{err}</p>}
+        </form>
+      )}
+    </Card>
+  );
+}
+
+function ConfigOnce({ made, onDone }: { made: Made; onDone: () => void }) {
+  const [qr, setQr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    configQr(made.config).then((u) => { if (alive) setQr(u); }).catch(() => { if (alive) setQr(""); });
+    return () => { alive = false; };
+  }, [made.config]);
+  return (
+    <Card title={`${made.device.name} is ready`}>
+      <div className="vpna-config">
+        {qr ? <img className="vpna-config-qr" src={qr} alt={`QR code for ${made.device.name}`} />
+          : qr === "" ? <p className="muted small">Couldn't draw the QR code: download the file instead.</p>
+          : <span className="vpna-config-qr vpna-config-wait" aria-label="Drawing the QR code" />}
+        <div className="vpna-config-side">
+          <p className="vpna-warn" role="alert"><b>Shown once.</b> The private key isn't kept anywhere. If you lose it, revoke this device under People and make a new one.</p>
+          <ol className="vpna-steps">
+            <li><span>Install the <a className="link" href="https://www.wireguard.com/install/" target="_blank" rel="noopener noreferrer">WireGuard app</a>.</span></li>
+            <li><span>On a phone: + → <b>Scan from QR code</b>. On a computer: <b>Import tunnel(s) from file</b>, with the file below.</span></li>
+            <li><span>Switch it on.</span></li>
+          </ol>
+          <div className="btn-group">
+            <button className="btn" onClick={() => saveConfig(made.config, made.filename)}>Download .conf</button>
+            <button className="btn btn-primary" onClick={() => { if (window.confirm("Did you save it? It can't be shown again.")) onDone(); }}>Done</button>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 const EMPTY = { name: "", region: "", country_code: "", agent_url: "", agent_token: "", cert_sha256: "", capacity: "" };
 
 function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
@@ -191,7 +300,7 @@ function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
 }
 
 type AdminDevice = { id: number; name: string; server: string; ip: string; last_handshake: string | null; rx_bytes: number; tx_bytes: number };
-export type VpnCustomer = { id: number; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
+export type VpnCustomer = { id: number; owner?: boolean; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
   has_card: boolean; payments: number; paid_usd: number; devices: AdminDevice[] };
 export type VpnPaymentRow = { id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
   created_at: string | null; credited_at: string | null; account: string | null };
@@ -200,7 +309,7 @@ const STATE_TONE = { active: "good", lapsed: "warn", blocked: "bad" } as const;
 const STATE_LABEL = { active: "active", lapsed: "out of time", blocked: "blocked" } as const;
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
-function Customers({ onChanged }: { onChanged: () => Promise<void> }) {
+function Customers({ payments, onChanged }: { payments: boolean; onChanged: () => Promise<void> }) {
   const r = useApi(() => request<{ items: VpnCustomer[] }>("/vpn/admin/customers"), 60_000);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   async function act(f: () => Promise<unknown>, ok: string) {
@@ -216,36 +325,38 @@ function Customers({ onChanged }: { onChanged: () => Promise<void> }) {
     void act(() => request(`/vpn/admin/devices/${d.id}`, { method: "DELETE" }), `Revoked ${d.name}.`);
   };
   return (
-    <Card title="Customers">
+    <Card title="People">
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
       {note && <p><Badge tone={note.ok ? "good" : "bad"}>{note.text}</Badge></p>}
-      {r.loading && !r.data ? <Loading /> : !r.data?.items?.length ? <Empty>No customers yet.</Empty> : (
+      {r.loading && !r.data ? <Loading /> : !r.data?.items?.length ? <Empty>Nobody yet. Devices you make and people who join appear here.</Empty> : (
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Customer</th><th>Status</th><th>Paid until</th><th>Paid</th><th>Devices</th><th /></tr></thead>
+          <thead><tr><th>Who</th><th>Status</th>{payments && <><th>Paid until</th><th>Paid</th></>}<th>Devices</th><th /></tr></thead>
           <tbody>
             {r.data.items.map((c) => (
               <tr key={c.id}>
                 <td><b>{c.label}</b>{c.has_card && <> <Badge>card</Badge></>}</td>
                 <td><Badge tone={STATE_TONE[c.state]}>{STATE_LABEL[c.state]}</Badge></td>
-                <td>{day(c.paid_until)}</td>
-                <td>${c.paid_usd.toFixed(2)} <span className="muted small">({c.payments})</span></td>
-                <td>{c.devices.length === 0 ? <span className="muted small">none</span> : c.devices.map((d) => {
+                {payments && <>
+                  <td>{c.owner ? "free" : day(c.paid_until)}</td>
+                  <td>${c.paid_usd.toFixed(2)} <span className="muted small">({c.payments})</span></td>
+                </>}
+                <td>{c.devices.length === 0 ? <span className="muted small">none</span> : <div className="vpna-devices">{c.devices.map((d) => {
                   const on = d.last_handshake !== null && Date.now() - new Date(d.last_handshake).getTime() < CONNECTED_MS;
                   return (
-                    <div key={d.id} className="small">
-                      <b>{d.name}</b> · {d.server} <span className="mono muted">{d.ip}</span> <Badge tone={on ? "good" : undefined}>{on ? "connected" : `seen ${d.last_handshake ? relativeTime(d.last_handshake) : "never"}`}</Badge>{" "}
+                    <div key={d.id} className="vpna-device">
+                      <b>{d.name}</b> · {d.server} <span className="mono muted">{d.ip}</span> <Badge tone={on ? "good" : undefined}>{on ? "connected" : d.last_handshake ? `seen ${relativeTime(d.last_handshake)}` : "not connected yet"}</Badge>{" "}
                       <button className="btn btn-sm" onClick={() => revoke(c, d)}>Revoke</button>
                     </div>
                   );
-                })}</td>
-                <td>{c.state === "blocked" ? <button className="btn btn-sm" onClick={() => block(c, false)}>Unblock</button>
+                })}</div>}</td>
+                <td>{c.owner ? null : c.state === "blocked" ? <button className="btn btn-sm" onClick={() => block(c, false)}>Unblock</button>
                   : <button className="btn btn-sm btn-kill-sm" onClick={() => block(c, true)}>Block</button>}</td>
               </tr>
             ))}
           </tbody>
         </table></div>
       )}
-      <BlockKey onDone={async () => { await r.reload(); await onChanged(); }} />
+      {payments && <BlockKey onDone={async () => { await r.reload(); await onChanged(); }} />}
     </Card>
   );
 }
@@ -278,12 +389,12 @@ function BlockKey({ onDone }: { onDone: () => Promise<void> }) {
   );
 }
 
-function Payments() {
+function Payments({ on }: { on: boolean }) {
   const r = useApi(() => request<{ items: VpnPaymentRow[] }>("/vpn/admin/payments"), 60_000);
   return (
     <Card title="Payments">
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
-      {r.loading && !r.data ? <Loading /> : !r.data?.items?.length ? <Empty>No payments yet.</Empty> : (
+      {r.loading && !r.data ? <Loading /> : !r.data?.items?.length ? <Empty>{on ? "No payments yet." : "Payments are off, so nobody is charged. Turn them on above when you're ready."}</Empty> : (
         <div className="table-wrap"><table className="table">
           <thead><tr><th>Started</th><th>Customer</th><th>Via</th><th>Asked</th><th>Received</th><th>Time</th><th>Status</th></tr></thead>
           <tbody>
@@ -305,28 +416,43 @@ function Payments() {
   );
 }
 
+type Tab = "overview" | "servers" | "customers" | "payments";
+
 export function VpnAdminPage() {
   const r = useApi(() => request<VpnOverview>("/vpn/admin/overview"), 60_000);
   const d = r.data;
+  const [tab, setTab] = useState<Tab>("overview");
   return (
     <div className="stack">
-      <PageHeader title="Kiwi VPN" subtitle="The paid WireGuard VPN ($9.99 a month): public sales, servers, customers and payments. No traffic is logged. Owner only."
+      <PageHeader title="Kiwi VPN" subtitle="Your WireGuard VPN: who can use it, whether it costs anything, servers and devices. No traffic is logged."
         actions={<button className="btn" onClick={() => void r.reload()} disabled={r.loading}>Refresh</button>} />
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
       {r.loading && !d ? <Loading /> : null}
       {d && <>
+        <Controls s={d.settings} canCharge={!!(d.billing?.usdt || d.billing?.card)} onSaved={r.reload} />
         <div className="stats">
           <Stat label="Devices" value={d.totals.devices} />
-          <Stat label="Customers with devices" value={d.totals.members} />
+          <Stat label="People with devices" value={d.totals.members} />
           <Stat label="Active in 24h" value={d.totals.active_24h} tone={d.totals.active_24h > 0 ? "good" : "neutral"} />
           <Stat label="Servers online" value={`${d.servers.filter((x) => x.online).length} / ${d.servers.length}`}
                 tone={d.servers.some((x) => x.enabled && !x.online) ? "warn" : "good"} />
         </div>
-        {d.billing && (
-          <p className="muted small">Paying accounts: <b>{d.billing.paying}</b> · anonymous keys: <b>{d.billing.anonymous}</b> · last 30 days: <b>${d.billing.revenue_30d_usd.toFixed(2)}</b> ·
-            USDT {d.billing.usdt ? "on" : "off (no NOWPayments keys)"} · cards {d.billing.card ? "on" : "off (no Stripe keys)"}</p>
-        )}
-        <SettingsCard s={d.settings} onSaved={() => void r.reload()} />
+        <Tabs<Tab> value={tab} onChange={setTab} tabs={[{ key: "overview", label: "Overview" }, { key: "servers", label: `Servers (${d.servers.length})` },
+          { key: "customers", label: "People" }, { key: "payments", label: "Payments" }]} />
+        {tab === "overview" && <>
+          {!d.servers.some((x) => x.online) && (
+            <Card title="Get connected">
+              <ol className="vpna-steps">
+                <li className={d.servers.length ? "is-done" : ""}><span><b>Connect a server</b> in the <button className="btn btn-sm" onClick={() => setTab("servers")}>Servers</button> tab. It has to show online.</span></li>
+                <li><span><b>Make a device</b> below and scan its QR code with the WireGuard app.</span></li>
+                <li><span><b>Open it to members</b> with the Access switch when you want others on it.</span></li>
+              </ol>
+            </Card>
+          )}
+          <MakeDevice servers={d.servers} onMade={r.reload} />
+          <LimitsCard s={d.settings} onSaved={() => void r.reload()} />
+        </>}
+        {tab === "servers" && <>
         <Card title={`Servers (${d.servers.length})`}>
           {!d.servers.length ? <Empty>No servers yet. Add one below.</Empty> : (
             <div className="table-wrap"><table className="table">
@@ -337,8 +463,19 @@ export function VpnAdminPage() {
           <p className="muted small">Synced every 5 minutes by the <span className="mono">vpn.sync</span> job (online, last seen, handshakes, monthly data).</p>
         </Card>
         <AddServer onAdded={r.reload} />
-        <Customers onChanged={r.reload} />
-        <Payments />
+        </>}
+        {tab === "customers" && <Customers payments={d.settings.payments_enabled} onChanged={r.reload} />}
+        {tab === "payments" && <>
+          {d.billing && (
+            <div className="stats">
+              <Stat label="With paid time" value={d.billing.paying} />
+              <Stat label="Anonymous keys" value={d.billing.anonymous} />
+              <Stat label="Last 30 days" value={`$${d.billing.revenue_30d_usd.toFixed(2)}`} />
+              <Stat label="Ways to pay" value={[d.billing.usdt && "USDT", d.billing.card && "Card"].filter(Boolean).join(" · ") || "None"} hint={!d.billing.usdt && !d.billing.card ? "No NOWPayments or Stripe keys" : undefined} />
+            </div>
+          )}
+          <Payments on={d.settings.payments_enabled} />
+        </>}
       </>}
     </div>
   );

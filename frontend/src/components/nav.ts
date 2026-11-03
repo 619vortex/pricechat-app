@@ -58,10 +58,10 @@ export const AREAS: NavArea[] = [
       { to: "/analytics", label: "Analytics", about: "Visitors, sign-ups and growth." },
     ],
   },
+  { key: "vpn", label: "VPN", icon: "⛨", pages: [{ to: "/vpn", label: "Kiwi VPN", about: "Who can use it, whether it costs anything, servers and devices." }] },
   {
     key: "system", label: "System", icon: "⚙",
     pages: [
-      { to: "/vpn", label: "VPN", about: "Kiwi VPN: public sales, servers, customers, payments and blocking keys." },
       { to: "/settings", label: "Settings", about: "The emergency stop, background jobs and AI models." },
       { to: "/api-keys", label: "API keys", about: "Passwords and keys for the services Price Chat connects to." },
       { to: "/activity", label: "Activity log", about: "Everything Price Chat did, newest first." },

@@ -23,6 +23,7 @@ class VpnSettings(Base):
     min_rank: Mapped[str] = mapped_column(String(16), default="warrior", server_default="warrior", nullable=False)  # a Rank.key
     max_devices: Mapped[int] = mapped_column(Integer, default=3, server_default="3", nullable=False)
     monthly_cap_gb: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # per member per UTC month, 0 = unlimited
+    payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # off: free for anyone it's open to
 
 
 class VpnServer(IdMixin, TimestampMixin, Base):
@@ -62,6 +63,7 @@ class VpnAccount(IdMixin, TimestampMixin, Base):
     paid_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
     lapsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # when its devices were switched off for lack of time
     stripe_customer: Mapped[str | None] = mapped_column(String(64))
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # the devices made in Admin: never charged, no key, no member
 
 
 class VpnPayment(IdMixin, TimestampMixin, Base):

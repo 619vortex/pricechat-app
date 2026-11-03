@@ -38,6 +38,43 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const BILL = { price_usd: 9.99, period_days: 30, min_usd: 5, max_usd: 500, usdt: true, card: true,
                networks: [{ key: "ethereum", name: "USDT on Ethereum" }, { key: "tron", name: "USDT on Tron", min_usd: 10.96 }, { key: "solana", name: "USDT on Solana" }] };
 
+describe("Free while payments are off", () => {
+  afterEach(() => { try { sessionStorage.clear(); } catch { /* none */ } });
+  const money = /\$|USDT|card|pay/i;
+
+  it("shows a signed-out visitor one way in, with nothing about money", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "Sign in" }],
+            "GET /api/members/vpn/public": [200, { enabled: true, payments: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(screen.getByText("Free while we test")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Sign in to start" }).getAttribute("href")).toBe("/join");
+    expect(screen.queryByRole("heading", { name: "Anonymous, with USDT" })).toBeNull();
+    expect(container.querySelector(".vpn")!.textContent).not.toMatch(money);
+  });
+
+  it("gives a signed-in member devices and no payment section", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ devices: [DEVICE], billing: null })] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    const page = container.querySelector(".vpn")!.textContent!;
+    expect(page).toMatch(/1 connected/);
+    expect(page).toMatch(/Add a device/);
+    expect(screen.queryByRole("heading", { name: "Your time" })).toBeNull();
+    expect(page).not.toMatch(money);
+  });
+
+  it("stays coming soon while closed, however it's priced", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "Sign in" }],
+            "GET /api/members/vpn/public": [200, { enabled: false, payments: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.textContent).toMatch(/Coming soon/);
+    expect(screen.queryByText("Free while we test")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Sign in to start" })).toBeNull();
+  });
+});
+
 describe("Paying and anonymous keys", () => {
   afterEach(() => { try { sessionStorage.clear(); } catch { /* none */ } });
   const SIGNED_OUT = { "/api/website/home": [200, HOME] as Route, "GET /api/members/vpn": [401, { detail: "Sign in" }] as Route,

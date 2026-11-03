@@ -177,6 +177,7 @@ def test_amounts_networks_and_provider_failure(db: Session, fake: Any, keys: Non
 def test_no_keys_means_that_way_of_paying_is_off(client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("nowpayments_api_key", "nowpayments_ipn_secret", "stripe_secret_key", "stripe_webhook_secret"):
         monkeypatch.setattr(get_settings(), name, None, raising=False)
+    vpn.update_settings(db, {"payments_enabled": True})
     b = client.get("/api/members/vpn/public").json()["billing"]
     assert b["usdt"] is False and b["card"] is False and b["networks"] == [] and b["price_usd"] == 9.99
     acct, _ = billing.new_anonymous(db)
@@ -287,8 +288,8 @@ def test_scrub_cuts_the_link_for_anonymous_payments_only(db: Session, fake: Any,
 
 def test_closed_means_nobody_buys_except_the_owner_testing(client: TestClient, db: Session, fake: Any, keys: None, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     server = add_server(db, fake)
+    vpn.update_settings(db, {"payments_enabled": True})  # closed, but charging: free access has its own test
     assert vpn.settings(db).enabled is False
-    db.commit()
     # a visitor and a signed-in member: no key, no payment, no card, no device, and the page says closed
     pub = client.get("/api/members/vpn/public").json()
     assert pub["enabled"] is False and pub["test_mode"] is False

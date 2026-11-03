@@ -111,7 +111,7 @@ def signed_in(client: TestClient, db: Session, m: Member) -> TestClient:
 
 
 def open_vpn(db: Session, **over: Any) -> None:
-    vpn.update_settings(db, {"enabled": True, **over})
+    vpn.update_settings(db, {"enabled": True, "payments_enabled": True, **over})  # paid unless a test says otherwise
 
 
 def add_server(db: Session, fake: FakeNode, name: str = "Frankfurt") -> VpnServer:
@@ -271,11 +271,11 @@ def test_admin_routes(client: TestClient, db: Session, fake: FakeNode) -> None:
     assert row.cert_sha256 == FP and TOKEN not in row.agent_token_enc and vpn.agent_token(row) == TOKEN
     assert row.public_key == fake.server_key and row.address == "10.66.0.1/16"
     o = client.get("/api/vpn/admin/overview").json()
-    assert o["settings"] == {"enabled": False, "max_devices": 3, "monthly_cap_gb": 0} and "ranks" not in o
+    assert o["settings"] == {"enabled": False, "payments_enabled": False, "max_devices": 3, "monthly_cap_gb": 0} and "ranks" not in o
     assert o["servers"][0]["online"] is True and o["servers"][0]["capacity"] == 50 and "agent_token" not in json.dumps(o)
     assert o["totals"] == {"devices": 0, "members": 0, "active_24h": 0}
     assert client.put("/api/vpn/admin/settings", json={"max_devices": 5, "enabled": True}).json() == \
-        {"enabled": True, "max_devices": 5, "monthly_cap_gb": 0}
+        {"enabled": True, "payments_enabled": False, "max_devices": 5, "monthly_cap_gb": 0}
     assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": 50}).json()["monthly_cap_gb"] == 50
     assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": -1}).status_code == 422
     assert client.put("/api/vpn/admin/settings", json={"min_rank": "knight"}).status_code == 422  # no such setting any more

@@ -39,6 +39,12 @@ def _open_or_preview(db: DbSession, request: Request) -> None:
         raise HTTPException(403, "Kiwi VPN isn't open yet.")
 
 
+def _payments_on(db: DbSession) -> None:
+    """Nobody starts a payment while Kiwi VPN is free. Webhooks still credit an invoice from before it was turned off."""
+    if not service.settings(db).payments_enabled:
+        raise HTTPException(403, "Payments are off: Kiwi VPN is free right now.")
+
+
 # --- member -------------------------------------------------------------------------------------------------------
 
 
@@ -91,17 +97,17 @@ def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]
 
 @router.get("/members/vpn/public")
 def public_info(request: Request, db: DbSession) -> dict[str, Any]:
-    """For a signed-out visitor: is it open and how can they pay."""
-    bill = billing.options()
-    enabled, preview = service.settings(db).enabled, _preview(db, request)
-    out = {"enabled": enabled or preview, "test_mode": preview and not enabled, "billing": bill}
+    """For a signed-out visitor: is it open, is it free, and how can they pay."""
+    s = service.settings(db)
+    enabled, payments, preview = s.enabled, s.payments_enabled, _preview(db, request)
     db.commit()
-    return out
+    return {"enabled": enabled or preview, "test_mode": preview and not enabled, "payments": payments, "billing": billing.options() if payments else None}
 
 
 @router.post("/members/vpn/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
 def member_usdt(payload: UsdtInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     _open_or_preview(db, request)
+    _payments_on(db)
     acct = service.account_of(db, _require(db, pc_session))
     db.commit()
     return _usdt(db, acct, payload)
@@ -110,6 +116,7 @@ def member_usdt(payload: UsdtInput, request: Request, db: DbSession, pc_session:
 @router.post("/members/vpn/card", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
 def member_card(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
     _open_or_preview(db, request)
+    _payments_on(db)
     acct = service.account_of(db, _require(db, pc_session))
     db.commit()
     try:
@@ -156,8 +163,10 @@ def _anon(db: DbSession, x_kiwi_key: str | None = Header(None)) -> VpnAccount:
 
 @router.post("/members/vpn/anon", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_new"))])
 def anon_create(request: Request, db: DbSession) -> dict[str, str]:
-    """A new key. Shown this once: there is no way to recover it."""
+    """A new key. Shown this once: there is no way to recover it. Only while paying: free access goes with a Passport, so one person can't take every slot on a server."""
     _open_or_preview(db, request)
+    if not service.settings(db).payments_enabled:
+        raise HTTPException(403, "New keys are off while Kiwi VPN is free. Sign in with a Passport instead.")
     return {"key": billing.new_anonymous(db)[1]}
 
 
@@ -190,6 +199,7 @@ def anon_device_delete(device_id: int, db: DbSession, acct: VpnAccount = Depends
 @router.post("/members/vpn/anon/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
 def anon_usdt(payload: UsdtInput, request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
     _open_or_preview(db, request)
+    _payments_on(db)
     return _usdt(db, acct, payload)
 
 
@@ -203,12 +213,15 @@ def admin_overview(db: DbSession) -> dict[str, Any]:
 
 class SettingsUpdate(StrictInput):
     enabled: bool | None = None
+    payments_enabled: bool | None = None
     max_devices: int | None = Field(None, ge=1, le=service.MAX_DEVICES_LIMIT)
     monthly_cap_gb: int | None = Field(None, ge=0, le=service.MAX_CAP_GB)  # per member per month, 0 = unlimited
 
 
 @router.put("/vpn/admin/settings")
 def admin_settings(payload: SettingsUpdate, db: DbSession) -> dict[str, Any]:
+    if payload.payments_enabled and not billing.can_charge():
+        raise HTTPException(400, "Add the NOWPayments or Stripe keys first: there's no way to take a payment yet.")
     try:
         return service.update_settings(db, payload.model_dump(exclude_unset=True))
     except VpnError as e:
@@ -247,6 +260,18 @@ def admin_block_key(payload: BlockKeyInput, db: DbSession) -> dict[str, Any]:
         return service.block_key(db, payload.key)
     except VpnError as e:
         raise _fail(e) from e
+
+
+@router.post("/vpn/admin/devices", status_code=status.HTTP_201_CREATED)
+def admin_create_device(payload: DeviceInput, db: DbSession) -> dict[str, Any]:
+    """A device made right here, free whatever the payment setting. The config comes back once, like any other device's."""
+    acct = service.owner_account(db)
+    db.commit()
+    try:
+        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id, preview=True)
+    except VpnError as e:
+        raise _fail(e) from e
+    return {"device": service.device_out(dev), "config": config, "filename": filename}
 
 
 @router.delete("/vpn/admin/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)

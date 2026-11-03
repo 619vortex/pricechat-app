@@ -42,7 +42,7 @@ function shell(path: string) {
 
 describe("Admin layout", () => {
   it("keeps the sidebar short: a few areas, every old page still reachable", () => {
-    expect(AREAS.length).toBeLessThanOrEqual(9);
+    expect(AREAS.length).toBeLessThanOrEqual(10);
     for (const p of ["/trading-os", "/trading-bot", "/affiliate", "/members", "/rank-rewards", "/workers", "/realm", "/telegram", "/invite-bot", "/invite-bot/send",
       "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
       "/settings", "/api-keys", "/activity"]) {
@@ -50,7 +50,7 @@ describe("Admin layout", () => {
     }
     expect(locate("/telegram/topics/4").page.to).toBe("/telegram");
     expect(locate("/pokemon/cards/9").area.key).toBe("pokemon");
-    expect(locate("/vpn").area.key).toBe("system");
+    expect(locate("/vpn").area.key).toBe("vpn");
     expect(locate("/invite-bot/send").page.label).toBe("Send invites");
   });
 
