@@ -257,11 +257,7 @@ def test_a_brand_new_login_works_at_once(tmp_path, certs):
     async def go():
         async with Rig(tmp_path, certs) as rig:
             rig.users_file.write_text(json.dumps({"users": {"alice": HASH, "newbie": hashlib.sha256(b"fresh").hexdigest()}}))  # no reload has run
-            out = await rig.ask(f"GET http://{P.CHECK_HOST}/ HTTP/1.1
-Host: x
-Proxy-Authorization: Basic {basic('newbie', 'fresh')}
-
-")
+            out = await rig.ask(f"GET http://{P.CHECK_HOST}/ HTTP/1.1\r\nHost: x\r\nProxy-Authorization: Basic {basic('newbie', 'fresh')}\r\n\r\n")
             assert out.startswith(b"HTTP/1.1 200")
     run(go())
 
