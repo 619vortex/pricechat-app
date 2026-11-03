@@ -10,7 +10,8 @@ export type VpnSettings = { enabled: boolean; max_devices: number; /** per membe
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean };
-export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number } };
+export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number };
+  billing?: { paying: number; anonymous: number; revenue_30d_usd: number; usdt: boolean; card: boolean } };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -170,6 +171,10 @@ export function VpnAdminPage() {
           <Stat label="Servers online" value={`${d.servers.filter((x) => x.online).length} / ${d.servers.length}`}
                 tone={d.servers.some((x) => x.enabled && !x.online) ? "warn" : "good"} />
         </div>
+        {d.billing && (
+          <p className="muted small">Paying accounts: <b>{d.billing.paying}</b> · anonymous keys: <b>{d.billing.anonymous}</b> · last 30 days: <b>${d.billing.revenue_30d_usd.toFixed(2)}</b> ·
+            USDT {d.billing.usdt ? "on" : "off (no NOWPayments keys)"} · cards {d.billing.card ? "on" : "off (no Stripe keys)"}</p>
+        )}
         <SettingsCard s={d.settings} onSaved={() => void r.reload()} />
         <Card title={`Servers (${d.servers.length})`}>
           {!d.servers.length ? <Empty>No servers yet. Add one below.</Empty> : (

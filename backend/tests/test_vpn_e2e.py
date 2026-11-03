@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.members import xp as ledger
 from app.models.vpn import VpnDevice, VpnServer
 from app.vpn import keys, service as vpn
-from tests.test_vpn import member_at, open_vpn, signed_in, ungrant
+from tests.test_vpn import member_at, open_vpn, signed_in
 
 AGENT_PY = Path(__file__).resolve().parents[2] / "vpn-node" / "agent.py"
 TOKEN = "kiwi-agent-token-" + "x" * 32
@@ -257,7 +257,7 @@ def test_sync_against_the_agent(client: TestClient, db: Session, agent: RunningA
     d2 = c.post("/api/members/vpn/devices", json={"name": "two", "server_id": sid}).json()["device"]
     dd = vpn.create_device(db, drop, "drop", sid)[0]
     k1, k2, kd = (db.get(VpnDevice, d1["id"]).public_key, db.get(VpnDevice, d2["id"]).public_key, dd.public_key)
-    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 3, "readded": 0, "removed": 0, "revoked": 0, "errors": 0, "paused": 0, "resumed": 0}
+    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 3, "readded": 0, "removed": 0, "revoked": 0, "suspended": 0, "errors": 0, "paused": 0, "resumed": 0}
 
     # a peer vanished from the kernel -> re-added; an unknown peer -> removed
     del wg.peers[k2]
@@ -276,14 +276,15 @@ def test_sync_against_the_agent(client: TestClient, db: Session, agent: RunningA
     assert dt.datetime.fromisoformat(dev["last_handshake"]).timestamp() == hs
 
     # a member who loses eligibility is revoked at the agent
-    ungrant(db, drop)
+    drop.status = "banned"
+    db.commit()
     db.commit()
     out = vpn.sync_all(db)
     assert out["revoked"] == 1 and out["errors"] == 0
     assert kd not in wg.peers and kd not in agent.agent.peers and set(agent.agent.peers) == {k1, k2}
     db.expire_all()
-    assert db.scalars(select(VpnDevice).where(VpnDevice.member_id == drop.id)).all() == []
-    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "errors": 0, "paused": 0, "resumed": 0}
+    assert db.scalars(select(VpnDevice).where(VpnDevice.account_id == vpn.account_of(db, drop).id)).all() == []
+    assert vpn.sync_all(db) == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "suspended": 0, "errors": 0, "paused": 0, "resumed": 0}
 
 
 def test_pinning_a_wrong_certificate_never_sends_the_token(client: TestClient, db: Session, agent: RunningAgent, tmp_path: Path) -> None:
@@ -325,7 +326,7 @@ def test_agent_restart_reapplies_peers_and_sync_is_clean(client: TestClient, db:
     assert agent.agent.peers == before
     assert {k: p["allowed_ip"] for k, p in wg.peers.items()} == before
     out = vpn.sync_all(db)
-    assert out == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "errors": 0, "paused": 0, "resumed": 0}
+    assert out == {"servers": 1, "online": 1, "updated": 2, "readded": 0, "removed": 0, "revoked": 0, "suspended": 0, "errors": 0, "paused": 0, "resumed": 0}
     # counters restarted at zero on the node: the monthly totals keep what was counted before
     k = next(iter(before))
     wg.peers[k].update(rx=100, tx=100)

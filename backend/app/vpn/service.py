@@ -1,7 +1,9 @@
 """Kiwi VPN: who may use it, members' devices, servers and the 5-minute sync with each node agent.
 
-Kiwi VPN is a paid product ($9.99 a month), not a rank perk: access is an unexpired grant of the `kiwi_vpn` entitlement, given
-by hand for now and by a subscription once billing exists. Kiwi Rank plays no part; banned members never qualify. A device is created by allocating a tunnel IP, adding the peer on the
+Kiwi VPN is a paid product ($9.99 a month), not a rank perk. Devices belong to an account: a Passport member's, or an anonymous
+key's (no member at all). An account has access while it has paid time (app/vpn/billing.py) or its member an unexpired manual
+grant of the `kiwi_vpn` entitlement. Out of time, its devices are switched off and kept for KEEP_LAPSED, so paying again just
+works; blocked or banned, they go at once. Kiwi Rank plays no part. A device is created by allocating a tunnel IP, adding the peer on the
 node, then committing; if the node call fails nothing is kept. Only the public key is ever stored.
 """
 
@@ -19,9 +21,9 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
-from app.models.vpn import VpnDevice, VpnServer, VpnSettings
+from app.models.vpn import VpnAccount, VpnDevice, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
-from app.vpn import keys, node
+from app.vpn import billing, keys, node
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,9 @@ MAX_DEVICES_LIMIT = 10
 MAX_CAP_GB = 100000
 GB = 1024 ** 3  # the website shows sizes in powers of 1024
 SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0}  # min_rank: unused column, kept
-NOT_SUBSCRIBED = "Kiwi VPN is $9.99 a month. Subscriptions by card or crypto open soon."
+NOT_SUBSCRIBED = "Kiwi VPN is $9.99 a month. Add time to start."
+KEEP_LAPSED = timedelta(days=30)
+Who = Member | VpnAccount
 
 
 class VpnError(ValueError):
@@ -79,6 +83,18 @@ class Rules:
 
     ent: Entitlement | None
     grants: dict[int, MemberEntitlement] | None = None  # member id -> the VPN grant, for the members being checked
+    people: dict[int, Member] | None = None
+
+
+def account_of(db: Session, who: Who) -> VpnAccount:
+    if isinstance(who, VpnAccount):
+        return who
+    acct = db.scalar(select(VpnAccount).where(VpnAccount.member_id == who.id))
+    if acct is None:
+        acct = VpnAccount(member_id=who.id)
+        db.add(acct)
+        db.flush()
+    return acct
 
 
 def rules(db: Session, member_ids: list[int] | None = None) -> Rules:
@@ -87,29 +103,43 @@ def rules(db: Session, member_ids: list[int] | None = None) -> Rules:
     if member_ids is not None:
         grants = {} if ent is None else {g.member_id: g for g in db.scalars(select(MemberEntitlement).where(
             MemberEntitlement.entitlement_id == ent.id, MemberEntitlement.member_id.in_(member_ids)))}
-    return Rules(ent, grants)
+    people = {m.id: m for m in db.scalars(select(Member).where(Member.id.in_(member_ids)))} if member_ids else ({} if member_ids is not None else None)
+    return Rules(ent, grants, people)
 
 
-def qualifies(db: Session, member: Member, r: Rules | None = None) -> tuple[bool, str | None]:
-    """The member-level rule (an unexpired grant, not banned), regardless of whether the VPN is open."""
-    if member.status != "active":
-        return False, "Your account can't use Kiwi VPN."
+def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime | None = None) -> str:
+    """active (paid time or a manual grant) | lapsed (neither: devices off, kept for a while) | blocked (devices go now)."""
+    now = now or utcnow()
+    member = None
+    if acct.member_id is not None:
+        member = r.people.get(acct.member_id) if r is not None and r.people is not None else db.get(Member, acct.member_id)
+        if member is None or member.status != "active":
+            return "blocked"
+    if acct.status != "active":
+        return "blocked"
+    if (until := _aware(acct.paid_until)) is not None and until > now:
+        return "active"
     ent = r.ent if r is not None else _entitlement(db)
-    if ent is not None and not ent.enabled:
-        return False, "Kiwi VPN isn't available right now."
-    if ent is not None:
-        now = utcnow()
+    if member is not None and ent is not None and ent.enabled:
         if r is not None and r.grants is not None:
             grant = r.grants.get(member.id)
         else:
             grant = db.scalar(select(MemberEntitlement).where(MemberEntitlement.member_id == member.id,
                                                               MemberEntitlement.entitlement_id == ent.id))
-        if grant is not None and (grant.expires_at is None or grant.expires_at > now):
-            return True, None
-    return False, NOT_SUBSCRIBED
+        if grant is not None and (grant.expires_at is None or _aware(grant.expires_at) > now):
+            return "active"
+    return "lapsed"
 
 
-def eligibility(db: Session, member: Member) -> tuple[bool, str | None]:
+def qualifies(db: Session, who: Who, r: Rules | None = None) -> tuple[bool, str | None]:
+    """The account-level rule, regardless of whether the VPN is open."""
+    state = access(db, account_of(db, who), r)
+    if state == "active":
+        return True, None
+    return False, "Your account can't use Kiwi VPN." if state == "blocked" else NOT_SUBSCRIBED
+
+
+def eligibility(db: Session, member: Who) -> tuple[bool, str | None]:
     s = settings(db)
     if not s.enabled:
         return False, "Kiwi VPN isn't open yet."
@@ -182,19 +212,20 @@ def _paused(dev: VpnDevice, now: datetime) -> bool:
     return until is not None and until > now
 
 
-def member_usage(db: Session, member_id: int, now: datetime | None = None) -> int:
-    """Bytes (down + up) the member's devices used this UTC month."""
+def account_usage(db: Session, account_id: int, now: datetime | None = None) -> int:
+    """Bytes (down + up) the account's devices used this UTC month."""
     month = _month(now or utcnow())
     return int(db.scalar(select(func.coalesce(func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes), 0))
-                         .where(VpnDevice.member_id == member_id, VpnDevice.usage_month == month)) or 0)
+                         .where(VpnDevice.account_id == account_id, VpnDevice.usage_month == month)) or 0)
 
 
-def usage_out(db: Session, member: Member, s: VpnSettings, now: datetime | None = None) -> dict[str, Any]:
+def usage_out(db: Session, who: Who, s: VpnSettings, now: datetime | None = None) -> dict[str, Any]:
     """This month's data for the member page: used / cap (0 = unlimited) and, over the cap, when it resumes."""
     now = now or utcnow()
-    paused = [u for d in db.scalars(select(VpnDevice).where(VpnDevice.member_id == member.id))
+    acct = account_of(db, who)
+    paused = [u for d in db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id))
               if _paused(d, now) and (u := _aware(d.paused_until)) is not None]
-    return {"month": _month(now), "used_bytes": member_usage(db, member.id, now), "cap_bytes": s.monthly_cap_gb * GB,
+    return {"month": _month(now), "used_bytes": account_usage(db, acct.id, now), "cap_bytes": s.monthly_cap_gb * GB,
             "paused_until": _iso(max(paused)) if paused else None}
 
 
@@ -213,17 +244,19 @@ def _v6_pool(value: str) -> str:
         return ""
 
 
-def overview(db: Session, member: Member) -> dict[str, Any]:
+def overview(db: Session, who: Who) -> dict[str, Any]:
     s = settings(db)
-    ok, reason = eligibility(db, member)
+    acct = account_of(db, who)
+    ok, reason = eligibility(db, acct)
     counts = _device_counts(db)
     servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
     best = recommended_id(servers, counts)
-    devices = db.scalars(select(VpnDevice).where(VpnDevice.member_id == member.id).order_by(VpnDevice.created_at, VpnDevice.id))
+    devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
     out = {"enabled": s.enabled, "eligible": ok, "reason": reason, "max_devices": s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best} for v in servers],
-           "devices": [device_out(d) for d in devices], "usage": usage_out(db, member, s)}
+           "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
+           "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": billing.options()}
     db.commit()  # first call seeds the settings row
     return out
 
@@ -258,9 +291,9 @@ def clean_name(name: str) -> str:
     return n
 
 
-def _checked_server(db: Session, member: Member, server_id: int, max_devices: int) -> VpnServer:
-    db.scalar(select(Member.id).where(Member.id == member.id).with_for_update())  # one device creation per member at a time
-    if db.scalar(select(func.count()).select_from(VpnDevice).where(VpnDevice.member_id == member.id)) >= max_devices:
+def _checked_server(db: Session, acct_id: int, server_id: int, max_devices: int) -> VpnServer:
+    db.scalar(select(VpnAccount.id).where(VpnAccount.id == acct_id).with_for_update())  # one device creation per account at a time
+    if db.scalar(select(func.count()).select_from(VpnDevice).where(VpnDevice.account_id == acct_id)) >= max_devices:
         raise VpnError(f"You can have up to {max_devices} devices. Delete one first.", 409)
     server = db.get(VpnServer, server_id)
     if server is None or not server.enabled:
@@ -272,27 +305,30 @@ def _checked_server(db: Session, member: Member, server_id: int, max_devices: in
     return server
 
 
-def create_device(db: Session, member: Member, name: str, server_id: int) -> tuple[VpnDevice, str, str]:
+def create_device(db: Session, who: Who, name: str, server_id: int) -> tuple[VpnDevice, str, str]:
     """(device, config text, filename). The config, holding the private key, exists only in this return value.
 
     The tunnel IP is protected by the unique (server_id, ip) constraint: if a concurrent creation took the same IP first,
     the flush fails, the transaction is rolled back and the next free IP is tried (checks re-run on the fresh state)."""
     name = clean_name(name)
-    ok, reason = eligibility(db, member)
+    acct = account_of(db, who)
+    db.commit()
+    acct_id = acct.id
+    ok, reason = eligibility(db, acct)
     if not ok:
         raise VpnError(reason or "Kiwi VPN isn't available.", 403)
     s = settings(db)
     max_devices = s.max_devices
     if s.monthly_cap_gb > 0:
-        use = usage_out(db, member, s)
+        use = usage_out(db, acct, s)
         if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:
             raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
     private_key, public_key = keys.generate_keypair()
     tried: set[str] = set()
     for _ in range(8):
-        server = _checked_server(db, member, server_id, max_devices)
+        server = _checked_server(db, acct_id, server_id, max_devices)
         ip = allocate_ip(db, server, tried)
-        dev = VpnDevice(member_id=member.id, server_id=server.id, name=name, public_key=public_key, ip=ip,
+        dev = VpnDevice(account_id=acct_id, server_id=server.id, name=name, public_key=public_key, ip=ip,
                         usage_month=utcnow().strftime("%Y-%m"))
         db.add(dev)
         try:
@@ -317,9 +353,9 @@ def create_device(db: Session, member: Member, name: str, server_id: int) -> tup
     return dev, config, keys.filename(server.name, dev.name)
 
 
-def delete_device(db: Session, member: Member, device_id: int) -> None:
+def delete_device(db: Session, who: Who, device_id: int) -> None:
     dev = db.get(VpnDevice, device_id)
-    if dev is None or dev.member_id != member.id:
+    if dev is None or dev.account_id != account_of(db, who).id:
         raise VpnError("Device not found.", 404)
     _remove(db, dev)
     db.commit()
@@ -463,8 +499,9 @@ def admin_overview(db: Session) -> dict[str, Any]:
                for v in db.scalars(select(VpnServer).order_by(VpnServer.name, VpnServer.id))]
     out = {"settings": settings_out(s), "servers": servers,
            "totals": {"devices": sum(counts.values()),
-                      "members": db.scalar(select(func.count(func.distinct(VpnDevice.member_id)))) or 0,
-                      "active_24h": sum(active.values())}}
+                      "members": db.scalar(select(func.count(func.distinct(VpnDevice.account_id)))) or 0,
+                      "active_24h": sum(active.values())},
+           "billing": billing.totals(db)}
     db.commit()
     return out
 
@@ -490,7 +527,7 @@ def _usage(dev: VpnDevice, peer: dict[str, Any], month: str) -> None:
 
 def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> dict[str, Any]:
     now = now or utcnow()
-    out = {"server": server.id, "online": False, "updated": 0, "readded": 0, "removed": 0, "revoked": 0, "errors": 0}
+    out = {"server": server.id, "online": False, "updated": 0, "readded": 0, "removed": 0, "revoked": 0, "suspended": 0, "errors": 0}
     s = settings(db)
     try:
         with node.client_for(server) as agent:
@@ -501,17 +538,33 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             peers = {p["public_key"]: p for p in st["peers"]}
             month = now.strftime("%Y-%m")
             ours: set[str] = set()
-            members: dict[int, bool] = {}
+            states: dict[int, str] = {}
             devices = list(db.scalars(select(VpnDevice).where(VpnDevice.server_id == server.id)))
-            ids = sorted({d.member_id for d in devices})
-            # members, the entitlement and grants read once for the server, not a query per member
-            people = {m.id: m for m in db.scalars(select(Member).where(Member.id.in_(ids)))} if ids else {}
-            r = rules(db, ids)
+            ids = sorted({d.account_id for d in devices})
+            # accounts, members, the entitlement and grants read once for the server, not a query per member
+            accounts = {a.id: a for a in db.scalars(select(VpnAccount).where(VpnAccount.id.in_(ids)))} if ids else {}
+            r = rules(db, sorted({a.member_id for a in accounts.values() if a.member_id is not None}))
             for dev in devices:
-                if dev.member_id not in members:
-                    m = people.get(dev.member_id)
-                    members[dev.member_id] = m is not None and qualifies(db, m, r)[0]
-                if not members[dev.member_id]:  # banned / grant expired or removed: revoke
+                acct = accounts[dev.account_id]
+                if dev.account_id not in states:
+                    states[dev.account_id] = access(db, acct, r, now)
+                    if states[dev.account_id] == "lapsed":
+                        acct.lapsed_at = acct.lapsed_at or now
+                    else:
+                        acct.lapsed_at = None
+                state = states[dev.account_id]
+                if state == "lapsed" and now - _aware(acct.lapsed_at) < KEEP_LAPSED:  # out of time: off, kept, back on when paid
+                    ours.add(dev.public_key)
+                    peer = peers.get(dev.public_key)
+                    if peer is not None:
+                        _usage(dev, peer, month)
+                        try:
+                            agent.delete_peer(dev.public_key)
+                            out["suspended"] += 1
+                        except node.NodeError:
+                            out["errors"] += 1
+                    continue
+                if state != "active":  # blocked or banned, or out of time for too long: gone
                     try:
                         agent.delete_peer(dev.public_key)
                     except node.NodeError:
@@ -562,18 +615,20 @@ def enforce_caps(db: Session, now: datetime | None = None) -> dict[str, int]:
     until the 1st of next month; a member under it again (a new month, or the owner raised / removed the cap) resumes."""
     now = now or utcnow()
     cap = settings(db).monthly_cap_gb * GB
-    used = dict(db.execute(select(VpnDevice.member_id, func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes))
-                           .where(VpnDevice.usage_month == _month(now)).group_by(VpnDevice.member_id)).all())  # type: ignore[arg-type]
+    used = dict(db.execute(select(VpnDevice.account_id, func.sum(VpnDevice.rx_bytes + VpnDevice.tx_bytes))
+                           .where(VpnDevice.usage_month == _month(now)).group_by(VpnDevice.account_id)).all())  # type: ignore[arg-type]
+    lapsed = set(db.scalars(select(VpnAccount.id).where(VpnAccount.lapsed_at.is_not(None))))
     pause: list[VpnDevice] = []
     resume: list[VpnDevice] = []
     for dev in db.scalars(select(VpnDevice).order_by(VpnDevice.id)):
-        over = cap > 0 and int(used.get(dev.member_id) or 0) >= cap
+        over = cap > 0 and int(used.get(dev.account_id) or 0) >= cap
         if over and not _paused(dev, now):
             dev.paused_until = next_month(now)
             pause.append(dev)
         elif not over and dev.paused_until is not None:
             dev.paused_until = None
-            resume.append(dev)
+            if dev.account_id not in lapsed:  # out of time too: stays off until paid
+                resume.append(dev)
     db.commit()
     errors = 0
     for server_id in sorted({d.server_id for d in pause + resume}):  # best effort: the next sync finishes what fails here
@@ -603,6 +658,7 @@ def sync_all(db: Session, now: datetime | None = None) -> dict[str, Any]:
     now = now or utcnow()
     results = [sync_server(db, v, now) for v in list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.id)))]
     caps = enforce_caps(db, now)
+    billing.scrub(db, now)
     return {"servers": len(results), "online": sum(r["online"] for r in results),
-            **{k: sum(r[k] for r in results) for k in ("updated", "readded", "removed", "revoked")},
+            **{k: sum(r[k] for r in results) for k in ("updated", "readded", "removed", "revoked", "suspended")},
             "errors": sum(r["errors"] for r in results) + caps["errors"], "paused": caps["paused"], "resumed": caps["resumed"]}

@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { MemberApiError, memberApi } from "./members";
 import { SitePage } from "./community";
 import { pageHead } from "./seo";
 import "./vpn.css";
 
 /**
- * Kiwi VPN: a paid WireGuard VPN ($9.99 a month). The server decides who may use it (/api/members/vpn); this page
- * only shows it. A new device's config (the only copy of its private key) comes back ONCE: it is shown as a QR code and a
+ * Kiwi VPN: a paid WireGuard VPN ($9.99 a month; any amount buys its share of time). Two ways in: a Passport account (card or
+ * USDT), or an anonymous key (USDT only, no email or name; a lost key can't be recovered). The server decides who may use it;
+ * this page only shows it. The key lives in this tab (sessionStorage) unless the visitor saves it elsewhere themselves. A new device's config (the only copy of its private key) comes back ONCE: it is shown as a QR code and a
  * .conf download, then forgotten. Lost it → delete the device and add a new one.
  */
 
@@ -16,7 +17,8 @@ export interface VpnDevice { id: number; name: string; server_id: number; ip: st
   rx_bytes: number; tx_bytes: number; paused_until: string | null }
 /** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
 export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number; paused_until: string | null }
-export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number;
+export interface VpnBilling { price_usd: number; period_days: number; min_usd: number; max_usd: number; usdt: boolean; card: boolean; networks: { key: string; name: string }[] }
+export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling;
   servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage }
 export interface NewDevice { device: VpnDevice; config: string; filename: string }
 
@@ -79,12 +81,34 @@ export const INSTALL = [
   { os: "Mac", href: "https://apps.apple.com/us/app/wireguard/id1451685025" },
 ];
 
+/** Every account call goes through this: the Passport session cookie, or the anonymous key in a header. */
+type Call = <T>(path: string, init?: RequestInit) => Promise<T>;
+const KEY_STORE = "kiwi-vpn-key";
+const callFor = (key: string | null): Call => (key
+  ? (path, init = {}) => memberApi(`/members/vpn/anon${path}`, { ...init, headers: { ...(init.headers ?? {}), "X-Kiwi-Key": key } })
+  : (path, init) => memberApi(`/members/vpn${path}`, init));
+const CallCtx = createContext<Call>(callFor(null));
+function readKey(): string | null { try { return sessionStorage.getItem(KEY_STORE); } catch { return null; } }
+function saveKey(k: string | null): void { try { if (k) sessionStorage.setItem(KEY_STORE, k); else sessionStorage.removeItem(KEY_STORE); } catch { /* the key stays in memory only */ } }
+
+type Loaded = VpnState | { error: string; status: number } | { visitor: true; enabled: boolean; billing: VpnBilling };
+
 export function VpnPage() {
-  const [state, setState] = useState<VpnState | { error: string; status: number } | null>(null);
+  const [key, setKeyState] = useState<string | null>(readKey);
+  const [fresh, setFresh] = useState<string | null>(null);  // a key just made: shown once, before anything else
+  const [state, setState] = useState<Loaded | null>(null);
+  const setKey = useCallback((k: string | null) => { saveKey(k); setKeyState(k); }, []);
   const load = useCallback(async () => {
-    try { setState(await memberApi<VpnState>("/members/vpn")); }
-    catch (e) { setState({ error: vpnError(e), status: e instanceof MemberApiError ? e.status : 0 }); }
-  }, []);
+    try { setState(await callFor(key)<VpnState>("")); }
+    catch (e) {
+      const status = e instanceof MemberApiError ? e.status : 0;
+      if (key && status === 401) { setKey(null); setState({ error: "That key isn't valid.", status: 0 }); return; }
+      if (status === 401) {
+        try { setState({ visitor: true, ...(await memberApi<{ enabled: boolean; billing: VpnBilling }>("/members/vpn/public")) }); return; } catch { /* the plain error below */ }
+      }
+      setState({ error: vpnError(e), status });
+    }
+  }, [key, setKey]);
   useEffect(() => { void load(); }, [load]);
   return (
     <SitePage {...pageHead("vpn")}>
@@ -96,18 +120,146 @@ export function VpnPage() {
             <p className="site-muted">A private WireGuard VPN for $9.99 a month. We never log what you do or where you go.</p>
           </div>
         </header>
-        {!state ? <p className="site-empty">Loading…</p>
-          : "error" in state ? (
+        {fresh ? <KeyOnce k={fresh} onDone={() => { setKey(fresh); setFresh(null); }} />
+          : !state ? <p className="site-empty">Loading…</p>
+          : "visitor" in state ? (
+            !state.enabled ? <div className="vpn-soon"><b>Coming soon</b><p>Kiwi VPN isn't open yet. It will appear here as soon as it is.</p></div>
+              : <Choose billing={state.billing} onKey={setKey} onFresh={setFresh} />
+          ) : "error" in state ? (
             <div className="vpn-gate">
               <p>{state.error}</p>
               <a className="site-button" href={state.status === 401 ? "/join" : "/passport"}>{state.status === 401 ? "Sign in" : "Back to your Passport"}</a>
             </div>
           ) : !state.enabled ? (
             <div className="vpn-soon"><b>Coming soon</b><p>Kiwi VPN isn't open yet. It will appear here as soon as it is.</p></div>
-          ) : !state.eligible ? <Locked s={state} />
-          : <Unlocked s={state} reload={load} />}
+          ) : (
+            <CallCtx.Provider value={callFor(key)}>
+              {state.anonymous && <p className="vpn-keybar">🔑 Using your anonymous key. <button className="vpn-link" onClick={() => { setKey(null); setState(null); }}>Forget it on this browser</button></p>}
+              {!state.eligible ? <Locked s={state} /> : <Unlocked s={state} reload={load} />}
+              <AddTime s={state} reload={load} />
+            </CallCtx.Provider>
+          )}
       </section>
     </SitePage>
+  );
+}
+
+/** A signed-out visitor picks: a Passport account, or an anonymous key. */
+function Choose({ billing, onKey, onFresh }: { billing: VpnBilling; onKey: (k: string) => void; onFresh: (k: string) => void }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function make() {
+    setBusy(true); setErr(null);
+    try { onFresh((await memberApi<{ key: string }>("/members/vpn/anon", { method: "POST" })).key); }
+    catch (e) { setErr(vpnError(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="vpn-grid">
+      <section className="vpn-card" aria-labelledby="vpn-passport">
+        <h2 id="vpn-passport">With a Passport</h2>
+        <p className="site-muted">Sign in with your email. Pay by {billing.card ? "card or USDT" : "USDT"}, and recover your account if you lose a device.</p>
+        <a className="site-button" href="/join">Sign in</a>
+      </section>
+      <section className="vpn-card" aria-labelledby="vpn-anon">
+        <h2 id="vpn-anon">Anonymous, with USDT</h2>
+        <p className="site-muted">No email, no username, no password. You get a key, and that key is your only login.
+          <b> Lose it and your time is gone: nobody can recover it.</b> Keeping your own crypto anonymous is up to you.</p>
+        {!billing.usdt && <p className="site-muted">USDT payments open soon.</p>}
+        <button className="site-button" disabled={busy || !billing.usdt} onClick={() => void make()}>{busy ? "Creating…" : "Get a key"}</button>
+        {err && <p className="site-error" role="alert">{err}</p>}
+        <form className="vpn-form" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) onKey(typed.trim()); }}>
+          <label className="site-field"><span>Already have a key?</span>
+            <input value={typed} autoComplete="off" spellCheck={false} placeholder="KIWI-XXXX-…" onChange={(e) => setTyped(e.target.value)} /></label>
+          <button className="site-button is-ghost" type="submit" disabled={!typed.trim()}>Use my key</button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+/** The new key, once. Continuing needs a tick: there is no recovery, so this is the one moment that matters. */
+function KeyOnce({ k, onDone }: { k: string; onDone: () => void }) {
+  const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
+  return (
+    <section className="vpn-card vpn-keyonce" aria-labelledby="vpn-key-title">
+      <h2 id="vpn-key-title">Save your key</h2>
+      <p>This is your only login, and it's shown <b>once</b>. We keep only a scrambled form of it, so we can't show it again or recover it.</p>
+      <code className="vpn-key">{k}</code>
+      <button className="site-button is-ghost" onClick={() => { void navigator.clipboard?.writeText(k); setCopied(true); }}>{copied ? "Copied ✓" : "Copy key"}</button>
+      <label className="vpn-check"><input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} /> I saved my key somewhere safe. If I lose it, my time is gone.</label>
+      <button className="site-button" disabled={!saved} onClick={onDone}>Continue</button>
+    </section>
+  );
+}
+
+type Invoice = { network_name: string; address: string; amount: number; amount_usd: number; expires_at: string | null; days: number };
+
+/** Time left, and buying more. Any amount buys its share of $9.99 for 30 days. */
+function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
+  const call = useContext(CallCtx);
+  const b = s.billing;
+  const [amount, setAmount] = useState("9.99");
+  const [network, setNetwork] = useState("tron");
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {  // the time appears by itself once the network confirms the payment
+    if (!invoice) return;
+    const id = window.setInterval(() => void reload(), 20000);
+    return () => window.clearInterval(id);
+  }, [invoice, reload]);
+  if (!b) return null;
+  const usd = Number(amount);
+  const days = usd > 0 ? (usd / b.price_usd) * b.period_days : 0;
+  const okAmount = usd >= b.min_usd && usd <= b.max_usd;
+  const until = s.paid_until ? new Date(s.paid_until) : null;
+  const active = until !== null && until.getTime() > Date.now();
+  async function usdt(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr(null);
+    try { setInvoice(await call<Invoice>("/usdt", { method: "POST", body: JSON.stringify({ amount_usd: usd, network }) })); }
+    catch (e2) { setErr(vpnError(e2)); } finally { setBusy(false); }
+  }
+  async function go(path: string) {
+    setBusy(true); setErr(null);
+    try { window.location.assign((await call<{ url: string }>(path, { method: "POST" })).url); }
+    catch (e2) { setErr(vpnError(e2)); setBusy(false); }
+  }
+  return (
+    <section className="vpn-card vpn-time" aria-labelledby="vpn-time">
+      <h2 id="vpn-time">Your time</h2>
+      <p>{active ? <>Paid until <b>{until!.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</b>.</>
+        : until ? "Your time has run out. Your devices are off and kept for 30 days: add time and they switch back on within 5 minutes." : "No paid time yet."}</p>
+      {!b.usdt && !b.card && <p className="site-muted">Payments open soon.</p>}
+      {b.card && !s.anonymous && (
+        s.has_card ? <button className="site-button is-ghost" disabled={busy} onClick={() => void go("/card/portal")}>Manage card subscription</button>
+          : <button className="site-button" disabled={busy} onClick={() => void go("/card")}>Subscribe by card: ${b.price_usd.toFixed(2)} a month</button>
+      )}
+      {b.usdt && (invoice ? (
+        <div className="vpn-invoice" role="status">
+          <p>Send exactly <b>{invoice.amount} USDT</b> on <b>{invoice.network_name}</b> to:</p>
+          <code className="vpn-key">{invoice.address}</code>
+          <button className="site-button is-ghost" onClick={() => void navigator.clipboard?.writeText(invoice.address)}>Copy address</button>
+          <p className="site-muted">Only {invoice.network_name}: other coins or networks can be lost. You'll get time for what actually arrives, about {invoice.days} days for this amount, a few minutes after the network confirms.</p>
+          <button className="vpn-link" onClick={() => setInvoice(null)}>Start over</button>
+        </div>
+      ) : (
+        <form className="vpn-form" onSubmit={usdt}>
+          <label className="site-field"><span>Amount (USD)</span>
+            <input type="number" inputMode="decimal" min={b.min_usd} max={b.max_usd} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <small>{okAmount ? `Buys about ${days.toFixed(1)} days` : `$${b.min_usd} to $${b.max_usd}`}</small></label>
+          <label className="site-field"><span>Pay with</span>
+            <select className="site-input" value={network} onChange={(e) => setNetwork(e.target.value)}>
+              {b.networks.map((n) => <option key={n.key} value={n.key}>{n.name}</option>)}
+            </select></label>
+          <button className="site-button" type="submit" disabled={busy || !okAmount}>{busy ? "Creating…" : "Pay with USDT"}</button>
+        </form>
+      ))}
+      {err && <p className="site-error" role="alert">{err}</p>}
+      <p className="site-muted vpn-fine">$9.99 buys 30 days and any amount buys its share. Network fees are yours. USDT payments can't be refunded.</p>
+    </section>
   );
 }
 
@@ -203,12 +355,13 @@ function AddDevice({ servers, full, max, count, paused, onCreated }: {
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { if (!servers.some((x) => x.id === server)) setServer(pick()); }, [servers]);  // eslint-disable-line react-hooks/exhaustive-deps
   const clean = name.trim();
+  const call = useContext(CallCtx);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!clean || !server || busy) return;
     setBusy(true); setErr(null);
     try {
-      const n = await memberApi<NewDevice>("/members/vpn/devices", { method: "POST", body: JSON.stringify({ name: clean, server_id: server }) });
+      const n = await call<NewDevice>("/devices", { method: "POST", body: JSON.stringify({ name: clean, server_id: server }) });
       setName("");
       onCreated(n);
     } catch (e2) {
@@ -305,12 +458,13 @@ function ConfigOnce({ created, server, onDone }: { created: NewDevice; server?: 
 }
 
 function DeviceRow({ d, server, reload }: { d: VpnDevice; server?: VpnServer; reload: () => Promise<void> }) {
+  const call = useContext(CallCtx);
   const [ask, setAsk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function remove() {
     setBusy(true); setErr(null);
-    try { await memberApi<void>(`/members/vpn/devices/${d.id}`, { method: "DELETE" }); await reload(); }
+    try { await call<void>(`/devices/${d.id}`, { method: "DELETE" }); await reload(); }
     catch (e) { setErr(vpnError(e)); setBusy(false); setAsk(false); }
   }
   return (

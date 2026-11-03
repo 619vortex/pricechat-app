@@ -90,6 +90,14 @@ write without changing anything (no root needed).
 - **New token:** delete the `TOKEN=` line in `/etc/kiwi-vpn/agent.env`, re-run the installer
   (with `--adblock` if it is on), paste the new token in Admin → VPN → server → edit.
 
+## Customers and payments (Price Chat backend, `app/vpn/billing.py`)
+
+- $9.99 buys 30 days and any amount buys its share. Passport accounts pay by card or USDT; anonymous keys pay by USDT only.
+- Off until configured, per provider. Railway variables: `NOWPAYMENTS_API_KEY` + `NOWPAYMENTS_IPN_SECRET`, `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET`.
+  Webhooks: `/api/members/vpn/webhooks/nowpayments`, `/api/members/vpn/webhooks/stripe` (events `checkout.session.completed`, `invoice.paid`).
+- Out of time: devices are off at the node and kept 30 days, and paying again switches them back on at the next sync. Blocked or banned: removed at once.
+- Anonymous key: 160 random bits, shown once, only its hash stored, no recovery. Payment records lose their account link after 7 days; amounts stay for the books.
+
 ## What is and isn't logged
 
 What the node **keeps**: `/var/lib/kiwi-vpn/peers.json`, which is each device's WireGuard

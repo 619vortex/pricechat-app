@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # Passwordless email sign-in (members/email_login.py). Codes are sent through Resend (resend.com); the API key is
     # saved encrypted on Settings › API keys (or RESEND_API_KEY). The sender's domain must be verified at Resend.
     resend_api_key: SecretStr | None = None
+    # Kiwi VPN payments (app/vpn/billing.py). Without both keys of a provider, that way of paying is simply off.
+    nowpayments_api_key: SecretStr | None = None
+    nowpayments_ipn_secret: SecretStr | None = None
+    stripe_secret_key: SecretStr | None = None
+    stripe_webhook_secret: SecretStr | None = None
     # The website's chat bubble: a read-only preview of the PUBLIC Telegram group (first names only). Off = no bubble.
     website_chat_enabled: bool = True
     # Pokémon Portfolio. Photos: a PRIVATE S3-compatible bucket (Railway bucket: endpoint, region, key id, secret, name).

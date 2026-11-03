@@ -229,7 +229,7 @@ def test_ip_allocation_is_unique_and_skips_reserved(db: Session, fake: FakeNode,
     db.add(tiny)
     db.commit()
     assert vpn.allocate_ip(db, tiny) == "10.8.0.2"
-    db.add(VpnDevice(member_id=m.id, server_id=tiny.id, name="x", public_key=keys.generate_keypair()[1], ip="10.8.0.2"))
+    db.add(VpnDevice(account_id=vpn.account_of(db, m).id, server_id=tiny.id, name="x", public_key=keys.generate_keypair()[1], ip="10.8.0.2"))
     db.commit()
     with pytest.raises(vpn.VpnError) as e:
         vpn.allocate_ip(db, tiny)
@@ -322,7 +322,7 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
     drop.status = "banned"
     db.commit()
     out = vpn.sync_all(db)
-    assert out == {"servers": 1, "online": 1, "updated": 1, "readded": 1, "removed": 1, "revoked": 1, "errors": 0, "paused": 0, "resumed": 0}
+    assert out == {"servers": 1, "online": 1, "updated": 1, "readded": 1, "removed": 1, "revoked": 1, "suspended": 0, "errors": 0, "paused": 0, "resumed": 0}
     assert set(fake.peers) == {keep_key, lost_key} and fake.peers[lost_key]["allowed_ip"] == f"{d_lost.ip}/32"
     db.expire_all()
     assert db.get(VpnDevice, drop_id) is None and drop_key not in fake.peers
@@ -335,9 +335,10 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
     assert (k.rx_bytes, k.tx_bytes) == (1500, 2100)
     o = vpn.admin_overview(db)
     assert o["totals"] == {"devices": 2, "members": 1, "active_24h": 1}
-    # access removed: revoked too
+    # access removed: off at the node, devices kept
     ungrant(db, keep)
-    assert vpn.sync_all(db)["revoked"] == 2 and fake.peers == {}
+    out = vpn.sync_all(db)
+    assert out["suspended"] == 2 and out["revoked"] == 0 and fake.peers == {} and db.get(VpnDevice, d_keep.id) is not None
     # an unreachable agent marks the server offline, keeps everything else
     fake.fail = True
     assert vpn.sync_all(db)["online"] == 0
@@ -370,7 +371,7 @@ def test_sync_checks_members_without_a_query_per_member(db: Session, fake: FakeN
         out = vpn.sync_all(db)
     finally:
         event.remove(engine, "before_cursor_execute", on)
-    assert out["revoked"] == 1 and set(fake.peers) == {k for n, k in devices.items() if expected[n]}
+    assert out["suspended"] == 1 and set(fake.peers) == {k for n, k in devices.items() if expected[n]}
     assert sum("FROM member_entitlements" in q for q in sql) == 1
     assert sum("FROM members" in q for q in sql) <= 2
 

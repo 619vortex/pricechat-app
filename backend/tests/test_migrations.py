@@ -178,3 +178,30 @@ def test_upgrading_keeps_every_accounts_auto_setting(tmp_path: Path) -> None:
     check.dispose()
     assert [(r[0], bool(r[1]), r[2] is not None, bool(r[3])) for r in got] == [
         (1, False, False, False), (2, False, False, True), (3, True, True, False), (4, False, False, False)]
+
+
+def test_vpn_devices_move_to_accounts_with_their_member(tmp_path: Path) -> None:
+    """Upgrading keeps every existing device, under an account for its member."""
+    url = f"sqlite:///{(tmp_path / 'vpn.db').as_posix()}"
+    engine = build_engine(url, enforce_foreign_keys=False)
+    with engine.begin() as conn:
+        config = alembic_config()
+        config.attributes["connection"] = conn
+        command.upgrade(config, "0096_kiwi_vpn_not_rank_based")
+        now = "2026-10-30 12:00:00"
+        conn.execute(text("INSERT INTO vpn_servers (id, name, agent_url, agent_token_enc, cert_sha256, region, country_code, public_key, endpoint_host, "
+                          "address, dns, created_at, updated_at) VALUES (1, 's', 'u', 't', 'c', '', '', '', '', '', '[]', :now, :now)"), {"now": now})
+        conn.execute(text("INSERT INTO vpn_devices (id, member_id, server_id, name, public_key, ip, created_at, updated_at) "
+                          "VALUES (3, 7, 1, 'phone', 'k3', '10.66.0.2', :now, :now), (4, 7, 1, 'laptop', 'k4', '10.66.0.3', :now, :now), "
+                          "(5, 8, 1, 'phone', 'k5', '10.66.0.4', :now, :now)"), {"now": now})
+    engine.dispose()
+
+    upgrade_database(url)
+
+    check = create_engine(url)
+    with check.connect() as conn:
+        owners = dict(conn.execute(text("SELECT d.id, a.member_id FROM vpn_devices d JOIN vpn_accounts a ON a.id = d.account_id")).all())
+        assert owners == {3: 7, 4: 7, 5: 8}
+        assert conn.execute(text("SELECT count(*) FROM vpn_accounts")).scalar() == 2
+        assert "member_id" not in {r[1] for r in conn.execute(text("PRAGMA table_info(vpn_devices)"))}
+    check.dispose()

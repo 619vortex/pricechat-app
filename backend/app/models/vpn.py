@@ -1,13 +1,13 @@
 """Kiwi VPN: WireGuard servers we run (one node agent per VPS) and members' devices on them.
 
-No traffic logs. A device row holds only who owns which PUBLIC key on which server, its tunnel IP, the last handshake time
+No traffic logs. A device row holds only which account owns which PUBLIC key on which server, its tunnel IP, the last handshake time
 and this month's bytes. The client's private key is generated, put in the config returned once, and never stored.
 """
 
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, ForeignKey, Integer, String, Text, UniqueConstraint, false, true
+from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
@@ -51,13 +51,45 @@ class VpnServer(IdMixin, TimestampMixin, Base):
     fail_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # syncs in a row that couldn't reach it
 
 
+class VpnAccount(IdMixin, TimestampMixin, Base):
+    """Who holds VPN time: a Passport member, or an anonymous key holder (no member, no email, no name; only the key's hash)."""
+
+    __tablename__ = "vpn_accounts"
+
+    member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), unique=True)
+    key_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(12), default="active", server_default="active", nullable=False)  # active | blocked
+    paid_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    lapsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # when its devices were switched off for lack of time
+    stripe_customer: Mapped[str | None] = mapped_column(String(64))
+
+
+class VpnPayment(IdMixin, TimestampMixin, Base):
+    """One top-up or card renewal. For anonymous accounts billing.scrub removes the account link and the blockchain details."""
+
+    __tablename__ = "vpn_payments"
+
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("vpn_accounts.id", ondelete="SET NULL"), index=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)  # nowpayments | stripe
+    order_ref: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)  # our random reference, never the account
+    provider_ref: Mapped[str | None] = mapped_column(String(80))
+    network: Mapped[str | None] = mapped_column(String(16))
+    amount_usd: Mapped[float] = mapped_column(Float, nullable=False)  # asked for
+    paid_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)  # credited so far
+    seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="pending", server_default="pending", nullable=False)  # pending | credited | failed | expired | refunded
+    pay_address: Mapped[str | None] = mapped_column(String(128))
+    pay_amount: Mapped[float | None] = mapped_column(Float)
+    credited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
 class VpnDevice(IdMixin, TimestampMixin, Base):
-    """One WireGuard peer a member owns. Public key only."""
+    """One WireGuard peer an account owns. Public key only."""
 
     __tablename__ = "vpn_devices"
     __table_args__ = (UniqueConstraint("server_id", "ip", name="uq_vpn_devices_server_ip"),)
 
-    member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), index=True, nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("vpn_accounts.id", ondelete="CASCADE"), index=True, nullable=False)
     server_id: Mapped[int] = mapped_column(ForeignKey("vpn_servers.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(32), nullable=False)
     public_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)

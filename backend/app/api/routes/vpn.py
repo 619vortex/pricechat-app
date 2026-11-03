@@ -1,26 +1,30 @@
 """Kiwi VPN API.
 
 Member routes live under /api/members/vpn... (public prefix; the member is whoever the pc_session cookie says, never an id in
-the request). Admin routes live under /api/vpn/admin/... (owner login: every non-public /api route). The gate and all node
+the request). Anonymous routes live under /api/members/vpn/anon...: the account is whoever the X-Kiwi-Key header's key says, and
+the key is never logged or stored, only its hash. Payment webhooks prove themselves with the provider's signature. Admin routes live under /api/vpn/admin/... (owner login: every non-public /api route). The gate and all node
 calls are in app.vpn.service, not here. A device's config (with its private key) is returned once and never stored.
 """
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import Field
 
 from app.api.deps import DbSession
 from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
+from app.models.vpn import VpnAccount
+from app.security import rate_limit
 from app.security.rate_limit import LIMITS
-from app.vpn import service
+from app.vpn import billing, service
+from app.vpn.billing import BillingError
 from app.vpn.service import VpnError
 
 router = APIRouter(tags=["vpn"])
 
 
-def _fail(e: VpnError) -> HTTPException:
+def _fail(e: VpnError | BillingError) -> HTTPException:
     return HTTPException(e.status, str(e))
 
 
@@ -57,6 +61,121 @@ def delete_device(device_id: int, db: DbSession, pc_session: SessionToken = None
     except VpnError as e:
         raise _fail(e) from e
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- paying --------------------------------------------------------------------------------------------------------
+
+
+class UsdtInput(StrictInput):
+    amount_usd: float = Field(gt=0, le=100000)
+    network: str = Field(min_length=1, max_length=16)
+
+
+def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]:
+    try:
+        return billing.start_usdt(db, acct, payload.amount_usd, payload.network)
+    except BillingError as e:
+        raise _fail(e) from e
+
+
+@router.get("/members/vpn/public")
+def public_info(db: DbSession) -> dict[str, Any]:
+    """For a signed-out visitor: is it open and how can they pay."""
+    out = {"enabled": service.settings(db).enabled, "billing": billing.options()}
+    db.commit()
+    return out
+
+
+@router.post("/members/vpn/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
+def member_usdt(payload: UsdtInput, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    acct = service.account_of(db, _require(db, pc_session))
+    db.commit()
+    return _usdt(db, acct, payload)
+
+
+@router.post("/members/vpn/card", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
+def member_card(db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
+    acct = service.account_of(db, _require(db, pc_session))
+    db.commit()
+    try:
+        return {"url": billing.start_card(db, acct)}
+    except BillingError as e:
+        raise _fail(e) from e
+
+
+@router.post("/members/vpn/card/portal", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
+def member_card_portal(db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
+    try:
+        return {"url": billing.card_portal(service.account_of(db, _require(db, pc_session)))}
+    except BillingError as e:
+        raise _fail(e) from e
+
+
+@router.post("/members/vpn/webhooks/nowpayments")
+async def nowpayments_webhook(request: Request, db: DbSession) -> dict[str, str]:
+    raw = await request.body()
+    try:
+        return {"status": billing.nowpayments_webhook(db, raw, request.headers.get("x-nowpayments-sig"))}
+    except BillingError as e:
+        raise _fail(e) from e
+
+
+@router.post("/members/vpn/webhooks/stripe")
+async def stripe_webhook(request: Request, db: DbSession) -> dict[str, str]:
+    raw = await request.body()
+    try:
+        return {"status": billing.stripe_webhook(db, raw, request.headers.get("stripe-signature"))}
+    except BillingError as e:
+        raise _fail(e) from e
+
+
+# --- anonymous key ---------------------------------------------------------------------------------------------------
+
+
+def _anon(db: DbSession, x_kiwi_key: str | None = Header(None)) -> VpnAccount:
+    acct = billing.by_key(db, x_kiwi_key)
+    if acct is None:
+        raise HTTPException(401, "That key isn't valid.")
+    return acct
+
+
+@router.post("/members/vpn/anon", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_new"))])
+def anon_create(db: DbSession) -> dict[str, str]:
+    """A new key. Shown this once: there is no way to recover it."""
+    if not service.settings(db).enabled:
+        raise HTTPException(403, "Kiwi VPN isn't open yet.")
+    return {"key": billing.new_anonymous(db)[1]}
+
+
+@router.get("/members/vpn/anon", dependencies=[Depends(rate_limit.limit("vpn_key"))])
+def anon_view(db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+    return service.overview(db, acct)
+
+
+@router.post("/members/vpn/anon/devices", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_key"))])
+def anon_device(payload: DeviceInput, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+    wait = LIMITS["vpn_device"].hit(f"a{acct.id}")
+    if wait is not None:
+        raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    try:
+        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id)
+    except VpnError as e:
+        raise _fail(e) from e
+    return {"device": service.device_out(dev), "config": config, "filename": filename}
+
+
+@router.delete("/members/vpn/anon/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit.limit("vpn_key"))])
+def anon_device_delete(device_id: int, db: DbSession, acct: VpnAccount = Depends(_anon)) -> Response:
+    try:
+        service.delete_device(db, acct, device_id)
+    except VpnError as e:
+        raise _fail(e) from e
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/members/vpn/anon/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
+def anon_usdt(payload: UsdtInput, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+    return _usdt(db, acct, payload)
 
 
 # --- admin (owner login) ------------------------------------------------------------------------------------------

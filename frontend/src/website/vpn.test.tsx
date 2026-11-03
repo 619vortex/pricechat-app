@@ -35,13 +35,90 @@ async function settle() {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+const BILL = { price_usd: 9.99, period_days: 30, min_usd: 5, max_usd: 500, usdt: true, card: true,
+               networks: [{ key: "ethereum", name: "USDT on Ethereum" }, { key: "tron", name: "USDT on Tron" }, { key: "solana", name: "USDT on Solana" }] };
+
+describe("Paying and anonymous keys", () => {
+  afterEach(() => { try { sessionStorage.clear(); } catch { /* none */ } });
+  const SIGNED_OUT = { "/api/website/home": [200, HOME] as Route, "GET /api/members/vpn": [401, { detail: "Sign in" }] as Route,
+                       "GET /api/members/vpn/public": [200, { enabled: true, billing: BILL }] as Route };
+
+  it("offers a signed-out visitor both ways in, and warns that a lost key can't be recovered", async () => {
+    serve(SIGNED_OUT);
+    render(<VpnPage />);
+    await settle();
+    expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/join");
+    expect(screen.getByRole("heading", { name: "Anonymous, with USDT" })).toBeTruthy();
+    expect(document.body.textContent).toMatch(/Lose it and your time is gone: nobody can recover it/);
+  });
+
+  it("shows a new key once and won't continue until it's saved; then pays with the key, never a cookie login", async () => {
+    let sent: RequestInit | undefined;
+    serve({ ...SIGNED_OUT, "POST /api/members/vpn/anon": [201, { key: "KIWI-TEST" }],
+            "GET /api/members/vpn/anon": [200, state({ eligible: false, reason: "Kiwi VPN is $9.99 a month. Add time to start.", anonymous: true, billing: BILL, paid_until: null })],
+            "POST /api/members/vpn/anon/usdt": (init) => { sent = init; return [200, { network_name: "USDT on Tron", address: "TAddr1", amount: 5, amount_usd: 5, expires_at: null, days: 15 }]; } });
+    render(<VpnPage />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Get a key" }));
+    await settle();
+    expect(screen.getByText("KIWI-TEST")).toBeTruthy();
+    const go = screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(go);
+    await settle();
+    expect(document.body.textContent).toMatch(/Using your anonymous key/);
+    expect(screen.queryByRole("button", { name: /Subscribe by card/ })).toBeNull();  // cards need a Passport
+    const amount = screen.getByLabelText(/Amount/);
+    fireEvent.change(amount, { target: { value: "5" } });
+    expect(document.body.textContent).toMatch(/Buys about 15\.0 days/);
+    fireEvent.click(screen.getByRole("button", { name: "Pay with USDT" }));
+    await settle();
+    expect((sent!.headers as Record<string, string>)["X-Kiwi-Key"]).toBe("KIWI-TEST");
+    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "tron" });
+    expect(screen.getByText("TAddr1")).toBeTruthy();
+    expect(document.body.textContent).toMatch(/Send exactly 5 USDT on USDT on Tron|Send exactly 5 USDT/);
+  });
+
+  it("an anonymous key deletes its device on the key route, with the key", async () => {
+    sessionStorage.setItem("kiwi-vpn-key", "KIWI-TEST");
+    let sent: RequestInit | undefined;
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn/anon": [200, state({ anonymous: true, billing: BILL, devices: [DEVICE] })],
+            "DELETE /api/members/vpn/anon/devices/7": (init) => { sent = init; return [204, null]; } });
+    render(<VpnPage />);
+    await settle();
+    fireEvent.click(screen.getAllByRole("button", { name: /Delete/ })[0]);
+    await settle();
+    const again = screen.queryAllByRole("button", { name: /Delete|Confirm|Yes/ });
+    if (!sent && again.length) { fireEvent.click(again[again.length - 1]); await settle(); }
+    expect((sent!.headers as Record<string, string>)["X-Kiwi-Key"]).toBe("KIWI-TEST");
+  });
+
+  it("refuses an amount outside the limits before asking the server", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: BILL, anonymous: false })] });
+    render(<VpnPage />);
+    await settle();
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "4" } });
+    expect((screen.getByRole("button", { name: "Pay with USDT" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: /Subscribe by card: \$9\.99 a month/ })).toBeTruthy();  // a Passport can use a card
+  });
+
+  it("says payments aren't open when no provider is configured, and never offers a dead button", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ eligible: false, billing: { ...BILL, usdt: false, card: false, networks: [] } })] });
+    render(<VpnPage />);
+    await settle();
+    expect(document.body.textContent).toMatch(/Payments open soon/);
+    expect(screen.queryByRole("button", { name: /Pay with USDT|Subscribe by card/ })).toBeNull();
+  });
+});
+
 describe("Kiwi VPN page", () => {
   it("shows the price, and no rank talk, when locked", async () => {
     serve({ "/api/website/home": [200, HOME],
-            "GET /api/members/vpn": [200, state({ eligible: false, reason: "Kiwi VPN is $9.99 a month. Subscriptions by card or crypto open soon.", devices: [] })] });
+            "GET /api/members/vpn": [200, state({ eligible: false, reason: "Kiwi VPN is $9.99 a month. Add time to start.", devices: [] })] });
     const { container } = render(<VpnPage />);
     await settle();
-    expect(screen.getByText(/Kiwi VPN is \$9\.99 a month\. Subscriptions by card or crypto open soon\./)).toBeTruthy();
+    expect(screen.getByText(/Kiwi VPN is \$9\.99 a month\. Add time to start\./)).toBeTruthy();
     expect(container.textContent).not.toMatch(/Kiwi Rank|Rank up/);
     expect(container.querySelector(".vpn-form")).toBeNull();  // no device form while locked
   });
