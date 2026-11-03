@@ -245,6 +245,7 @@ def _v6_pool(value: str) -> str:
 
 
 def overview(db: Session, who: Who) -> dict[str, Any]:
+    bill = billing.options()  # may ask the provider: before anything here can hold a write transaction
     s = settings(db)
     acct = account_of(db, who)
     ok, reason = eligibility(db, acct)
@@ -256,7 +257,7 @@ def overview(db: Session, who: Who) -> dict[str, Any]:
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
-           "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": billing.options()}
+           "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": bill}
     db.commit()  # first call seeds the settings row
     return out
 

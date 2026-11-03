@@ -24,6 +24,8 @@ from tests.test_production import prod  # noqa: F401
 DAY = 86400
 IPN, HOOK = "ipn-test-secret", "whsec_test"
 SENT: list[httpx.Request] = []
+MINS = {"usdttrc20": 10.9507}
+RATE = {"coins_per_usd": 1.0}
 
 
 @pytest.fixture
@@ -32,11 +34,15 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
     for name, value in (("nowpayments_api_key", "np-key"), ("nowpayments_ipn_secret", IPN), ("stripe_secret_key", "sk_test"), ("stripe_webhook_secret", HOOK)):
         monkeypatch.setattr(s, name, SecretStr(value), raising=False)
     SENT.clear()
+    billing._mins.clear()
 
     def answer(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/min-amount"):
+            return httpx.Response(200, json={"fiat_equivalent": MINS.get(req.url.params["currency_from"], 0.5)})
         SENT.append(req)
         if "nowpayments" in str(req.url):
-            return httpx.Response(201, json={"payment_id": 555, "pay_address": "TAddr", "pay_amount": 5.0, "expiration_estimate_date": "2026-11-04T00:00:00Z"})
+            price = json.loads(req.content)["price_amount"]
+            return httpx.Response(201, json={"payment_id": 555, "pay_address": "TAddr", "pay_amount": price * RATE["coins_per_usd"], "expiration_estimate_date": "2026-11-04T00:00:00Z"})
         return httpx.Response(200, json={"url": "https://checkout.stripe.test/s"})
 
     monkeypatch.setattr(billing, "transport", httpx.MockTransport(answer))
@@ -81,17 +87,17 @@ def test_anonymous_key_buys_time_with_no_identity_anywhere(client: TestClient, d
     assert client.post("/api/members/vpn/anon/devices", json={"name": "phone", "server_id": server.id}, headers=head).status_code == 403  # no time yet
     # a lower-case key with odd spacing still works: it's typed by people
     assert client.get("/api/members/vpn/anon", headers={"x-kiwi-key": " " + key.lower()}).status_code == 200
-    pay = client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "tron"}, headers=head)
+    pay = client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "solana"}, headers=head)
     assert pay.status_code == 200 and pay.json()["address"] == "TAddr" and pay.json()["days"] == pytest.approx(15, abs=0.1)
     sent = json.loads(SENT[-1].content)
-    assert sent["pay_currency"] == "usdttrc20" and sent["order_description"] == "Kiwi VPN time" and len(sent["order_id"]) >= 20  # a random reference, not the account
+    assert sent["pay_currency"] == "usdtsol" and sent["order_description"] == "Kiwi VPN time" and len(sent["order_id"]) >= 20  # a random reference, not the account
     assert not {"email", "customer", "name"} & set(sent)
     order = db.scalars(select(VpnPayment)).one().order_ref
     assert client.get("/api/members/vpn/anon", headers=head).json()["eligible"] is False  # nothing until the money arrives
-    assert ipn(client, order, "waiting", 0).status_code == 200
+    assert ipn(client, order, "waiting", 0, "usdtsol").status_code == 200
     db.expire_all()
     assert db.scalars(select(VpnAccount)).one().paid_until is None
-    assert ipn(client, order, "finished", 5.0).status_code == 200
+    assert ipn(client, order, "finished", 5.0, "USDTSOL").status_code == 200  # the provider's casing varies
     db.expire_all()
     acct = db.scalars(select(VpnAccount)).one()
     assert days_left(acct) == pytest.approx(5 / 9.99 * 30, abs=0.01)
@@ -131,15 +137,39 @@ def test_webhook_needs_the_signature_and_never_pays_twice(client: TestClient, db
     assert days_left(db.get(VpnAccount, acct.id)) == pytest.approx(10 / 9.99 * 30, abs=0.01)
 
 
+def test_each_network_shows_and_enforces_its_live_minimum(client: TestClient, db: Session, keys: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    nets = {n["key"]: n["min_usd"] for n in billing.options()["networks"]}
+    assert nets == {"ethereum": 5.0, "tron": 10.96, "solana": 5.0}  # our $5 floor, or the provider's minimum when higher, rounded up
+    acct, _ = billing.new_anonymous(db)
+    with pytest.raises(billing.BillingError, match=r"USDT on Tron needs at least \$10\.96"):
+        billing.start_usdt(db, acct, 9.99, "tron")
+    assert billing.start_usdt(db, acct, 9.99, "solana")["address"] == "TAddr"
+    # the provider is down: the last known minimum stands, and the page still loads
+    monkeypatch.setattr(billing, "transport", httpx.MockTransport(lambda r: httpx.Response(500)))
+    monkeypatch.setattr(billing, "MIN_TTL_S", -1.0)
+    assert billing.network_min("tron") == 10.96
+
+
+def test_time_follows_the_invoice_rate_not_one_usdt_per_dollar(client: TestClient, db: Session, keys: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(RATE, "coins_per_usd", 0.99722)  # as seen on a real invoice: $12 asked for 11.966 USDT
+    acct, _ = billing.new_anonymous(db)
+    billing.start_usdt(db, acct, 12, "solana")
+    pay = db.scalars(select(VpnPayment)).one()
+    assert ipn(client, pay.order_ref, "finished", pay.pay_amount, "usdtsol").status_code == 200
+    db.expire_all()
+    assert db.scalars(select(VpnPayment)).one().paid_usd == 12.0  # paid what it asked: exactly the $12 of time promised
+    assert days_left(db.get(VpnAccount, acct.id)) == pytest.approx(12 / 9.99 * 30, abs=0.01)
+
+
 def test_amounts_networks_and_provider_failure(db: Session, fake: Any, keys: None, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     acct, _ = billing.new_anonymous(db)
     with pytest.raises(billing.BillingError, match="between"):
-        billing.start_usdt(db, acct, 4.99, "tron")
+        billing.start_usdt(db, acct, 4.99, "solana")
     with pytest.raises(billing.BillingError, match="Ethereum, Tron or Solana"):
         billing.start_usdt(db, acct, 5, "bitcoin")
     monkeypatch.setattr(billing, "transport", httpx.MockTransport(lambda r: httpx.Response(500)))
     with pytest.raises(billing.BillingError, match="Nothing was charged"):
-        billing.start_usdt(db, acct, 5, "tron")
+        billing.start_usdt(db, acct, 5, "solana")
     assert db.scalars(select(VpnPayment)).one().status == "failed"
 
 
@@ -239,11 +269,11 @@ def test_blocked_key_loses_devices_at_once(db: Session, fake: Any, keys: None) -
 
 def test_scrub_cuts_the_link_for_anonymous_payments_only(db: Session, fake: Any, keys: None) -> None:  # noqa: F811
     anon, _ = billing.new_anonymous(db)
-    billing.start_usdt(db, anon, 5, "tron")
+    billing.start_usdt(db, anon, 5, "solana")
     m = member_at(db, "egg", "named", paid=False)
     named = vpn.account_of(db, m)
     db.commit()
-    billing.start_usdt(db, named, 5, "tron")
+    billing.start_usdt(db, named, 5, "solana")
     anon_pay, named_pay = db.scalars(select(VpnPayment).order_by(VpnPayment.id)).all()
     anon_pay.status, anon_pay.paid_usd, anon_pay.credited_at = "credited", 5.0, utcnow()
     db.commit()

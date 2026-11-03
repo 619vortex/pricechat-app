@@ -81,7 +81,8 @@ def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]
 @router.get("/members/vpn/public")
 def public_info(db: DbSession) -> dict[str, Any]:
     """For a signed-out visitor: is it open and how can they pay."""
-    out = {"enabled": service.settings(db).enabled, "billing": billing.options()}
+    bill = billing.options()
+    out = {"enabled": service.settings(db).enabled, "billing": bill}
     db.commit()
     return out
 

@@ -17,7 +17,7 @@ export interface VpnDevice { id: number; name: string; server_id: number; ip: st
   rx_bytes: number; tx_bytes: number; paused_until: string | null }
 /** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
 export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number; paused_until: string | null }
-export interface VpnBilling { price_usd: number; period_days: number; min_usd: number; max_usd: number; usdt: boolean; card: boolean; networks: { key: string; name: string }[] }
+export interface VpnBilling { price_usd: number; period_days: number; min_usd: number; max_usd: number; usdt: boolean; card: boolean; networks: { key: string; name: string; min_usd?: number }[] }
 export interface VpnState { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling;
   servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage }
 export interface NewDevice { device: VpnDevice; config: string; filename: string }
@@ -201,7 +201,7 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const call = useContext(CallCtx);
   const b = s.billing;
   const [amount, setAmount] = useState("9.99");
-  const [network, setNetwork] = useState("tron");
+  const [network, setNetwork] = useState("solana");  // the lowest fees; each network's minimum comes from the server
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -213,7 +213,8 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   if (!b) return null;
   const usd = Number(amount);
   const days = usd > 0 ? (usd / b.price_usd) * b.period_days : 0;
-  const okAmount = usd >= b.min_usd && usd <= b.max_usd;
+  const floor = Math.max(b.min_usd, b.networks.find((n) => n.key === network)?.min_usd ?? 0);
+  const okAmount = usd >= floor && usd <= b.max_usd;
   const until = s.paid_until ? new Date(s.paid_until) : null;
   const active = until !== null && until.getTime() > Date.now();
   async function usdt(e: React.FormEvent) {
@@ -249,10 +250,10 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
         <form className="vpn-form" onSubmit={usdt}>
           <label className="site-field"><span>Amount (USD)</span>
             <input type="number" inputMode="decimal" min={b.min_usd} max={b.max_usd} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-            <small>{okAmount ? `Buys about ${days.toFixed(1)} days` : `$${b.min_usd} to $${b.max_usd}`}</small></label>
+            <small>{okAmount ? `Buys about ${days.toFixed(1)} days` : `$${floor} to $${b.max_usd} on this network`}</small></label>
           <label className="site-field"><span>Pay with</span>
             <select className="site-input" value={network} onChange={(e) => setNetwork(e.target.value)}>
-              {b.networks.map((n) => <option key={n.key} value={n.key}>{n.name}</option>)}
+              {b.networks.map((n) => <option key={n.key} value={n.key}>{n.name}{n.min_usd && n.min_usd > b.min_usd ? ` (min $${n.min_usd})` : ""}</option>)}
             </select></label>
           <button className="site-button" type="submit" disabled={busy || !okAmount}>{busy ? "Creating…" : "Pay with USDT"}</button>
         </form>

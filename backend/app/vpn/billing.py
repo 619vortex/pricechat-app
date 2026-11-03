@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import re
 import secrets
 import time
@@ -33,6 +34,7 @@ PRICE_USD = 9.99
 PERIOD_DAYS = 30
 MIN_USD = 5.0  # below this, network and processor fees eat the payment
 MAX_USD = 500.0
+MIN_TTL_S = 600.0
 SCRUB_AFTER = timedelta(days=7)
 CARD_PERIOD = timedelta(days=32)  # a card renews by calendar month: never lapse in a 31-day month while the renewal is on its way
 NETWORKS = {"ethereum": ("usdterc20", "USDT on Ethereum"), "tron": ("usdttrc20", "USDT on Tron"), "solana": ("usdtsol", "USDT on Solana")}
@@ -57,12 +59,43 @@ def _secret(name: str) -> str | None:
     return v.get_secret_value() if v is not None else None
 
 
+def _usdt_on() -> bool:
+    return bool(_secret("nowpayments_api_key") and _secret("nowpayments_ipn_secret"))
+
+
+def _card_on() -> bool:
+    return bool(_secret("stripe_secret_key") and _secret("stripe_webhook_secret"))
+
+
+_mins: dict[str, tuple[float, float | None]] = {}  # network -> (read at, the provider's minimum in USD)
+
+
+def network_min(network: str) -> float:
+    """The most this network requires right now: our floor, or the provider's live minimum if higher. It moves with network fees
+    (Tron has been above the $9.99 price), so it's read from the provider and remembered for a while. A failed read falls back
+    to the last known value, and the provider still has the final say when the payment is created."""
+    now = time.monotonic()
+    at, known = _mins.get(network, (-1e9, None))
+    if now - at > MIN_TTL_S:
+        code, fresh = NETWORKS[network][0], None
+        try:
+            with httpx.Client(timeout=5.0, transport=transport) as c:
+                r = c.get(f"{NOWPAYMENTS}/min-amount", params={"currency_from": code, "currency_to": code, "fiat_equivalent": "usd"},
+                          headers={"x-api-key": _secret("nowpayments_api_key") or ""})
+            r.raise_for_status()
+            fresh = float(r.json()["fiat_equivalent"])
+        except (httpx.HTTPError, KeyError, TypeError, ValueError):
+            logger.info("vpn: couldn't read the minimum for %s", network)
+        known = fresh if fresh is not None else known
+        _mins[network] = (now, known)
+    return max(MIN_USD, math.ceil((known or 0) * 100) / 100)
+
+
 def options() -> dict[str, Any]:
     """What the page can offer right now: only providers that have keys."""
-    usdt = bool(_secret("nowpayments_api_key") and _secret("nowpayments_ipn_secret"))
-    card = bool(_secret("stripe_secret_key") and _secret("stripe_webhook_secret"))
-    return {"price_usd": PRICE_USD, "period_days": PERIOD_DAYS, "min_usd": MIN_USD, "max_usd": MAX_USD, "usdt": usdt, "card": card,
-            "networks": [{"key": k, "name": v[1]} for k, v in NETWORKS.items()] if usdt else []}
+    usdt = _usdt_on()
+    return {"price_usd": PRICE_USD, "period_days": PERIOD_DAYS, "min_usd": MIN_USD, "max_usd": MAX_USD, "usdt": usdt, "card": _card_on(),
+            "networks": [{"key": k, "name": v[1], "min_usd": network_min(k)} for k, v in NETWORKS.items()] if usdt else []}
 
 
 def seconds_for(usd: float) -> int:
@@ -120,6 +153,9 @@ def start_usdt(db: Session, acct: VpnAccount, amount_usd: float, network: str) -
         raise BillingError("Pick Ethereum, Tron or Solana.", 400)
     if not MIN_USD <= amount_usd <= MAX_USD:
         raise BillingError(f"Add between ${MIN_USD:.0f} and ${MAX_USD:.0f} at a time.", 400)
+    floor = network_min(network)
+    if amount_usd < floor:
+        raise BillingError(f"{NETWORKS[network][1]} needs at least ${floor:.2f} right now. Add more or pick another network.", 400)
     amount_usd = round(amount_usd, 2)
     pay = VpnPayment(account_id=acct.id, provider="nowpayments", order_ref=secrets.token_urlsafe(18), network=network, amount_usd=amount_usd)
     db.add(pay)
@@ -161,16 +197,18 @@ def nowpayments_webhook(db: Session, raw: bytes, signature: str | None, now: dat
     pay = db.scalar(select(VpnPayment).where(VpnPayment.order_ref == str(data.get("order_id"))).with_for_update())
     if pay is None or pay.account_id is None:  # not ours, or already scrubbed
         return "ignored"
-    if data.get("pay_currency") != NETWORKS.get(pay.network or "", ("",))[0]:
+    if str(data.get("pay_currency")).lower() != NETWORKS.get(pay.network or "", ("",))[0]:
         logger.warning("vpn: payment %s came in an unexpected currency", pay.id)
         return "ignored"
     acct = db.get(VpnAccount, pay.account_id)
     status = str(data.get("payment_status"))
     if status in ("finished", "partially_paid") and acct is not None:
         try:
-            paid = float(data["actually_paid"])  # 1 USDT counts as $1
+            coins = float(data["actually_paid"])
         except (KeyError, TypeError, ValueError):
             raise BillingError("Bad request.", 400) from None
+        # USDT isn't exactly $1: the invoice's own rate, so paying what it asked for buys exactly what it promised
+        paid = round(coins * pay.amount_usd / pay.pay_amount, 2) if pay.pay_amount else coins
         _credit(acct, pay, min(paid, MAX_USD * 2), now)
     elif status == "refunded" and acct is not None and pay.seconds:
         if acct.paid_until is not None:
@@ -289,4 +327,4 @@ def totals(db: Session, now: datetime | None = None) -> dict[str, Any]:
     revenue = db.scalar(select(func.coalesce(func.sum(VpnPayment.paid_usd), 0.0)).where(VpnPayment.credited_at >= now - timedelta(days=30)))
     return {"paying": int(db.scalar(select(func.count()).select_from(VpnAccount).where(VpnAccount.paid_until > now)) or 0),
             "anonymous": int(db.scalar(select(func.count()).select_from(VpnAccount).where(VpnAccount.key_hash.is_not(None))) or 0),
-            "revenue_30d_usd": round(float(revenue or 0), 2), **{k: options()[k] for k in ("usdt", "card")}}
+            "revenue_30d_usd": round(float(revenue or 0), 2), "usdt": _usdt_on(), "card": _card_on()}

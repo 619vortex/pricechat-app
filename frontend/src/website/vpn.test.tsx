@@ -36,7 +36,7 @@ async function settle() {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const BILL = { price_usd: 9.99, period_days: 30, min_usd: 5, max_usd: 500, usdt: true, card: true,
-               networks: [{ key: "ethereum", name: "USDT on Ethereum" }, { key: "tron", name: "USDT on Tron" }, { key: "solana", name: "USDT on Solana" }] };
+               networks: [{ key: "ethereum", name: "USDT on Ethereum" }, { key: "tron", name: "USDT on Tron", min_usd: 10.96 }, { key: "solana", name: "USDT on Solana" }] };
 
 describe("Paying and anonymous keys", () => {
   afterEach(() => { try { sessionStorage.clear(); } catch { /* none */ } });
@@ -56,7 +56,7 @@ describe("Paying and anonymous keys", () => {
     let sent: RequestInit | undefined;
     serve({ ...SIGNED_OUT, "POST /api/members/vpn/anon": [201, { key: "KIWI-TEST" }],
             "GET /api/members/vpn/anon": [200, state({ eligible: false, reason: "Kiwi VPN is $9.99 a month. Add time to start.", anonymous: true, billing: BILL, paid_until: null })],
-            "POST /api/members/vpn/anon/usdt": (init) => { sent = init; return [200, { network_name: "USDT on Tron", address: "TAddr1", amount: 5, amount_usd: 5, expires_at: null, days: 15 }]; } });
+            "POST /api/members/vpn/anon/usdt": (init) => { sent = init; return [200, { network_name: "USDT on Solana", address: "TAddr1", amount: 5, amount_usd: 5, expires_at: null, days: 15 }]; } });
     render(<VpnPage />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Get a key" }));
@@ -75,9 +75,9 @@ describe("Paying and anonymous keys", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pay with USDT" }));
     await settle();
     expect((sent!.headers as Record<string, string>)["X-Kiwi-Key"]).toBe("KIWI-TEST");
-    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "tron" });
+    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "solana" });
     expect(screen.getByText("TAddr1")).toBeTruthy();
-    expect(document.body.textContent).toMatch(/Send exactly 5 USDT on USDT on Tron|Send exactly 5 USDT/);
+    expect(document.body.textContent).toMatch(/Send exactly 5 USDT on USDT on Solana/);
   });
 
   it("an anonymous key deletes its device on the key route, with the key", async () => {
@@ -101,6 +101,10 @@ describe("Paying and anonymous keys", () => {
     fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "4" } });
     expect((screen.getByRole("button", { name: "Pay with USDT" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: /Subscribe by card: \$9\.99 a month/ })).toBeTruthy();  // a Passport can use a card
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: "9.99" } });
+    fireEvent.change(screen.getByLabelText("Pay with"), { target: { value: "tron" } });
+    expect((screen.getByRole("button", { name: "Pay with USDT" }) as HTMLButtonElement).disabled).toBe(true);  // below Tron's own minimum
+    expect(document.body.textContent).toMatch(/\$10\.96 to \$500 on this network/);
   });
 
   it("says payments aren't open when no provider is configured, and never offers a dead button", async () => {
