@@ -1,5 +1,5 @@
 // The popup only shows state and asks the service worker to act. It never sees the proxy password.
-import { PRIVACY_URL, SIGN_IN_URL, browserServers, bytes, flag, pickServer, refusal } from "./lib.js";
+import { PRIVACY_URL, SIGN_IN_URL, VPN_URL, browserServers, bytes, flag, pickServer, refusal } from "./lib.js";
 
 const app = document.getElementById("app");
 const POWER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>`;
@@ -24,9 +24,8 @@ function el(tag, attrs = {}, ...kids) {
 }
 
 const head = (s) => {
-  const billing = s?.account?.billing;
   return el("header", { class: "head" }, el("img", { src: "icons/48.png", alt: "" }), el("b", {}, "Kiwi VPN"),
-    s?.account?.enabled && !billing ? el("span", { class: "pill" }, "Free while we test") : null);
+    s?.account?.plan?.kind === "free" ? el("span", { class: "pill" }, "Free while we test") : null);
 };
 
 function gate(title, text, action) {
@@ -46,7 +45,7 @@ function view(s) {
     return gate("Can't reach Price Chat", s.error, el("button", { class: "button ghost", onclick: () => render() }, "Try again"));
   }
   const no = refusal(s.account);
-  if (no && !s.on) return gate("Not available", no);
+  if (no && !s.on) return gate("Not available", no, el("a", { class: "button", href: VPN_URL, target: "_blank", rel: "noopener" }, "Open Kiwi VPN page"));
 
   const servers = browserServers(s.account);
   const chosen = s.on ? s.loginServer : pickServer(servers, s.lastServer);

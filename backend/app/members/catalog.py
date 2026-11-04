@@ -195,7 +195,7 @@ ENTITLEMENTS: list[dict[str, Any]] = [
     dict(key="vip_access", name="VIP access", required_rank=8,
          description="Golden Kiwi perks: VIP Telegram, early content, events. Not active yet; nothing is created automatically."),
     dict(key="kiwi_vpn", name="Kiwi VPN", required_rank=None,
-         description="A private WireGuard VPN (up to 3 devices). Not unlocked by rank."),
+         description="A private WireGuard VPN (up to 3 devices). Free for Royal Kiwis and above."),
 ]
 
 

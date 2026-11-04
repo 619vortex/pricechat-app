@@ -313,7 +313,7 @@ def test_closed_means_nobody_buys_except_the_owner_testing(client: TestClient, d
     # the owner's real Admin session: the whole flow works, labelled as a test, and it's still closed to everyone else
     monkeypatch.setattr(admin_auth, "current", lambda _db, token: object() if token == "owner" else None)
     c.cookies.set(admin_auth.COOKIE, "owner")
-    assert c.get("/api/members/vpn/public").json() == {**pub, "enabled": True, "test_mode": True}
+    assert c.get("/api/members/vpn/public").json() == {**pub, "enabled": True, "test_mode": True, "trial": True}
     fresh = c.post("/api/members/vpn/anon").json()["key"]
     head = {"x-kiwi-key": fresh}
     view = c.get("/api/members/vpn/anon", headers=head).json()

@@ -23,6 +23,7 @@ const work = mkdtempSync(join(tmpdir(), "kiwi-ext-"));
 const ext = join(work, "ext");
 cpSync(join(HERE, ".."), ext, { recursive: true, filter: (p) => !p.includes("e2e") && !p.endsWith(".test.js") });
 writeFileSync(join(ext, "lib.js"), readFileSync(join(ext, "lib.js"), "utf8").replace('"https://pricechat.live/api/members/vpn"', `"${API}/api/members/vpn"`));
+writeFileSync(join(ext, "manifest.json"), readFileSync(join(ext, "manifest.json"), "utf8").replace('"https://pricechat.live/*"', '"http://127.0.0.1/*"'));  // the fake API stands in for pricechat.live
 
 // ----- the browser and a tiny DevTools client -----
 const port = 9400 + Math.floor(Math.random() * 400);
@@ -102,7 +103,7 @@ try {
   await reopen();
   const off = await popup.text();
   check("signed in on the website: the extension sees the account (the SameSite=Lax session cookie is sent)", /Not connected/.test(off) && /Helsinki 1/.test(off), off);
-  check("free mode shows the label, and no price or payment", /Free while we test/.test(off) && !/\$|USDT|pay/i.test(off), off);
+  check("shows no price or payment in the popup", !/\$|USDT|pay/i.test(off), off);
   await popup.shot("2-off.png");
 
   // before connecting: the test sites don't exist on this machine's normal connection

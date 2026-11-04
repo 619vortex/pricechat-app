@@ -1,5 +1,6 @@
-/** Official listing addresses, filled in only once a store has approved the extension: an empty one shows no store link. */
-export const STORE_LINKS: { chrome: string; edge: string } = { chrome: "", edge: "" };
+/** Official listing addresses, filled in only once a store has approved the extension: an empty one shows Coming Soon, never a link.
+ *  brave: the Chrome listing, once the extension has actually been tested in Brave. firefox: needs its own Firefox extension first. */
+export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox: string } = { chrome: "", edge: "", brave: "", firefox: "" };
 
 export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
 

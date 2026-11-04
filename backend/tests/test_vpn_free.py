@@ -16,7 +16,7 @@ from tests.test_vpn_billing import SENT, ipn, keys  # noqa: F401
 
 
 def go_free(db: Session) -> None:
-    vpn.update_settings(db, {"enabled": True})
+    vpn.update_settings(db, {"enabled": True, "trial_enabled": False})  # free for all takes Admin switching the trial off too
     assert vpn.settings(db).payments_enabled is False  # the default
 
 
@@ -24,7 +24,7 @@ def test_free_means_no_time_needed_and_no_payment_route(client: TestClient, db: 
     server = add_server(db, fake)
     go_free(db)
     pub = client.get("/api/members/vpn/public").json()
-    assert pub == {"enabled": True, "test_mode": False, "payments": False, "billing": None}
+    assert pub == {"enabled": True, "test_mode": False, "payments": False, "trial": False, "free": True, "billing": None}
     assert client.post("/api/members/vpn/anon").status_code == 403  # free access goes with a Passport
     c = signed_in(client, db, member_at(db, "egg", "free", paid=False))
     view = c.get("/api/members/vpn").json()

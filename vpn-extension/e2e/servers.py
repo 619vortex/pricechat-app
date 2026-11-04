@@ -49,7 +49,7 @@ def http(status, body, ctype="application/json", extra=""):
     return f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {len(raw)}\r\nCache-Control: no-store\r\nConnection: close\r\n{extra}\r\n".encode() + raw
 
 
-ACCOUNT = {"enabled": True, "test_mode": False, "payments": False, "eligible": True, "reason": None, "max_devices": 3, "billing": None, "devices": [],
+ACCOUNT = {"enabled": True, "test_mode": False, "payments": False, "eligible": True, "reason": None, "max_devices": 3, "billing": None, "plan": {"kind": "trial", "until": None, "days_left": 23}, "devices": [],
            "servers": [{"id": 1, "name": "Helsinki 1", "region": "Finland", "country_code": "FI", "online": True, "load": 0.1, "adblock": False, "recommended": True, "browser": True}],
            "usage": {"month": "2026-11", "used_bytes": 1610612736, "cap_bytes": 0, "paused_until": None}}
 

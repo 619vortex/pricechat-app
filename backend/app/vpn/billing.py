@@ -30,6 +30,7 @@ from app.models.vpn import VpnAccount, VpnPayment
 
 logger = logging.getLogger(__name__)
 
+CARD_SUBSCRIPTIONS = False  # a card subscription renews by itself, and the owner's rule is no automatic billing: renewal is by hand
 PRICE_USD = 9.99
 PERIOD_DAYS = 30
 MIN_USD = 5.0  # below this, network and processor fees eat the payment
@@ -94,12 +95,12 @@ def network_min(network: str) -> float:
 def options() -> dict[str, Any]:
     """What the page can offer right now: only providers that have keys."""
     usdt = _usdt_on()
-    return {"price_usd": PRICE_USD, "period_days": PERIOD_DAYS, "min_usd": MIN_USD, "max_usd": MAX_USD, "usdt": usdt, "card": _card_on(),
+    return {"price_usd": PRICE_USD, "period_days": PERIOD_DAYS, "min_usd": MIN_USD, "max_usd": MAX_USD, "usdt": usdt, "card": CARD_SUBSCRIPTIONS and _card_on(),
             "networks": [{"key": k, "name": v[1], "min_usd": network_min(k)} for k, v in NETWORKS.items()] if usdt else []}
 
 
 def can_charge() -> bool:
-    return _usdt_on() or _card_on()
+    return _usdt_on() or (CARD_SUBSCRIPTIONS and _card_on())
 
 
 def seconds_for(usd: float) -> int:

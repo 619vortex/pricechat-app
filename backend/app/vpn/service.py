@@ -1,6 +1,6 @@
 """Kiwi VPN: who may use it, members' devices, servers and the 5-minute sync with each node agent.
 
-Kiwi VPN is a paid product ($9.99 a month), not a rank perk. Devices belong to an account: a Passport member's, or an anonymous
+Kiwi VPN: one free 30-day trial per account, then $9.99 for 30 days renewed by hand; free for Royal Kiwis and above. Devices belong to an account: a Passport member's, or an anonymous
 key's (no member at all). An account has access while it has paid time (app/vpn/billing.py) or its member an unexpired manual
 grant of the `kiwi_vpn` entitlement. Out of time, its devices are switched off and kept for KEEP_LAPSED, so paying again just
 works; blocked or banned, they go at once. The same goes for browsers (the extension's logins on a server's proxy). Kiwi Rank plays no part. A device is created by allocating a tunnel IP, adding the peer on the
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,9 +33,14 @@ ENTITLEMENT = "kiwi_vpn"
 MAX_DEVICES_LIMIT = 10
 MAX_CAP_GB = 100000
 GB = 1024 ** 3  # the website shows sizes in powers of 1024
-SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0, "payments_enabled": False}  # min_rank: unused column, kept
+TRIAL_DAYS = 30
+ROYAL_LEVEL = 7  # Royal Kiwi on the rank ladder; higher ranks count too
+LIVE_WINDOW = timedelta(minutes=10)  # the server reads handshakes and proxy use every 5 minutes
+SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0, "payments_enabled": False, "trial_enabled": True}  # min_rank: unused column, kept
 OWNER_MAX_DEVICES = 50  # devices made in Admin; the server's capacity still applies
-NOT_SUBSCRIBED = "Kiwi VPN is $9.99 a month. Add time to start."
+NOT_SUBSCRIBED = "Kiwi VPN is $9.99 for 30 days. Add time to start."
+START_TRIAL = "Start your free 30-day trial on the Kiwi VPN page."
+PAID_UNAVAILABLE = "Your free trial has ended. The $9.99 plan isn't available yet."
 KEEP_LAPSED = timedelta(days=30)
 Who = Member | VpnAccount
 
@@ -72,7 +77,7 @@ def settings(db: Session) -> VpnSettings:
 
 
 def settings_out(s: VpnSettings) -> dict[str, Any]:
-    return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb}
+    return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "trial_enabled": s.trial_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb}
 
 
 def _entitlement(db: Session) -> Entitlement | None:
@@ -108,7 +113,7 @@ def rules(db: Session, member_ids: list[int] | None = None) -> Rules:
         grants = {} if ent is None else {g.member_id: g for g in db.scalars(select(MemberEntitlement).where(
             MemberEntitlement.entitlement_id == ent.id, MemberEntitlement.member_id.in_(member_ids)))}
     people = {m.id: m for m in db.scalars(select(Member).where(Member.id.in_(member_ids)))} if member_ids else ({} if member_ids is not None else None)
-    return Rules(ent, grants, people, free=not settings(db).payments_enabled)
+    return Rules(ent, grants, people, free=is_free(settings(db)))
 
 
 def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime | None = None) -> str:
@@ -121,9 +126,13 @@ def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime 
             return "blocked"
     if acct.status != "active":
         return "blocked"
-    if acct.is_owner or (r.free if r is not None else not settings(db).payments_enabled):
+    if acct.is_owner or (r.free if r is not None else is_free(settings(db))):
+        return "active"
+    if is_royal(member):
         return "active"
     if (until := _aware(acct.paid_until)) is not None and until > now:
+        return "active"
+    if (ends := _aware(acct.trial_ends_at)) is not None and ends > now:
         return "active"
     ent = r.ent if r is not None else _entitlement(db)
     if member is not None and ent is not None and ent.enabled:
@@ -137,12 +146,94 @@ def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime 
     return "lapsed"
 
 
+def is_free(s: VpnSettings) -> bool:
+    """Free for every member: only with both payments and the trial switched off in Admin."""
+    return not s.payments_enabled and not s.trial_enabled
+
+
+def no_access_reason(db: Session, acct: VpnAccount) -> str:
+    s = settings(db)
+    if s.trial_enabled and acct.member_id is not None and acct.trial_started_at is None:
+        return START_TRIAL
+    return NOT_SUBSCRIBED if s.payments_enabled else PAID_UNAVAILABLE
+
+
+def is_royal(member: Member | None) -> bool:
+    """Royal Kiwi or higher, from the rank the server keeps. XP under review doesn't count."""
+    return member is not None and member.status == "active" and not member.xp_suspended and member.rank_level >= ROYAL_LEVEL
+
+
+def _member_of(db: Session, acct: VpnAccount) -> Member | None:
+    return db.get(Member, acct.member_id) if acct.member_id is not None else None
+
+
+def _days_left(until: datetime, now: datetime) -> int:
+    return max(0, -((now - until) // timedelta(days=1)))
+
+
+def plan_out(db: Session, acct: VpnAccount, s: VpnSettings, state: str, now: datetime | None = None) -> dict[str, Any]:
+    """What the account is on, for showing: kind, its end date (none for Royal or free) and the days left."""
+    now = now or utcnow()
+    member = _member_of(db, acct)
+    paid, trial = _aware(acct.paid_until), _aware(acct.trial_ends_at)
+    dated = lambda kind, until: {"kind": kind, "until": until.isoformat(), "days_left": _days_left(until, now)}  # noqa: E731
+    if state == "blocked":
+        return {"kind": "blocked", "until": None, "days_left": None}
+    if state == "active":
+        if acct.is_owner:
+            return {"kind": "owner", "until": None, "days_left": None}
+        if is_royal(member):
+            return {"kind": "royal", "until": None, "days_left": None}
+        if is_free(s):
+            return {"kind": "free", "until": None, "days_left": None}
+        if paid is not None and paid > now:
+            return dated("paid", paid)
+        if trial is not None and trial > now:
+            return dated("trial", trial)
+        return {"kind": "granted", "until": None, "days_left": None}
+    return {"kind": "expired" if paid is not None or trial is not None else "not_activated", "until": None, "days_left": None}
+
+
+def start_trial(db: Session, who: Member, preview: bool = False) -> None:
+    """One 30-day trial per account, only while the VPN is open and the trial is on. The one write that sets it can only win once."""
+    s = settings(db)
+    db.commit()
+    if not s.trial_enabled or not (s.enabled or preview):
+        raise VpnError("The free trial isn't available right now.", 403)
+    acct = account_of(db, who)
+    db.commit()
+    if acct.trial_started_at is not None:
+        raise VpnError("You've already used your free trial.", 409)
+    if access(db, acct) != "lapsed":
+        raise VpnError("You already have Kiwi VPN." if access(db, acct) == "active" else "Your account can't use Kiwi VPN.", 409 if access(db, acct) == "active" else 403)
+    now = utcnow()
+    done = db.execute(update(VpnAccount).where(VpnAccount.id == acct.id, VpnAccount.trial_started_at.is_(None))
+                      .values(trial_started_at=now, trial_ends_at=now + timedelta(days=TRIAL_DAYS)))
+    db.commit()
+    if done.rowcount != 1:
+        raise VpnError("You've already used your free trial.", 409)
+    db.refresh(acct)
+
+
+def public_stats(db: Session, now: datetime | None = None) -> dict[str, Any]:
+    """Only what the server really knows. There's no uptime monitoring, so uptime is None."""
+    now = now or utcnow()
+    counts = _device_counts(db)
+    servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
+    best = recommended_id(servers, counts)
+    online = [v for v in servers if v.online]
+    since = now - LIVE_WINDOW
+    live = set(db.scalars(select(VpnDevice.account_id).where(VpnDevice.last_handshake >= since))) | set(db.scalars(select(VpnBrowser.account_id).where(VpnBrowser.last_active >= since)))
+    return {"active_users": len(live), "countries": len({(v.country_code or "").upper() for v in online if v.country_code}), "online_servers": len(online), "uptime": None,
+            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers]}
+
+
 def qualifies(db: Session, who: Who, r: Rules | None = None) -> tuple[bool, str | None]:
     """The account-level rule, regardless of whether the VPN is open."""
     state = access(db, account_of(db, who), r)
     if state == "active":
         return True, None
-    return False, "Your account can't use Kiwi VPN." if state == "blocked" else NOT_SUBSCRIBED
+    return False, "Your account can't use Kiwi VPN." if state == "blocked" else no_access_reason(db, account_of(db, who))
 
 
 def eligibility(db: Session, member: Who, preview: bool = False) -> tuple[bool, str | None]:
@@ -167,6 +258,8 @@ def update_settings(db: Session, changes: dict[str, Any]) -> dict[str, Any]:
         s.monthly_cap_gb = cap  # the next sync pauses / resumes members to match
     if changes.get("enabled") is not None:
         s.enabled = bool(changes["enabled"])
+    if changes.get("trial_enabled") is not None:
+        s.trial_enabled = bool(changes["trial_enabled"])
     if changes.get("payments_enabled") is not None:
         s.payments_enabled = bool(changes["payments_enabled"])  # the next sync switches off whoever has no time left, and back on
     db.commit()
@@ -269,6 +362,11 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
            "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": bill}
+    state = access(db, acct)
+    member = _member_of(db, acct)
+    out["plan"] = plan_out(db, acct, s, state)
+    out["royal"] = is_royal(member)
+    out["trial"] = {"available": (s.enabled or preview) and s.trial_enabled and member is not None and acct.trial_started_at is None and state == "lapsed", "days": TRIAL_DAYS}
     db.commit()  # first call seeds the settings row
     return out
 

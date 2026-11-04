@@ -16,6 +16,7 @@ from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
 from app.models.vpn import VpnAccount
 from app.security import admin_auth, rate_limit
+from app.security import rate_limit
 from app.security.rate_limit import LIMITS
 from app.vpn import billing, service
 from app.vpn.billing import BillingError
@@ -51,6 +52,29 @@ def _payments_on(db: DbSession) -> None:
 @router.get("/members/vpn")
 def my_vpn(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     return service.overview(db, _require(db, pc_session), _preview(db, request))
+
+
+@router.get("/members/vpn/stats", dependencies=[Depends(rate_limit.limit("earn"))])
+def stats(db: DbSession) -> dict[str, Any]:
+    """The page's statistics and server list: real figures only, nothing private about a server."""
+    out = service.public_stats(db)
+    db.commit()
+    return out
+
+
+@router.post("/members/vpn/trial")
+def start_trial(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    """Takes no input: eligibility comes from the account, Admin's switch and the server's clock."""
+    member = _require(db, pc_session)
+    wait = LIMITS["vpn_device"].hit(str(member.id))
+    if wait is not None:
+        raise HTTPException(429, "Too many tries. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    preview = _preview(db, request)
+    try:
+        service.start_trial(db, member, preview)
+    except VpnError as e:
+        raise _fail(e) from e
+    return service.overview(db, member, preview)
 
 
 class DeviceInput(StrictInput):
@@ -128,7 +152,9 @@ def public_info(request: Request, db: DbSession) -> dict[str, Any]:
     s = service.settings(db)
     enabled, payments, preview = s.enabled, s.payments_enabled, _preview(db, request)
     db.commit()
-    return {"enabled": enabled or preview, "test_mode": preview and not enabled, "payments": payments, "billing": billing.options() if payments else None}
+    trial = (enabled or preview) and s.trial_enabled
+    free = service.is_free(s)
+    return {"enabled": enabled or preview, "test_mode": preview and not enabled, "payments": payments, "trial": trial, "free": free, "billing": billing.options() if payments else None}
 
 
 @router.post("/members/vpn/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
@@ -241,13 +267,14 @@ def admin_overview(db: DbSession) -> dict[str, Any]:
 class SettingsUpdate(StrictInput):
     enabled: bool | None = None
     payments_enabled: bool | None = None
+    trial_enabled: bool | None = None
     max_devices: int | None = Field(None, ge=1, le=service.MAX_DEVICES_LIMIT)
     monthly_cap_gb: int | None = Field(None, ge=0, le=service.MAX_CAP_GB)  # per member per month, 0 = unlimited
 
 
 @router.put("/vpn/admin/settings")
 def admin_settings(payload: SettingsUpdate, db: DbSession) -> dict[str, Any]:
-    if payload.payments_enabled and not billing.can_charge():
+    if payload.payments_enabled and not billing.can_charge():  # USDT only: never an automatic charge
         raise HTTPException(400, "Add the NOWPayments or Stripe keys first: there's no way to take a payment yet.")
     try:
         return service.update_settings(db, payload.model_dump(exclude_unset=True))

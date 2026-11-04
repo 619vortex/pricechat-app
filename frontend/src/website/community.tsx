@@ -350,7 +350,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ]],
       ["The browser extension", [
         "While switched on, it sends that browser's traffic through the server you chose, except pricechat.live and addresses on your own network. It doesn't cover other apps. If you switch it off, disable it or remove it, your browser goes back to its normal connection.",
-        "Proxy: to send traffic through the server. Web requests and access to all sites: to answer the server's password request on any page you open, and to check the connection is working. It doesn't read or change the pages you visit. Privacy: to stop WebRTC revealing your real address while on. Storage: to remember your on/off state, server and login on your device.",
+        "Proxy: to send traffic through the server. Web requests: to answer the server's password request and notice a refused login. Site access only to pricechat.live, for your account, and to the proxy's own check address, to confirm the connection is working. It doesn't read or change the pages you visit. Privacy: to stop WebRTC revealing your real address while on. Storage: to remember your on/off state, server and login on your device.",
         "It uses your Kiwi Passport sign-in on pricechat.live to get its login. It has no ads or analytics and loads no code from outside its package.",
         "The use of information received through the extension is limited to providing this feature, in line with the Limited Use requirements of the Chrome Web Store User Data Policy and the Microsoft Edge Add-ons developer policies.",
       ]],

@@ -8,7 +8,7 @@ import "./VpnAdmin.css";
 /* Kiwi VPN (OWNER ONLY): who can use it, whether it costs anything, devices made here, the WireGuard servers, customers and payments.
    An anonymous customer is only a number here. Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
 
-export type VpnSettings = { enabled: boolean; payments_enabled: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
+export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string };
@@ -39,12 +39,22 @@ function Controls({ s, canCharge, onSaved }: { s: VpnSettings; canCharge: boolea
               ? `Open Kiwi VPN? ${free ? "Anyone with a Passport can use it for free" : "Anyone can buy it, with real money"}, and their traffic leaves through your servers' IP addresses.`
               : "Close Kiwi VPN? Nobody new can join and members can't add devices. Devices already connected keep working.")} /><span />
           </label>
-          <p>{s.enabled ? (free ? "Anyone with a Passport can sign in at /vpn and connect." : "Anyone can pay and connect at /vpn.")
+          <p>{s.enabled ? (free && !s.trial_enabled ? "Anyone with a Passport can sign in at /vpn and connect." : s.trial_enabled ? "Members can start one free trial at /vpn." : "Anyone can pay and connect at /vpn.")
             : "The public sees “coming soon”. You can still make devices here, and test /vpn in this browser."}</p>
+        </section>
+        <section className={`vpna-control${s.trial_enabled ? " is-on" : ""}`}>
+          <span className="vpna-control-label">Free trial</span>
+          <span className="vpna-control-state">{s.trial_enabled ? "On · 30 days, once per account" : "Off"}</span>
+          <label className="toggle" title={s.trial_enabled ? "On" : "Off"}>
+            <input type="checkbox" aria-label="Free trial on" checked={!!s.trial_enabled} disabled={busy} onChange={(e) => void flip({ trial_enabled: e.target.checked }, e.target.checked
+              ? "Turn the 30-day free trial on? While Kiwi VPN is open, any signed-in member who hasn't had one can start it, and devices connect through your server."
+              : "Turn the free trial off? Nobody new can start one, and trials already running carry on. If payments are also off, Kiwi VPN becomes free for every member while it's open.")} /><span />
+          </label>
+          <p>{s.trial_enabled ? (s.enabled ? "Members can start a trial at /vpn." : "Waiting: it only appears while Kiwi VPN is open.") : "The trial isn't offered to anyone."}</p>
         </section>
         <section className={`vpna-control${s.payments_enabled ? " is-on" : ""}`}>
           <span className="vpna-control-label">Payments</span>
-          <span className="vpna-control-state">{free ? "Off · free" : "On · $9.99 for 30 days"}</span>
+          <span className="vpna-control-state">{free ? (s.trial_enabled ? "Off · trial only" : "Off · free") : "On · $9.99 for 30 days"}</span>
           <label className="toggle" title={free ? "Off" : "On"}>
             <input type="checkbox" aria-label="Payments on" checked={s.payments_enabled} disabled={busy || (free && !canCharge)} onChange={(e) => void flip({ payments_enabled: e.target.checked }, e.target.checked
               ? "Turn payments on? Anyone without paid time loses access within 5 minutes (their devices are kept for 30 days). Devices you made here stay free. Payments are real money."

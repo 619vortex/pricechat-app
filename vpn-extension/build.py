@@ -34,4 +34,10 @@ plain = json.loads(read("manifest.json"))
 write(OUT, "kiwi-vpn-extension/", read("manifest.json"))
 store = json.dumps({k: v for k, v in plain.items() if k != "key"}, indent=2).encode() + b"\n"
 for browser in ("chrome", "edge"):
-    write(os.path.join(DIST, f"kiwi-vpn-{browser}-{plain['version']}.zip"), "", store)
+    path = os.path.join(DIST, f"kiwi-vpn-{browser}-{plain['version']}.zip")
+    write(path, "", store)
+    with zipfile.ZipFile(path) as z:  # read back what was really written: the stores refuse a `key`, and want the manifest at the top
+        built = json.loads(z.read("manifest.json"))
+        assert "key" not in built, f"{path} has a key"
+        assert sorted(z.namelist()) == sorted(FILES), f"{path} has the wrong files"
+        assert z.testzip() is None, f"{path} is damaged"
