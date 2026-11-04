@@ -81,3 +81,24 @@ def test_a_blocked_member_gets_no_session(client: TestClient, db: Session) -> No
     db.commit()
     c.cookies.clear()
     assert client.post(TOKEN, json={"code": code, "verifier": verifier}).status_code == 400
+
+
+def test_the_apps_session_reaches_only_the_vpn(client: TestClient, db: Session) -> None:
+    code, verifier = code_for(client, db, "scoped")
+    token = client.post(TOKEN, json={"code": code, "verifier": verifier}).json()["token"]
+    assert token.startswith("kd_")
+    client.cookies.set("pc_session", token)
+    assert client.get("/api/members/vpn").status_code == 200
+    assert client.get("/api/members/me").status_code == 200
+    for method, path in [("GET", "/api/members/crew"), ("GET", "/api/members/packs"), ("POST", "/api/members/play/sell-all"), ("GET", "/api/vpn/admin/settings"), ("POST", "/api/members/desktop/code")]:
+        refused = client.request(method, path)
+        assert refused.status_code == 403 and refused.json()["code"] == "desktop_scope", path
+    assert client.post("/api/members/logout").status_code == 200
+    client.cookies.set("pc_session", token)
+    assert client.get("/api/members/vpn").status_code == 401, "signing out ends it"
+
+
+def test_a_browser_session_is_not_limited(client: TestClient, db: Session) -> None:
+    c = signed_in(client, db, member_at(db, "egg", "browser", paid=False))
+    assert not c.cookies.get("pc_session", "").startswith("kd_")
+    assert c.get("/api/members/crew").json().get("code") != "desktop_scope"

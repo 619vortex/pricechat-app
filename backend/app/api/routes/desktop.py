@@ -2,7 +2,7 @@
 
 The app makes a random verifier and opens /vpn/desktop in the browser with its SHA-256 (the challenge) and a loopback port. The signed-in person presses
 Allow, and the page hands a one-time code to 127.0.0.1 only. The app swaps the code and the verifier for its own session. A code alone is useless, and works once.
-The app then sends that session as the pc_session cookie, like a browser, on the existing VPN routes.
+The app then sends that session as the pc_session cookie on the existing VPN routes. It reaches nothing else: see app.members.desktop_scope.
 """
 
 import base64
@@ -22,6 +22,7 @@ from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
 from app.db.base import utcnow
 from app.members import service
+from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.desktop import MemberDesktopCode
 from app.models.members import Member
 from app.security import rate_limit
@@ -77,4 +78,4 @@ def swap_code(payload: TokenInput, db: DbSession) -> dict[str, Any]:
     member = db.get(Member, row.member_id)
     if member is None or member.status != "active":
         raise HTTPException(400, FAIL)
-    return {"token": service.new_session(db, member, SESSION_DAYS), "expires_in_days": SESSION_DAYS}
+    return {"token": service.new_session(db, member, SESSION_DAYS, DESKTOP_TOKEN_PREFIX), "expires_in_days": SESSION_DAYS}

@@ -96,13 +96,20 @@ describe("the window", () => {
   });
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-  it("shows the normal address when off, and the server's place and address once connected", async () => {
+  it("never asks an outside service while disconnected, so it can't see the person's own address", async () => {
+    render(<App />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(fetched).toEqual([]);
+    expect(document.querySelector(".ip")!.textContent).toBe("–");
+    expect(document.querySelector(".place")!.textContent).toBe("–");
+    reply = { service: true, message: null, status: status({ state: "connecting" }) };
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(fetched).toEqual([]);
+  });
+
+  it("shows the server's place and address once connected", async () => {
     render(<App />);
     await settle();
-    await settle();
-    expect(document.querySelector(".ip")!.textContent).toBe("5.30.213.225");
-    expect(document.querySelector(".place")!.textContent).toBe("–");
-    expect(document.body.textContent).not.toContain("Dubai");
     lookupReply = { ip: "2.31.133.78", city: "Falkenstein", country: "DE" };
     reply = up({ connected_since: 1 });
     await tick();
@@ -111,21 +118,11 @@ describe("the window", () => {
     expect(document.querySelector(".ip")!.textContent).toBe("2.31.133.78");
     expect(document.querySelector(".place")!.textContent).toBe("Falkenstein, Germany");
     expect(document.querySelector<HTMLImageElement>(".flag img")!.getAttribute("src")).toBe("/flags/de.svg");
-    expect(screen.queryByText(/same as before connecting/)).toBeNull();
-  });
-
-  it("warns if the address didn't change after connecting", async () => {
-    render(<App />);
-    await settle();
-    await settle();
-    reply = up({ connected_since: 1 });
-    await tick();
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-    expect(screen.getByText(/same as before connecting/)).toBeTruthy();
   });
 
   it("says when it couldn't check, rather than showing nothing or a guess", async () => {
     lookupReply = null;
+    reply = up({ connected_since: 1 });
     render(<App />);
     await settle();
     expect(document.querySelector(".ip")!.textContent).toBe("Checking");
@@ -136,8 +133,9 @@ describe("the window", () => {
   it("an answer that arrives after the connection changed is thrown away", async () => {
     let release: (v: unknown) => void = () => {};
     vi.stubGlobal("fetch", (url: string) => { fetched.push(url); return new Promise((done) => { release = done; }); });
+    reply = up({ connected_since: 1 });
     render(<App />);
-    await settle();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     reply = { service: true, message: null, status: status({ state: "connecting" }) };
     await tick();
     await act(async () => { release({ ok: true, json: async () => ({ ip: "9.9.9.9", country: "DE" }) }); await vi.advanceTimersByTimeAsync(0); });

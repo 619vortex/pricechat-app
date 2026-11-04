@@ -1,7 +1,7 @@
 //! Everything that touches Windows: the tunnel service, the driver's statistics, and the named pipe the app talks through.
 
 use crate::config;
-use crate::protocol::{self, Request, ServiceState, Status, PIPE_NAME};
+use crate::protocol::{self, Caller, Request, ServiceState, Status, PIPE_NAME};
 use std::ffi::c_void;
 use std::io::Write;
 use std::mem::{size_of, zeroed};
@@ -13,14 +13,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_KERNEL_OBJECT};
-use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Services::*;
+use windows_sys::Win32::System::Threading::{OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
 
 pub const OWN_SERVICE: &str = "KiwiVPN";
 pub const TUNNEL_NAME: &str = "kiwi";
+/// The one program, in this service's own folder, that may change the tunnel without administrator rights.
+pub const APP_EXE: &str = "KiwiVPN.exe";
+/// Clients being served at once. A program opening endless connections gets refused rather than running the service out of threads.
+const MAX_CLIENTS: usize = 64;
 const TUNNEL_SERVICE: &str = "WireGuardTunnel$kiwi";
 /// SYSTEM and the Administrators group only.
 const PRIVATE_SDDL: &str = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)";
@@ -155,14 +160,17 @@ fn create_tunnel_service(scm: &Sc, conf: &str) -> Result<Sc, String> {
 pub struct Tunnel {
     error: Mutex<Option<String>>,
     since: Mutex<Option<u64>>,
+    /// One connect or disconnect at a time: two running together could delete each other's tunnel.
+    changing: Mutex<()>,
 }
 
 impl Tunnel {
     pub fn new() -> Self {
-        Tunnel { error: Mutex::new(None), since: Mutex::new(None) }
+        Tunnel { error: Mutex::new(None), since: Mutex::new(None), changing: Mutex::new(()) }
     }
 
     pub fn connect(&self, text: &str) -> Status {
+        let _one_at_a_time = self.changing.lock().unwrap();
         *self.error.lock().unwrap() = None;
         *self.since.lock().unwrap() = None;
         let cfg = match config::parse(text) {
@@ -218,6 +226,7 @@ impl Tunnel {
     }
 
     pub fn disconnect(&self) -> Status {
+        let _one_at_a_time = self.changing.lock().unwrap();
         *self.error.lock().unwrap() = None;
         *self.since.lock().unwrap() = None;
         match self.disconnect_inner() {
@@ -360,8 +369,49 @@ fn write_all(pipe: HANDLE, bytes: &[u8]) -> bool {
     unsafe { WriteFile(pipe, bytes.as_ptr(), bytes.len() as u32, &mut written, null_mut()) != 0 }
 }
 
-fn serve_client(pipe: HANDLE, tunnel: &Tunnel) {
-    let status = match read_line(pipe).and_then(|l| protocol::parse_request(l.trim_end())) {
+/// Works out who's on the other end from Windows' own records. Anything it can't establish counts as Other.
+fn caller_of(pipe: HANDLE) -> Caller {
+    unsafe {
+        let mut pid = 0u32;
+        if GetNamedPipeClientProcessId(pipe, &mut pid) == 0 {
+            return Caller::Other;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return Caller::Other;
+        }
+        let mut elevated = false;
+        let mut token: HANDLE = null_mut();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) != 0 {
+            let mut info: TOKEN_ELEVATION = zeroed();
+            let mut got = 0u32;
+            elevated = GetTokenInformation(token, TokenElevation, &mut info as *mut _ as *mut c_void, size_of::<TOKEN_ELEVATION>() as u32, &mut got) != 0 && info.TokenIsElevated != 0;
+            CloseHandle(token);
+        }
+        let mut path = [0u16; 1024];
+        let mut len = path.len() as u32;
+        let named = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut len) != 0;
+        CloseHandle(process);
+        if elevated {
+            return Caller::Elevated;
+        }
+        let image = if named { String::from_utf16_lossy(&path[..len as usize]) } else { return Caller::Other };
+        match exe_dir() {
+            Ok(dir) if protocol::is_app_image(&image, &dir.display().to_string(), APP_EXE) => Caller::App,
+            _ => Caller::Other,
+        }
+    }
+}
+
+fn serve_client(pipe: HANDLE, tunnel: &Tunnel, check_callers: bool) {
+    let request = read_line(pipe).and_then(|l| protocol::parse_request(l.trim_end())).and_then(|r| {
+        if !check_callers || protocol::allowed(&r, if matches!(r, Request::Status) { Caller::Other } else { caller_of(pipe) }) {
+            Ok(r)
+        } else {
+            Err(protocol::NOT_ALLOWED.to_string())
+        }
+    });
+    let status = match request {
         Ok(Request::Connect { config }) => tunnel.connect(&config),
         Ok(Request::Disconnect) => tunnel.disconnect(),
         Ok(Request::Status) => tunnel.status(),
@@ -398,6 +448,8 @@ pub fn serve_for_tests(stop: Arc<std::sync::atomic::AtomicBool>) -> Result<(), S
 
 fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> Result<(), String> {
     let sd = sddl.map(Descriptor::new).transpose()?;
+    let check_callers = sddl.is_some();
+    let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tunnel = Arc::new(Tunnel::new());
     let mut first = FILE_FLAG_FIRST_PIPE_INSTANCE;
     while !stop.load(std::sync::atomic::Ordering::SeqCst) {
@@ -419,15 +471,23 @@ fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> R
             unsafe { CloseHandle(pipe) };
             continue;
         }
+        if active.load(std::sync::atomic::Ordering::SeqCst) >= MAX_CLIENTS {
+            unsafe { CloseHandle(pipe) };
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        active.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let active = Arc::clone(&active);
         let tunnel = Arc::clone(&tunnel);
         let raw = pipe as usize;
         std::thread::spawn(move || {
             let pipe = raw as HANDLE;
-            serve_client(pipe, &tunnel);
+            serve_client(pipe, &tunnel, check_callers);
             unsafe {
                 FlushFileBuffers(pipe);
                 CloseHandle(pipe); // closing, not DisconnectNamedPipe: that makes the client's read fail after it already has its answer
             }
+            active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         });
     }
     Ok(())
@@ -544,8 +604,17 @@ pub fn ask_service(request: &Request) -> Result<Status, AskError> {
 
 // --- install and uninstall ----------------------------------------------------------------------------------------
 
+/// The service runs as SYSTEM from wherever it's installed, so that folder has to be one only administrators can write to.
+pub fn in_protected_folder(exe: &str, program_files: &str) -> bool {
+    let (exe, root) = (exe.to_ascii_lowercase(), format!("{}\\", program_files.trim_end_matches('\\').to_ascii_lowercase()));
+    !program_files.is_empty() && exe.starts_with(&root)
+}
+
 pub fn install() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if !in_protected_folder(&exe.display().to_string(), &std::env::var("ProgramFiles").unwrap_or_default()) {
+        return Err("The Kiwi VPN service must be installed under Program Files.".into());
+    }
     let scm = manager()?;
     let command = format!("\"{}\" service", exe.display());
     if open_service(&scm, OWN_SERVICE).is_some() {
@@ -587,6 +656,16 @@ mod tests {
         assert_eq!(PIPE_CLIENT_ACCESS & FILE_CREATE_PIPE_INSTANCE, 0);
         assert!(PIPE_SDDL.ends_with(&format!("(A;;{PIPE_CLIENT_ACCESS:#x};;;IU)")), "the pipe's rule and the client's request must match");
         assert!(!PIPE_SDDL.contains("GW"), "generic write includes creating instances");
+    }
+
+    #[test]
+    fn the_service_only_installs_where_users_cant_write() {
+        let root = r"C:\Program Files";
+        assert!(in_protected_folder(r"C:\Program Files\KiwiVPN\kiwivpn-service.exe", root));
+        assert!(in_protected_folder(r"c:\program files\kiwivpn\kiwivpn-service.exe", root));
+        assert!(!in_protected_folder(r"C:\Users\me\kiwivpn-service.exe", root));
+        assert!(!in_protected_folder(r"C:\Program Files Evil\kiwivpn-service.exe", root));
+        assert!(!in_protected_folder(r"C:\Users\me\kiwivpn-service.exe", ""));
     }
 
     #[test]

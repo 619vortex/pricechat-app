@@ -77,7 +77,7 @@ export function App() {
   const reported = phaseOf(answer);
   // A request in flight may say disconnecting. Nothing here can say connected: that only ever comes from the service's answer.
   const phase: Phase = action === "disconnect" ? "stopping" : reported;
-  const { exit, checking, unchanged } = useExit(phase);
+  const { exit, checking } = useExit(phase);
 
   const take = useCallback((next: Answer) => {
     setAnswer(next);
@@ -134,7 +134,6 @@ export function App() {
   const live = phase === "on";
   const status = answer?.status ?? null;
   const up = live ? secondsUp(status?.connected_since, now) : null;
-  const showsAddress = phase === "on" || phase === "off";
   const pending = checking ? "Checking" : "Couldn't check";
   const place = exit ? placeLine(exit) : null;
   // Disconnect stays available while the tunnel exists, including while it's still trying to reach the server.
@@ -156,12 +155,11 @@ export function App() {
         {testBuild && <span className="tag">Test build</span>}
       </header>
 
-      <section className={`stage${unchanged ? " is-warned" : ""}`}>
+      <section className="stage">
         <Slice phase={phase} />
         <h1 aria-live="polite">{HEADLINE[phase]}</h1>
         <p className="detail" role={phase === "failed" || phase === "no-service" ? "alert" : "status"}>{detail(phase, answer, slow, testBuild)}</p>
         {problem && <p className="problem" role="alert">{problem}</p>}
-        {unchanged && <p className="problem" role="alert">Your public IP is the same as before connecting, so traffic may not be leaving through the server.</p>}
       </section>
 
       <dl className="route">
@@ -174,8 +172,8 @@ export function App() {
         </div>
         <div>
           <dt>Public IP</dt>
-          <dd className="ip">{!showsAddress ? "–" : exit ? exit.ip : pending}</dd>
-          <dd className="sub">{showsAddress && exit ? (live ? "what sites see now" : "your normal address") : ""}</dd>
+          <dd className="ip">{!live ? "–" : exit ? exit.ip : pending}</dd>
+          <dd className="sub">{live && exit ? "what sites see now" : ""}</dd>
         </div>
       </dl>
 

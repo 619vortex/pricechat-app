@@ -29,7 +29,6 @@ body { background: var(--ground); color: var(--text); font: 400 15px/1.45 var(--
 .slice img { position: absolute; left: 12.3%; top: 15%; width: 77%; height: auto; transition: filter .5s; }
 .slice-fruit { transition: filter .5s; filter: saturate(.18) brightness(.5); }
 .slice-halo { fill: none; stroke: var(--lime); stroke-width: 2; opacity: 0; transition: opacity .5s; }
-.stage.is-warned .slice { width: min(128px, 19vh); }
 .slice.is-off img, .slice.is-loading img, .slice.is-no-service img, .slice.is-failed img { filter: brightness(.8); }
 .slice.is-connecting .slice-fruit, .slice.is-stopping .slice-fruit { filter: saturate(.6) brightness(.72); }
 .slice.is-connecting .slice-halo { opacity: .75; stroke-dasharray: 18 26; }

@@ -59,6 +59,10 @@ fn test_build() -> bool {
 }
 
 fn main() {
+    // A program that starts this app could otherwise use these to open the window's browser to remote control, or swap the browser itself.
+    for name in ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", "WEBVIEW2_USER_DATA_FOLDER", "WEBVIEW2_RELEASE_CHANNEL_PREFERENCE", "WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER"] {
+        std::env::remove_var(name);
+    }
     let builder = tauri::Builder::default();
     #[cfg(feature = "test-config")]
     let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect_test_file, test_build]);

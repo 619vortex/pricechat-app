@@ -3,6 +3,8 @@
 //!   fake_service instance        add an instance to the real service's pipe; passes if Windows refuses
 //!   fake_service serve <seconds> take the pipe's name while the service is stopped, and listen
 //!   fake_service control         send a harmless line without checking who's listening, to prove the listener works
+//!   fake_service disconnect      ask the REAL service to disconnect, as an unauthorised program; passes if it's refused
+//!   fake_service connect         ask the REAL service to connect to a made-up server, as an unauthorised program; passes if it's refused
 
 #[cfg(windows)]
 pub mod fake {
@@ -81,6 +83,22 @@ pub mod fake {
     }
 }
 
+/// Passes only on the service's own refusal: anything else means it either obeyed or never heard the request.
+#[cfg(windows)]
+fn refused(answer: Result<kiwivpn::protocol::Status, kiwivpn::windows::AskError>) {
+    match answer {
+        Ok(s) if s.error.as_deref() == Some(kiwivpn::protocol::NOT_ALLOWED) => println!("REFUSED"),
+        Ok(s) => {
+            println!("OBEYED: {:?}", s.state);
+            std::process::exit(1);
+        }
+        Err(e) => {
+            println!("UNCLEAR: {}", e.message());
+            std::process::exit(1);
+        }
+    }
+}
+
 #[cfg(windows)]
 fn main() {
     use std::io::Write;
@@ -102,6 +120,12 @@ fn main() {
             std::thread::sleep(Duration::from_secs(seconds.parse().expect("seconds")));
             println!("DONE {:?}", log.lock().unwrap());
             std::process::exit(0);
+        }
+        ["disconnect"] => refused(kiwivpn::windows::ask_service(&kiwivpn::protocol::Request::Disconnect)),
+        ["connect"] => {
+            let key = "S0lXSUNBTkFSWUtJV0lDQU5BUllLSVdJQ0FOQVJZIT0=";
+            let config = format!("[Interface]\nPrivateKey = {key}\nAddress = 10.66.0.9/32\n\n[Peer]\nPublicKey = {key}\nEndpoint = 192.0.2.1:51821\nAllowedIPs = 0.0.0.0/0\n");
+            refused(kiwivpn::windows::ask_service(&kiwivpn::protocol::Request::Connect { config }));
         }
         ["control"] => {
             let mut pipe = kiwivpn::windows::open_pipe().expect("nothing is listening");

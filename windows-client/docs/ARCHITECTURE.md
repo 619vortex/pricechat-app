@@ -32,8 +32,8 @@ WireGuard's README calls `SERVICE_SID_TYPE_UNRESTRICTED` on the tunnel service e
 
 | Need | What exists | Consequence |
 |---|---|---|
-| Sign-in | Browser cookie `pc_session`, no desktop flow | **Added here, not deployed:** `/vpn/desktop`, `POST /api/members/desktop/code`, `POST /api/members/desktop/token`, migration 0102. One-time code + PKCE, loopback only. The app sends the result as a `pc_session` cookie, so existing routes need no change. |
-| Sign out | `POST /api/members/auth/logout` | Reused. |
+| Sign-in | Browser cookie `pc_session`, no desktop flow | **Added here, not deployed:** `/vpn/desktop`, `POST /api/members/desktop/code`, `POST /api/members/desktop/token`, migration 0102. One-time code + PKCE, loopback only. The app sends the result as a `pc_session` cookie on the existing VPN routes, and it reaches nothing else (`app/members/desktop_scope.py`). |
+| Sign out | `POST /api/members/logout` | Reused. |
 | Entitlement | `GET /api/members/vpn`: `eligible`, `reason`, `plan`, `trial`, `royal`, `servers`, `devices`, `usage` | Reused. The server decides; nothing local is trusted. |
 | Trial | `POST /api/members/vpn/trial` | Reused. |
 | Device + config | `POST /api/members/vpn/devices {name, server_id}` returns the only copy of the config, with the private key generated on the server | Reused. Store it encrypted with DPAPI, in SYSTEM-only files. Lost config: delete the device and make a new one. |
@@ -45,14 +45,14 @@ WireGuard's README calls `SERVICE_SID_TYPE_UNRESTRICTED` on the tunnel service e
 1. **A device belongs to one server.** Finland and Germany each use a slot of the 3-device limit. V1 should create one per country on first use and keep it. A person with 3 devices elsewhere gets a clear "remove a device" message.
 2. **New devices are rate limited** (5, then one per 10 minutes, per member). Reusing devices when switching countries avoids this.
 3. **Testing while closed:** an owner-named tester (Admin > VPN > People; `POST /api/vpn/admin/testers`) may use the VPN until a date, at most 10 testers and 90 days. Nobody else gains access.
-4. **The app's session has the same reach as a browser's** across member routes. A VPN-only scope would be better before a wide release.
+4. **The app's session reaches only the VPN routes, who is signed in, and sign-out.**
 5. **Session expiry is a re-login**, after 90 days of no renewal. There is no refresh token.
 
 ## Security rules for the service
 
 - The pipe's rule gives the signed-in person read, write and read-attributes only. Generic write would also grant creating a pipe instance, which would let a program of theirs join the service's own pipe under its owner.
 - Before writing anything, including a config with its private key, the client requires a pipe owned by SYSTEM or Administrators whose server is in session 0, and connects anonymously so the other end can't act as the person. `fake-service-test.ps1` tries both attacks.
-- Any program the person runs can still ask the real service to connect or disconnect. It accepts only a validated config, so this can't run a command, but it could point the tunnel at another server. Worth reviewing before release.
+- Connect and Disconnect come only from KiwiVPN.exe in the service's own folder, or an administrator. Limits and the planned signed server list: `LOCAL-SECURITY.md`.
 - Pipe open only to the interactive user, with a fixed command set and strict parsing. No paths, commands or arbitrary config from the UI: the service fetches nothing and accepts only a validated WireGuard config.
 - Never logs private keys, session tokens or configs.
 - Never ships server keys or agent tokens: the installer contains none.

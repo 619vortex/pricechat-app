@@ -140,8 +140,8 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def new_session(db: Session, member: Member, days: int) -> str:
-    token = secrets.token_urlsafe(32)
+def new_session(db: Session, member: Member, days: int, prefix: str = "") -> str:
+    token = prefix + secrets.token_urlsafe(32)
     db.add(MemberSession(member_id=member.id, token_hash=_hash(token), expires_at=utcnow() + timedelta(days=days), last_seen_at=utcnow()))
     db.commit()
     return token

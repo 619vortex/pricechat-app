@@ -80,6 +80,28 @@ pub fn session_since(previous: Option<u64>, status: &Status, now: u64) -> Option
     }
 }
 
+/// Who's on the other end of the pipe, as the service worked it out from Windows, never from anything the client said.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Caller {
+    /// KiwiVPN.exe from the service's own install folder, which only administrators can write to.
+    App,
+    /// Any program with administrator rights. It could replace the service anyway, so refusing it would protect nothing.
+    Elevated,
+    Other,
+}
+
+pub const NOT_ALLOWED: &str = "Only the Kiwi VPN app can do that.";
+
+/// Anyone signed in may read the status. Changing the tunnel is for the app.
+pub fn allowed(request: &Request, caller: Caller) -> bool {
+    matches!(request, Request::Status) || caller != Caller::Other
+}
+
+/// `image` is the client's full path from Windows; `install_dir` the service's own folder.
+pub fn is_app_image(image: &str, install_dir: &str, app_exe: &str) -> bool {
+    image.eq_ignore_ascii_case(&format!("{}\\{}", install_dir.trim_end_matches('\\'), app_exe))
+}
+
 pub fn parse_request(line: &str) -> Result<Request, String> {
     if line.len() > MAX_REQUEST {
         return Err("request too large".into());
@@ -113,6 +135,30 @@ mod tests {
         assert_eq!(decide(ServiceState::Stopping, Some(1), 0, 0).state, State::Stopping);
         assert_eq!(decide(ServiceState::Stopped, Some(1), 0, 0).state, State::Disconnected);
         assert_eq!(decide(ServiceState::Missing, None, 0, 0).state, State::Disconnected);
+    }
+
+    #[test]
+    fn only_the_app_or_an_administrator_may_change_the_tunnel() {
+        let connect = Request::Connect { config: "x".into() };
+        for request in [&connect, &Request::Disconnect] {
+            assert!(allowed(request, Caller::App));
+            assert!(allowed(request, Caller::Elevated));
+            assert!(!allowed(request, Caller::Other));
+        }
+        for caller in [Caller::App, Caller::Elevated, Caller::Other] {
+            assert!(allowed(&Request::Status, caller));
+        }
+    }
+
+    #[test]
+    fn the_app_is_a_full_path_not_a_name() {
+        let dir = r"C:\Program Files\KiwiVPN";
+        assert!(is_app_image(r"C:\Program Files\KiwiVPN\KiwiVPN.exe", dir, "KiwiVPN.exe"));
+        assert!(is_app_image(r"c:\program files\kiwivpn\kiwivpn.EXE", dir, "KiwiVPN.exe"));
+        assert!(!is_app_image(r"C:\Users\me\Downloads\KiwiVPN.exe", dir, "KiwiVPN.exe"));
+        assert!(!is_app_image(r"C:\Program Files\KiwiVPN\sub\KiwiVPN.exe", dir, "KiwiVPN.exe"));
+        assert!(!is_app_image(r"C:\Program Files\KiwiVPN\kiwivpn-service.exe", dir, "KiwiVPN.exe"));
+        assert!(!is_app_image(r"C:\Program Files\KiwiVPN2\KiwiVPN.exe", dir, "KiwiVPN.exe"));
     }
 
     #[test]

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Phase } from "./vpn";
 
 /**
- * What the outside world sees: the public address and where it's placed, asked of an outside service each time the connection changes. It's the app's check that traffic
- * really leaves through the tunnel. Until sign-in brings the server list (milestone 4), it's also the only source of the server's location, so the window labels it as a lookup.
- * Those services see the person's address, which the release checklist covers. Each answer is treated as untrusted text. The sites must also be in tauri.conf.json's CSP.
+ * What the outside world sees while connected: the public address and where it's placed. Asked of an outside service only while the tunnel is up, so what that service sees
+ * is the VPN server's address, never the person's own. Temporary: Kiwi's own endpoint and server list replace it (docs/PLAN.md, milestones 3 and 4).
+ * Each answer is treated as untrusted text. The sites must also be in tauri.conf.json's CSP.
  */
 
 export const LOOKUPS = ["https://ipinfo.io/json", "https://ipapi.co/json/"];
@@ -65,26 +65,24 @@ const wait = (ms: number, signal: AbortSignal) => new Promise<void>((done) => {
   signal.addEventListener("abort", () => { clearTimeout(timer); done(); }, { once: true });
 });
 
-export interface ExitView { exit: Exit | null; checking: boolean; unchanged: boolean }
+export interface ExitView { exit: Exit | null; checking: boolean }
 
 /** Starts over whenever the phase changes, and an answer that arrives after the phase has moved on is thrown away, so an old address can't be shown as the tunnel's. */
 export function useExit(phase: Phase): ExitView {
   const [exit, setExit] = useState<Exit | null>(null);
   const [checking, setChecking] = useState(false);
-  const normal = useRef<string | null>(null);
 
   useEffect(() => {
     setExit(null);
-    if (phase !== "on" && phase !== "off") { setChecking(false); return; }
+    if (phase !== "on") { setChecking(false); return; }
     const control = new AbortController();
     setChecking(true);
     void (async () => {
-      if (phase === "on") await wait(SETTLE_MS, control.signal);
+      await wait(SETTLE_MS, control.signal);
       for (let i = 0; i < TRIES && !control.signal.aborted; i++) {
         const found = await lookup(control.signal);
         if (control.signal.aborted) return;
         if (found) {
-          if (phase === "off") normal.current = found.ip;
           setExit(found);
           setChecking(false);
           return;
@@ -96,5 +94,5 @@ export function useExit(phase: Phase): ExitView {
     return () => control.abort();
   }, [phase]);
 
-  return { exit, checking, unchanged: phase === "on" && exit !== null && exit.ip === normal.current };
+  return { exit, checking };
 }
