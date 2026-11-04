@@ -86,7 +86,7 @@ def test_a_blocked_member_gets_no_session(client: TestClient, db: Session) -> No
 def test_the_apps_session_reaches_only_the_vpn(client: TestClient, db: Session) -> None:
     code, verifier = code_for(client, db, "scoped")
     token = client.post(TOKEN, json={"code": code, "verifier": verifier}).json()["token"]
-    assert token.startswith("kd_")
+    assert token.startswith("kd.")
     client.cookies.set("pc_session", token)
     assert client.get("/api/members/vpn").status_code == 200
     assert client.get("/api/members/me").status_code == 200
@@ -100,5 +100,5 @@ def test_the_apps_session_reaches_only_the_vpn(client: TestClient, db: Session) 
 
 def test_a_browser_session_is_not_limited(client: TestClient, db: Session) -> None:
     c = signed_in(client, db, member_at(db, "egg", "browser", paid=False))
-    assert not c.cookies.get("pc_session", "").startswith("kd_")
+    assert not c.cookies.get("pc_session", "").startswith("kd.")
     assert c.get("/api/members/crew").json().get("code") != "desktop_scope"

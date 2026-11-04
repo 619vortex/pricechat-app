@@ -6,7 +6,7 @@ Nothing here runs until you approve it. The code is on `feat/kiwi-windows`. A tr
 **Backend**
 - `POST /api/members/desktop/code`: the signed-in website page asks for a one-time code.
 - `POST /api/members/desktop/token`: the app swaps code + secret verifier (PKCE, S256) for a session. Codes last 5 minutes, work once, are stored only as hashes, and a wrong attempt still spends them.
-- **New:** the app's session starts `kd_` and reaches only `/api/members/vpn*`, `/api/members/me` and `/api/members/logout`. Everything else gets 403, so a token stolen from a PC can't spend, trade or change the account.
+- **New:** the app's session starts `kd.` and reaches only `/api/members/vpn*`, `/api/members/me` and `/api/members/logout`. Everything else gets 403, so a token stolen from a PC can't spend, trade or change the account.
 - Admin: `POST /api/vpn/admin/testers` names up to 10 testers for up to 90 days while the VPN is closed.
 - Sessions last 90 days, with no refresh token. After that, the person signs in again.
 
@@ -41,7 +41,7 @@ def downgrade():
         batch.drop_column("tester_until")
     op.drop_table("member_desktop_codes")
 ```
-One new empty table, and one empty nullable column. No existing data is changed. The `kd_` limit needs no schema change.
+One new empty table, and one empty nullable column. No existing data is changed. The `kd.` limit needs no schema change.
 
 **Tested on a throwaway SQLite database, not a copy of production:** upgrade to 0102 kept an existing row with the new column empty; downgrade removed both and left the row identical; upgrading again worked.
 
@@ -77,14 +77,14 @@ One new empty table, and one empty nullable column. No existing data is changed.
 | Schema itself must go | Run `alembic downgrade 0101_newsdesk` first, then deploy old code. This needs a shell on Railway, and `railway ssh` needs a key that isn't set up | Downgrade yes; on Railway no | Sign-in codes and tester dates |
 | Database damaged | Restore the volume backup from step 1 | **Never tested** | Everything since the backup |
 
-Revoking the app's sessions if needed: delete `member_sessions` rows whose token came from the app. Tokens are stored as hashes, so the `kd_` prefix can't be seen in the database. **Gap:** today that means ending all of a member's sessions. Tell me if you want a way to tell them apart, which would need a column in this same migration.
+Revoking the app's sessions if needed: delete `member_sessions` rows whose token came from the app. Tokens are stored as hashes, so the `kd.` prefix can't be seen in the database. **Gap:** today that means ending all of a member's sessions. Tell me if you want a way to tell them apart, which would need a column in this same migration.
 
 ## Decisions for you
-1. **Approve the `kd_` session limit?** It's new since the plan and I recommend it. Tests are on the branch.
+1. **Approve the `kd.` session limit?** It's new since the plan and I recommend it. Tests are on the branch.
 2. **Should a session's type be stored?** It would allow revoking only app sessions and listing them for the member. It adds one column to 0102, so it's cheapest to decide now. I recommend yes.
 3. **Should testers stay in this migration?** They're unrelated to sign-in, though you need them to test while the VPN is closed. I recommend keeping them.
 4. **Should the Windows app generate its own private key?** It means the server never holds it, but the device API must accept a public key. That's a milestone 4 backend change, and I recommend it.
 
 ## Remaining weak points
-- A local program can start the sign-in with its own verifier and a loopback listener. If the person presses Allow, it gets a session. The page says to continue only if you just pressed Sign in in the app; the `kd_` limit caps the damage.
+- A local program can start the sign-in with its own verifier and a loopback listener. If the person presses Allow, it gets a session. The page says to continue only if you just pressed Sign in in the app; the `kd.` limit caps the damage.
 - The member can't yet see or revoke desktop sessions from their account (decision 2).
