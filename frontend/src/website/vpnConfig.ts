@@ -12,6 +12,17 @@ export function visitorBrowser(agent: string): VisitorBrowser {
   return /\bChrome\//.test(agent) ? "chrome" : "other";
 }
 
+export type VisitorOs = "Windows" | "macOS" | "Linux" | "Android" | "iOS" | null;
+
+/** Which device to mark "Your device" in the downloads. iPads can call themselves Macs, but then they also report touch, which a page checks with the second argument. */
+export function visitorOs(agent: string, touch = 0): VisitorOs {
+  if (/Android/i.test(agent)) return "Android";
+  if (/iPhone|iPad|iPod/i.test(agent)) return "iOS";
+  if (/Windows NT/i.test(agent)) return "Windows";
+  if (/Mac OS X|Macintosh/i.test(agent)) return touch > 1 ? "iOS" : "macOS";
+  return /Linux|X11/i.test(agent) ? "Linux" : null;
+}
+
 /** A device's WireGuard config, shown once: its QR code and its .conf download. Used by the member page and by Admin. */
 
 export async function configQr(config: string): Promise<string> {
