@@ -1,0 +1,59 @@
+/* Kiwi VPN's window. The same colours and type as pricechat.live/vpn: near black, forest, kiwi lime, Archivo. Nothing moves unless the state it shows is real. */
+:root {
+  color-scheme: dark;
+  --ground: #070b09; --forest: #0d1d15; --line: rgba(214, 245, 170, .11);
+  --lime: #a3e635; --lime-bright: #bef264; --ink: #0b1406; --warn: #ff9f5a;
+  --text: #f6f8f4; --soft: #bcc7bf; --muted: #84918a;
+  --display: "Archivo Variable", "Arial Narrow", Arial, sans-serif;
+  --sans: "Archivo Variable", "Segoe UI", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--ground); color: var(--text); font: 400 15px/1.45 var(--sans); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; overflow: hidden; }
+.app { height: 100%; display: flex; flex-direction: column; padding: 16px 24px 24px; background: radial-gradient(120% 62% at 50% 30%, #0f2417 0%, var(--ground) 72%); }
+
+.bar { display: flex; align-items: center; gap: 10px; flex: none; }
+.bar img { width: 30px; height: 30px; padding: 3px; border-radius: 50%; background: var(--lime); }
+.brand { font-family: var(--display); font-weight: 800; font-stretch: 90%; letter-spacing: .08em; text-transform: uppercase; font-size: 14px; }
+.tag { margin-left: auto; padding: 2px 9px; border-radius: 999px; background: rgba(255, 159, 90, .12); color: var(--warn); font-size: 12px; font-weight: 650; }
+
+.stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; }
+.stage h1 { margin: 12px 0 0; font-family: var(--display); font-weight: 900; font-stretch: 80%; text-transform: uppercase; font-size: 38px; line-height: 1.02; letter-spacing: -.005em; }
+.detail { margin: 2px 0 0; min-height: 2.9em; max-width: 34ch; color: var(--soft); text-wrap: balance; }
+.problem { margin: 0; color: var(--warn); font-size: 14px; }
+.is-on h1 { color: var(--lime-bright); }
+.is-failed h1, .is-no-service h1 { color: var(--warn); }
+
+.slice { position: relative; width: min(232px, 34vh); aspect-ratio: 1; flex: none; }
+.slice svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.slice img { position: absolute; left: 12.3%; top: 15%; width: 77%; height: auto; transition: filter .5s; }
+.slice-fruit { transition: filter .5s; filter: saturate(.18) brightness(.5); }
+.slice-halo { fill: none; stroke: var(--lime); stroke-width: 2; opacity: 0; transition: opacity .5s; }
+.slice.is-off img, .slice.is-loading img, .slice.is-no-service img, .slice.is-failed img { filter: brightness(.8); }
+.slice.is-connecting .slice-fruit, .slice.is-stopping .slice-fruit { filter: saturate(.6) brightness(.72); }
+.slice.is-connecting .slice-halo { opacity: .75; stroke-dasharray: 18 26; }
+.slice.is-on .slice-fruit { filter: none; }
+.slice.is-on .slice-halo { opacity: .4; }
+
+.controls { flex: none; display: grid; gap: 18px; }
+.go { width: 100%; height: 64px; border: 0; border-radius: 999px; background: var(--lime); color: var(--ink); font: 800 18px var(--sans); font-stretch: 92%; letter-spacing: .01em; cursor: pointer; transition: background-color .18s, color .18s, box-shadow .18s, transform .12s; }
+.go:hover:not(:disabled) { background: var(--lime-bright); }
+.go:active:not(:disabled) { transform: scale(.985); }
+.go:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.go:disabled { background: #18251d; color: var(--muted); cursor: default; }
+.go.is-stop { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1.5px rgba(246, 248, 244, .34); }
+.go.is-stop:hover:not(:disabled) { background: rgba(246, 248, 244, .07); }
+
+.stats { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); padding-top: 14px; }
+.stats > div { min-width: 0; padding-left: 12px; border-left: 1px solid var(--line); }
+.stats > div:first-child { padding-left: 0; border-left: 0; }
+.stats dt { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.stats dd { margin: 1px 0 0; font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats dd.sub { color: var(--muted); font-weight: 450; font-size: 11.5px; min-height: 2.5em; white-space: normal; line-height: 1.25; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .slice.is-connecting .slice-halo { transform-origin: 50% 50%; animation: turn 2.6s linear infinite; }
+  .slice.is-on .slice-halo { transform-origin: 50% 50%; animation: breathe 3.6s ease-in-out infinite; }
+}
+@keyframes turn { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { opacity: .14; transform: scale(1.015); } }

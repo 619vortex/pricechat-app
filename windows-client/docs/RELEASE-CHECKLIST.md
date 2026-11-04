@@ -17,6 +17,7 @@ Tick only what was really run. Nothing below has been run yet, except where mark
 ## Tunnel, on Windows 10 and Windows 11 (test machines, not the owner's PC running `client1`)
 - [ ] Fresh install, no separate WireGuard app present
 - [ ] Trial activation
+- [x] Service alone, in the VM, run by the owner on 2026-11-04: handshake, Connected only after it, IP changed from 5.30.213.225 to 2.31.133.78, traffic, adapter, DNS set, disconnect restored networking, cleanup removed the services. Not yet through the app or an installer
 - [ ] Finland connect: public IP becomes Helsinki's
 - [ ] Germany connect: public IP becomes Falkenstein's
 - [ ] Switching countries
