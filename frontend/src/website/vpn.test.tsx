@@ -659,6 +659,15 @@ describe("The redesigned page", () => {
     expect(screen.getByRole("link", { name: "My Devices" }).getAttribute("href")).toBe("/vpn/devices");
   });
 
+  it("offers no manual setup while access is closed, because that page has nothing to give yet", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: false, trial: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector('a[href^="/vpn/devices"]')).toBeNull();
+    expect(container.querySelector("#vpn-faq")!.textContent).not.toMatch(/manual setup/i);
+    expect(container.querySelector(".vpn-app .vpn-status")!.textContent).toBe("In development");
+  });
+
   it("replaces Explore Apps with Get Kiwi VPN, going to the apps", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: false, trial: false, billing: null }] });
     const { container } = render(<VpnPage />);

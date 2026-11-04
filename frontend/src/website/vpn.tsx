@@ -155,7 +155,7 @@ export function VpnPage() {
         {state && "error" in state && <Gate error={state.error} status={state.status} />}
         {!free && <Plans state={state} onStarted={setState} />}
         {!fresh && visitor?.enabled && (visitor.billing ? <Choose billing={visitor.billing} onKey={setKey} onFresh={setFresh} /> : <FreeStart onKey={setKey} trial={!!visitor.trial} />)}
-        <Downloads testers={!!member?.enabled && member.servers.some((x) => x.browser)} />
+        <Downloads manualOpen={open} testers={!!member?.enabled && member.servers.some((x) => x.browser)} />
         {!state ? <MySkeleton /> : member?.enabled && !fresh && (
           <CallCtx.Provider value={callFor(key)}>
             <section className="vpn-account" aria-label="Your account">
@@ -168,7 +168,7 @@ export function VpnPage() {
         )}
         <Network stats={stats} list={list} />
         <RoyalKiwi member={member} />
-        <Faq member={member} free={free} paid={paid} />
+        <Faq member={member} free={free} paid={paid} open={open} />
       </div>
     </SitePage>
   );
@@ -427,7 +427,7 @@ function AppCard({ icons, name, text, status, on = false, mine, children }: { ic
 }
 
 /** Available means a real, working store link. Anything else says so plainly and offers only the manual route. Nothing here is a download until it exists. */
-export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTouchPoints, testers = false }: { agent?: string; touch?: number; /** the tester ZIP: a signed-in member, with a server that takes it */ testers?: boolean }) {
+export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTouchPoints, testers = false, manualOpen = true }: { agent?: string; touch?: number; /** the tester ZIP: a signed-in member, with a server that takes it */ testers?: boolean; /** manual setup leads somewhere only once access is open */ manualOpen?: boolean }) {
   const browser = visitorBrowser(agent);
   const os = visitorOs(agent, touch);
   const [zip, setZip] = useState(false);
@@ -435,7 +435,7 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
     { key: "chrome", href: STORE_LINKS.chrome, action: "Add to Chrome" },
     { key: "edge", href: STORE_LINKS.edge, action: "Get for Edge" },
   ].filter((x) => x.href);
-  const manual = (name: string) => <a className="vpn-textlink" aria-label={`Manual setup for ${name}`} href="/vpn/devices#manual">Manual setup</a>;
+  const manual = (name: string) => manualOpen && <a className="vpn-textlink" aria-label={`Manual setup for ${name}`} href="/vpn/devices#manual">Manual setup</a>;
   return (
     <section id="vpn-downloads" className="vpn-band vpn-downloads site-reveal" aria-labelledby="vpn-download">
       <SectionHead id="vpn-download" kicker="Apps" title="Get Kiwi VPN" />
@@ -464,7 +464,7 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
           </div>
         </details>
       )}
-      <p className="vpn-manual-line"><WireGuardIcon className="vpn-fold-icon" />On another system, or need it today? <a className="vpn-textlink" href="/vpn/devices#manual">Set it up manually</a> with the free WireGuard app.</p>
+      {manualOpen && <p className="vpn-manual-line"><WireGuardIcon className="vpn-fold-icon" />On another system, or need it today? <a className="vpn-textlink" href="/vpn/devices#manual">Set it up manually</a> with the free WireGuard app.</p>}
     </section>
   );
 }
@@ -624,13 +624,13 @@ function RoyalKiwi({ member }: { member: VpnState | null }) {
   );
 }
 
-function Faq({ member, free, paid }: { member: VpnState | null; free: boolean; paid: boolean }) {
+function Faq({ member, free, paid, open }: { member: VpnState | null; free: boolean; paid: boolean; open: boolean }) {
   const items: [string, React.ReactNode][] = [
     ["What's the difference between the device and browser versions?", "A browser extension sends only that browser's traffic through Kiwi VPN. Other apps keep your normal connection. A device connection covers every app on the device."],
     ["Do you keep logs?", <>We don't log the websites you visit, your DNS lookups or the content of your traffic. We do keep your account, your devices' names and keys, and how much data each one used this month and when it was last active. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
-    ["Is there a Kiwi VPN app?", "Not yet. A native Windows app is our first, and it's in development. Until then, manual setup connects any device with the free WireGuard app. Browser extensions appear here once each store approves them."],
-    ["Do I have to set up each device myself?", "With the apps, no: signing in will set the device up. Manual setup is there for anything else, under My Devices."],
+    ["Is there a Kiwi VPN app?", `Not yet. A native Windows app is our first, and it's in development.${open ? " Until then, manual setup connects any device with the free WireGuard app." : ""} Browser extensions appear here once each store approves them.`],
+    ["Do I have to set up each device myself?", `With the apps, no: signing in will set the device up.${open ? " Manual setup is there for anything else, under My Devices." : ""}`],
     ...(member ? [["How many devices can I use?", `Your account can have ${member.max_devices} ${member.max_devices === 1 ? "device" : "devices"} at a time. Delete one to add another.`] as [string, React.ReactNode]] : []),
     ...(!free ? [["What happens when my time runs out?", `Your devices are switched off and kept for 30 days.${paid ? " Add time and they switch back on within 5 minutes." : ""} Nothing renews or charges by itself.`] as [string, React.ReactNode]] : []),
   ];
