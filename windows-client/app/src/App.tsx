@@ -258,7 +258,7 @@ export function App() {
       <header className="bar">
         <img src="/kiwi.webp" alt="" />
         <span className="brand">Kiwi VPN</span>
-        <span className="tag">Beta</span>
+        <span className="tag">Public beta</span>
         <button type="button" className="link" onClick={() => setSettings(true)}>Settings</button>
       </header>
 

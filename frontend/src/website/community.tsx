@@ -354,6 +354,11 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "It uses your Kiwi Passport sign-in on pricechat.live to get its login. It has no ads or analytics and loads no code from outside its package.",
         "The use of information received through the extension is limited to providing this feature, in line with the Limited Use requirements of the Chrome Web Store User Data Policy and the Microsoft Edge Add-ons developer policies.",
       ]],
+      ["The Windows app (public beta)", [
+        "It keeps your sign-in and each device's private key on your PC, encrypted with Windows DPAPI so other Windows users can't read them. The private key is made on your PC and never sent to us. While you want the VPN on, the Kiwi VPN service also holds it in a folder only administrators can read, and it's deleted when you disconnect, sign out or uninstall.",
+        "We keep the device's name, public key and private address, as for any device, and mark its sign-in as coming from the app. To show your public address it asks our own server, which sends the address back and doesn't store it. Our hosting providers' request logs can record it, as with any visit.",
+        "It's a beta: it isn't code signed, it has no kill switch, and its security, DNS leak and IPv6 leak testing isn't finished.",
+      ]],
       ["Who else is involved", [
         "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). WireGuard devices look up addresses through Cloudflare's public DNS unless the server blocks ads, so Cloudflare receives those lookups under its own privacy policy. These companies provide infrastructure for us; we don't send them your data for their own use.",
         "We'd only share data beyond this if the law requires it, and we can only share what's listed above.",

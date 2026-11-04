@@ -411,6 +411,7 @@
 
 .vpn-checksum { flex-basis: 100%; font-size: 12.500px; color: var(--vpn-muted); }
 .vpn-checksum summary { cursor: pointer; min-height: 28px; }
+.vpn-beta-notes { display: grid; gap: 4px; margin: 4px 0 8px !important; padding-left: 16px !important; list-style: disc !important; line-height: 1.4; }
 .vpn-checksum code { display: block; margin-top: 4px; font: 600 11.500px/1.4 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; color: var(--vpn-soft); }
 
 /* My Devices */

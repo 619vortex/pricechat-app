@@ -165,9 +165,13 @@ describe("Free while payments are off", () => {
       view = render(<Downloads agent={CHROME} />);
       const windows = card(view.container, "Windows");
       expect(screen.getByRole("link", { name: /Download for Windows/ }).getAttribute("href")).toBe("/downloads/KiwiVPN-Setup.exe");
-      expect(windows.querySelector(".vpn-status")!.textContent).toBe("Beta");
+      expect(windows.querySelector(".vpn-status")!.textContent).toBe("Public beta");
+      expect(windows.textContent).toMatch(/isn't code signed/);
+      expect(windows.textContent).toMatch(/no kill switch/);
+      expect(windows.textContent).toMatch(/Security, DNS leak and IPv6 leak testing aren't finished/);
+      expect(windows.textContent).not.toMatch(/passed|verified|audited/i);
       expect(windows.textContent).toMatch(/sign in, choose a country and connect/);
-      expect(windows.textContent).toMatch(/Version 0\.1\.0/);
+      expect(windows.textContent).toMatch(/Public beta 0\.1\.0/);
       expect(windows.textContent).toContain("ABC123");
       expect(windows.textContent).not.toMatch(/WireGuard|\.conf|config file/i);
       expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
