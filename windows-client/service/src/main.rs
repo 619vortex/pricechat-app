@@ -47,11 +47,14 @@ mod app {
     }
 
     fn show(request: Request) -> i32 {
-        match win::ask(&request) {
+        match win::ask_service(&request) {
             Ok(s) => {
                 println!("state: {:?}", s.state);
                 if let Some(age) = s.handshake_age_seconds {
                     println!("last handshake: {age}s ago");
+                }
+                if let Some(since) = s.connected_since {
+                    println!("connected since: {since}");
                 }
                 println!("received: {} bytes, sent: {} bytes", s.rx_bytes, s.tx_bytes);
                 if let Some(e) = &s.error {
@@ -60,7 +63,7 @@ mod app {
                 i32::from(s.state == State::Failed)
             }
             Err(e) => {
-                eprintln!("{e}");
+                eprintln!("{}", e.message());
                 1
             }
         }

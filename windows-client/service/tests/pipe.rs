@@ -3,7 +3,7 @@
 #![cfg(windows)]
 
 use kiwivpn::protocol::{Request, State};
-use kiwivpn::windows::{ask, open_pipe, serve, TUNNEL_NAME};
+use kiwivpn::windows::{ask_unverified as ask, open_pipe, serve_for_tests, TUNNEL_NAME};
 use std::io::Write;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::time::Duration;
 
 fn start() {
     let stop = Arc::new(AtomicBool::new(false));
-    std::thread::spawn(move || serve(stop));
+    std::thread::spawn(move || serve_for_tests(stop));
     std::thread::sleep(Duration::from_millis(300));
 }
 

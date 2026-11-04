@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
  */
 
 export type TunnelState = "disconnected" | "connecting" | "connected" | "stopping" | "failed";
-export interface Status { state: TunnelState; handshake_age_seconds: number | null; rx_bytes: number; tx_bytes: number; error: string | null }
+export interface Status { state: TunnelState; handshake_age_seconds: number | null; rx_bytes: number; tx_bytes: number; error: string | null; connected_since: number | null }
 export interface Answer { service: boolean; status: Status | null; message: string | null }
 export type Phase = "loading" | "no-service" | "off" | "connecting" | "on" | "stopping" | "failed";
 
@@ -46,6 +46,11 @@ export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const pad = (v: number) => String(v).padStart(2, "0");
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+}
+
+/** Seconds the tunnel has been up, from the service's own record, so it's the same whether or not this window was open. Null when the service doesn't give one. */
+export function secondsUp(since: number | null | undefined, nowMs: number): number | null {
+  return since === null || since === undefined ? null : Math.max(0, nowMs / 1000 - since);
 }
 
 export interface Sample { at: number; rx: number; tx: number }

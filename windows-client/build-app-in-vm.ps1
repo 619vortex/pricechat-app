@@ -1,4 +1,4 @@
-# Builds the Kiwi VPN desktop window INSIDE THE VM, puts the already-proven service in place, and opens the window. Milestone 1: no installer yet.
+# Builds the Kiwi VPN service and desktop window INSIDE THE VM, tests them, installs the service, and opens the folder. No installer yet.
 #   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1            (as administrator)
 #   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1 -Remove    removes the service and everything it put on the machine
 # Not for the host: Smart App Control blocks these builds there, and no Kiwi service may ever run on the PC with client1. It stops itself there.
@@ -49,7 +49,16 @@ if (-not (Test-Path "$Work\cargo\bin\cargo.exe")) {
 }
 cargo --version
 
-Write-Host "[4/5] The app: tests, then the build"
+Write-Host "[4/6] The service's tests, which need the pipe's name free, then its build"
+if (Test-Path $Svc) { & $Svc uninstall; Start-Sleep 2 }
+Push-Location "$Here\service"
+cargo test -- --test-threads=1
+Need ($LASTEXITCODE -eq 0) "The service's tests failed."
+cargo build --bins --examples
+Need ($LASTEXITCODE -eq 0) "The service didn't build."
+Pop-Location
+
+Write-Host "[5/6] The app: tests, then the build"
 Push-Location "$Here\app"
 npm ci
 Need ($LASTEXITCODE -eq 0) "npm ci failed."
@@ -61,15 +70,16 @@ Pop-Location
 $Exe = "$Work\target-app\debug\KiwiVPN.exe"
 Need (Test-Path $Exe) "No KiwiVPN.exe at $Exe"
 
-Write-Host "[5/5] The service that passed the connection test, in its protected folder"
-if (Test-Path $Svc) { & $Svc uninstall; Start-Sleep 2 }
-New-Item -ItemType Directory -Force $Dir | Out-Null
-Copy-Item "$Here\dist\kiwivpn-service.exe", "$Here\dist\tunnel.dll", "$Here\dist\wireguard.dll" $Dir -Force
+Write-Host "[6/6] The service, in its protected folder, and the fake service for the security test, outside it"
+New-Item -ItemType Directory -Force $Dir, "$Here\test-tools" | Out-Null
+Copy-Item "$Work\target-app\debug\kiwivpn-service.exe", "$Here\dist\tunnel.dll", "$Here\dist\wireguard.dll" $Dir -Force
+Copy-Item "$Work\target-app\debug\examples\fake_service.exe" "$Here\test-tools" -Force
 & $Svc install
 Need ($LASTEXITCODE -eq 0) "The service didn't install."
 Copy-Item $Exe "$Dir\KiwiVPN.exe" -Force
 
 Write-Host ""
 Write-Host "Built: $Dir\KiwiVPN.exe" -ForegroundColor Green
+Write-Host "Security test: $Here\fake-service-test.ps1, from a normal PowerShell."
 Write-Host "Open it from a NORMAL File Explorer window, NOT this administrator PowerShell: the test has to prove it works without administrator rights."
 if (-not $NoLaunch) { Start-Process explorer.exe $Dir }

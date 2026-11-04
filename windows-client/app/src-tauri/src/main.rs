@@ -14,10 +14,10 @@ struct Answer {
     message: Option<String>,
 }
 
-fn answer(result: Result<Status, ipc::IpcError>) -> Answer {
+fn answer(result: Result<Status, String>) -> Answer {
     match result {
         Ok(status) => Answer { service: true, status: Some(status), message: None },
-        Err(e) => Answer { service: false, status: None, message: Some(e.message()) },
+        Err(message) => Answer { service: false, status: None, message: Some(message) },
     }
 }
 

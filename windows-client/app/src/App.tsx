@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type Answer, type Phase, type Sample, formatBytes, formatDuration, formatRate, isTestBuild, phaseOf, ratesBetween, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
+import { placeLine, useExit } from "./exit";
+import { type Answer, type Phase, type Sample, formatBytes, formatDuration, formatRate, isTestBuild, phaseOf, ratesBetween, secondsUp, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
 
 const POLL_MS = 1000;
 /** How long before saying the server hasn't answered. The tunnel keeps trying; the person decides. */
@@ -28,6 +29,13 @@ function Slice({ phase }: { phase: Phase }) {
       <img src="/kiwi.webp" alt="" />
     </div>
   );
+}
+
+/** A flag picture, or the country's two letters if there's no picture for it. */
+function Flag({ code }: { code: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return <span className="flag is-code" aria-hidden>{code}</span>;
+  return <span className="flag" aria-hidden><img src={`/flags/${code.toLowerCase()}.svg`} alt="" onError={() => setBroken(true)} /></span>;
 }
 
 const HEADLINE: Record<Phase, string> = {
@@ -62,7 +70,6 @@ export function App() {
   const [action, setAction] = useState<"connect" | "disconnect" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [rates, setRates] = useState({ rx: 0, tx: 0 });
-  const [since, setSince] = useState<number | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const last = useRef<Sample | null>(null);
@@ -70,6 +77,7 @@ export function App() {
   const reported = phaseOf(answer);
   // A request in flight may say disconnecting. Nothing here can say connected: that only ever comes from the service's answer.
   const phase: Phase = action === "disconnect" ? "stopping" : reported;
+  const { exit, checking, unchanged } = useExit(phase);
 
   const take = useCallback((next: Answer) => {
     setAnswer(next);
@@ -79,12 +87,9 @@ export function App() {
       const sample = { at: Date.now(), rx: next.status.rx_bytes, tx: next.status.tx_bytes };
       setRates(ratesBetween(last.current, sample));
       last.current = sample;
-      setSince((s) => s ?? Date.now());
     } else {
       last.current = null;
       setRates({ rx: 0, tx: 0 });
-      // a late handshake between rekeys doesn't end the session; the tunnel going away does
-      if (seen !== "connecting") setSince(null);
     }
     if (seen === "connecting") setStartedAt((s) => s ?? Date.now());
     else setStartedAt(null);
@@ -128,6 +133,10 @@ export function App() {
   const slow = phase === "connecting" && startedAt !== null && now - startedAt > SLOW_CONNECT_MS;
   const live = phase === "on";
   const status = answer?.status ?? null;
+  const up = live ? secondsUp(status?.connected_since, now) : null;
+  const showsAddress = phase === "on" || phase === "off";
+  const pending = checking ? "Checking" : "Couldn't check";
+  const place = exit ? placeLine(exit) : null;
   // Disconnect stays available while the tunnel exists, including while it's still trying to reach the server.
   const tunnelUp = reported === "on" || reported === "connecting";
 
@@ -147,19 +156,35 @@ export function App() {
         {testBuild && <span className="tag">Test build</span>}
       </header>
 
-      <section className="stage">
+      <section className={`stage${unchanged ? " is-warned" : ""}`}>
         <Slice phase={phase} />
         <h1 aria-live="polite">{HEADLINE[phase]}</h1>
         <p className="detail" role={phase === "failed" || phase === "no-service" ? "alert" : "status"}>{detail(phase, answer, slow, testBuild)}</p>
         {problem && <p className="problem" role="alert">{problem}</p>}
+        {unchanged && <p className="problem" role="alert">Your public IP is the same as before connecting, so traffic may not be leaving through the server.</p>}
       </section>
+
+      <dl className="route">
+        <div>
+          <dt>Server location</dt>
+          <dd className="place">
+            {!live ? "–" : place ? <>{exit?.country && <Flag code={exit.country} />}<span>{place}</span></> : pending}
+          </dd>
+          <dd className="sub">{live && place ? "from an IP lookup" : ""}</dd>
+        </div>
+        <div>
+          <dt>Public IP</dt>
+          <dd className="ip">{!showsAddress ? "–" : exit ? exit.ip : pending}</dd>
+          <dd className="sub">{showsAddress && exit ? (live ? "what sites see now" : "your normal address") : ""}</dd>
+        </div>
+      </dl>
 
       <section className="controls">
         <button type="button" className={`go${tunnelUp ? " is-stop" : ""}`} disabled={button.off} onClick={button.run}>{button.label}</button>
         <dl className="stats" aria-label="Connection statistics">
           <div><dt>Download</dt><dd>{live ? formatRate(rates.rx) : "–"}</dd><dd className="sub">{live && status ? `${formatBytes(status.rx_bytes)} total` : ""}</dd></div>
           <div><dt>Upload</dt><dd>{live ? formatRate(rates.tx) : "–"}</dd><dd className="sub">{live && status ? `${formatBytes(status.tx_bytes)} total` : ""}</dd></div>
-          <div><dt>Time</dt><dd>{live && since !== null ? formatDuration((now - since) / 1000) : "–"}</dd><dd className="sub">{live ? "seen by this window" : ""}</dd></div>
+          <div><dt>Time</dt><dd>{up !== null ? formatDuration(up) : "–"}</dd><dd className="sub">{up !== null ? "since handshake" : ""}</dd></div>
         </dl>
       </section>
     </main>

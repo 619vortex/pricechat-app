@@ -16,9 +16,6 @@ kiwivpn-service = { path = "../../service" }
 # Only for the test build's "choose a config file" button.
 tauri-plugin-dialog = { version = "2", optional = true }
 
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
-
 [features]
 # Connecting from a config file exists until sign-in does (milestone 3). Release builds use --no-default-features.
 default = ["test-config"]

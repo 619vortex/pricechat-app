@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { type Answer, type Status, formatBytes, formatDuration, phaseOf, ratesBetween } from "./vpn";
+import conf from "../src-tauri/tauri.conf.json";
+import { LOOKUPS, placeLine, readLookup } from "./exit";
+import { type Answer, type Status, formatBytes, formatDuration, phaseOf, ratesBetween, secondsUp } from "./vpn";
 
 const calls: string[] = [];
 let reply: Answer;
@@ -16,7 +18,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-const status = (over: Partial<Status>): Status => ({ state: "disconnected", handshake_age_seconds: null, rx_bytes: 0, tx_bytes: 0, error: null, ...over });
+const status = (over: Partial<Status>): Status => ({ state: "disconnected", handshake_age_seconds: null, rx_bytes: 0, tx_bytes: 0, error: null, connected_since: null, ...over });
 const up = (over: Partial<Status> = {}): Answer => ({ service: true, message: null, status: status({ state: "connected", handshake_age_seconds: 5, rx_bytes: 2048, tx_bytes: 1024, ...over }) });
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(1000); });
@@ -52,9 +54,103 @@ describe("the numbers", () => {
   });
 });
 
+describe("the outside view", () => {
+  it("reads a lookup, and refuses anything that isn't one", () => {
+    expect(readLookup({ ip: "2.31.133.78", city: "Falkenstein", country: "DE" })).toEqual({ ip: "2.31.133.78", city: "Falkenstein", country: "DE" });
+    expect(readLookup({ ip: "2a00:f2a::1", country: "ae" })).toEqual({ ip: "2a00:f2a::1", city: null, country: "AE" });
+    expect(readLookup({ ip: "<img src=x>", country: "DE" })).toBeNull();
+    expect(readLookup({ ip: "1.2.3.4", country: "<script>", city: "x".repeat(65) })).toEqual({ ip: "1.2.3.4", country: null, city: null });
+    for (const bad of [null, "1.2.3.4", {}, { ip: 7 }, { ip: "abcd" }]) expect(readLookup(bad)).toBeNull();
+  });
+  it("words the place from what it knows", () => {
+    expect(placeLine({ ip: "x", city: "Falkenstein", country: "DE" })).toBe("Falkenstein, Germany");
+    expect(placeLine({ ip: "x", city: null, country: "FI" })).toBe("Finland");
+    expect(placeLine({ ip: "x", city: null, country: null })).toBeNull();
+  });
+  it("the window's security policy allows every lookup, and nothing else out there", () => {
+    const csp = conf.app.security.csp;
+    const allowed = csp.split(";").find((d) => d.trim().startsWith("connect-src"))!.trim().split(/\s+/).filter((s) => s.startsWith("https:"));
+    expect(allowed.sort()).toEqual(LOOKUPS.map((u) => new URL(u).origin).sort());
+  });
+});
+
+describe("the timer", () => {
+  it("comes from the service's record, not from when this window opened", () => {
+    expect(secondsUp(1000, 1_060_000)).toBe(60);
+    expect(secondsUp(2000, 1_000_000)).toBe(0);
+    expect(secondsUp(null, 5)).toBeNull();
+    expect(secondsUp(undefined, 5)).toBeNull();
+  });
+});
+
 describe("the window", () => {
-  beforeEach(() => { vi.useFakeTimers(); calls.length = 0; connectReply = null; testBuild = true; reply = { service: true, message: null, status: status({}) }; });
-  afterEach(() => { cleanup(); vi.useRealTimers(); });
+  let lookupReply: unknown;
+  const fetched: string[] = [];
+  const stats = () => screen.getByLabelText("Connection statistics").textContent!;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    calls.length = 0; fetched.length = 0; connectReply = null; testBuild = true;
+    reply = { service: true, message: null, status: status({}) };
+    lookupReply = { ip: "5.30.213.225", city: "Dubai", country: "AE" };
+    vi.stubGlobal("fetch", async (url: string) => { fetched.push(url); return { ok: lookupReply !== null, json: async () => lookupReply }; });
+  });
+  afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it("shows the normal address when off, and the server's place and address once connected", async () => {
+    render(<App />);
+    await settle();
+    await settle();
+    expect(document.querySelector(".ip")!.textContent).toBe("5.30.213.225");
+    expect(document.querySelector(".place")!.textContent).toBe("–");
+    expect(document.body.textContent).not.toContain("Dubai");
+    lookupReply = { ip: "2.31.133.78", city: "Falkenstein", country: "DE" };
+    reply = up({ connected_since: 1 });
+    await tick();
+    expect(document.querySelector(".ip")!.textContent).toBe("Checking");
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(document.querySelector(".ip")!.textContent).toBe("2.31.133.78");
+    expect(document.querySelector(".place")!.textContent).toBe("Falkenstein, Germany");
+    expect(document.querySelector<HTMLImageElement>(".flag img")!.getAttribute("src")).toBe("/flags/de.svg");
+    expect(screen.queryByText(/same as before connecting/)).toBeNull();
+  });
+
+  it("warns if the address didn't change after connecting", async () => {
+    render(<App />);
+    await settle();
+    await settle();
+    reply = up({ connected_since: 1 });
+    await tick();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText(/same as before connecting/)).toBeTruthy();
+  });
+
+  it("says when it couldn't check, rather than showing nothing or a guess", async () => {
+    lookupReply = null;
+    render(<App />);
+    await settle();
+    expect(document.querySelector(".ip")!.textContent).toBe("Checking");
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(document.querySelector(".ip")!.textContent).toBe("Couldn't check");
+  });
+
+  it("an answer that arrives after the connection changed is thrown away", async () => {
+    let release: (v: unknown) => void = () => {};
+    vi.stubGlobal("fetch", (url: string) => { fetched.push(url); return new Promise((done) => { release = done; }); });
+    render(<App />);
+    await settle();
+    reply = { service: true, message: null, status: status({ state: "connecting" }) };
+    await tick();
+    await act(async () => { release({ ok: true, json: async () => ({ ip: "9.9.9.9", country: "DE" }) }); await vi.advanceTimersByTimeAsync(0); });
+    expect(document.body.textContent).not.toContain("9.9.9.9");
+  });
+
+  it("the timer picks up from the service when a window opens on a running tunnel", async () => {
+    vi.setSystemTime(new Date(1_000_000_000));
+    reply = up({ connected_since: 1_000_000 - 3725 });
+    render(<App />);
+    await settle();
+    expect(stats()).toContain("01:02:05");
+  });
 
   it("says the service is offline, and offers nothing it can't do", async () => {
     reply = { service: false, status: null, message: "The Kiwi VPN service isn't running." };
@@ -98,7 +194,6 @@ describe("the window", () => {
     const text = screen.getByLabelText("Connection statistics").textContent!;
     expect(text).toContain("2.0 KB/s");
     expect(text).toContain("1.0 KB/s");
-    expect(text).toContain("00:00:01");
   });
 
   it("a cancelled file picker changes nothing, and a refused config shows why", async () => {

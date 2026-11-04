@@ -50,6 +50,9 @@ WireGuard's README calls `SERVICE_SID_TYPE_UNRESTRICTED` on the tunnel service e
 
 ## Security rules for the service
 
+- The pipe's rule gives the signed-in person read, write and read-attributes only. Generic write would also grant creating a pipe instance, which would let a program of theirs join the service's own pipe under its owner.
+- Before writing anything, including a config with its private key, the client requires a pipe owned by SYSTEM or Administrators whose server is in session 0, and connects anonymously so the other end can't act as the person. `fake-service-test.ps1` tries both attacks.
+- Any program the person runs can still ask the real service to connect or disconnect. It accepts only a validated config, so this can't run a command, but it could point the tunnel at another server. Worth reviewing before release.
 - Pipe open only to the interactive user, with a fixed command set and strict parsing. No paths, commands or arbitrary config from the UI: the service fetches nothing and accepts only a validated WireGuard config.
 - Never logs private keys, session tokens or configs.
 - Never ships server keys or agent tokens: the installer contains none.

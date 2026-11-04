@@ -5,13 +5,15 @@ use crate::protocol::{self, Request, ServiceState, Status, PIPE_NAME};
 use std::ffi::c_void;
 use std::io::Write;
 use std::mem::{size_of, zeroed};
+use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
-use windows_sys::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_KERNEL_OBJECT};
+use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 use windows_sys::Win32::Storage::FileSystem::*;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Pipes::*;
@@ -22,8 +24,11 @@ pub const TUNNEL_NAME: &str = "kiwi";
 const TUNNEL_SERVICE: &str = "WireGuardTunnel$kiwi";
 /// SYSTEM and the Administrators group only.
 const PRIVATE_SDDL: &str = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)";
-/// SYSTEM fully; the signed-in person may read and write. Nobody else, nothing over the network (see PIPE_REJECT_REMOTE_CLIENTS).
-const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)";
+/// What the signed-in person may do on the pipe: read data, write data, read its attributes and owner, wait on it. Exactly this, because for a pipe the "append data" part of
+/// generic write is also the right to create another instance of it, which would let any program of theirs pose as the service on the service's own pipe, under its owner.
+pub const PIPE_CLIENT_ACCESS: u32 = 0x0012_0083;
+/// SYSTEM fully, the signed-in person PIPE_CLIENT_ACCESS. Nobody else, nothing over the network (see PIPE_REJECT_REMOTE_CLIENTS).
+const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;0x120083;;;IU)";
 const SERVICE_SID_TYPE_UNRESTRICTED: u32 = 1;
 
 fn wide(s: &str) -> Vec<u16> {
@@ -149,15 +154,17 @@ fn create_tunnel_service(scm: &Sc, conf: &str) -> Result<Sc, String> {
 
 pub struct Tunnel {
     error: Mutex<Option<String>>,
+    since: Mutex<Option<u64>>,
 }
 
 impl Tunnel {
     pub fn new() -> Self {
-        Tunnel { error: Mutex::new(None) }
+        Tunnel { error: Mutex::new(None), since: Mutex::new(None) }
     }
 
     pub fn connect(&self, text: &str) -> Status {
         *self.error.lock().unwrap() = None;
+        *self.since.lock().unwrap() = None;
         let cfg = match config::parse(text) {
             Ok(c) => c,
             Err(e) => return Status::failed(e),
@@ -212,6 +219,7 @@ impl Tunnel {
 
     pub fn disconnect(&self) -> Status {
         *self.error.lock().unwrap() = None;
+        *self.since.lock().unwrap() = None;
         match self.disconnect_inner() {
             Ok(()) => self.status(),
             Err(e) => Status::failed(e),
@@ -226,7 +234,12 @@ impl Tunnel {
         let Some(service) = open_service(&scm, TUNNEL_SERVICE) else { return Status::off() };
         let state = service_state(&service);
         let (age, rx, tx) = if state == ServiceState::Running { peer_stats().unwrap_or((None, 0, 0)) } else { (None, 0, 0) };
-        protocol::decide(state, age, rx, tx)
+        let mut status = protocol::decide(state, age, rx, tx);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let mut since = self.since.lock().unwrap();
+        *since = protocol::session_since(*since, &status, now);
+        status.connected_since = *since;
+        status
     }
 }
 
@@ -360,15 +373,38 @@ fn serve_client(pipe: HANDLE, tunnel: &Tunnel) {
     }
 }
 
-/// Serves the app until `stop` is set. The first instance claims the name, so nothing else can pose as this service.
+/// Serves the app until `stop` is set. The first instance claims the name, and PIPE_SDDL stops anyone without administrator rights adding an instance of their own.
 pub fn serve(stop: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
+    serve_with(stop, Some(PIPE_SDDL))
+}
+
+/// For tests: one instance under the service's real rule, so they can try the rule itself.
+#[doc(hidden)]
+pub fn pipe_under_real_rule_for_tests() -> Result<HANDLE, String> {
     let sd = Descriptor::new(PIPE_SDDL)?;
+    let attrs = sd.attributes();
+    let pipe = unsafe { CreateNamedPipeW(wide(PIPE_NAME).as_ptr(), PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &attrs) };
+    if pipe == INVALID_HANDLE_VALUE {
+        return Err(last_error());
+    }
+    Ok(pipe)
+}
+
+/// For tests, which run the same loop without being SYSTEM: PIPE_SDDL would refuse them their own second instance. Windows' default security applies instead.
+#[doc(hidden)]
+pub fn serve_for_tests(stop: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
+    serve_with(stop, None)
+}
+
+fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> Result<(), String> {
+    let sd = sddl.map(Descriptor::new).transpose()?;
     let tunnel = Arc::new(Tunnel::new());
     let mut first = FILE_FLAG_FIRST_PIPE_INSTANCE;
     while !stop.load(std::sync::atomic::Ordering::SeqCst) {
-        let attrs = sd.attributes();
+        let attrs = sd.as_ref().map(Descriptor::attributes);
+        let attrs_ptr = attrs.as_ref().map_or(null(), |a| a as *const SECURITY_ATTRIBUTES);
         let pipe = unsafe {
-            CreateNamedPipeW(wide(PIPE_NAME).as_ptr(), PIPE_ACCESS_DUPLEX | first, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &attrs)
+            CreateNamedPipeW(wide(PIPE_NAME).as_ptr(), PIPE_ACCESS_DUPLEX | first, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, attrs_ptr)
         };
         if pipe == INVALID_HANDLE_VALUE {
             return Err(format!("Can't open the pipe: {}", last_error()));
@@ -399,14 +435,19 @@ pub fn serve(stop: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
 
 /// Wakes `serve` so it can notice it's been told to stop.
 pub fn nudge_pipe() {
-    let _ = std::fs::OpenOptions::new().read(true).write(true).open(PIPE_NAME);
+    let _ = open_once();
+}
+
+/// Asks only for PIPE_CLIENT_ACCESS. Anonymous: whatever is on the other end can't act as this person, even if it isn't the service.
+fn open_once() -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().access_mode(PIPE_CLIENT_ACCESS).security_qos_flags(SECURITY_ANONYMOUS).open(PIPE_NAME)
 }
 
 /// Opens the pipe, allowing for the instant between one client finishing and the next instance opening, so that gap never reads as "the service isn't running".
 pub fn open_pipe() -> std::io::Result<std::fs::File> {
     let mut tries = 0;
     loop {
-        match std::fs::OpenOptions::new().read(true).write(true).open(PIPE_NAME) {
+        match open_once() {
             Err(e) if tries < 10 && matches!(e.raw_os_error().map(|c| c as u32), Some(ERROR_PIPE_BUSY | ERROR_FILE_NOT_FOUND)) => {
                 tries += 1;
                 std::thread::sleep(Duration::from_millis(100));
@@ -416,15 +457,89 @@ pub fn open_pipe() -> std::io::Result<std::fs::File> {
     }
 }
 
-/// One request from the app's side of the pipe.
-pub fn ask(request: &Request) -> Result<Status, String> {
-    let mut pipe = open_pipe().map_err(|_| "The Kiwi VPN service isn't running".to_string())?;
+/// One request over an open pipe.
+fn exchange(mut pipe: std::fs::File, request: &Request) -> Result<Status, String> {
     let mut line = serde_json::to_vec(request).map_err(|e| e.to_string())?;
     line.push(b'\n');
     pipe.write_all(&line).map_err(|e| e.to_string())?;
     let mut text = String::new();
     std::io::BufRead::read_line(&mut std::io::BufReader::new(pipe), &mut text).map_err(|e| e.to_string())?;
     serde_json::from_str(text.trim()).map_err(|_| "The service gave an answer I can't read".to_string())
+}
+
+/// Sends without checking who's listening, so only tests may use it: they run the loop themselves, and it's how the fake service test proves it could have caught something.
+#[doc(hidden)]
+pub fn ask_unverified(request: &Request) -> Result<Status, String> {
+    exchange(open_pipe().map_err(|_| "The Kiwi VPN service isn't running".to_string())?, request)
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AskError {
+    /// The pipe isn't there: the service isn't installed or isn't running.
+    NoService,
+    /// Something other than the service is on the pipe. Nothing was sent to it.
+    NotTheService,
+    Broken(String),
+}
+
+impl AskError {
+    pub fn message(&self) -> String {
+        match self {
+            AskError::NoService => "The Kiwi VPN service isn't running.".into(),
+            AskError::NotTheService => "Something other than the Kiwi VPN service is answering. Nothing was sent to it.".into(),
+            AskError::Broken(e) => format!("Couldn't talk to the Kiwi VPN service: {e}"),
+        }
+    }
+}
+
+/// The service's identity, from what a program without administrator rights can't fake: a pipe owned by SYSTEM or Administrators, whose server runs in session 0,
+/// where only services run. The session also catches a program that's running elevated, whose pipes Administrators own.
+pub fn trusted_server(owner_sid: &str, server_session: u32) -> bool {
+    (owner_sid == "S-1-5-18" || owner_sid == "S-1-5-32-544") && server_session == 0
+}
+
+fn pipe_owner(pipe: &std::fs::File) -> Result<String, String> {
+    unsafe {
+        let mut owner: *mut c_void = null_mut();
+        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+        let got = GetSecurityInfo(pipe.as_raw_handle() as _, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION, &mut owner as *mut _ as _, null_mut(), null_mut(), null_mut(), &mut sd);
+        if got != ERROR_SUCCESS {
+            return Err(format!("Windows error {got}"));
+        }
+        let mut text: *mut u16 = null_mut();
+        let result = if ConvertSidToStringSidW(owner as _, &mut text) == 0 {
+            Err(last_error())
+        } else {
+            let len = (0..).take_while(|&i| *text.add(i) != 0).count();
+            let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+            LocalFree(text as _);
+            Ok(sid)
+        };
+        LocalFree(sd as _);
+        result
+    }
+}
+
+fn server_session(pipe: &std::fs::File) -> Result<u32, String> {
+    let mut session = u32::MAX;
+    if unsafe { GetNamedPipeServerSessionId(pipe.as_raw_handle() as _, &mut session) } == 0 {
+        return Err(last_error());
+    }
+    Ok(session)
+}
+
+/// One request to the real service. Nothing is written until the other end has proved it's the service, because a connect request carries the device's private key.
+pub fn ask_service(request: &Request) -> Result<Status, AskError> {
+    let pipe = open_pipe().map_err(|e| match e.raw_os_error().map(|c| c as u32) {
+        Some(ERROR_FILE_NOT_FOUND | ERROR_PIPE_BUSY) => AskError::NoService,
+        _ => AskError::Broken(e.to_string()),
+    })?;
+    let owner = pipe_owner(&pipe).map_err(AskError::Broken)?;
+    let session = server_session(&pipe).map_err(AskError::Broken)?;
+    if !trusted_server(&owner, session) {
+        return Err(AskError::NotTheService);
+    }
+    exchange(pipe, request).map_err(AskError::Broken)
 }
 
 // --- install and uninstall ----------------------------------------------------------------------------------------
@@ -459,4 +574,29 @@ pub fn uninstall() -> Result<(), String> {
     nudge_pipe();
     stop_and_delete(OWN_SERVICE)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FILE_CREATE_PIPE_INSTANCE: u32 = 0x4;
+
+    #[test]
+    fn people_can_use_the_pipe_but_not_add_to_it() {
+        assert_eq!(PIPE_CLIENT_ACCESS & FILE_CREATE_PIPE_INSTANCE, 0);
+        assert!(PIPE_SDDL.ends_with(&format!("(A;;{PIPE_CLIENT_ACCESS:#x};;;IU)")), "the pipe's rule and the client's request must match");
+        assert!(!PIPE_SDDL.contains("GW"), "generic write includes creating instances");
+    }
+
+    #[test]
+    fn only_a_system_or_administrators_pipe_in_session_0_is_the_service() {
+        assert!(trusted_server("S-1-5-18", 0));
+        assert!(trusted_server("S-1-5-32-544", 0));
+        assert!(!trusted_server("S-1-5-32-544", 1), "an elevated program in someone's session");
+        assert!(!trusted_server("S-1-5-18", 1));
+        for other in ["S-1-5-11", "S-1-5-21-1-2-3-1001", "S-1-1-0", ""] {
+            assert!(!trusted_server(other, 0), "{other}");
+        }
+    }
 }
