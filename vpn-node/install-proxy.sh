@@ -86,7 +86,8 @@ cat > "$HOOK" <<EOF
 set -e
 install -m 0640 -o root -g $USER_NAME /etc/letsencrypt/live/$PROXY_HOST/fullchain.pem $ETC/tls/fullchain.pem
 install -m 0640 -o root -g $USER_NAME /etc/letsencrypt/live/$PROXY_HOST/privkey.pem $ETC/tls/privkey.pem
-systemctl try-restart kiwi-vpn-proxy
+# on the first install the service doesn't exist yet
+if systemctl cat kiwi-vpn-proxy >/dev/null 2>&1; then systemctl try-restart kiwi-vpn-proxy; fi
 EOF
 chmod 0755 "$HOOK"
 certbot certonly --standalone --preferred-challenges http --non-interactive --agree-tos --keep-until-expiring "${EMAIL_ARGS[@]}" -d "$PROXY_HOST" >/dev/null
