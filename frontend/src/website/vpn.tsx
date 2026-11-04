@@ -4,7 +4,7 @@ import { SitePage } from "./community";
 import { reducedMotion } from "./motion";
 import { pageHead } from "./seo";
 import { site } from "./websiteData";
-import { PLAN, STORE_LINKS, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
+import { PLAN, STORE_LINKS, WINDOWS_BETA, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
 import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
@@ -294,7 +294,9 @@ function Hero({ state, servers, onStarted }: { state: Loaded | null; servers: Ma
         <p className="vpn-hero-lead">Sites see our server's address instead of yours, and your connection is encrypted on its way there.</p>
         <div className="vpn-hero-actions">
           {primary}
-          <a className={primary ? "site-button is-ghost" : "site-button is-go"} href="#vpn-downloads">Get Kiwi VPN</a>
+          {WINDOWS_BETA.href && visitorOs(navigator.userAgent, navigator.maxTouchPoints) === "Windows"
+            ? <a className="site-button vpn-windows-go" href={WINDOWS_BETA.href} download><WindowsIcon className="vpn-picon" />Download for Windows<span className="vpn-beta">Beta</span></a>
+            : <a className={primary ? "site-button is-ghost" : "site-button is-go"} href="#vpn-downloads">Get Kiwi VPN</a>}
           {closed && <span className="vpn-opening" role="status"><i />Opening soon</span>}
         </div>
         {err && <p className="site-error" role="alert">{err}</p>}
@@ -440,7 +442,14 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
     <section id="vpn-downloads" className="vpn-band vpn-downloads site-reveal" aria-labelledby="vpn-download">
       <SectionHead id="vpn-download" kicker="Apps" title="Get Kiwi VPN" />
       <ul className="vpn-apps">
-        <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC. Sign in and connect, with no files to handle." status="In development" mine={os === "Windows" ? "Your device" : null}>{manual("Windows")}</AppCard>
+        {WINDOWS_BETA.href ? (
+          <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC. Setup is temporary for now: the beta needs a config file from My Devices." status="Beta" on mine={os === "Windows" ? "Your device" : null}>
+            <a className="site-button is-small vpn-windows-go" href={WINDOWS_BETA.href} download><WindowsIcon className="vpn-picon" />Download for Windows</a>
+            {manual("Windows")}
+          </AppCard>
+        ) : (
+          <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC." status="In development" mine={os === "Windows" ? "Your device" : null}>{manual("Windows")}</AppCard>
+        )}
         <AppCard icons={<><ChromeIcon className="vpn-app-icon" /><EdgeIcon className="vpn-app-icon" /></>} name="Browser extension" text="For Chrome and Edge. Covers that browser only." status={stores.length ? "Available" : "Coming soon"} on={stores.length > 0} mine={browser === "chrome" || browser === "edge" ? "Your browser" : null}>
           {stores.map((x) => <a key={x.key} className="site-button is-small" href={x.href} target="_blank" rel="noopener noreferrer">{x.action}</a>)}
         </AppCard>

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
-import { PLAN, STORE_LINKS, visitorBrowser, visitorOs } from "./vpnConfig";
+import { PLAN, STORE_LINKS, WINDOWS_BETA, visitorBrowser, visitorOs } from "./vpnConfig";
 
 import { Flag, drawMap, place, placeLine } from "./vpnMap";
 
@@ -153,6 +153,25 @@ describe("Free while payments are off", () => {
       expect(screen.queryByText(/Manual install/)).toBeNull();
     } finally {
       Object.assign(STORE_LINKS, { chrome: "", edge: "" });
+    }
+  });
+
+  it("offers the Windows beta only once a real installer is set, labelled Beta, promising no sign-in", () => {
+    let view = render(<Downloads agent={CHROME} />);
+    expect(screen.queryByRole("link", { name: /Download for Windows/ })).toBeNull();
+    view.unmount();
+    Object.assign(WINDOWS_BETA, { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.0" });
+    try {
+      view = render(<Downloads agent={CHROME} />);
+      const windows = card(view.container, "Windows");
+      expect(screen.getByRole("link", { name: /Download for Windows/ }).getAttribute("href")).toBe("/downloads/KiwiVPN-Setup.exe");
+      expect(windows.querySelector(".vpn-status")!.textContent).toBe("Beta");
+      expect(windows.textContent).toMatch(/temporary/);
+      expect(windows.textContent).not.toMatch(/sign in|one-click/i);
+      expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+      expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+    } finally {
+      Object.assign(WINDOWS_BETA, { href: "", version: "" });
     }
   });
 

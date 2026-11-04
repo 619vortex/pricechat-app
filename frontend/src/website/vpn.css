@@ -405,6 +405,10 @@
 .vpn-facts dd { font-size: clamp(18px, 1.900vw, 21px); }
 .vpn-my-next .site-button { min-height: 44px; }
 
+.vpn .vpn-windows-go { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.vpn-windows-go .vpn-picon { width: 18px; height: 18px; color: currentColor; }
+.vpn-beta { padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 800; background: rgba(11, 20, 6, .16); }
+
 /* My Devices */
 .vpn-devpage { padding-top: clamp(20px, 3vw, 36px); }
 .vpn-devpage .vpn-head h1 { font-family: var(--site-display); font-weight: 900; font-stretch: 82%; text-transform: uppercase; font-size: clamp(34px, 5.200vw, 58px); line-height: .98; color: var(--vpn-text); }

@@ -6,6 +6,9 @@ export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox
  *  stop matching backend/app/vpn/billing.py (PRICE_USD, PERIOD_DAYS) and service.py (TRIAL_DAYS, KEEP_LAPSED). When the server does send billing, its figures are used. */
 export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_days: 30 };
 
+/** The Windows beta. Empty until a real, tested installer is hosted: then the button appears, and until then nothing on the page offers a download. */
+export const WINDOWS_BETA: { href: string; version: string } = { href: "", version: "" };
+
 export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
 
 /** Which install button to put first. Edge's and Opera's agents also say Chrome, so they're ruled out first. */
