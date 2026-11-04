@@ -346,6 +346,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "We don't log the websites or addresses you visit, your DNS lookups or the content of your traffic, and we don't keep a per-connection history of your use.",
         "Your traffic does pass through our server while the VPN is on, and it has to read the destination to carry it there. Pages on https stay encrypted between your browser and the website. Pages on plain http aren't encrypted beyond our server, as with any VPN.",
         "Our server's ordinary system and firewall logs can record connection attempts to the server, including IP addresses. We use them only for security, and the system rotates them away.",
+        "The extension's account requests to pricechat.live don't go through the VPN. Like any website visit, our hosting providers' ordinary request logs can record them, including your IP address.",
       ]],
       ["The browser extension", [
         "While switched on, it sends that browser's traffic through the server you chose, except pricechat.live and addresses on your own network. It doesn't cover other apps. If you switch it off, disable it or remove it, your browser goes back to its normal connection.",
