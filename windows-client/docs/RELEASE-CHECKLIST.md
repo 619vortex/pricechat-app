@@ -26,6 +26,7 @@ Tick only what was really run. Nothing below has been run yet, except where mark
 - [ ] Expired subscription, device limit, server unavailable
 - [ ] Kill switch, real leak tests, before it's offered
 - [ ] Uninstall removes services, adapter and configs
+- [ ] Uninstall removes `C:\Program Files\WireGuard\Data`, which `tunnel.dll` creates for its log, unless the WireGuard app is installed there, in which case that folder is left alone
 - [ ] Coexistence with an existing WireGuard install
 
 ## Release

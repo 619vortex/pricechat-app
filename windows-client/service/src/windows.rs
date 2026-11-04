@@ -123,9 +123,17 @@ fn create_tunnel_service(scm: &Sc, conf: &str) -> Result<Sc, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let command = format!("\"{}\" tunnel \"{}\"", exe.display(), conf);
     let deps: Vec<u16> = "Nsi\0TcpIp\0\0".encode_utf16().collect();
-    let h = unsafe {
-        CreateServiceW(scm.0, wide(TUNNEL_SERVICE).as_ptr(), wide("Kiwi VPN tunnel").as_ptr(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
-                       wide(&command).as_ptr(), null(), null_mut(), deps.as_ptr(), null(), null())
+    let start = Instant::now();
+    let h = loop {
+        let h = unsafe {
+            CreateServiceW(scm.0, wide(TUNNEL_SERVICE).as_ptr(), wide("Kiwi VPN tunnel").as_ptr(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
+                           wide(&command).as_ptr(), null(), null_mut(), deps.as_ptr(), null(), null())
+        };
+        // switching server: Windows finishes deleting the old tunnel only once every handle to it has closed, such as a status check running right now
+        if !h.is_null() || unsafe { GetLastError() } != ERROR_SERVICE_MARKED_FOR_DELETE || start.elapsed() > Duration::from_secs(10) {
+            break h;
+        }
+        std::thread::sleep(Duration::from_millis(200));
     };
     if h.is_null() {
         return Err(format!("Can't create the tunnel: {}", last_error()));
@@ -394,9 +402,23 @@ pub fn nudge_pipe() {
     let _ = std::fs::OpenOptions::new().read(true).write(true).open(PIPE_NAME);
 }
 
+/// Opens the pipe, allowing for the instant between one client finishing and the next instance opening, so that gap never reads as "the service isn't running".
+pub fn open_pipe() -> std::io::Result<std::fs::File> {
+    let mut tries = 0;
+    loop {
+        match std::fs::OpenOptions::new().read(true).write(true).open(PIPE_NAME) {
+            Err(e) if tries < 10 && matches!(e.raw_os_error().map(|c| c as u32), Some(ERROR_PIPE_BUSY | ERROR_FILE_NOT_FOUND)) => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// One request from the app's side of the pipe.
 pub fn ask(request: &Request) -> Result<Status, String> {
-    let mut pipe = std::fs::OpenOptions::new().read(true).write(true).open(PIPE_NAME).map_err(|_| "The Kiwi VPN service isn't running".to_string())?;
+    let mut pipe = open_pipe().map_err(|_| "The Kiwi VPN service isn't running".to_string())?;
     let mut line = serde_json::to_vec(request).map_err(|e| e.to_string())?;
     line.push(b'\n');
     pipe.write_all(&line).map_err(|e| e.to_string())?;

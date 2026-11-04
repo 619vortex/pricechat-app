@@ -3,7 +3,7 @@
 #![cfg(windows)]
 
 use kiwivpn::protocol::{Request, State};
-use kiwivpn::windows::{ask, serve, TUNNEL_NAME};
+use kiwivpn::windows::{ask, open_pipe, serve, TUNNEL_NAME};
 use std::io::Write;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ fn start() {
 }
 
 fn raw(line: &str) -> String {
-    let mut pipe = std::fs::OpenOptions::new().read(true).write(true).open(kiwivpn::protocol::PIPE_NAME).unwrap();
+    let mut pipe = open_pipe().unwrap();
     pipe.write_all(line.as_bytes()).unwrap();
     pipe.write_all(b"\n").unwrap();
     let mut out = String::new();
