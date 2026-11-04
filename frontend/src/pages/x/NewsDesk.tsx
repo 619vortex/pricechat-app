@@ -1,0 +1,154 @@
+import { useState } from "react";
+import { request } from "../../api/client";
+import { useApi } from "../../api/useApi";
+import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type Tone } from "../../components/ui";
+
+/** Admin › X › News Desk: Price Chat's automatic news account. The server decides everything; this page shows it and holds the switches. */
+
+type Source = { name: string; url: string; at: string | null };
+type Check = { check: string; passed: boolean; detail: string };
+export type DeskPost = { id: number; kind: string; category: string; priority: string; status: string; text: string; edited: boolean; score: number; sources: Source[]; checks: Check[];
+  error: string | null; url: string | null; metrics: Record<string, number | string>; created_at: string | null; published_at: string | null; expires_at: string | null; facts: Record<string, unknown> };
+type Feed = { name: string; url: string; tier: number; category: string | null };
+type Watch = { symbol: string; name: string; group: string; category: string };
+export type DeskSettings = { automation: boolean; mode: "dry_run" | "live"; kill_switch: boolean; paused_until: string | null; pause_reason: string | null; target_per_day: number; max_breaking_per_day: number;
+  breaking_gap_minutes: number; sensitivity: string; categories: Record<string, boolean>; feeds: Feed[]; watchlist: Watch[] };
+export type Desk = { settings: DeskSettings; blocked: string | null; last_run: (Record<string, unknown> & { at?: string }) | null; feed_problems: Record<string, string>;
+  x: { configured: boolean; can_write: boolean; status: string; account: string | null; blocked_until: string | null }; writer: "model" | "headlines";
+  today: { published: number; breaking: number; target: number }; cost: { per_post_usd: number; posted_30d: number; estimate_30d_usd: number; budget: { daily_usd: number; monthly_usd: number }; x_spend_today_usd: number; x_spend_month_usd: number };
+  queue: DeskPost[]; published: DeskPost[]; problems: DeskPost[] };
+
+const body = (method: string, value: unknown): RequestInit => ({ method, body: JSON.stringify(value), headers: { "Content-Type": "application/json" } });
+const CATEGORY_NAME: Record<string, string> = { crypto: "Crypto", stocks: "Stocks", commodities: "Commodities", politics: "Politics", economics: "Economics", viral: "Viral market stories" };
+const STATUS_TONE: Record<string, Tone> = { published: "good", dry_run: "info", queued: "neutral", failed: "bad", uncertain: "warn" };
+const STATUS_TEXT: Record<string, string> = { dry_run: "Dry run: not sent", uncertain: "Check X", published: "Published", failed: "Failed", queued: "Queued" };
+
+export function NewsDesk() {
+  const { data, failure, reload } = useApi(() => request<Desk>("/x/newsdesk"), 30000);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  if (failure) return <ApiErrorBanner error={failure} />;
+  if (!data) return <Loading />;
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true); setError(null);
+    try { await fn(); await reload(); } catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  const save = (change: Partial<DeskSettings> & { resume?: boolean }) => act(() => request("/x/newsdesk/settings", body("PUT", change)));
+  const s = data.settings;
+  const live = s.mode === "live";
+  return (
+    <div className="stack">
+      {error ? <ApiErrorBanner error={error} /> : null}
+      <Card title="News Desk">
+        <p className="muted">Reads news and prices around the clock, verifies them, and posts to X without you. Runs on the server, so this page can be closed.</p>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <Badge tone={s.kill_switch ? "bad" : data.blocked ? "warn" : live ? "good" : "info"}>{s.kill_switch ? "Emergency stop" : data.blocked ? "Paused" : live ? "LIVE: posting to X" : "Dry run: nothing goes to X"}</Badge>
+          <button className="btn btn-sm" disabled={busy} onClick={() => void save({ automation: !s.automation })}>{s.automation ? "Turn automation off" : "Turn automation on"}</button>
+          {live ? <button className="btn btn-sm" disabled={busy} onClick={() => void save({ mode: "dry_run" })}>Back to dry run</button>
+            : <button className="btn btn-sm btn-primary" disabled={busy || !data.x.can_write} title={data.x.can_write ? "" : "X isn't connected with posting access"}
+                      onClick={() => { if (window.confirm(`Go live? From now on the desk posts to @${data.x.account ?? "your account"} on its own, up to ${s.target_per_day + s.max_breaking_per_day} times a day, at about $${data.cost.per_post_usd} a post.`)) void save({ mode: "live" }); }}>Go live</button>}
+          {s.kill_switch ? <button className="btn btn-sm" disabled={busy} onClick={() => void save({ kill_switch: false })}>Release emergency stop</button>
+            : <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => void save({ kill_switch: true })}>Emergency stop</button>}
+          {s.pause_reason && <button className="btn btn-sm" disabled={busy} onClick={() => void save({ resume: true })}>Resume</button>}
+        </div>
+        {data.blocked && <p className="banner banner-warn" role="status">{data.blocked}</p>}
+        {!data.x.configured && <p className="banner banner-warn" role="status">X isn't connected: dry run works, but it can't go live. Connect it in the Connect X tab.</p>}
+        {data.x.configured && !data.x.can_write && <p className="banner banner-warn" role="status">X is connected without posting access: add the Access Token and Secret in Connect X.</p>}
+        {data.writer === "headlines" && <p className="muted small">Writing: attributed headlines. Add an Anthropic key in API keys for posts in Price Chat's own words.</p>}
+        <div className="stat-grid">
+          <Stat label="Last 24 hours" value={`${data.today.published} / ${data.today.target}`} />
+          <Stat label="Breaking, 24 hours" value={`${data.today.breaking} / ${s.max_breaking_per_day}`} />
+          <Stat label="X spend this month" value={`$${data.cost.x_spend_month_usd.toFixed(2)} / $${data.cost.budget.monthly_usd}`} />
+          <Stat label="Last run" value={data.last_run?.at ? relativeTime(data.last_run.at) : "Not yet"} />
+        </div>
+      </Card>
+
+      <Card title="Settings">
+        <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
+          <label>Posts a day <input className="input" type="number" min={1} max={48} defaultValue={s.target_per_day} key={`t${s.target_per_day}`} onBlur={(e) => { const n = Number(e.target.value); if (n !== s.target_per_day && n >= 1) void save({ target_per_day: n }); }} /></label>
+          <label>Breaking a day <input className="input" type="number" min={0} max={24} defaultValue={s.max_breaking_per_day} key={`b${s.max_breaking_per_day}`} onBlur={(e) => { const n = Number(e.target.value); if (n !== s.max_breaking_per_day && n >= 0) void save({ max_breaking_per_day: n }); }} /></label>
+          <label>Breaking sensitivity <select className="input" value={s.sensitivity} disabled={busy} onChange={(e) => void save({ sensitivity: e.target.value })}>{["low", "medium", "high"].map((x) => <option key={x}>{x}</option>)}</select></label>
+        </div>
+        <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 12 }}>
+          {Object.entries(CATEGORY_NAME).map(([k, name]) => (
+            <label key={k}><input type="checkbox" checked={s.categories[k] !== false} disabled={busy} onChange={(e) => void save({ categories: { ...s.categories, [k]: e.target.checked } })} /> {name}</label>
+          ))}
+        </div>
+        <details style={{ marginTop: 12 }}>
+          <summary>Sources ({s.feeds.length}) and tickers ({s.watchlist.length})</summary>
+          <p className="small"><b>Feeds:</b> {s.feeds.map((f) => f.name).join(", ")}</p>
+          <p className="small"><b>Tickers:</b> {s.watchlist.map((w) => `${w.name} (${w.symbol})`).join(", ")}</p>
+          <JsonEditor label="Feeds" value={s.feeds} disabled={busy} onSave={(feeds) => save({ feeds: feeds as Feed[] })} />
+          <JsonEditor label="Tickers" value={s.watchlist} disabled={busy} onSave={(watchlist) => save({ watchlist: watchlist as Watch[] })} />
+          {Object.keys(data.feed_problems).length > 0 && <p className="small banner banner-warn">Feeds not answering: {Object.entries(data.feed_problems).map(([u, p]) => `${new URL(u).hostname} (${p})`).join(", ")}</p>}
+        </details>
+      </Card>
+
+      <NewPost busy={busy} onAdd={(text) => act(() => request("/x/newsdesk/posts", body("POST", { text })))} />
+
+      <Card title={`Upcoming (${data.queue.length})`}>
+        {data.queue.length === 0 ? <Empty>Nothing queued.</Empty> : data.queue.map((p) => <PostRow key={p.id} p={p} busy={busy} act={act} />)}
+      </Card>
+      {data.problems.length > 0 && <Card title="Problems">{data.problems.map((p) => <PostRow key={p.id} p={p} busy={busy} act={act} />)}</Card>}
+      <Card title="Published">
+        {data.published.length === 0 ? <Empty>Nothing yet.</Empty> : data.published.map((p) => <PostRow key={p.id} p={p} busy={busy} act={act} />)}
+      </Card>
+    </div>
+  );
+}
+
+function JsonEditor({ label, value, disabled, onSave }: { label: string; value: unknown; disabled: boolean; onSave: (v: unknown) => Promise<unknown> }) {
+  const [text, setText] = useState(() => JSON.stringify(value, null, 1));
+  const [bad, setBad] = useState(false);
+  return (
+    <label className="small" style={{ display: "block", marginTop: 8 }}>{label}
+      <textarea className="input" rows={6} style={{ width: "100%", fontFamily: "monospace" }} value={text} onChange={(e) => { setText(e.target.value); setBad(false); }} />
+      <button className="btn btn-sm" type="button" disabled={disabled} onClick={() => { try { void onSave(JSON.parse(text)); } catch { setBad(true); } }}>Save {label.toLowerCase()}</button>
+      {bad && <span role="alert"> That isn't valid JSON.</span>}
+    </label>
+  );
+}
+
+function NewPost({ busy, onAdd }: { busy: boolean; onAdd: (text: string) => Promise<unknown> }) {
+  const [text, setText] = useState("");
+  return (
+    <Card title="Write one yourself">
+      <textarea className="input" rows={3} maxLength={280} style={{ width: "100%" }} value={text} placeholder="Goes to the front of the queue. No links: a link makes a post cost $0.20." onChange={(e) => setText(e.target.value)} />
+      <button className="btn btn-sm" disabled={busy || !text.trim()} onClick={() => void onAdd(text).then(() => setText(""))}>Add to queue</button>
+    </Card>
+  );
+}
+
+function PostRow({ p, busy, act }: { p: DeskPost; busy: boolean; act: (fn: () => Promise<unknown>) => Promise<void> }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const m = p.metrics;
+  return (
+    <div className="list-row" style={{ padding: "10px 0", borderBottom: "1px solid var(--line, rgba(255,255,255,.1))" }}>
+      <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <Badge tone={STATUS_TONE[p.status] ?? "neutral"}>{STATUS_TEXT[p.status] ?? p.status}</Badge>
+        {p.priority === "breaking" && <Badge tone="bad">Breaking</Badge>}
+        <Badge>{CATEGORY_NAME[p.category] ?? p.category}</Badge>
+        {p.edited && <Badge>Edited</Badge>}
+        <span className="muted small">{relativeTime(p.published_at ?? p.created_at ?? "")}</span>
+        {p.url && <a className="link small" href={p.url} target="_blank" rel="noopener noreferrer">Open on X</a>}
+      </div>
+      {editing !== null ? (
+        <>
+          <textarea className="input" rows={4} maxLength={280} style={{ width: "100%" }} value={editing} onChange={(e) => setEditing(e.target.value)} />
+          <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => request(`/x/newsdesk/posts/${p.id}`, body("PUT", { text: editing }))).then(() => setEditing(null))}>Save</button>{" "}
+          <button className="btn btn-sm" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+        </>
+      ) : <p style={{ whiteSpace: "pre-wrap", margin: "6px 0" }}>{p.text}</p>}
+      {p.error && <p className="small" role="alert">{p.error}</p>}
+      {p.sources.length > 0 && <p className="muted small">Sources: {p.sources.map((x, i) => <span key={x.url + i}>{i > 0 && ", "}<a className="link" href={x.url} target="_blank" rel="noopener noreferrer">{x.name}</a></span>)}</p>}
+      {m.impression_count !== undefined && <p className="muted small">{String(m.impression_count)} views · {String(m.like_count ?? 0)} likes · {String(m.retweet_count ?? 0)} reposts · {String(m.reply_count ?? 0)} replies</p>}
+      {p.status === "queued" && editing === null && (
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn btn-sm" disabled={busy} onClick={() => setEditing(p.text)}>Edit</button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => request(`/x/newsdesk/posts/${p.id}/publish`, { method: "POST" }))}>Publish now</button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => request(`/x/newsdesk/posts/${p.id}/reject`, { method: "POST" }))}>Reject</button>
+        </div>
+      )}
+    </div>
+  );
+}

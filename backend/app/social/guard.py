@@ -13,6 +13,10 @@ Writes are supervised: AUTOMATIC mode exists in the data model but is locked (AU
 = False), so every write needs a human approval. Connector write methods refuse to run without an
 `ExecutionPermit`, which only this guard can issue, only for an approved request that passed every
 check, and which can be used once.
+
+One exception, by the owner's decision: the News Desk (app/newsdesk) publishes its own plain posts on
+its own switch, after its own checks. It still stops at the kill switch, the outbound switch and any X
+block here. Replies, likes, reposts and follows stay human-approved.
 """
 
 import hashlib
@@ -119,6 +123,26 @@ class SocialActionGuard:
                          "executable": decision.executable, "target": req.target_username or req.target_external_id},
             )
         return decision
+
+    def news_problem(self, req: ActionRequest) -> str | None:
+        """Why the News Desk may not post right now, or None. Its own limits and checks are in app/newsdesk."""
+        policy = get_or_create_policy(self.db, self.agent_id)
+        if policy.kill_switch:
+            return "Social actions are paused"
+        if not policy.outbound_enabled:
+            return "Outbound actions are disabled"
+        if (policy.platforms_enabled or {}).get(req.platform.value) is False:
+            return f"{req.platform.value} is disabled for social actions"
+        problem = self._x_api_problem(req)
+        return problem[1] if problem else None
+
+    def issue_news_permit(self, req: ActionRequest) -> ExecutionPermit:
+        """A plain post only, never a reply or anything aimed at someone."""
+        if req.action != SocialAction.POST or req.target_external_id or req.target_username:
+            raise PermissionError("The News Desk may only publish plain posts")
+        if (problem := self.news_problem(req)) is not None:
+            raise PermissionError(problem)
+        return ExecutionPermit(req.action, None, req.text_hash, 0, secrets.token_hex(8), _PERMIT_KEY)
 
     def issue_permit(self, req: ActionRequest, decision: GuardDecision, approval_id: int) -> ExecutionPermit:
         if not (decision.allowed and decision.executable):

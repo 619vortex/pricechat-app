@@ -483,6 +483,16 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         report = await ingest_x(ctx.db, s, runtime.x, runtime.embedder, only_own=True)
         return report.as_dict()
 
+    async def newsdesk_tick(ctx: JobContext) -> dict[str, Any]:
+        from app.newsdesk import engine as desk
+
+        return await desk.tick(ctx.db, s, runtime.x, get_agent_config(ctx.db).id, ctx.now)
+
+    async def newsdesk_metrics(ctx: JobContext) -> dict[str, Any]:
+        from app.newsdesk import engine as desk
+
+        return await desk.collect_metrics(ctx.db, s, runtime.x, ctx.now)
+
     async def x_opps(ctx: JobContext) -> dict[str, Any]:
         agent_id = get_agent_config(ctx.db).id
         report = await detect_x_opportunities(
@@ -589,6 +599,10 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 "Create missions from new Price Chat content; award XP for linked members' verified activity (authorised Telegram chats, ingested X posts)",
                 s.job_members_verify_seconds, members_verify, initial_delay_seconds=120, timeout_seconds=300),
         JobSpec("x.ingest", "X reading", "Read own posts, mentions, monitoring rules and watched accounts (read-only, budgeted)", s.job_x_ingest_seconds, x_ingest, initial_delay_seconds=60, timeout_seconds=300),
+        JobSpec("newsdesk.tick", "News Desk", "Read news and prices, verify and queue posts for X, publish what's due (dry run until switched live in X › News Desk)",
+                s.job_newsdesk_seconds, newsdesk_tick, initial_delay_seconds=120, timeout_seconds=240),
+        JobSpec("newsdesk.metrics", "News Desk: post metrics", "Read impressions, likes and reposts of the last 3 days' posts (X charges per post read)",
+                86400, newsdesk_metrics, initial_delay_seconds=1800, timeout_seconds=120),
         JobSpec("x.own", "X: Price Chat's own posts", "Read Price Chat's own new X posts for Read & Earn (one incremental request, budgeted)",
                 s.job_x_own_seconds, x_own, initial_delay_seconds=90, timeout_seconds=120),
         JobSpec("x.opportunities", "X opportunities", "Find X posts where Price Chat could add value (suggestions only)", s.job_x_opportunities_seconds, x_opps, initial_delay_seconds=360),

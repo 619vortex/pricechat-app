@@ -8,7 +8,7 @@ Local-first AI brand-management platform.
 
 - **Phase 3B/4A (current):** real community pilot and X intelligence. Dashboard setup for Telegram and X with encrypted secret storage, pilot statistics and message tracing, human feedback that shapes ranking, topic merge/split, transparent opportunity ranking, a draft generator with variants, read-only X monitoring (mentions, accounts, topics, own posts, metrics), X opportunities, Telegram ↔ X signals, relationship memory, a command center, and a safety guard with an approval queue.
 
-Price Chat never sends anything to Telegram. On X it only acts after you approve each action (see **X operator**); automatic mode is locked.
+Price Chat never sends anything to Telegram. The News Desk posts news and market moves on its own once you switch it live (X › News Desk). Everything else on X only acts after you approve each action (see **X operator**); automatic mode is locked.
 
 ## Requirements (Windows)
 

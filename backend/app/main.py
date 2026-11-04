@@ -61,6 +61,7 @@ from app.api.routes import (
     vortex,
     webhooks,
     vpn,
+    newsdesk,
     workers,
 )
 from app.config.logging import configure_logging
@@ -374,7 +375,7 @@ def create_app(
     for module in (
         health, overview, agent, brand, model, knowledge, content, connectors, activity, settings, api_keys,
         telegram, telegram_account, community, opportunities, jobs, x, social, growth, analytics, youtube, website,
-        members, members_admin, admin, pokemon, portfolio, market, exchange, vault, brand_manager, short_market, invites, system, tradingbot, tradingos, trading, kiwibrain, arbitrage, burner, workers, rewards, home, seo, vpn, vortex, committee, webhooks, kalshi,
+        members, members_admin, admin, pokemon, portfolio, market, exchange, vault, brand_manager, newsdesk, short_market, invites, system, tradingbot, tradingos, trading, kiwibrain, arbitrage, burner, workers, rewards, home, seo, vpn, vortex, committee, webhooks, kalshi,
     ):
         app.include_router(module.router, prefix="/api")
 

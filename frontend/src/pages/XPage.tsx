@@ -5,12 +5,14 @@ import { useApi } from "../api/useApi";
 import type { Approval, MetricSnapshot, MonitorRuleType, SocialOpportunity, SocialOpportunityStatus, SocialPost, WatchCategory, WatchedAccount, XCredentialsInput, XStatus } from "../api/types";
 import { TrendBadge } from "../components/community";
 import { GrowthPilot } from "./x/GrowthPilot";
+import { NewsDesk } from "./x/NewsDesk";
 import { CapabilityBadge, compact, FeedbackButtons, GuardChecks, Reasons, SignalBars } from "../components/social";
 import { Advanced, ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, Tabs, formatTime, label, relativeTime, type Tone } from "../components/ui";
 
-type Tab = "growth" | "overview" | "mentions" | "accounts" | "topics" | "opportunities" | "own" | "analytics" | "connection";
+type Tab = "newsdesk" | "growth" | "overview" | "mentions" | "accounts" | "topics" | "opportunities" | "own" | "analytics" | "connection";
 const TABS: { key: Tab; label: string; more?: boolean }[] = [
   { key: "overview", label: "Overview" },
+  { key: "newsdesk", label: "News Desk" },
   { key: "opportunities", label: "Post ideas" },
   { key: "growth", label: "Growth Pilot" },
   { key: "connection", label: "Connect X" },
@@ -38,6 +40,7 @@ export function XPage() {
       <PageHeader title="X / Twitter" subtitle="What's being said on X and post ideas. Nothing is posted without your approval." />
       <Tabs tabs={TABS} value={tab} onChange={go} />
       {tab === "growth" && <GrowthPilot />}
+      {tab === "newsdesk" && <NewsDesk />}
       {tab === "overview" && <OverviewTab go={go} />}
       {tab === "mentions" && <PostsTab source="mention" empty="No mentions yet." intro="Posts that mention your account, newest first." />}
       {tab === "accounts" && <AccountsTab />}

@@ -273,7 +273,10 @@ class Settings(BaseSettings):
     x_account_username: str = ""
     # X bills per resource read (pay-per-use). Local guard rails on top of the console spending limit.
     # Local estimate per X write request (X does not report per-request charges through the API).
-    x_write_cost_estimate_usd: float = Field(0.01, ge=0)
+    x_write_cost_estimate_usd: float = Field(0.015, ge=0)  # X's price for a post with no link; one with a link is $0.20
+    # The News Desk (app/newsdesk). The model only rewrites headlines, and only with an Anthropic key; without one, posts are the attributed headline.
+    newsdesk_model: str = "claude-haiku-5-5"
+    job_newsdesk_seconds: int = Field(300, ge=60)
     job_pokemon_pulse_seconds: int = Field(900, ge=300)  # Market Pulse X search (only when enabled in the dashboard)
     x_daily_budget_usd: float = Field(1.0, ge=0)
     x_monthly_budget_usd: float = Field(20.0, ge=0)
