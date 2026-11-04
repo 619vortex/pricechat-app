@@ -7,5 +7,6 @@ pub mod flow;
 pub mod keys;
 #[cfg(windows)]
 pub mod opener;
+pub mod settings;
 #[cfg(windows)]
 pub mod store;

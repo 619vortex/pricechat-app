@@ -12,6 +12,7 @@ Windows doesn't treat two programs run by the same user as separated. A program 
 | 4. Service validates every config: no scripts, only known fields | A config running commands as SYSTEM | Implemented |
 | 5. **Signed server list.** The backend signs each server's public key and endpoint with a key held off the API; the service has the public half built in, and refuses any peer without a valid signature | Even code injected into KiwiVPN.exe pointing the tunnel at an attacker's server | **Proposed for milestone 4. Needs a backend change and your approval** |
 | 6. Visible change: the app tells the person whenever the server changes or the tunnel drops without them pressing anything | A silent change going unnoticed | Proposed for milestone 4 |
+| Note | Reconnect after restart reuses the config kept in the admin-only folder. It's deleted only by Disconnect, sign-out or uninstall | | Implemented |
 | 7. Optional kill-switch-style protection and app hardening: code signing, signature check of the caller instead of only its path | Swapped binaries if someone gets past the folder rights | Milestone 7 |
 
 ## Privilege escalation review
@@ -23,4 +24,4 @@ Windows doesn't treat two programs run by the same user as separated. A program 
 ## What this doesn't stop
 - Code already running as the user can inject into KiwiVPN.exe, or automate its window, until layer 5 limits what that achieves. Even then it could still disconnect the tunnel, which layer 6 would make visible.
 - Malware running as administrator. It's above every boundary here.
-- The test build's "choose a config file" button accepts any valid config. It's compiled out of release builds, and the debug test build also allows developer tools.
+- The "use a config file" option under Settings > Advanced accepts any valid config. It's only reachable through the window. A final public build should use `--no-default-features`, which removes it.

@@ -156,22 +156,24 @@ describe("Free while payments are off", () => {
     }
   });
 
-  it("offers the Windows beta only once a real installer is set, labelled Beta, promising no sign-in", () => {
+  it("offers the Windows beta only once a real installer is set, labelled Beta, with its version and checksum", () => {
     let view = render(<Downloads agent={CHROME} />);
     expect(screen.queryByRole("link", { name: /Download for Windows/ })).toBeNull();
     view.unmount();
-    Object.assign(WINDOWS_BETA, { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.0" });
+    Object.assign(WINDOWS_BETA, { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.0", sha256: "ABC123" });
     try {
       view = render(<Downloads agent={CHROME} />);
       const windows = card(view.container, "Windows");
       expect(screen.getByRole("link", { name: /Download for Windows/ }).getAttribute("href")).toBe("/downloads/KiwiVPN-Setup.exe");
       expect(windows.querySelector(".vpn-status")!.textContent).toBe("Beta");
-      expect(windows.textContent).toMatch(/temporary/);
-      expect(windows.textContent).not.toMatch(/sign in|one-click/i);
+      expect(windows.textContent).toMatch(/sign in, choose a country and connect/);
+      expect(windows.textContent).toMatch(/Version 0\.1\.0/);
+      expect(windows.textContent).toContain("ABC123");
+      expect(windows.textContent).not.toMatch(/WireGuard|\.conf|config file/i);
       expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
       expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
     } finally {
-      Object.assign(WINDOWS_BETA, { href: "", version: "" });
+      Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" });
     }
   });
 
@@ -749,6 +751,25 @@ describe("The redesigned page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use my key" }));
     await settle();
     expect(screen.getByRole("heading", { name: "Your devices" })).toBeTruthy();
+  });
+
+  it("signs the Windows app out everywhere from My Devices, and only offers it when there's a PC to sign out", async () => {
+    let view = render(<VpnDevicesPage />);
+    serve(member({ devices: [DEVICE] }));
+    view.unmount();
+    serve({ ...member({ devices: [DEVICE] }), "GET /api/members/desktop/sessions": [200, { count: 0 }] });
+    view = render(<VpnDevicesPage />);
+    await settle();
+    expect(screen.queryByRole("button", { name: "Sign out on every PC" })).toBeNull();
+    view.unmount();
+    serve({ ...member({ devices: [DEVICE] }), "GET /api/members/desktop/sessions": [200, { count: 2 }], "POST /api/members/desktop/sessions/revoke": [200, { removed: 2 }] });
+    render(<VpnDevicesPage />);
+    await settle();
+    expect(document.body.textContent).toMatch(/Signed in on 2 PCs/);
+    fireEvent.click(screen.getByRole("button", { name: "Sign out on every PC" }));
+    await settle();
+    expect(calls).toContain("POST /api/members/desktop/sessions/revoke");
+    expect(screen.getByRole("status").textContent).toMatch(/signed out on every PC/);
   });
 
   it("explains why an account that can't add a device can't, with the way forward", async () => {

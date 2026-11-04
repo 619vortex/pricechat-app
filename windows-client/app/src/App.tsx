@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useExit } from "./exit";
-import { type AccountView, type Answer, type Phase, type Sample, type Server, accountState, cancelSignIn, formatBytes, formatDuration, formatRate, hasTestConfig, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
+import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
 
 const POLL_MS = 1000;
 const ACCOUNT_MS = 60_000;
@@ -37,6 +37,17 @@ function Flag({ code }: { code: string }) {
   const [broken, setBroken] = useState(false);
   if (broken || !/^[A-Za-z]{2}$/.test(code)) return <span className="flag is-code" aria-hidden>{code.toUpperCase()}</span>;
   return <span className="flag" aria-hidden><img src={`/flags/${code.toLowerCase()}.svg`} alt="" onError={() => setBroken(true)} /></span>;
+}
+
+const PLAN: Record<string, string> = { trial: "Free trial", royal: "Royal Kiwi", paid: "Paid", tester: "Tester", granted: "Included", owner: "Owner", free: "Free while we test" };
+
+function Toggle({ label, hint, on, off, onChange }: { label: string; hint?: string; on: boolean; off?: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className={`toggle${off ? " is-off" : ""}`}>
+      <span><b>{label}</b>{hint && <small>{hint}</small>}</span>
+      <input type="checkbox" role="switch" checked={on} disabled={off} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
 }
 
 const HEADLINE: Record<Phase, string> = {
@@ -76,6 +87,11 @@ export function App() {
   const [chosen, setChosen] = useState<number | null>(null);
   const [settings, setSettings] = useState(false);
   const [testConfig, setTestConfig] = useState(false);
+  const [prefs, setPrefs] = useState<Settings | null>(null);
+  const [diag, setDiag] = useState<Diagnostics | null>(null);
+  const autoChecked = useRef(false);
+  const wasOn = useRef(false);
+  const meantToStop = useRef(false);
   const last = useRef<Sample | null>(null);
 
   const reported = phaseOf(answer);
@@ -119,6 +135,7 @@ export function App() {
     void tick();
     void loadAccount();
     void hasTestConfig().then(setTestConfig).catch(() => setTestConfig(false));
+    void getSettings().then(setPrefs).catch(() => setPrefs(null));
     const refresh = window.setInterval(() => void loadAccount(), ACCOUNT_MS);
     return () => { alive = false; window.clearTimeout(timer); window.clearInterval(refresh); };
   }, [take, loadAccount]);
@@ -131,16 +148,41 @@ export function App() {
     finally { setAction(null); }
   };
   const connect = (serverId: number) => run("connect", async () => { take(await vpnConnect(serverId)); await loadAccount(); });
-  const disconnect = () => run("disconnect", async () => { take(await vpnDisconnect()); });
+  const disconnect = () => run("disconnect", async () => { meantToStop.current = true; take(await vpnDisconnect()); });
   const login = () => run("sign-in", async () => { await signIn(); await loadAccount(); });
   const trial = () => run("trial", async () => { await startTrial(); await loadAccount(); });
-  const logout = () => run("disconnect", async () => { await signOut(); setChosen(null); setSettings(false); await loadAccount(); });
+  const logout = () => run("disconnect", async () => { meantToStop.current = true; await signOut(); setChosen(null); setSettings(false); await loadAccount(); });
+  const change = (patch: Partial<Settings>) => {
+    if (!prefs) return;
+    setProblem(null);
+    void saveSettings({ ...prefs, ...patch }).then(setPrefs).catch((e) => setProblem(String(e)));
+  };
   const fromFile = () => run("connect", async () => { const next = await vpnConnectTestFile(); if (next) { take(next); setSettings(false); } });
 
   const account = view?.account ?? null;
   const servers: Server[] = account?.servers ?? [];
   const picked = chosen ?? view?.suggested ?? null;
   const shown = servers.find((s) => s.id === (phase === "on" || phase === "connecting" ? view?.last_server ?? picked : picked)) ?? null;
+
+  // Tell the person when the state changes, and only then. A drop they didn't ask for is worth a notification; their own Disconnect isn't.
+  useEffect(() => {
+    if (reported === "on" && !wasOn.current) {
+      wasOn.current = true;
+      meantToStop.current = false;
+      void notify("connected", shown ? serverPlace(shown) : undefined).catch(() => undefined);
+    } else if (reported !== "on" && reported !== "connecting" && reported !== "loading" && wasOn.current) {
+      wasOn.current = false;
+      if (!meantToStop.current) void notify("lost").catch(() => undefined);
+      meantToStop.current = false;
+    }
+  }, [reported]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-connect: asked once, once the account and the tunnel's state are both known. Rust says yes only once per launch, and only when Windows started the app.
+  useEffect(() => {
+    if (autoChecked.current || reported !== "off" || !view?.signed_in || !account?.eligible || !picked) return;
+    autoChecked.current = true;
+    void shouldAutoConnect().then((yes) => { if (yes) void connect(picked); }).catch(() => undefined);
+  }, [reported, view, account, picked]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const slow = phase === "connecting" && startedAt !== null && now - startedAt > SLOW_CONNECT_MS;
   const live = phase === "on";
@@ -177,10 +219,27 @@ export function App() {
           <button type="button" className="link" onClick={() => setSettings(false)}>Back</button>
         </header>
         <section className="settings">
+          {prefs && (
+            <div className="toggles">
+              <Toggle label="Launch when Windows starts" on={prefs.launch_at_startup} onChange={(v) => change({ launch_at_startup: v, auto_connect: v && prefs.auto_connect })} />
+              <Toggle label="Connect when Windows starts" hint="Uses your last country." on={prefs.auto_connect} off={!prefs.launch_at_startup} onChange={(v) => change({ auto_connect: v })} />
+              <Toggle label="Keep running in the system tray" hint="Closing the window leaves Kiwi VPN in the tray." on={prefs.minimize_to_tray} onChange={(v) => change({ minimize_to_tray: v })} />
+              <Toggle label="Notifications" hint="When you connect, or the connection drops." on={prefs.notifications} onChange={(v) => change({ notifications: v })} />
+              <div className="toggle is-off"><span><b>Kill switch</b><small>Not available yet. Your traffic isn't blocked if the tunnel drops.</small></span></div>
+            </div>
+          )}
           {view?.signed_in && <button type="button" className="row" onClick={() => void logout()}>Sign out of Kiwi VPN</button>}
           <button type="button" className="row" onClick={() => void openSite("devices")}>My Devices on pricechat.live</button>
-          <details className="advanced">
+          <details className="advanced" onToggle={(e) => { if (e.currentTarget.open) void diagnostics().then(setDiag).catch(() => setDiag(null)); }}>
             <summary>Advanced</summary>
+            {diag && (
+              <dl className="diag">
+                <div><dt>Version</dt><dd>{diag.version}</dd></div>
+                <div><dt>Service</dt><dd>{diag.service}</dd></div>
+                <div><dt>Tunnel</dt><dd>{diag.tunnel}</dd></div>
+                <div><dt>Last handshake</dt><dd>{diag.handshake_age_seconds === null ? "None" : `${diag.handshake_age_seconds} s ago`}</dd></div>
+              </dl>
+            )}
             {testConfig && (
               <div>
                 <p>For testing only. Connect with a WireGuard config file instead of your account.</p>
@@ -213,6 +272,9 @@ export function App() {
         {problem?.includes("My Devices") && <button type="button" className="link" onClick={() => void openSite("devices")}>Open My Devices</button>}
       </section>
 
+      {view?.signed_in && account && (
+        <p className="plan">{PLAN[account.plan?.kind ?? ""] ?? ""}{account.plan?.days_left != null ? ` · ${account.plan.days_left} ${account.plan.days_left === 1 ? "day" : "days"} left` : ""}</p>
+      )}
       {view?.signed_in && servers.length > 0 && !locked && (
         <div className="picker" role="radiogroup" aria-label="Country">
           {servers.map((s) => (
@@ -242,7 +304,7 @@ export function App() {
       </dl>
 
       <section className="controls">
-        <button type="button" className={`go${button.quiet ? " is-stop" : ""}`} disabled={button.off} onClick={button.run}>{button.label}</button>
+        <button type="button" className={`go${button.quiet ? " is-stop" : ""}${phase === "connecting" ? " is-busy" : ""}`} disabled={button.off} onClick={button.run}>{button.label}</button>
         <dl className="stats" aria-label="Connection statistics">
           <div><dt>Download</dt><dd>{live ? formatRate(rates.rx) : "–"}</dd><dd className="sub">{live && status ? `${formatBytes(status.rx_bytes)} total` : ""}</dd></div>
           <div><dt>Upload</dt><dd>{live ? formatRate(rates.tx) : "–"}</dd><dd className="sub">{live && status ? `${formatBytes(status.tx_bytes)} total` : ""}</dd></div>

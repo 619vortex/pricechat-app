@@ -95,6 +95,14 @@ impl Vault for FileVault {
         let _ = std::fs::write(self.dir.join("server.txt"), server_id.to_string());
     }
 
+    fn refreshed_at(&self) -> Option<u64> {
+        std::fs::read_to_string(self.dir.join("refreshed.txt")).ok()?.trim().parse().ok()
+    }
+
+    fn save_refreshed_at(&self, seconds: u64) {
+        let _ = std::fs::write(self.dir.join("refreshed.txt"), seconds.to_string());
+    }
+
     fn forget_all(&self) {
         let _ = std::fs::remove_dir_all(&self.dir);
         let _ = std::fs::create_dir_all(&self.dir);

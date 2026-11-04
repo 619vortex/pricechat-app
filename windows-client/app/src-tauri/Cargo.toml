@@ -8,7 +8,9 @@ description = "Kiwi VPN for Windows: the desktop window. It runs as the signed-i
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The service's own library: one definition of the pipe's protocol, used by both ends.

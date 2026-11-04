@@ -35,7 +35,9 @@ Tick only what was really run. Nothing below has been run yet, except where mark
 - [ ] Security review
 - [ ] `fake-service-test.ps1` passes against the release build
 - [ ] `ipc-and-key-test.ps1` passes against the release build
-- [ ] ipinfo.io and ipapi.co removed in favour of Kiwi's own endpoint and server list (PRIVACY-REVIEW.md)
+- [ ] Signed server list (LOCAL-SECURITY.md, layer 5)
+- [ ] Public build made with `--no-default-features`
+- [ ] Pipe read timeout
 - [ ] Every line in PRIVACY-REVIEW.md resolved, and the privacy page covers the app
 - [ ] Backend changes explained and deployed with approval (migration 0102, with a backup first)
 - [ ] `/vpn` Windows card switched to the real download, only after all of the above

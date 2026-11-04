@@ -100,6 +100,7 @@ pub trait Backend {
     fn delete_device(&self, token: &str, device_id: i64) -> Result<(), ApiError>;
     fn token(&self, code: &str, verifier: &str) -> Result<String, ApiError>;
     fn logout(&self, token: &str) -> Result<(), ApiError>;
+    fn refresh(&self, token: &str) -> Result<String, ApiError>;
     fn my_ip(&self) -> Result<String, ApiError>;
 }
 
@@ -170,6 +171,15 @@ impl Backend for Http {
 
     fn logout(&self, token: &str) -> Result<(), ApiError> {
         self.with_session("POST", "/members/logout", token).call().map(|_| ()).map_err(failure)
+    }
+
+    fn refresh(&self, token: &str) -> Result<String, ApiError> {
+        #[derive(Deserialize)]
+        struct Reply {
+            token: String,
+        }
+        let reply: Reply = parsed(self.with_session("POST", "/members/desktop/refresh", token).call())?;
+        Ok(reply.token)
     }
 
     fn my_ip(&self) -> Result<String, ApiError> {

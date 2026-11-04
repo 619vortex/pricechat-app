@@ -35,6 +35,13 @@ export const vpnDisconnect = () => invoke<Answer>("vpn_disconnect");
 export const vpnConnect = (serverId: number) => invoke<Answer>("vpn_connect", { serverId });
 export const vpnConnectTestFile = () => invoke<Answer | null>("vpn_connect_test_file");
 export const hasTestConfig = () => invoke<boolean>("has_test_config");
+export interface Settings { launch_at_startup: boolean; auto_connect: boolean; minimize_to_tray: boolean; notifications: boolean }
+export interface Diagnostics { version: string; service: string; tunnel: string; handshake_age_seconds: number | null; settings_file: string }
+export const getSettings = () => invoke<Settings>("get_settings");
+export const setSettings = (next: Settings) => invoke<Settings>("set_settings", { new: next });
+export const shouldAutoConnect = () => invoke<boolean>("should_auto_connect");
+export const diagnostics = () => invoke<Diagnostics>("diagnostics");
+export const notify = (kind: "connected" | "lost", place?: string) => invoke<void>("notify", { kind, place: place ?? null });
 export const accountState = () => invoke<AccountView>("account_state");
 export const signIn = () => invoke<void>("sign_in");
 export const cancelSignIn = () => invoke<void>("cancel_sign_in");

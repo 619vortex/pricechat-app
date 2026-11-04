@@ -18,6 +18,8 @@ pub trait Vault {
     fn forget_device(&self, server_id: i64);
     fn last_server(&self) -> Option<i64>;
     fn save_last_server(&self, server_id: i64);
+    fn refreshed_at(&self) -> Option<u64>;
+    fn save_refreshed_at(&self, seconds: u64);
     fn forget_all(&self);
 }
 
@@ -90,6 +92,26 @@ pub fn config_for(backend: &dyn Backend, vault: &dyn Vault, computer: &str, serv
     Ok(render_config(&pair.private_b64, &added.peer))
 }
 
+const REFRESH_EVERY: u64 = 7 * 24 * 3600;
+
+/// Swaps the session for a fresh one about weekly, so regular use never hits the 90-day limit, and a copied token soon stops working. Failing to refresh changes nothing: the
+/// current session still works, and a session the server has ended shows up as signed out on the next account call. A first-time session starts the clock without a swap.
+pub fn refresh_if_due(backend: &dyn Backend, vault: &dyn Vault, now: u64) {
+    let Some(token) = vault.session() else { return };
+    let Some(last) = vault.refreshed_at() else {
+        vault.save_refreshed_at(now);
+        return;
+    };
+    if now.saturating_sub(last) < REFRESH_EVERY {
+        return;
+    }
+    if let Ok(fresh) = backend.refresh(&token) {
+        if vault.save_session(&fresh).is_ok() {
+            vault.save_refreshed_at(now);
+        }
+    }
+}
+
 /// The server to offer first: the last one used if it's still online, else the backend's recommendation, else any online one.
 pub fn suggested(servers: &[Server], last: Option<i64>) -> Option<i64> {
     let online = |id: i64| servers.iter().any(|s| s.id == id && s.online);
@@ -108,6 +130,7 @@ mod tests {
         session: RefCell<Option<String>>,
         devices: RefCell<HashMap<i64, (i64, String)>>,
         last: RefCell<Option<i64>>,
+        refreshed: RefCell<Option<u64>>,
     }
 
     impl Vault for FakeVault {
@@ -133,6 +156,12 @@ mod tests {
         }
         fn save_last_server(&self, s: i64) {
             *self.last.borrow_mut() = Some(s);
+        }
+        fn refreshed_at(&self) -> Option<u64> {
+            *self.refreshed.borrow()
+        }
+        fn save_refreshed_at(&self, s: u64) {
+            *self.refreshed.borrow_mut() = Some(s);
         }
         fn forget_all(&self) {
             *self.session.borrow_mut() = None;
@@ -178,6 +207,13 @@ mod tests {
         }
         fn logout(&self, _: &str) -> Result<(), ApiError> {
             Ok(())
+        }
+        fn refresh(&self, _: &str) -> Result<String, ApiError> {
+            self.calls.borrow_mut().push("refresh".into());
+            if let Some(e) = self.add.borrow().clone() {
+                return Err(e);
+            }
+            Ok("fresh".into())
         }
         fn my_ip(&self) -> Result<String, ApiError> {
             Ok("1.2.3.4".into())
@@ -282,6 +318,26 @@ mod tests {
         assert_eq!(e, SIGNED_OUT);
         assert!(v.session().is_none() && v.device(2).is_none());
         assert_eq!(config_for(&backend(Ok(account(vec![]))), &FakeVault::default(), "PC", 2).unwrap_err(), SIGNED_OUT);
+    }
+
+    #[test]
+    fn refreshes_weekly_and_keeps_working_if_it_cant() {
+        const DAY: u64 = 24 * 3600;
+        let (b, v) = (backend(Ok(account(vec![]))), signed_in());
+        refresh_if_due(&b, &v, 1000);
+        assert!(b.calls.borrow().is_empty(), "a new session just starts the clock");
+        refresh_if_due(&b, &v, 1000 + 6 * DAY);
+        assert!(b.calls.borrow().is_empty());
+        refresh_if_due(&b, &v, 1000 + 8 * DAY);
+        assert_eq!(v.session().unwrap().as_str(), "fresh");
+        assert_eq!(v.refreshed_at(), Some(1000 + 8 * DAY));
+        let (down, kept) = (backend(Ok(account(vec![]))), signed_in());
+        kept.save_refreshed_at(0);
+        *down.add.borrow_mut() = Some(ApiError { status: 0, message: "offline".into() });
+        refresh_if_due(&down, &kept, 30 * DAY);
+        assert_eq!(kept.session().unwrap().as_str(), "token", "no connection: the session stays");
+        assert_eq!(kept.refreshed_at(), Some(0));
+        refresh_if_due(&backend(Ok(account(vec![]))), &FakeVault::default(), 30 * DAY);
     }
 
     #[test]

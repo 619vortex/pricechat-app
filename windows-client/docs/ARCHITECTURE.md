@@ -1,6 +1,6 @@
 # Kiwi VPN for Windows: architecture and audit
 
-Status: **the service made a real VPN connection in the VM on 2026-11-04 (run by the owner). Sign-in and the tester exception are tested but not deployed. The app is being built: see PLAN.md. There is no installer yet.** Rust builds of the app only run in the VM, because Smart App Control blocks them on the host.
+Status: **the service made a real VPN connection in the VM on 2026-11-04 (run by the owner). Sign-in and the tester exception are tested but not deployed. The app and installer are built: see VERIFICATION.md for what has actually been verified.** Rust builds of the app only run in the VM, because Smart App Control blocks them on the host.
 
 ## Engine
 

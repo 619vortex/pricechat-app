@@ -175,6 +175,24 @@ export function VpnPage() {
 }
 
 /** Account > My Devices: everything about individual devices, including the manual route. The apps won't need any of it: signing in will set a device up. */
+/** Signs the Windows app out on every PC, for a lost or sold one. Browsers stay signed in. Shows only if there's a PC to sign out. */
+function DesktopSessions() {
+  const [count, setCount] = useState(0);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { void memberApi<{ count: number }>("/members/desktop/sessions").then((r) => setCount(r.count)).catch(() => undefined); }, []);
+  if (done) return <p className="vpn-done" role="status"><Tick />The Windows app is signed out on every PC.</p>;
+  if (!count) return null;
+  return (
+    <section className="vpn-card" aria-labelledby="vpn-desktop-sessions">
+      <h2 id="vpn-desktop-sessions">Kiwi VPN for Windows</h2>
+      <p className="site-muted">Signed in on {count} {count === 1 ? "PC" : "PCs"}.</p>
+      <button className="site-button is-ghost is-small" onClick={() => void memberApi("/members/desktop/sessions/revoke", { method: "POST" }).then(() => setDone(true)).catch((e) => setErr(vpnError(e)))}>Sign out on every PC</button>
+      {err && <p className="site-error" role="alert">{err}</p>}
+    </section>
+  );
+}
+
 export function VpnDevicesPage() {
   const { key, setKey, state, load } = useVpnAccount();
   const [typed, setTyped] = useState("");
@@ -210,6 +228,7 @@ export function VpnDevicesPage() {
             <CallCtx.Provider value={callFor(key)}>
               <PausedNote s={state} />
               <Unlocked s={state} reload={load} />
+              {!state.anonymous && <DesktopSessions />}
             </CallCtx.Provider>
           )}
         {state && !("error" in state) && state.enabled && !(member && member.enabled) && <ManualSetup form={null} />}
@@ -443,9 +462,13 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
       <SectionHead id="vpn-download" kicker="Apps" title="Get Kiwi VPN" />
       <ul className="vpn-apps">
         {WINDOWS_BETA.href ? (
-          <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC. Setup is temporary for now: the beta needs a config file from My Devices." status="Beta" on mine={os === "Windows" ? "Your device" : null}>
+          <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC. Install it, sign in, choose a country and connect." status="Beta" on mine={os === "Windows" ? "Your device" : null}>
             <a className="site-button is-small vpn-windows-go" href={WINDOWS_BETA.href} download><WindowsIcon className="vpn-picon" />Download for Windows</a>
-            {manual("Windows")}
+            <details className="vpn-checksum">
+              <summary>Version {WINDOWS_BETA.version}</summary>
+              <p>Windows may warn about an unknown publisher while we finish code signing. SHA-256:</p>
+              <code>{WINDOWS_BETA.sha256}</code>
+            </details>
           </AppCard>
         ) : (
           <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC." status="In development" mine={os === "Windows" ? "Your device" : null}>{manual("Windows")}</AppCard>

@@ -1,6 +1,6 @@
-# Milestone 3: authentication changes, for review. Not deployed.
+# Milestone 3: authentication changes. Approved by the owner; not deployed yet.
 
-Nothing here runs until you approve it. The code is on `feat/kiwi-windows`. A trial merge with `main` is clean.
+The code is on `feat/kiwi-windows`, merged with `main`. Deploy with `deploy-m3.ps1`: the auto-mode safety check stops Claude running a production deploy, so the owner runs it.
 
 ## What changes
 **Backend**
@@ -8,13 +8,14 @@ Nothing here runs until you approve it. The code is on `feat/kiwi-windows`. A tr
 - `POST /api/members/desktop/token`: the app swaps code + secret verifier (PKCE, S256) for a session. Codes last 5 minutes, work once, are stored only as hashes, and a wrong attempt still spends them.
 - **New:** the app's session starts `kd.` and reaches only `/api/members/vpn*`, `/api/members/me` and `/api/members/logout`. Everything else gets 403, so a token stolen from a PC can't spend, trade or change the account.
 - Admin: `POST /api/vpn/admin/testers` names up to 10 testers for up to 90 days while the VPN is closed.
-- Sessions last 90 days, with no refresh token. After that, the person signs in again.
+- Sessions last 90 days. `POST /api/members/desktop/refresh` swaps one for a new token about weekly, and the old one stops working. `member_sessions.kind` marks them "desktop", and `/members/desktop/sessions/revoke` signs out every PC, leaving browsers alone.
+- `POST /api/members/vpn/devices` also accepts `public_key`: the private half stays on the PC. `GET /api/members/vpn/devices/{id}/peer` gives current connection details. `GET /api/members/vpn/ip` returns the caller's address, unstored.
 
 **Website**
 - `/vpn/desktop`: the "Allow" page, reachable only with the app's link, and `noindex`. It sends the code only to `127.0.0.1`.
 - Admin > VPN > People for testers.
 
-**App (not written yet; built after you approve this design)**
+**App (written, first compile is in the VM)**
 - Opens the system browser, listens on `127.0.0.1` on a random port, checks `state`, swaps the code.
 - The token lives only in Rust, encrypted with Windows DPAPI, and never enters the web page. All API calls run from Rust: the backend refuses cross-site POSTs, and a request from the app's web page would count as one.
 - DPAPI protects against other users and a stolen disk, **not** against malware running as the same user.
@@ -35,13 +36,16 @@ def upgrade():
     )
     op.create_index("ix_member_desktop_codes_member_id", "member_desktop_codes", ["member_id"])
     op.add_column("vpn_accounts", sa.Column("tester_until", sa.DateTime(timezone=True)))
+    op.add_column("member_sessions", sa.Column("kind", sa.String(16)))
 
 def downgrade():
+    with op.batch_alter_table("member_sessions") as batch:
+        batch.drop_column("kind")
     with op.batch_alter_table("vpn_accounts") as batch:
         batch.drop_column("tester_until")
     op.drop_table("member_desktop_codes")
 ```
-One new empty table, and one empty nullable column. No existing data is changed. The `kd.` limit needs no schema change.
+One new empty table, and two empty nullable columns. No existing data is changed. The `kd.` limit needs no schema change.
 
 **Tested on a throwaway SQLite database, not a copy of production:** upgrade to 0102 kept an existing row with the new column empty; downgrade removed both and left the row identical; upgrading again worked.
 
@@ -58,7 +62,7 @@ One new empty table, and one empty nullable column. No existing data is changed.
 2. Send me its ID and time. I won't deploy without one taken within the hour, and I record it in the notes.
 3. It has never been test-restored. If you want real assurance, restore one into a throwaway volume first; that's your decision, because it costs time.
 
-## Deploy steps, once approved
+## Deploy steps (`deploy-m3.ps1` runs 1 to 6, except the tests in step 3)
 1. Backup, as above.
 2. Merge `feat/kiwi-windows` to `main`, in a clean worktree. The main checkout holds another session's uncommitted files, so never deploy from it.
 3. Run the full backend and frontend tests on the merged commit.
@@ -77,14 +81,10 @@ One new empty table, and one empty nullable column. No existing data is changed.
 | Schema itself must go | Run `alembic downgrade 0101_newsdesk` first, then deploy old code. This needs a shell on Railway, and `railway ssh` needs a key that isn't set up | Downgrade yes; on Railway no | Sign-in codes and tester dates |
 | Database damaged | Restore the volume backup from step 1 | **Never tested** | Everything since the backup |
 
-Revoking the app's sessions if needed: delete `member_sessions` rows whose token came from the app. Tokens are stored as hashes, so the `kd.` prefix can't be seen in the database. **Gap:** today that means ending all of a member's sessions. Tell me if you want a way to tell them apart, which would need a column in this same migration.
+Revoking the app's sessions if needed: delete `member_sessions` rows with `kind = 'desktop'`, or use the member's own button on My Devices.
 
-## Decisions for you
-1. **Approve the `kd.` session limit?** It's new since the plan and I recommend it. Tests are on the branch.
-2. **Should a session's type be stored?** It would allow revoking only app sessions and listing them for the member. It adds one column to 0102, so it's cheapest to decide now. I recommend yes.
-3. **Should testers stay in this migration?** They're unrelated to sign-in, though you need them to test while the VPN is closed. I recommend keeping them.
-4. **Should the Windows app generate its own private key?** It means the server never holds it, but the device API must accept a public key. That's a milestone 4 backend change, and I recommend it.
+## Decided by the owner
+VPN-only sessions, recording desktop sessions in 0102, locally generated keys and automatic device registration: all approved. Testers stay in this migration.
 
 ## Remaining weak points
 - A local program can start the sign-in with its own verifier and a loopback listener. If the person presses Allow, it gets a session. The page says to continue only if you just pressed Sign in in the app; the `kd.` limit caps the damage.
-- The member can't yet see or revoke desktop sessions from their account (decision 2).

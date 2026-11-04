@@ -10,6 +10,8 @@ let reply: Answer;
 let view: AccountView;
 let ip: string | null;
 let testConfig = true;
+let prefs = { launch_at_startup: false, auto_connect: false, minimize_to_tray: false, notifications: true };
+let autoConnect = false;
 let refuse: Record<string, string> = {};
 let hold: Record<string, () => void> = {};
 vi.mock("@tauri-apps/api/core", () => ({
@@ -19,6 +21,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (refuse[cmd]) throw refuse[cmd];
     if (cmd === "account_state") return view;
     if (cmd === "has_test_config") return testConfig;
+    if (cmd === "get_settings") return prefs;
+    if (cmd === "set_settings") { prefs = (a as { new: typeof prefs }).new; return prefs; }
+    if (cmd === "should_auto_connect") return autoConnect;
+    if (cmd === "diagnostics") return { version: "0.1.0", service: "Running", tunnel: "Connected", handshake_age_seconds: 5, settings_file: "x" };
     if (cmd === "my_ip") { if (!ip) throw "no"; return ip; }
     if (cmd === "sign_in") await new Promise<void>((done) => { hold.sign_in = done; });
     if (cmd === "vpn_status" || cmd === "vpn_disconnect" || cmd === "vpn_connect") return reply;
@@ -89,7 +95,8 @@ describe("the numbers", () => {
 describe("the window", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    calls.length = 0; refuse = {}; hold = {}; testConfig = true;
+    calls.length = 0; refuse = {}; hold = {}; testConfig = true; autoConnect = false;
+    prefs = { launch_at_startup: false, auto_connect: false, minimize_to_tray: false, notifications: true };
     reply = off(); view = signedIn(); ip = "5.30.213.225";
   });
   afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -302,6 +309,82 @@ describe("the window", () => {
     render(<App />);
     await settle();
     expect(screen.getByLabelText("Connection statistics").textContent).toContain("01:02:05");
+  });
+
+  it("settings save, connect-at-startup needs launch-at-startup, and the kill switch says it isn't available", async () => {
+    render(<App />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const connectAtStart = () => screen.getByRole("switch", { name: /Connect when Windows starts/ }) as HTMLInputElement;
+    expect(connectAtStart().disabled).toBe(true);
+    fireEvent.click(screen.getByRole("switch", { name: /Launch when Windows starts/ }));
+    await settle();
+    expect(prefs.launch_at_startup).toBe(true);
+    expect(connectAtStart().disabled).toBe(false);
+    fireEvent.click(connectAtStart());
+    await settle();
+    expect(prefs.auto_connect).toBe(true);
+    fireEvent.click(screen.getByRole("switch", { name: /Launch when Windows starts/ }));
+    await settle();
+    expect(prefs).toMatchObject({ launch_at_startup: false, auto_connect: false });
+    expect(document.body.textContent).toMatch(/Kill switch.*Not available yet/);
+    expect(screen.queryByRole("switch", { name: /Kill switch/ })).toBeNull();
+  });
+
+  it("auto-connects at most once, only when Rust says so, and never retries after a failure", async () => {
+    autoConnect = true;
+    refuse.vpn_connect = "That server is offline right now.";
+    render(<App />);
+    await settle();
+    await tick(5000);
+    expect(calls.filter((c) => c === "should_auto_connect")).toHaveLength(1);
+    expect(calls.filter((c) => c === "vpn_connect")).toHaveLength(1);
+    await tick(70_000);
+    expect(calls.filter((c) => c === "vpn_connect")).toHaveLength(1);
+    cleanup();
+    calls.length = 0;
+    autoConnect = false;
+    refuse = {};
+    render(<App />);
+    await settle();
+    await tick(2000);
+    expect(calls).not.toContain("vpn_connect");
+  });
+
+  it("notifies on connecting and on an unasked drop, but not on the person's own disconnect", async () => {
+    render(<App />);
+    await settle();
+    reply = up();
+    await tick();
+    expect(args.notify).toEqual({ kind: "connected", place: "Helsinki, Finland" });
+    calls.length = 0;
+    reply = off();
+    await tick();
+    expect(args.notify).toEqual({ kind: "lost", place: null });
+    calls.length = 0;
+    reply = up();
+    await tick();
+    calls.length = 0;
+    reply = off();
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await settle();
+    await tick();
+    expect(calls).not.toContain("notify");
+  });
+
+  it("shows the account's plan, and diagnostics with nothing secret", async () => {
+    view = signedIn({ account: account({ plan: { kind: "trial", days_left: 12 } }) });
+    render(<App />);
+    await settle();
+    expect(document.querySelector(".plan")!.textContent).toBe("Free trial · 12 days left");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const advanced = document.querySelector<HTMLDetailsElement>("details.advanced")!;
+    advanced.open = true;
+    fireEvent(advanced, new Event("toggle"));
+    await settle();
+    expect(calls).toContain("diagnostics");
+    expect(document.querySelector(".diag")!.textContent).toMatch(/Version0\.1\.0/);
+    expect(document.querySelector(".diag")!.textContent).not.toMatch(/key|token|PrivateKey/i);
   });
 
   it("disconnect goes to the service", async () => {

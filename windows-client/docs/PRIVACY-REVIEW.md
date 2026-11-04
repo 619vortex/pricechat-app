@@ -15,12 +15,12 @@ Reviewed 2026-11-04 from the code only. **I did not inspect the live servers' co
 | 9 | Devices "switched off and removed after 30 days" | `KEEP_LAPSED = 30 days` | **Matches** | None |
 | 10 | "Renewal is by hand, never automatic" | `CARD_SUBSCRIPTIONS = False` | **Matches** | None. Revisit if cards are ever switched on |
 | 11 | Sites "see our server's address instead of yours" | IP change proven in the VM with the service. **DNS and IPv6 leak tests haven't been reported** | **Proven for IPv4 only** | Run the leak tests before release |
-| 12 | Nothing about the desktop app | The test build asks ipinfo.io and ipapi.co for the public IP while connected | **Missing, not yet public** | Replace with our own endpoint, then add a section on what the app stores before it ships |
+| 12 | Nothing about the desktop app | It keeps a session and private keys in AppData with DPAPI, and asks Price Chat for the public IP | **Missing, not yet public** | Add a section on what the app stores before it ships |
 
 Not a false claim, but worth your decision: **customers share the exit IP with your personal `client1` on Helsinki**, so their traffic and yours look the same from outside. The privacy page doesn't mention it.
 
 ## Replacing the outside lookups
-What changed already: the app asks only **while connected**, when the service sees the VPN server's address, never the customer's. Disconnected, it shows no IP. The earlier "IP didn't change" warning went with that, because it needed the customer's real address.
+**Done in the code, not yet deployed:** ipinfo.io and ipapi.co are gone from the app, and its web page can reach nothing on the internet. The app asks Price Chat's own `GET /api/members/vpn/ip`, in Rust, and location comes from the server list. Steps 1 to 4 below are all implemented.
 
 The plan, with no customer data going to anyone new:
 1. **Public IP, milestone 3 deploy:** `GET /api/members/vpn/ip` returns only the caller's address, using the existing `client_ip` logic, with `Cache-Control: no-store`, a rate limit, and nothing stored or logged by our code. Vercel and Railway can see that address on any request anyway, which the privacy page already covers.

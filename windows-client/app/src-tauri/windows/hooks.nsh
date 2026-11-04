@@ -27,6 +27,7 @@
 
 ; tunnel.dll keeps its log under Program Files\WireGuard\Data. If the real WireGuard app is installed there, that folder isn't ours to remove.
 !macro NSIS_HOOK_POSTUNINSTALL
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "KiwiVPN"
   RMDir /r "$INSTDIR\tunnels"
   ${IfNot} ${FileExists} "$PROGRAMFILES64\WireGuard\wireguard.exe"
     RMDir /r "$PROGRAMFILES64\WireGuard\Data"
