@@ -1,6 +1,6 @@
-# Builds the Kiwi VPN service and desktop window INSIDE THE VM, tests them, installs the service, and opens the folder. No installer yet.
+# Builds KiwiVPN-Setup.exe INSIDE THE VM: tests the service and the window, then packages the release builds with WireGuard's DLLs. It doesn't install anything: you run the installer yourself, like a customer.
 #   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1            (as administrator)
-#   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1 -Remove    removes the service and everything it put on the machine
+#   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1 -Remove    removes Kiwi VPN and everything it put on the machine
 # Not for the host: Smart App Control blocks these builds there, and no Kiwi service may ever run on the PC with client1. It stops itself there.
 param([switch]$Remove, [switch]$NoLaunch)
 $ErrorActionPreference = "Stop"
@@ -12,10 +12,14 @@ $Engine = "C:\Program Files\WireGuard"
 if (Get-Service 'WireGuardTunnel$*' -ErrorAction SilentlyContinue | Where-Object Name -ne 'WireGuardTunnel$kiwi') { throw "Another WireGuard tunnel is on this machine. This belongs in the VM. Nothing was changed." }
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "Run this as administrator." }
 
-if ($Remove) {
-  if (Test-Path $Svc) { & $Svc uninstall }
-  Start-Sleep 2
+function RemoveInstalled {
+  if (Test-Path "$Dir\uninstall.exe") { Start-Process "$Dir\uninstall.exe" -ArgumentList "/S" -Wait; Start-Sleep 3 }
+  if (Test-Path $Svc) { & $Svc uninstall; Start-Sleep 2 }
   Remove-Item -Recurse -Force $Dir -ErrorAction SilentlyContinue
+}
+
+if ($Remove) {
+  RemoveInstalled
   # tunnel.dll keeps its log here. The real WireGuard app would have wireguard.exe beside it, and then the folder isn't ours.
   if ((Test-Path $Engine) -and -not (Test-Path "$Engine\wireguard.exe")) { Remove-Item -Recurse -Force $Engine -ErrorAction SilentlyContinue }
   Write-Host "Removed. Services left: $((Get-Service KiwiVPN, 'WireGuardTunnel$kiwi' -ErrorAction SilentlyContinue | Measure-Object).Count)"
@@ -50,36 +54,39 @@ if (-not (Test-Path "$Work\cargo\bin\cargo.exe")) {
 cargo --version
 
 Write-Host "[4/6] The service's tests, which need the pipe's name free, then its build"
-if (Test-Path $Svc) { & $Svc uninstall; Start-Sleep 2 }
+RemoveInstalled
 Push-Location "$Here\service"
 cargo test -- --test-threads=1
 Need ($LASTEXITCODE -eq 0) "The service's tests failed."
-cargo build --bins --examples
+cargo build --examples
+Need ($LASTEXITCODE -eq 0) "The security test's tools didn't build."
+cargo build --release --bins
 Need ($LASTEXITCODE -eq 0) "The service didn't build."
 Pop-Location
 
-Write-Host "[5/6] The app: tests, then the build"
+Write-Host "[5/6] The app: tests, then the installer"
+$Bundle = "$Here\app\src-tauri\bundle-files"
+New-Item -ItemType Directory -Force $Bundle | Out-Null
+Copy-Item "$Work\target-app\release\kiwivpn-service.exe", "$Here\dist\tunnel.dll", "$Here\dist\wireguard.dll" $Bundle -Force
+Need ((Get-AuthenticodeSignature "$Bundle\wireguard.dll").Status -eq "Valid") "wireguard.dll's signature isn't valid."
 Push-Location "$Here\app"
 npm ci
 Need ($LASTEXITCODE -eq 0) "npm ci failed."
 npm test
 Need ($LASTEXITCODE -eq 0) "The window's tests failed."
-npm run tauri -- build --debug
-Need ($LASTEXITCODE -eq 0) "The app didn't build."
+npm run tauri -- build
+Need ($LASTEXITCODE -eq 0) "The installer didn't build."
 Pop-Location
-$Exe = "$Work\target-app\debug\KiwiVPN.exe"
-Need (Test-Path $Exe) "No KiwiVPN.exe at $Exe"
+$Built = Get-ChildItem "$Work\target-app\release\bundle\nsis\*-setup.exe" | Sort-Object LastWriteTime | Select-Object -Last 1
+Need $Built "No installer under $Work\target-app\release\bundle\nsis"
+Copy-Item $Built.FullName "$Here\KiwiVPN-Setup.exe" -Force
 
-Write-Host "[6/6] The service, in its protected folder, and the fake service for the security test, outside it"
-New-Item -ItemType Directory -Force $Dir, "$Here\test-tools" | Out-Null
-Copy-Item "$Work\target-app\debug\kiwivpn-service.exe", "$Here\dist\tunnel.dll", "$Here\dist\wireguard.dll" $Dir -Force
+Write-Host "[6/6] The fake service for the security test"
+New-Item -ItemType Directory -Force "$Here\test-tools" | Out-Null
 Copy-Item "$Work\target-app\debug\examples\fake_service.exe" "$Here\test-tools" -Force
-& $Svc install
-Need ($LASTEXITCODE -eq 0) "The service didn't install."
-Copy-Item $Exe "$Dir\KiwiVPN.exe" -Force
 
 Write-Host ""
-Write-Host "Built: $Dir\KiwiVPN.exe" -ForegroundColor Green
-Write-Host "Security test: $Here\fake-service-test.ps1, from a normal PowerShell."
-Write-Host "Open it from a NORMAL File Explorer window, NOT this administrator PowerShell: the test has to prove it works without administrator rights."
-if (-not $NoLaunch) { Start-Process explorer.exe $Dir }
+Write-Host "Built: $Here\KiwiVPN-Setup.exe" -ForegroundColor Green
+Write-Host ("SHA-256: " + (Get-FileHash "$Here\KiwiVPN-Setup.exe" -Algorithm SHA256).Hash + "   Size: " + [math]::Round((Get-Item "$Here\KiwiVPN-Setup.exe").Length / 1MB, 1) + " MB")
+Write-Host "Double-click it in File Explorer, as a customer would."
+if (-not $NoLaunch) { Start-Process explorer.exe $Here }

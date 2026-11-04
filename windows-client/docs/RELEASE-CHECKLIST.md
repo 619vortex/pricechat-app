@@ -6,7 +6,8 @@ Tick only what was really run. Nothing below has been run yet, except where mark
 - [ ] `tunnel.dll` built from wireguard-windows (needs approval to run its build script)
 - [ ] Service compiles and all its tests pass in the VM (only the 5 config-safety tests have run so far)
 - [ ] App compiles
-- [ ] `KiwiVPN-Setup.exe` built
+- [ ] `KiwiVPN-Setup.exe` built and run in the VM from its clean checkpoint
+- [ ] Licence notices for WireGuard's components shipped with it
 - [ ] Code signing in place
 
 ## Sign-in

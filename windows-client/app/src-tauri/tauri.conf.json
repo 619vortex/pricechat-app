@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Kiwi VPN",
+  "productName": "KiwiVPN",
   "mainBinaryName": "KiwiVPN",
   "version": "0.1.0",
   "identifier": "live.pricechat.kiwivpn",
@@ -28,8 +28,24 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"]
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Price Chat",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "bundle-files/kiwivpn-service.exe": "kiwivpn-service.exe",
+      "bundle-files/tunnel.dll": "tunnel.dll",
+      "bundle-files/wireguard.dll": "wireguard.dll"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "windows/hooks.nsh"
+      }
+    }
   }
 }

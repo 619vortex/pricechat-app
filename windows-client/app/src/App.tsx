@@ -56,7 +56,7 @@ function detail(phase: Phase, answer: Answer | null, slow: boolean, testBuild: b
   switch (phase) {
     case "loading": return "Asking the Kiwi VPN service.";
     case "no-service": return answer?.message ?? "The Kiwi VPN service isn't running.";
-    case "off": return testBuild ? "Sites see your normal address. This test build asks for a config file." : "Sites see your normal address.";
+    case "off": return testBuild ? "Sites see your normal address. For now, this beta needs a config file from My Devices." : "Sites see your normal address.";
     case "connecting": return slow ? "The server hasn't answered yet. You can keep waiting or disconnect." : "Waiting for the server to answer.";
     case "on": return age === null ? "" : `The server answered ${age === 0 ? "just now" : `${age} s ago`}.`;
     case "stopping": return "Closing the tunnel.";
@@ -152,7 +152,7 @@ export function App() {
       <header className="bar">
         <img src="/kiwi.webp" alt="" />
         <span className="brand">Kiwi VPN</span>
-        {testBuild && <span className="tag">Test build</span>}
+        {testBuild && <span className="tag">Beta</span>}
       </header>
 
       <section className="stage">
