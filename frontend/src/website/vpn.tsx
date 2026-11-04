@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { MemberApiError, memberApi } from "./members";
 import { SitePage } from "./community";
 import { pageHead } from "./seo";
-import { configQr, saveConfig } from "./vpnConfig";
+import { STORE_LINKS, configQr, saveConfig, visitorBrowser } from "./vpnConfig";
 import "./vpn.css";
 
 /**
@@ -133,7 +133,10 @@ export function VpnPage() {
           : !state ? <p className="site-empty">Loading…</p>
           : "visitor" in state ? (
             !state.enabled ? <div className="vpn-soon"><b>Coming soon</b><p>Kiwi VPN isn't open yet. It will appear here as soon as it is.</p></div>
-              : state.billing ? <Choose billing={state.billing} onKey={setKey} onFresh={setFresh} /> : <FreeStart onKey={setKey} />
+              : <>
+                  {state.billing ? <Choose billing={state.billing} onKey={setKey} onFresh={setFresh} /> : <FreeStart onKey={setKey} />}
+                  {(STORE_LINKS.chrome || STORE_LINKS.edge) && <BrowserCard />}
+                </>
           ) : "error" in state ? (
             <div className="vpn-gate">
               <p>{state.error}</p>
@@ -361,19 +364,40 @@ function Unlocked({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   );
 }
 
-/** Testers install the extension by hand until it's in the browser stores. */
-function BrowserCard() {
+/** One button per store, the visitor's own browser first. No approved listing yet means no link: the button says so instead. */
+function StoreButton({ label, store, href, mine }: { label: string; store: string; href: string; mine: boolean }) {
+  const name = <>{label}{mine && <small>Your browser</small>}</>;
+  return href
+    ? <a className={`site-button vpn-store${mine ? "" : " is-ghost"}`} href={href} target="_blank" rel="noopener noreferrer">{name}</a>
+    : <span className={`vpn-store is-waiting${mine ? " is-mine" : ""}`}>{name}<small>Not in the {store} yet</small></span>;
+}
+
+export function BrowserCard({ agent = navigator.userAgent }: { agent?: string }) {
+  const browser = visitorBrowser(agent);
+  const buttons = [
+    <StoreButton key="chrome" label="Add to Chrome" store="Chrome Web Store" href={STORE_LINKS.chrome} mine={browser === "chrome"} />,
+    <StoreButton key="edge" label="Get for Edge" store="Edge Add-ons store" href={STORE_LINKS.edge} mine={browser === "edge"} />,
+  ];
   return (
     <section className="vpn-card vpn-browser" aria-labelledby="vpn-browser">
       <h2 id="vpn-browser">Browser extension</h2>
-      <p className="site-muted">Chrome or Edge, one switch, no app. It covers that browser only. For everything on your device, add it above and use WireGuard.</p>
-      <a className="site-button" href="/downloads/kiwi-vpn-extension.zip" download>Download the extension</a>
-      <ol className="vpn-steps">
-        <li>Unzip it somewhere you'll keep it.</li>
-        <li>Open <b>chrome://extensions</b> or <b>edge://extensions</b> and turn on <b>Developer mode</b>.</li>
-        <li>Click <b>Load unpacked</b> and pick the <b>kiwi-vpn-extension</b> folder.</li>
-        <li>Click the Kiwi VPN icon and press the switch.</li>
-      </ol>
+      <p className="site-muted">Chrome or Edge, one switch, no app. It covers that browser only. For everything on your device, use WireGuard.</p>
+      {browser === "phone" && <p className="site-muted">Open this page on a computer to add the extension. On a phone, use the WireGuard app.</p>}
+      <div className="vpn-stores">{browser === "edge" ? buttons.reverse() : buttons}</div>
+      {(!STORE_LINKS.chrome || !STORE_LINKS.edge) && browser !== "phone" && (
+        <details className="vpn-manual">
+          <summary>Manual install, for testers</summary>
+          <p className="site-muted">This isn't the store version. It needs Developer mode, and it won't update by itself.</p>
+          <a className="site-button is-ghost" href="/downloads/kiwi-vpn-extension.zip" download>Download the ZIP</a>
+          <ol className="vpn-steps">
+            <li>Unzip it somewhere you'll keep it.</li>
+            <li>Open <b>chrome://extensions</b> or <b>edge://extensions</b> and turn on <b>Developer mode</b>.</li>
+            <li>Click <b>Load unpacked</b> and pick the <b>kiwi-vpn-extension</b> folder.</li>
+            <li>Click the Kiwi VPN icon and press the switch.</li>
+          </ol>
+        </details>
+      )}
+      <a className="vpn-privacy" href="/vpn/privacy">How Kiwi VPN handles your data</a>
     </section>
   );
 }

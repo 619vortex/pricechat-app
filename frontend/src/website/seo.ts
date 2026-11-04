@@ -31,6 +31,7 @@ export const PAGE_HEADS = {
   "earn/kalshi": { title: "Earn: Kalshi · Price Chat", description: "Watch Kiwi's Kalshi bot scan every market against Kalshi's fees, and follow your own Kalshi positions marked at the current bid after Kalshi's fees." },
   learn: { title: "Beginner content · Price Chat", description: "Exclusive beginner lessons for Kiwi Chicks and above." },
   vpn: { title: "Kiwi VPN · Price Chat", description: "A private WireGuard VPN for Kiwi Passport members. No traffic logs." },
+  "vpn/privacy": { title: "Kiwi VPN Privacy · Price Chat", description: "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions." },
   "website/privacy": { title: "Privacy · Price Chat", description: "How Price Chat handles member data, connected accounts and Kiwi XP." },
   "website/terms": { title: "Terms · Price Chat", description: "The rules of the Price Chat community and Kiwi XP." },
   "website/disclaimer": { title: "Disclaimer · Price Chat", description: "Price Chat content is for information and entertainment." },

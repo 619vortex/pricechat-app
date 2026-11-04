@@ -50,6 +50,10 @@
    "title": "Kiwi VPN · Price Chat",
    "description": "A private WireGuard VPN for Kiwi Passport members. No traffic logs."
   },
+  "vpn/privacy": {
+    "title": "Kiwi VPN Privacy · Price Chat",
+    "description": "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions."
+  },
   "website/privacy": {
    "title": "Privacy · Price Chat",
    "description": "How Price Chat handles member data, connected accounts and Kiwi XP."

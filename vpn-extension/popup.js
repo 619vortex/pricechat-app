@@ -1,5 +1,5 @@
 // The popup only shows state and asks the service worker to act. It never sees the proxy password.
-import { SIGN_IN_URL, browserServers, bytes, flag, pickServer, refusal } from "./lib.js";
+import { PRIVACY_URL, SIGN_IN_URL, browserServers, bytes, flag, pickServer, refusal } from "./lib.js";
 
 const app = document.getElementById("app");
 const POWER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>`;
@@ -62,6 +62,7 @@ function view(s) {
       el("span", {}, el("b", {}, bytes(used?.used_bytes ?? 0)), used?.cap_bytes ? ` of ${bytes(used.cap_bytes)} this month` : " this month"),
       s.exitIp && s.on ? el("span", {}, "IP ", el("b", {}, s.exitIp)) : null),
     el("p", { class: "note" }, "Covers this browser only, not other apps. Use the WireGuard app for your whole device."),
+    el("p", { class: "note" }, "While on, this browser's traffic goes through Kiwi VPN's server. We don't log the sites you visit."),
     el("button", { class: "link", onclick: () => { if (confirm("Switch off and remove this browser from your account?")) void act("forget"); } }, "Remove this browser"),
   ];
 }
@@ -97,7 +98,7 @@ async function render() {
   let s;
   try { s = await ask("state"); }
   catch (e) { app.replaceChildren(el("p", { class: "error" }, e.message)); return; }
-  app.replaceChildren(head(s), ...view(s).filter(Boolean));
+  app.replaceChildren(head(s), ...view(s).filter(Boolean), el("a", { class: "link", href: PRIVACY_URL, target: "_blank", rel: "noopener" }, "Privacy policy"));
 }
 
 void render();

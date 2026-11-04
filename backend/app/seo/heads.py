@@ -32,6 +32,7 @@ PAGES: dict[str, tuple[str, str]] = {
     "earn/kalshi": ("Earn: Kalshi · Price Chat", "Watch Kiwi's Kalshi bot scan every market against Kalshi's fees, and follow your own Kalshi positions marked at the current bid after Kalshi's fees."),
     "learn": ("Beginner content · Price Chat", "Exclusive beginner lessons for Kiwi Chicks and above."),
     "vpn": ("Kiwi VPN · Price Chat", "A private WireGuard VPN for Kiwi Passport members. No traffic logs."),
+    "vpn/privacy": ("Kiwi VPN Privacy · Price Chat", "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions."),
     "website/privacy": ("Privacy · Price Chat", "How Price Chat handles member data, connected accounts and Kiwi XP."),
     "website/terms": ("Terms · Price Chat", "The rules of the Price Chat community and Kiwi XP."),
     "website/disclaimer": ("Disclaimer · Price Chat", "Price Chat content is for information and entertainment."),

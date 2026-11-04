@@ -1,3 +1,16 @@
+/** Official listing addresses, filled in only once a store has approved the extension: an empty one shows no store link. */
+export const STORE_LINKS: { chrome: string; edge: string } = { chrome: "", edge: "" };
+
+export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
+
+/** Which install button to put first. Edge's and Opera's agents also say Chrome, so they're ruled out first. */
+export function visitorBrowser(agent: string): VisitorBrowser {
+  if (/Android|iPhone|iPad|Mobile/i.test(agent)) return "phone";
+  if (/\bEdg\//.test(agent)) return "edge";
+  if (/\b(OPR|Vivaldi|YaBrowser|SamsungBrowser)\//.test(agent)) return "other";
+  return /\bChrome\//.test(agent) ? "chrome" : "other";
+}
+
 /** A device's WireGuard config, shown once: its QR code and its .conf download. Used by the member page and by Admin. */
 
 export async function configQr(config: string): Promise<string> {

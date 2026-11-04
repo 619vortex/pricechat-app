@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VpnPage, ago, bytes, flag, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
+import { BrowserCard, VpnPage, ago, bytes, flag, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
+import { STORE_LINKS, visitorBrowser } from "./vpnConfig";
 
 /** TEST FIXTURES only: a fake Kiwi VPN API. No real config, keys or servers. */
 const HOME = { sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
@@ -73,7 +74,47 @@ describe("Free while payments are off", () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: null, servers: [{ ...SERVERS[0], browser: true }] })] });
     view = render(<VpnPage />);
     await settle();
-    expect(screen.getByRole("link", { name: "Download the extension" }).getAttribute("href")).toBe("/downloads/kiwi-vpn-extension.zip");
+    expect(screen.getByRole("link", { name: "Download the ZIP" }).getAttribute("href")).toBe("/downloads/kiwi-vpn-extension.zip");
+  });
+
+  const EDGE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0";
+  const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
+  const PHONE = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36";
+
+  it("tells the browsers apart", () => {
+    expect(visitorBrowser(EDGE)).toBe("edge");
+    expect(visitorBrowser(CHROME)).toBe("chrome");
+    expect(visitorBrowser(PHONE)).toBe("phone");
+    expect(visitorBrowser("Mozilla/5.0 (Windows NT 10.0; rv:130.0) Gecko/20100101 Firefox/130.0")).toBe("other");
+    expect(visitorBrowser(`${CHROME} OPR/110.0.0.0`)).toBe("other");
+  });
+
+  it("makes no store link before approval, and labels the manual install", () => {
+    const { container } = render(<BrowserCard agent={CHROME} />);
+    expect([...container.querySelectorAll("a")].filter((a) => /chromewebstore|microsoftedge/.test(a.href))).toHaveLength(0);
+    expect(container.querySelector(".vpn-store.is-mine")?.textContent).toMatch(/Add to Chrome.*Your browser.*Not in the Chrome Web Store yet/);
+    expect(screen.getByText("Manual install, for testers")).toBeTruthy();
+  });
+
+  it("puts the visitor's own store first, links it once approved, and drops the manual install", () => {
+    Object.assign(STORE_LINKS, { chrome: "https://chromewebstore.google.com/detail/test", edge: "https://microsoftedge.microsoft.com/addons/detail/test" });
+    try {
+      const { container } = render(<BrowserCard agent={EDGE} />);
+      const links = [...container.querySelectorAll<HTMLAnchorElement>("a.vpn-store")];
+      expect(links.map((a) => a.textContent)).toEqual(["Get for EdgeYour browser", "Add to Chrome"]);
+      expect(links[0].href).toBe(STORE_LINKS.edge);
+      expect(links[0].className).not.toMatch(/is-ghost/);
+      expect(links[1].className).toMatch(/is-ghost/);
+      expect(screen.queryByText("Manual install, for testers")).toBeNull();
+    } finally {
+      Object.assign(STORE_LINKS, { chrome: "", edge: "" });
+    }
+  });
+
+  it("sends phones to WireGuard, with no manual install", () => {
+    render(<BrowserCard agent={PHONE} />);
+    expect(screen.getByText(/On a phone, use the WireGuard app/)).toBeTruthy();
+    expect(screen.queryByText("Manual install, for testers")).toBeNull();
   });
 
   it("stays coming soon while closed, however it's priced", async () => {

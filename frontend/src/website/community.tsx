@@ -296,7 +296,7 @@ export function LeaderboardPage() {
 
 // --- legal (draft) ----------------------------------------------------------------------------------------------
 
-type LegalKind = "privacy" | "terms" | "disclaimer" | "contact";
+type LegalKind = "privacy" | "vpnprivacy" | "terms" | "disclaimer" | "contact";
 
 const LEGAL: Record<LegalKind, { title: string; description: string; sections: [string, string[]][] }> = {
   privacy: {
@@ -328,6 +328,42 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ["Questions", ["Message us on Telegram or X (see Contact)."]],
     ],
   },
+  vpnprivacy: {
+    title: "Kiwi VPN privacy",
+    description: "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions.",
+    sections: [
+      ["The short version", [
+        "Kiwi VPN is run by Price Chat. It carries your traffic so websites see our server's address instead of yours. We don't record the sites you visit, and we don't sell your data or use it for advertising.",
+      ]],
+      ["What we keep", [
+        "Your account: your Kiwi Passport member id, or a one-way fingerprint of your key if you use an anonymous key. Your Price Chat privacy page covers the Passport itself.",
+        "For each browser using the extension: a random login for one server. We keep only a one-way fingerprint of its password, and the password itself stays in your browser's extension storage.",
+        "For each WireGuard device: the name you gave it, its public key and the private address we assigned it.",
+        "Usage: how many bytes each login or device used this month, and when it was last active. We use this to show you your usage, apply any monthly limit and keep the service fair.",
+        "If payments are switched on and you pay: the amount, date and status of each payment. Payment providers handle the payment itself.",
+      ]],
+      ["What we don't keep", [
+        "We don't log the websites or addresses you visit, your DNS lookups or the content of your traffic, and we don't keep a per-connection history of your use.",
+        "Your traffic does pass through our server while the VPN is on, and it has to read the destination to carry it there. Pages on https stay encrypted between your browser and the website. Pages on plain http aren't encrypted beyond our server, as with any VPN.",
+        "Our server's ordinary system and firewall logs can record connection attempts to the server, including IP addresses. We use them only for security, and the system rotates them away.",
+      ]],
+      ["The browser extension", [
+        "While switched on, it sends that browser's traffic through the server you chose, except pricechat.live and addresses on your own network. It doesn't cover other apps. If you switch it off, disable it or remove it, your browser goes back to its normal connection.",
+        "Proxy: to send traffic through the server. Web requests and access to all sites: to answer the server's password request on any page you open, and to check the connection is working. It doesn't read or change the pages you visit. Privacy: to stop WebRTC revealing your real address while on. Storage: to remember your on/off state, server and login on your device.",
+        "It uses your Kiwi Passport sign-in on pricechat.live to get its login. It has no ads or analytics and loads no code from outside its package.",
+        "The use of information received through the extension is limited to providing this feature, in line with the Limited Use requirements of the Chrome Web Store User Data Policy and the Microsoft Edge Add-ons developer policies.",
+      ]],
+      ["Who else is involved", [
+        "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). WireGuard devices look up addresses through Cloudflare's public DNS unless the server blocks ads. These companies provide infrastructure for us; we don't send them your data for their own use.",
+        "We'd only share data beyond this if the law requires it, and we can only share what's listed above.",
+      ]],
+      ["How long, and your controls", [
+        "In the extension, Remove this browser deletes its login straight away. On the Kiwi VPN page you can revoke any device.",
+        "If your access ends, your devices are switched off and removed after 30 days. Deleting your Price Chat account removes your Kiwi VPN account, devices and browser logins with it.",
+      ]],
+      ["Changes and questions", ["We'll update this page if any of this changes. To ask about it, message us on Telegram or X (see Contact)."]],
+    ],
+  },
   terms: {
     title: "Terms",
     description: "The rules of the Price Chat community and Kiwi XP.",
@@ -339,6 +375,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "Ranks can't be bought. Any future paid perks will be kept separate from community rank.",
       ]],
       ["Community conduct", ["Be respectful. No spam, scams, impersonation, harassment or automated activity. Accounts that break the rules may be suspended or closed."]],
+      ["Kiwi VPN", ["Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk. It's provided as is, without a promise that it will always be available."]],
       ["Changes", ["We may update these terms as the community grows. Material changes will be announced."]],
     ],
   },
@@ -370,7 +407,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
   return (
-    <SitePage {...pageHead(`website/${kind}`)}>
+    <SitePage {...pageHead(kind === "vpnprivacy" ? "vpn/privacy" : `website/${kind}`)}>
       <article className="site-legal site-reveal">
         <p className="site-draft" role="note">
           Draft: this page has not had final legal review yet.

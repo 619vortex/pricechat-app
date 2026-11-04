@@ -2,6 +2,7 @@
 
 export const API = "https://pricechat.live/api/members/vpn";
 export const SIGN_IN_URL = "https://pricechat.live/join";
+export const PRIVACY_URL = "https://pricechat.live/vpn/privacy";
 export const CHECK_URL = "http://check.kiwi-vpn.invalid/"; // answered by the proxy itself: proves traffic really goes through it
 // The account API stays reachable when the proxy is down, so the extension can say what's wrong and get a new login.
 export const BYPASS = ["<local>", "pricechat.live"];

@@ -23,8 +23,8 @@ The second runs the real extension in a real browser through the real proxy, wit
 
 ## Building the download
 
-`python vpn-extension/build.py` writes `frontend/public/downloads/kiwi-vpn-extension.zip`. Run it after changing the extension, and bump `version` in `manifest.json`.
+`python vpn-extension/build.py` writes the testers' `frontend/public/downloads/kiwi-vpn-extension.zip` and the store packages in `vpn-extension/store/dist/`. Run it after changing the extension, and bump `version` in `manifest.json`.
 
 ## Publishing
 
-Testers install the zip with "Load unpacked". For the Chrome Web Store and Edge Add-ons you need your own developer accounts. A store listing gets its own extension id: add `chrome-extension://<id>` to `VPN_EXTENSION_ORIGINS` on the backend, or the extension's sign-in requests are refused.
+Everything for the listings is in `store/`: `LISTING.md` has the text and form answers, `assets/` the images, `dist/` the packages. Each store gives its own extension id at the first upload: add every `chrome-extension://<id>` to `VPN_EXTENSION_ORIGINS` on the backend (keep the testers' one), or sign-in from that install is refused. Put the approved listing addresses in `STORE_LINKS` in `frontend/src/website/vpnConfig.ts`; the buttons on /vpn follow it.

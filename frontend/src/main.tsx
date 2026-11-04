@@ -61,6 +61,7 @@ function PublicSite() {
         <Route path="trading-bot" element={page(<TradingBotPage />)} />
         <Route path="learn" element={page(<LearnPage />)} />
         <Route path="vpn" element={page(<VpnPage />)} />
+        <Route path="vpn/privacy" element={page(<LegalPage kind="vpnprivacy" />)} />
         <Route path="arena" element={<Navigate to="/passport#realm" replace />} />
         <Route path="realm" element={<Navigate to="/passport#realm" replace />} />
         <Route path="pokemon/*" element={page(<PublicMarket />)} />
