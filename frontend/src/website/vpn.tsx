@@ -4,8 +4,8 @@ import { SitePage } from "./community";
 import { reducedMotion } from "./motion";
 import { pageHead } from "./seo";
 import { site } from "./websiteData";
-import { STORE_LINKS, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
-import { AndroidIcon, AppleIcon, BraveIcon, ChromeIcon, EdgeIcon, FirefoxIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
+import { PLAN, STORE_LINKS, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
+import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
 import "./vpn.css";
@@ -100,12 +100,10 @@ function saveKey(k: string | null): void { try { if (k) sessionStorage.setItem(K
 type Visitor = { visitor: true; enabled: boolean; test_mode?: boolean; trial?: boolean; free?: boolean; billing: VpnBilling | null };
 type Loaded = VpnState | { error: string; status: number } | Visitor;
 
-export function VpnPage() {
+/** The account behind both pages: a Passport session or an anonymous key, whichever this tab has. */
+function useVpnAccount() {
   const [key, setKeyState] = useState<string | null>(readKey);
-  const [fresh, setFresh] = useState<string | null>(null);  // a key just made: shown once, before anything else
   const [state, setState] = useState<Loaded | null>(null);
-  const [stats, setStats] = useState<VpnStats | "unavailable" | null>(null);
-  const [picked, setPicked] = useState<number | null>(null);  // a location chosen in Global Network, for the next new device
   const setKey = useCallback((k: string | null) => { saveKey(k); setKeyState(k); }, []);
   const load = useCallback(async () => {
     try { setState(await callFor(key)<VpnState>("")); }
@@ -119,10 +117,31 @@ export function VpnPage() {
     }
   }, [key, setKey]);
   useEffect(() => { void load(); }, [load]);
+  return { key, setKey, state, setState, load };
+}
+
+function TestModeNote({ paid }: { paid: boolean }) {
+  return <p className="vpn-testmode" role="status"><b>Test mode</b> Kiwi VPN is closed to everyone else. You see this because you're signed in to Admin.{paid ? " Payments here are real." : ""}</p>;
+}
+
+function Gate({ error, status }: { error: string; status: number }) {
+  return (
+    <div className="vpn-gate">
+      <p>{error}</p>
+      <a className="site-button" href={status === 401 ? "/join" : "/passport"}>{status === 401 ? "Sign in" : "Back to your Passport"}</a>
+    </div>
+  );
+}
+
+export function VpnPage() {
+  const { key, setKey, state, setState, load } = useVpnAccount();
+  const [fresh, setFresh] = useState<string | null>(null);  // a key just made: shown once, before anything else
+  const [stats, setStats] = useState<VpnStats | "unavailable" | null>(null);
   useEffect(() => {
     memberApi<VpnStats>("/members/vpn/stats").then(setStats).catch(() => setStats("unavailable"));
   }, []);
   const member = state && "eligible" in state ? state : null;
+  const visitor = state && "visitor" in state ? state : null;
   const open = !!state && "enabled" in state && state.enabled;
   const paid = open && !!state && "billing" in state && !!state.billing;
   const free = freeForAll(state);
@@ -131,32 +150,69 @@ export function VpnPage() {
     <SitePage {...pageHead("vpn")}>
       <div className="vpn">
         <Hero state={state} servers={list ?? []} onStarted={setState} />
-        {state && "test_mode" in state && state.test_mode && (
-          <p className="vpn-testmode" role="status"><b>Test mode</b> Kiwi VPN is closed to everyone else. You see this because you're signed in to Admin.{paid ? " Payments here are real." : ""}</p>
-        )}
-        {fresh ? <KeyOnce k={fresh} onDone={() => { setKey(fresh); setFresh(null); }} />
-          : !state ? <MySkeleton />
-          : "visitor" in state ? (
-            !state.enabled ? <Soon /> : state.billing ? <Choose billing={state.billing} onKey={setKey} onFresh={setFresh} /> : <FreeStart onKey={setKey} trial={!!state.trial} />
-          ) : "error" in state ? (
-            <div className="vpn-gate">
-              <p>{state.error}</p>
-              <a className="site-button" href={state.status === 401 ? "/join" : "/passport"}>{state.status === 401 ? "Sign in" : "Back to your Passport"}</a>
-            </div>
-          ) : !state.enabled ? <Soon /> : (
-            <CallCtx.Provider value={callFor(key)}>
-              {state.anonymous && <p className="vpn-keybar">Using your anonymous key. <button className="vpn-link" onClick={() => { setKey(null); setState(null); }}>Forget it on this browser</button></p>}
-              <MyVpn s={state} onStarted={setState} />
-              {state.eligible && <Unlocked s={state} reload={load} picked={picked} />}
-              <AddTime s={state} reload={load} />
-            </CallCtx.Provider>
-          )}
-        <Downloads testers={!!member?.enabled && member.servers.some((x) => x.browser)} canAdd={!!member?.eligible} />
-        <Network member={member} stats={stats} list={list} picked={picked} onPick={setPicked} />
-        <WhyKiwi />
+        {state && "test_mode" in state && state.test_mode && <TestModeNote paid={paid} />}
+        {fresh && <KeyOnce k={fresh} onDone={() => { setKey(fresh); setFresh(null); }} />}
+        {state && "error" in state && <Gate error={state.error} status={state.status} />}
         {!free && <Plans state={state} onStarted={setState} />}
+        {!fresh && visitor?.enabled && (visitor.billing ? <Choose billing={visitor.billing} onKey={setKey} onFresh={setFresh} /> : <FreeStart onKey={setKey} trial={!!visitor.trial} />)}
+        <Downloads testers={!!member?.enabled && member.servers.some((x) => x.browser)} />
+        {!state ? <MySkeleton /> : member?.enabled && !fresh && (
+          <CallCtx.Provider value={callFor(key)}>
+            <section className="vpn-account" aria-label="Your account">
+              {member.anonymous && <p className="vpn-keybar">Using your anonymous key. <button className="vpn-link" onClick={() => { setKey(null); setState(null); }}>Forget it on this browser</button></p>}
+              <MyVpn s={member} onStarted={setState} />
+              <PausedNote s={member} />
+              <AddTime s={member} reload={load} />
+            </section>
+          </CallCtx.Provider>
+        )}
+        <Network stats={stats} list={list} />
         <RoyalKiwi member={member} />
         <Faq member={member} free={free} paid={paid} />
+      </div>
+    </SitePage>
+  );
+}
+
+/** Account > My Devices: everything about individual devices, including the manual route. The apps won't need any of it: signing in will set a device up. */
+export function VpnDevicesPage() {
+  const { key, setKey, state, load } = useVpnAccount();
+  const [typed, setTyped] = useState("");
+  const member = state && "eligible" in state ? state : null;
+  useEffect(() => { if (state && location.hash === "#manual") reveal("vpn-manual"); }, [state === null]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const paid = !!state && "billing" in state && !!state.billing;
+  return (
+    <SitePage title="My Devices · Kiwi VPN" description="Your Kiwi VPN devices and manual setup." path="/vpn/devices" noindex>
+      <div className="vpn vpn-devpage">
+        <nav className="vpn-crumbs" aria-label="Breadcrumb"><a href="/passport">Account</a><i aria-hidden>/</i><a href="/vpn">Kiwi VPN</a><i aria-hidden>/</i><span aria-current="page">My Devices</span></nav>
+        <header className="vpn-head">
+          <h1>My Devices</h1>
+          {member?.enabled && <p className="vpn-head-sub">{member.devices.length} of {member.max_devices} in use. The Kiwi VPN apps will set themselves up when you sign in, so you won't need to add them here.</p>}
+        </header>
+        {state && "test_mode" in state && state.test_mode && <TestModeNote paid={paid} />}
+        {!state ? <MySkeleton />
+          : "error" in state ? <Gate error={state.error} status={state.status} />
+          : !state.enabled ? <Soon />
+          : "visitor" in state ? (
+            <section className="vpn-card vpn-start" aria-labelledby="vpn-devs-in">
+              <h2 id="vpn-devs-in">Sign in to see your devices</h2>
+              <a className="site-button" href="/join">Sign in</a>
+              <details className="vpn-havekey">
+                <summary>I have a key</summary>
+                <form className="vpn-form" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) setKey(typed.trim()); }}>
+                  <label className="site-field"><span>Your key</span>
+                    <input value={typed} autoComplete="off" spellCheck={false} placeholder="KIWI-XXXX-…" onChange={(e) => setTyped(e.target.value)} /></label>
+                  <button className="site-button is-ghost" type="submit" disabled={!typed.trim()}>Use my key</button>
+                </form>
+              </details>
+            </section>
+          ) : (
+            <CallCtx.Provider value={callFor(key)}>
+              <PausedNote s={state} />
+              <Unlocked s={state} reload={load} />
+            </CallCtx.Provider>
+          )}
+        {state && !("error" in state) && state.enabled && !(member && member.enabled) && <ManualSetup form={null} />}
       </div>
     </SitePage>
   );
@@ -212,10 +268,9 @@ function useTrial(onStarted: (s: VpnState) => void) {
   return { busy, err, start };
 }
 
-const TRUST: { text: string; href?: string; paid?: boolean }[] = [
-  { text: "The sites you visit aren't logged", href: "/vpn/privacy" },
-  { text: "We never keep your device's private key" },
-  { text: "Renewal is by hand, never automatic", paid: true },
+const TRUST: { text: string; href?: string }[] = [
+  { text: "We don't log the sites you visit", href: "/vpn/privacy" },
+  { text: "We don't store your device's private key" },
 ];
 
 function Hero({ state, servers, onStarted }: { state: Loaded | null; servers: MapServer[]; onStarted: (s: VpnState) => void }) {
@@ -228,8 +283,7 @@ function Hero({ state, servers, onStarted }: { state: Loaded | null; servers: Ma
   const billing = open && state && "billing" in state ? state.billing : null;
   const primary = member?.trial?.available ? <button className="site-button is-go" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : trialLabel}</button>
     : visitor?.trial && open ? <a className="site-button is-go" href="/join">{trialLabel}</a>
-    : billing && visitor ? <button className="site-button is-go" onClick={() => reveal("vpn-get")}>Get Kiwi VPN</button>
-    : billing && member && !member.eligible ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>Get Kiwi VPN</button>
+    : billing && member && !member.eligible ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>Add Time</button>
     : null;
   const closed = !!state && !open && !("error" in state);
   return (
@@ -237,15 +291,15 @@ function Hero({ state, servers, onStarted }: { state: Loaded | null; servers: Ma
       <div className="vpn-hero-text">
         <p className="vpn-brand"><img src={site.kiwi.src} width={24} height={20} alt="" />Kiwi VPN {open && free && <span className="vpn-pill is-free">Free while we test</span>}</p>
         <h1>Your internet. <em>Your rules.</em></h1>
-        <p className="vpn-hero-lead">Sites see our server's address instead of yours, and your connection is encrypted on its way there. Use it in your browser or on your whole device.</p>
+        <p className="vpn-hero-lead">Sites see our server's address instead of yours, and your connection is encrypted on its way there.</p>
         <div className="vpn-hero-actions">
           {primary}
+          <a className={primary ? "site-button is-ghost" : "site-button is-go"} href="#vpn-downloads">Get Kiwi VPN</a>
           {closed && <span className="vpn-opening" role="status"><i />Opening soon</span>}
-          <a className={primary || closed ? "site-button is-ghost" : "site-button is-go"} href="#vpn-downloads">Explore Apps</a>
         </div>
         {err && <p className="site-error" role="alert">{err}</p>}
         <ul className="vpn-trust">
-          {TRUST.filter((t) => !t.paid || !free).map((t) => (
+          {TRUST.map((t) => (
             <li key={t.text}><Tick />{t.href ? <a href={t.href}>{t.text}</a> : t.text}</li>
           ))}
         </ul>
@@ -299,14 +353,13 @@ function Crown() {
 
 const LIVE_MS = 10 * 60_000;  // the server reads handshakes every 5 minutes
 
-/** One place for the account: plan, time, devices, data, location and the one thing to do next. There's no Connect button: a web page can't control a tunnel. */
+/** The account in one compact line: plan, time, devices, data and the one thing to do next. There's no Connect button: a web page can't control a tunnel. */
 function MyVpn({ s, onStarted }: { s: VpnState; onStarted: (s: VpnState) => void }) {
   const { busy, err, start } = useTrial(onStarted);
   const plan = planOf(s);
   const used = s.usage?.used_bytes ?? 0;
   const cap = s.usage?.cap_bytes ?? 0;
   const live = s.devices.filter((d) => d.last_handshake && Date.now() - new Date(d.last_handshake).getTime() < LIVE_MS).length;
-  const places = [...new Map(s.devices.flatMap((d) => s.servers.filter((x) => x.id === d.server_id)).map((x) => [x.id, x])).values()];
   const detail = plan.kind === "royal" ? "No expiry while you keep your rank."
     : plan.kind === "free" ? "Free for everyone during testing."
     : plan.kind === "owner" ? "Made in Admin."
@@ -336,19 +389,13 @@ function MyVpn({ s, onStarted }: { s: VpnState; onStarted: (s: VpnState) => void
           <dd>{bytes(used)}</dd>
           {s.usage && cap > 0 ? <UsageMeter u={s.usage} /> : <small>This month · no limit</small>}
         </div>
-        <div>
-          <dt>Location</dt>
-          {places.length ? <dd className="vpn-fact-place"><Flag cc={places[0].country_code} />{place(places[0]).city || place(places[0]).country}{places.length > 1 && <small> +{places.length - 1}</small>}</dd> : <dd className="is-none">Not chosen</dd>}
-          <small>{places.length ? "From your devices" : "You pick it for each device"}</small>
-        </div>
       </dl>
       <div className="vpn-my-next">
         {s.trial?.available ? <button className="site-button is-go" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : `Start Free Trial — ${s.trial.days} Days`}</button>
-          : s.eligible ? <button className="site-button is-go" onClick={() => reveal("vpn-manage")}>{s.devices.length ? "Manage Devices" : "Add Your First Device"}</button>
-          : s.billing && !["royal", "owner", "blocked"].includes(plan.kind) ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>Get Kiwi VPN</button>
+          : !s.eligible && s.billing && !["royal", "owner", "blocked"].includes(plan.kind) ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>Add Time</button>
           : null}
         {s.eligible && s.billing && !["royal", "owner"].includes(plan.kind) && <button className="vpn-textlink" onClick={() => reveal("vpn-time")}>Add time</button>}
-        {!s.eligible || !s.devices.length ? <a className="vpn-textlink" href="#vpn-downloads">See the apps</a> : null}
+        <a className="vpn-textlink" href="/vpn/devices">My Devices</a>
         {hint && <small>{hint}</small>}
         {err && <p className="site-error" role="alert">{err}</p>}
       </div>
@@ -356,14 +403,7 @@ function MyVpn({ s, onStarted }: { s: VpnState; onStarted: (s: VpnState) => void
   );
 }
 
-const STORE_ROWS = [
-  { key: "chrome", name: "Google Chrome", action: "Add to Chrome", Icon: ChromeIcon },
-  { key: "edge", name: "Microsoft Edge", action: "Get for Edge", Icon: EdgeIcon },
-  { key: "firefox", name: "Mozilla Firefox", action: "Add to Firefox", Icon: FirefoxIcon },
-  { key: "brave", name: "Brave", action: "Add to Brave", Icon: BraveIcon },
-] as const;
-
-/** The official WireGuard app for each system: manual setup only. No Kiwi VPN device app is released yet, so none of these says Available. */
+/** The official WireGuard app for each system: manual setup only. */
 const DEVICE_ROWS = [
   { name: "Windows", href: "https://www.wireguard.com/install/", Icon: WindowsIcon },
   { name: "macOS", href: "https://apps.apple.com/us/app/wireguard/id1451685025", Icon: AppleIcon },
@@ -372,139 +412,100 @@ const DEVICE_ROWS = [
   { name: "iOS", href: "https://apps.apple.com/us/app/wireguard/id1441195209", Icon: AppleIcon },
 ];
 
-/** What each kind of app covers, drawn: every row lit for a device, one for a browser. */
-function Coverage({ whole }: { whole: boolean }) {
-  const rows = whole ? ["Browser", "Apps", "Games", "Updates"] : ["This browser", "Other browsers", "Apps", "Games"];
+function AppCard({ icons, name, text, status, on = false, mine, children }: { icons: React.ReactNode; name: string; text: string; status: string; on?: boolean; mine?: string | null; children?: React.ReactNode }) {
   return (
-    <ul className="vpn-cover" aria-hidden>
-      {rows.map((r, i) => <li key={r} className={whole || i === 0 ? "is-on" : ""}><i />{r}</li>)}
-    </ul>
+    <li className={`vpn-app${mine ? " is-mine" : ""}`}>
+      <span className="vpn-app-icons">{icons}</span>
+      <h3>{name}{mine && <small className="vpn-yours">{mine}</small>}</h3>
+      <p>{text}</p>
+      <div className="vpn-app-foot">
+        <span className={`vpn-status${on ? " is-on" : ""}`}>{status}</span>
+        {children}
+      </div>
+    </li>
   );
 }
 
-/** Available means a real, working link. Anything else says Coming Soon. Today's whole-device route, the WireGuard app, is one level down in Manual Setup. */
-export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTouchPoints, testers = false, canAdd = false }: { agent?: string; touch?: number; /** the tester ZIP: a signed-in member, with a server that takes it */ testers?: boolean; canAdd?: boolean }) {
+/** Available means a real, working store link. Anything else says so plainly and offers only the manual route. Nothing here is a download until it exists. */
+export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTouchPoints, testers = false }: { agent?: string; touch?: number; /** the tester ZIP: a signed-in member, with a server that takes it */ testers?: boolean }) {
   const browser = visitorBrowser(agent);
   const os = visitorOs(agent, touch);
-  const [picked, setPicked] = useState<string | null>(null);
   const [zip, setZip] = useState(false);
-  const manual = (name: string) => { setPicked(name); reveal("vpn-manual"); };
-  const WindowsRow = DEVICE_ROWS[0];
+  const stores = [
+    { key: "chrome", href: STORE_LINKS.chrome, action: "Add to Chrome" },
+    { key: "edge", href: STORE_LINKS.edge, action: "Get for Edge" },
+  ].filter((x) => x.href);
+  const manual = (name: string) => <a className="vpn-textlink" aria-label={`Manual setup for ${name}`} href="/vpn/devices#manual">Manual setup</a>;
   return (
     <section id="vpn-downloads" className="vpn-band vpn-downloads site-reveal" aria-labelledby="vpn-download">
-      <SectionHead id="vpn-download" kicker="Apps" title="Download Kiwi VPN" sub="One account. Choose how much you want covered." />
-      <div className="vpn-dl">
-        <div className="vpn-dl-col is-device">
-          <header className="vpn-dl-head">
-            <div>
-              <h3>Kiwi VPN for Your Device</h3>
-              <p>Covers every app on the device, not just your browser.</p>
-            </div>
-            <Coverage whole />
-          </header>
-          <article className={`vpn-star${os === "Windows" ? " is-mine" : ""}`}>
-            <WindowsRow.Icon className="vpn-star-logo" />
-            <div className="vpn-star-text">
-              <p className="vpn-star-tag"><i />In development{os === "Windows" && <small className="vpn-yours">Your device</small>}</p>
-              <h4>Kiwi VPN for Windows</h4>
-              <p>Our first native desktop app. Sign in with your Price Chat account, pick a location and switch it on, with no files to handle.</p>
-              <div className="vpn-star-foot">
-                <span className="vpn-status">Coming Soon</span>
-                <button className="vpn-textlink" onClick={() => manual("Windows")}>Use it today with manual setup</button>
-              </div>
-            </div>
-          </article>
-          <ul className="vpn-os">
-            {DEVICE_ROWS.slice(1).map(({ name, Icon }) => (
-              <li key={name} className={os === name ? "is-mine" : ""}>
-                <Icon className="vpn-picon" />
-                <span className="vpn-platform-name"><b>{name}</b>{os === name && <small className="vpn-yours">Your device</small>}</span>
-                <span className="vpn-os-go">
-                  <span className="vpn-status">Coming Soon</span>
-                  <button className="vpn-textlink" aria-label={`Manual setup for ${name}`} onClick={() => manual(name)}>Manual setup</button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="vpn-dl-col is-browser">
-          <header className="vpn-dl-head">
-            <div>
-              <h3>Kiwi VPN for Your Browser</h3>
-              <p>One switch that covers that browser only. Other apps keep your normal connection.</p>
-            </div>
-            <Coverage whole={false} />
-          </header>
-          <ul className="vpn-platforms">
-            {STORE_ROWS.map(({ key, name, action, Icon }) => {
-              const href = STORE_LINKS[key];
-              return (
-                <li key={key} className={`vpn-platform${browser === key ? " is-mine" : ""}`}>
-                  <Icon className="vpn-picon" />
-                  <span className="vpn-platform-name"><b>{name}</b>{browser === key && <small className="vpn-yours">Your browser</small>}</span>
-                  {href ? <span className="vpn-platform-go"><span className="vpn-status is-on">Available</span>
-                    <a className="site-button is-small" href={href} target="_blank" rel="noopener noreferrer">{action}</a></span>
-                    : <span className="vpn-status">Coming Soon</span>}
-                </li>
-              );
-            })}
-          </ul>
-          <p className="vpn-note">Each extension appears here with an install button once its store has approved it.</p>
-          {browser === "phone" && <p className="vpn-note">Browser extensions need a computer. On a phone, use Manual Setup below.</p>}
-          {testers && (!STORE_LINKS.chrome || !STORE_LINKS.edge) && browser !== "phone" && (
-            <details className="vpn-fold is-small">
-              <summary>Manual install, for testers (Chrome and Edge)</summary>
-              <div className="vpn-fold-body">
-                <p className="site-muted">This isn't the store version. It needs Developer mode, and it won't update by itself.</p>
-                <a className="site-button is-ghost is-small" href="/downloads/kiwi-vpn-extension.zip" download onClick={() => setZip(true)}>Download the ZIP</a>
-                {zip && <p className="vpn-done" role="status"><Tick />Your download should start now. Then follow these steps.</p>}
-                <ol className="vpn-steps">
-                  <li>Unzip it somewhere you'll keep it.</li>
-                  <li>Open <b>chrome://extensions</b> or <b>edge://extensions</b> and turn on <b>Developer mode</b>.</li>
-                  <li>Click <b>Load unpacked</b> and pick the <b>kiwi-vpn-extension</b> folder.</li>
-                  <li>Click the Kiwi VPN icon and press the switch.</li>
-                </ol>
-              </div>
-            </details>
-          )}
-        </div>
-      </div>
-      <details id="vpn-manual" className="vpn-fold">
-        <summary><WireGuardIcon className="vpn-fold-icon" /><span>Advanced / Manual Setup<small>Connect a whole device today with the free WireGuard app.</small></span></summary>
-        <div className="vpn-fold-body">
-          <ol className="vpn-manual-steps">
-            <li>
-              <b>Install the WireGuard app</b>
-              <span>It's free and official, made by the WireGuard project.</span>
-              <div className="vpn-wg">
-                {DEVICE_ROWS.map(({ name, href, Icon }) => (
-                  <a key={name} className={picked === name ? "is-picked" : ""} href={href} target="_blank" rel="noopener noreferrer" aria-label={`WireGuard Setup for ${name}`}><Icon className="vpn-picon" />{name}</a>
-                ))}
-              </div>
-            </li>
-            <li>
-              <b>Add a device to your Kiwi VPN</b>
-              <span>You name it and pick a location, and get a QR code and a file. Save them: you only see them once.</span>
-              {canAdd ? <button className="vpn-textlink" onClick={() => reveal("vpn-manage")}>Go to my devices</button> : null}
-            </li>
-            <li>
-              <b>Import it and switch on</b>
-              <span>Scan the QR code on a phone, or import the file on a computer.</span>
-            </li>
-          </ol>
-        </div>
-      </details>
+      <SectionHead id="vpn-download" kicker="Apps" title="Get Kiwi VPN" />
+      <ul className="vpn-apps">
+        <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC. Sign in and connect, with no files to handle." status="In development" mine={os === "Windows" ? "Your device" : null}>{manual("Windows")}</AppCard>
+        <AppCard icons={<><ChromeIcon className="vpn-app-icon" /><EdgeIcon className="vpn-app-icon" /></>} name="Browser extension" text="For Chrome and Edge. Covers that browser only." status={stores.length ? "Available" : "Coming soon"} on={stores.length > 0} mine={browser === "chrome" || browser === "edge" ? "Your browser" : null}>
+          {stores.map((x) => <a key={x.key} className="site-button is-small" href={x.href} target="_blank" rel="noopener noreferrer">{x.action}</a>)}
+        </AppCard>
+        <AppCard icons={<AndroidIcon className="vpn-app-icon" />} name="Android" text="Covers every app on your phone." status="Coming soon" mine={os === "Android" ? "Your device" : null}>{manual("Android")}</AppCard>
+        <AppCard icons={<AppleIcon className="vpn-app-icon" />} name="iOS / macOS" text="For iPhone, iPad and Mac. Covers every app on your device." status="Coming soon" mine={os === "iOS" || os === "macOS" ? "Your device" : null}>{manual(os === "macOS" ? "macOS" : "iOS")}</AppCard>
+      </ul>
+      {browser === "phone" && <p className="vpn-note">Browser extensions need a computer.</p>}
+      {testers && (!STORE_LINKS.chrome || !STORE_LINKS.edge) && browser !== "phone" && (
+        <details className="vpn-fold is-small">
+          <summary>Manual install, for testers (Chrome and Edge)</summary>
+          <div className="vpn-fold-body">
+            <p className="site-muted">This isn't the store version. It needs Developer mode, and it won't update by itself.</p>
+            <a className="site-button is-ghost is-small" href="/downloads/kiwi-vpn-extension.zip" download onClick={() => setZip(true)}>Download the ZIP</a>
+            {zip && <p className="vpn-done" role="status"><Tick />Your download should start now. Then follow these steps.</p>}
+            <ol className="vpn-steps">
+              <li>Unzip it somewhere you'll keep it.</li>
+              <li>Open <b>chrome://extensions</b> or <b>edge://extensions</b> and turn on <b>Developer mode</b>.</li>
+              <li>Click <b>Load unpacked</b> and pick the <b>kiwi-vpn-extension</b> folder.</li>
+              <li>Click the Kiwi VPN icon and press the switch.</li>
+            </ol>
+          </div>
+        </details>
+      )}
+      <p className="vpn-manual-line"><WireGuardIcon className="vpn-fold-icon" />On another system, or need it today? <a className="vpn-textlink" href="/vpn/devices#manual">Set it up manually</a> with the free WireGuard app.</p>
     </section>
   );
 }
 
+/** The advanced route: the WireGuard app and a config file. `form` is the add-a-device form, for an account that can add one. */
+function ManualSetup({ form, startOpen = false }: { form: React.ReactNode; startOpen?: boolean }) {
+  return (
+    <details id="vpn-manual" className="vpn-fold" open={startOpen}>
+      <summary><WireGuardIcon className="vpn-fold-icon" /><span>Advanced: manual setup<small>Connect any device with the free WireGuard app and a config file.</small></span></summary>
+      <div className="vpn-fold-body">
+        <ol className="vpn-manual-steps">
+          <li>
+            <b>Install the WireGuard app</b>
+            <span>It's free and official, made by the WireGuard project.</span>
+            <div className="vpn-wg">
+              {DEVICE_ROWS.map(({ name, href, Icon }) => (
+                <a key={name} href={href} target="_blank" rel="noopener noreferrer" aria-label={`WireGuard Setup for ${name}`}><Icon className="vpn-picon" />{name}</a>
+              ))}
+            </div>
+          </li>
+          <li>
+            <b>Add a device</b>
+            <span>Name it and pick a location. You get a QR code and a file, shown only once.</span>
+            {form}
+          </li>
+          <li>
+            <b>Import it and switch on</b>
+            <span>Scan the QR code on a phone, or import the file on a computer.</span>
+          </li>
+        </ol>
+      </div>
+    </details>
+  );
+}
+
 /** Real configured servers only. A signed-in member's list carries load, the public one doesn't. No latency: nothing measures it. "Recommended" is the server's own pick: online with the lowest load. */
-function Network({ member, stats, list, picked, onPick }: { member: VpnState | null; stats: VpnStats | "unavailable" | null; list: (VpnServer | VpnStats["servers"][number])[] | null; picked: number | null; onPick: (id: number) => void }) {
+function Network({ stats, list }: { stats: VpnStats | "unavailable" | null; list: (VpnServer | VpnStats["servers"][number])[] | null }) {
   const [focus, setFocus] = useState<number | null>(null);
   const real = stats && stats !== "unavailable" ? stats : null;
   const online = list?.filter((x) => x.online) ?? [];
   const countries = new Set(online.map((x) => (x.country_code || "").toUpperCase()).filter(Boolean)).size;
-  const canPick = !!member?.eligible && member.devices.length < member.max_devices && !member.usage?.paused_until;
   const cityCount = (x: MapServer) => list?.filter((o) => place(o).city === place(x).city && (o.country_code || "").toUpperCase() === (x.country_code || "").toUpperCase()).length ?? 0;
   return (
     <section id="vpn-network" className="vpn-section vpn-network site-reveal" aria-labelledby="vpn-servers">
@@ -521,7 +522,7 @@ function Network({ member, stats, list, picked, onPick }: { member: VpnState | n
                 const p = place(x);
                 const title = !p.city ? p.country : cityCount(x) > 1 ? x.name : p.city;
                 return (
-                  <li key={x.id} className={`${x.online ? "" : "is-off"}${focus === x.id ? " is-focus" : ""}${picked === x.id ? " is-picked" : ""}`}
+                  <li key={x.id} className={`${x.online ? "" : "is-off"}${focus === x.id ? " is-focus" : ""}`}
                       onMouseEnter={() => setFocus(x.id)} onMouseLeave={() => setFocus(null)} onClick={() => setFocus(x.id)}>
                     <Flag cc={x.country_code} />
                     <span className="vpn-sname">
@@ -531,11 +532,6 @@ function Network({ member, stats, list, picked, onPick }: { member: VpnState | n
                     </span>
                     <span className={`vpn-online${x.online ? " is-on" : ""}`}><i className={`vpn-dot${x.online ? " is-on" : ""}`} aria-label={x.online ? "Online" : "Offline"} title={x.online ? "Online" : "Offline"} />{x.online ? "Online" : "Offline"}</span>
                     {"load" in x && <LoadBar load={x.load} />}
-                    {canPick && x.online && (
-                      <button className="vpn-use" aria-label={`Use ${title} for a new device`} onClick={(e) => { e.stopPropagation(); onPick(x.id); reveal("vpn-manage"); }}>
-                        {picked === x.id ? <><Tick />Selected</> : "Use for a new device"}
-                      </button>
-                    )}
                   </li>
                 );
               })}
@@ -550,30 +546,6 @@ function Network({ member, stats, list, picked, onPick }: { member: VpnState | n
   );
 }
 
-const WHY: { title: string; text: string; icon: React.ReactNode }[] = [
-  { title: "Privacy while browsing", text: "Websites see our server's address instead of yours.", icon: <path d="M2.500 12S6 5.500 12 5.500 21.500 12 21.500 12 18 18.500 12 18.500 2.500 12 2.500 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /> },
-  { title: "Safer on public Wi-Fi", text: "Your connection to our server is encrypted, so others on the network can't read it.", icon: <path d="M2.500 9a14 14 0 0 1 19 0M6 12.800a9 9 0 0 1 12 0M9.500 16.400a4 4 0 0 1 5 0M12 20h.01" /> },
-  { title: "Pick your country", text: "Choose a location for each device, or switch it in the browser extension.", icon: <path d="M12 21.500s7-6.300 7-11.500a7 7 0 1 0-14 0c0 5.200 7 11.500 7 11.500zM12 12.500a2.500 2.500 0 1 0 0-5 2.500 2.500 0 0 0 0 5z" /> },
-  { title: "Browser or whole device", text: "An extension covers one browser. A device connection covers every app on it.", icon: <path d="M3 5.500h18v11H3zM8 20.500h8M12 16.500v4" /> },
-  { title: "One Price Chat account", text: "The same Kiwi Passport runs your plan, your devices and your browsers.", icon: <path d="M12 12a4.500 4.500 0 1 0 0-9 4.500 4.500 0 0 0 0 9zM3.500 21.500c.8-4.300 4.200-6.500 8.500-6.500s7.700 2.200 8.500 6.500" /> },
-];
-
-function WhyKiwi() {
-  return (
-    <section className="vpn-section vpn-why site-reveal" aria-labelledby="vpn-why">
-      <SectionHead id="vpn-why" kicker="Why Kiwi VPN" title="Less exposed, without the homework." sub="You shouldn't need to know how a VPN works to use one." />
-      <ul className="vpn-why-list">
-        {WHY.map((w) => (
-          <li key={w.title}>
-            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.700" strokeLinecap="round" strokeLinejoin="round">{w.icon}</svg>
-            <div><b>{w.title}</b><span>{w.text}</span></div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
 /** The one place prices appear. Each button is the real next step for this account, or says plainly that there isn't one. */
 function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnState) => void }) {
   const { busy, err, start } = useTrial(onStarted);
@@ -583,7 +555,9 @@ function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnS
   const billing = open && state && "billing" in state ? state.billing ?? null : null;
   const canBuy = !!billing && (billing.usdt || billing.card);
   const plan = member ? planOf(member) : null;
-  const days = member?.trial?.days ?? 30;
+  const days = member?.trial?.days ?? PLAN.trial_days;
+  const price = billing?.price_usd ?? PLAN.price_usd;
+  const period = billing?.period_days ?? PLAN.period_days;
   const trial = member?.trial?.available ? <button className="site-button is-ghost" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : `Start Free Trial — ${days} Days`}</button>
     : visitor?.trial && open ? <a className="site-button is-ghost" href="/join">Sign in to start</a>
     : plan?.kind === "trial" ? <span className="vpn-plan-note is-on"><Tick />Active · {daysLeft(plan.days_left)}</span>
@@ -591,22 +565,22 @@ function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnS
     : <span className="vpn-plan-note">Opens with Kiwi VPN</span>;
   const buy = plan?.kind === "royal" || plan?.kind === "owner" ? <span className="vpn-plan-note">Not needed on your plan</span>
     : !canBuy ? <span className="vpn-plan-note">Purchasing isn't open yet</span>
-    : member ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>{member.eligible ? "Add Time" : "Get Kiwi VPN"}</button>
-    : <button className="site-button is-go" onClick={() => reveal("vpn-get")}>Get Kiwi VPN</button>;
+    : member ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>Add Time</button>
+    : <button className="site-button is-go" onClick={() => reveal("vpn-get")}>Buy Time</button>;
   return (
     <section id="vpn-plans" className="vpn-section vpn-plans site-reveal" aria-labelledby="vpn-plans-title">
-      <SectionHead id="vpn-plans-title" kicker="Plans" title="Simple pricing." />
+      <SectionHead id="vpn-plans-title" kicker="Pricing" title="Simple pricing." />
       <ul className="vpn-plan-list">
         <li>
           <h3>Free Trial</h3>
           <p className="vpn-price">{days}<small>days</small></p>
-          <p>One trial per eligible account.</p>
+          <p>Free, with no payment details. One trial per account.</p>
           <div>{trial}</div>
         </li>
         <li className="is-main">
           <h3>Kiwi VPN Subscription</h3>
-          <p className="vpn-price">${billing?.price_usd ?? 9.99}<small>per {billing?.period_days ?? 30} days</small></p>
-          <p>You renew by hand. No automatic billing.</p>
+          <p className="vpn-price">${price}<small>per {period} days</small></p>
+          <p>You renew by hand. No automatic billing.{billing?.usdt && !billing.card ? " Paid in USDT." : ""}</p>
           <div>{buy}</div>
         </li>
         <li className="is-gold">
@@ -616,6 +590,7 @@ function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnS
           <div>{member?.royal ? <span className="vpn-plan-note is-gold"><Tick />Your plan</span> : <a className="vpn-royal-link" href="#royal">How Royal works</a>}</div>
         </li>
       </ul>
+      <p className="vpn-after"><b>When your trial ends</b> nothing is charged. Your devices switch off and are kept for {PLAN.keep_days} days, and adding time switches them back on.</p>
       {err && <p className="site-error" role="alert">{err}</p>}
     </section>
   );
@@ -654,7 +629,8 @@ function Faq({ member, free, paid }: { member: VpnState | null; free: boolean; p
     ["What's the difference between the device and browser versions?", "A browser extension sends only that browser's traffic through Kiwi VPN. Other apps keep your normal connection. A device connection covers every app on the device."],
     ["Do you keep logs?", <>We don't log the websites you visit, your DNS lookups or the content of your traffic. We do keep your account, your devices' names and keys, and how much data each one used this month and when it was last active. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
-    ["Is there a Kiwi VPN app?", "Not yet. A native Windows app is our first, and it's in development. Until then, Manual Setup connects any device with the free WireGuard app. Browser extensions appear here once each store approves them."],
+    ["Is there a Kiwi VPN app?", "Not yet. A native Windows app is our first, and it's in development. Until then, manual setup connects any device with the free WireGuard app. Browser extensions appear here once each store approves them."],
+    ["Do I have to set up each device myself?", "With the apps, no: signing in will set the device up. Manual setup is there for anything else, under My Devices."],
     ...(member ? [["How many devices can I use?", `Your account can have ${member.max_devices} ${member.max_devices === 1 ? "device" : "devices"} at a time. Delete one to add another.`] as [string, React.ReactNode]] : []),
     ...(!free ? [["What happens when my time runs out?", `Your devices are switched off and kept for 30 days.${paid ? " Add time and they switch back on within 5 minutes." : ""} Nothing renews or charges by itself.`] as [string, React.ReactNode]] : []),
   ];
@@ -870,36 +846,34 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   );
 }
 
-function Unlocked({ s, reload, picked }: { s: VpnState; reload: () => Promise<void>; picked: number | null }) {
+function PausedNote({ s }: { s: VpnState }) {
+  const paused = s.usage?.paused_until;
+  if (!paused) return null;
+  return (
+    <p className="vpn-paused" role="status"><b>Paused for the rest of the month</b> You've used this month's {bytes(s.usage.cap_bytes)} of
+      Kiwi VPN data. Your devices are kept and switch back on by themselves on {resumeDay(paused)}.</p>
+  );
+}
+
+function Unlocked({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const [created, setCreated] = useState<NewDevice | null>(null);
-  const [startOpen] = useState(s.devices.length === 0);
   const full = s.devices.length >= s.max_devices;
   const serverName = (id: number) => s.servers.find((x) => x.id === id);
   const paused = s.usage?.paused_until ?? null;
   return (
     <>
-      {paused && (
-        <p className="vpn-paused" role="status"><b>Paused for the rest of the month</b> You've used this month's {bytes(s.usage.cap_bytes)} of
-          Kiwi VPN data. Your devices are kept and switch back on by themselves on {resumeDay(paused)}.</p>
-      )}
       {created && <ConfigOnce created={created} server={serverName(created.device.server_id)} onDone={() => setCreated(null)} />}
-      <details id="vpn-manage" className="vpn-fold" open={startOpen}>
-        <summary><span>Manage devices<small>{s.devices.length} of {s.max_devices} in use</small></span></summary>
-        <div className="vpn-fold-body vpn-manage">
-          {!created && (
-            <AddDevice servers={s.servers} full={full} max={s.max_devices} count={s.devices.length} paused={!!paused} picked={picked}
-                       onCreated={(n) => { setCreated(n); void reload(); }} />
-          )}
-          <section className="vpn-list" aria-labelledby="vpn-devices">
-            <h3 id="vpn-devices">Your devices</h3>
-            {s.devices.length === 0 ? <p className="site-muted">No devices yet. Add your phone or laptop here.</p> : (
-              <ul className="vpn-devices">
-                {s.devices.map((d) => <DeviceRow key={d.id} d={d} server={serverName(d.server_id)} reload={reload} />)}
-              </ul>
-            )}
-          </section>
-        </div>
-      </details>
+      <section className="vpn-card vpn-list" aria-labelledby="vpn-devices">
+        <h2 id="vpn-devices">Your devices</h2>
+        {s.devices.length === 0 ? <p className="site-muted">No devices yet.</p> : (
+          <ul className="vpn-devices">
+            {s.devices.map((d) => <DeviceRow key={d.id} d={d} server={serverName(d.server_id)} reload={reload} />)}
+          </ul>
+        )}
+      </section>
+      <ManualSetup form={!s.eligible ? <p className="site-muted">{s.reason ?? "Your account can't add a device right now."} <a className="vpn-textlink" href="/vpn#vpn-plans">See pricing</a></p>
+        : created ? null : <AddDevice servers={s.servers} full={full} max={s.max_devices} count={s.devices.length} paused={!!paused}
+                                      onCreated={(n) => { setCreated(n); void reload(); }} />} />
     </>
   );
 }
@@ -930,8 +904,8 @@ function UsageMeter({ u }: { u: VpnUsage }) {
   );
 }
 
-function AddDevice({ servers, full, max, count, paused, picked, onCreated }: {
-  servers: VpnServer[]; full: boolean; max: number; count: number; paused: boolean; picked: number | null; onCreated: (n: NewDevice) => void;
+function AddDevice({ servers, full, max, count, paused, onCreated }: {
+  servers: VpnServer[]; full: boolean; max: number; count: number; paused: boolean; onCreated: (n: NewDevice) => void;
 }) {
   const pick = () => pickServer(servers);
   const [name, setName] = useState("");
@@ -939,7 +913,6 @@ function AddDevice({ servers, full, max, count, paused, picked, onCreated }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { if (!servers.some((x) => x.id === server)) setServer(pick()); }, [servers]);  // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (picked != null && servers.some((x) => x.id === picked && x.online)) setServer(picked); }, [picked]);  // eslint-disable-line react-hooks/exhaustive-deps
   const clean = name.trim();
   const call = useContext(CallCtx);
   async function submit(e: React.FormEvent) {
@@ -957,8 +930,7 @@ function AddDevice({ servers, full, max, count, paused, picked, onCreated }: {
     }
   }
   return (
-    <section className="vpn-add" aria-labelledby="vpn-add">
-      <h3 id="vpn-add">Add a device</h3>
+    <section className="vpn-add" aria-label="Add a device">
       {paused ? <p className="site-muted">You can add devices again when your data resets on the 1st.</p>
         : full ? <p className="site-muted">You're using all {max} of your devices ({count} / {max}). Delete one to add another.</p> : servers.length === 0 ? (
         <p className="site-muted">No servers are available yet. Check back soon.</p>
@@ -1067,11 +1039,11 @@ export function VpnStatus() {
   if (!s || !s.enabled) return null;
   const open = s.eligible;
   return (
-    <a className={`pp-vip${open ? " is-open" : ""}`} href="/vpn" aria-label="Kiwi VPN">
+    <a className={`pp-vip${open ? " is-open" : ""}`} href={open ? "/vpn/devices" : "/vpn"} aria-label={open ? "Kiwi VPN: My Devices" : "Kiwi VPN"}>
       <span className="pp-vip-icon" aria-hidden>{open ? "✓" : "🔒"}</span>
       <span className="pp-vip-text"><b>Kiwi VPN</b>
         <small>{open ? `${s.devices.length} / ${s.max_devices} devices${planOf(s).kind === "free" ? " · free while we test" : ""}` : s.reason || "Not available"}</small></span>
-      <span className="pp-vip-go">{open ? "Open →" : "View →"}</span>
+      <span className="pp-vip-go">{open ? "My Devices →" : "View →"}</span>
     </a>
   );
 }

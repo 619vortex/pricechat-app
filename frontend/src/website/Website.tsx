@@ -693,9 +693,9 @@ function Community({ links, growth }: { links: HomeData["links"]; growth?: HomeD
 }
 
 const VPN_POINTS: [string, string][] = [
-  ["No traffic logs", "We never record what you do or where you go."],
-  ["WireGuard speed", "The modern VPN protocol: fast, and easy on your battery."],
-  ["Free with Kiwi Rank", "No subscription. Rank up in the community and it's yours."],
+  ["Your address stays hidden", "Sites see our server's address instead of yours."],
+  ["We don't log the sites you visit", "Our privacy page lists exactly what we do keep."],
+  ["30-day free trial", "Then $9.99 for 30 days, renewed by hand. Free for Royal Kiwi and above."],
 ];
 
 /** A member perk, sold briefly next to the sign-up: Kiwi VPN's three selling points and a link to /vpn. */

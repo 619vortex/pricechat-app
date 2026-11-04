@@ -338,7 +338,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ["What we keep", [
         "Your account: your Kiwi Passport member id, or a one-way fingerprint of your key if you use an anonymous key. Your Price Chat privacy page covers the Passport itself.",
         "For each browser using the extension: a random login for one server. We keep only a one-way fingerprint of its password, and the password itself stays in your browser's extension storage.",
-        "For each WireGuard device: the name you gave it, its public key and the private address we assigned it.",
+        "For each WireGuard device: the name you gave it, its public key and the private address we assigned it. Its private key is created on our server, handed to you once in its config, and not stored.",
         "Usage: how many bytes each login or device used this month, and when it was last active. We use this to show you your usage, apply any monthly limit and keep the service fair.",
         "If payments are switched on and you pay: the amount, date and status of each payment. Payment providers handle the payment itself.",
       ]],
@@ -346,7 +346,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "We don't log the websites or addresses you visit, your DNS lookups or the content of your traffic, and we don't keep a per-connection history of your use.",
         "Your traffic does pass through our server while the VPN is on, and it has to read the destination to carry it there. Pages on https stay encrypted between your browser and the website. Pages on plain http aren't encrypted beyond our server, as with any VPN.",
         "Our server's ordinary system and firewall logs can record connection attempts to the server, including IP addresses. We use them only for security, and the system rotates them away.",
-        "The extension's account requests to pricechat.live don't go through the VPN. Like any website visit, our hosting providers' ordinary request logs can record them, including your IP address.",
+        "Account requests to pricechat.live, from this website or the apps, are ordinary website visits: our hosting providers' request logs can record them, including your IP address. The extension's don't go through the VPN.",
       ]],
       ["The browser extension", [
         "While switched on, it sends that browser's traffic through the server you chose, except pricechat.live and addresses on your own network. It doesn't cover other apps. If you switch it off, disable it or remove it, your browser goes back to its normal connection.",
@@ -355,11 +355,11 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "The use of information received through the extension is limited to providing this feature, in line with the Limited Use requirements of the Chrome Web Store User Data Policy and the Microsoft Edge Add-ons developer policies.",
       ]],
       ["Who else is involved", [
-        "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). WireGuard devices look up addresses through Cloudflare's public DNS unless the server blocks ads. These companies provide infrastructure for us; we don't send them your data for their own use.",
+        "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). WireGuard devices look up addresses through Cloudflare's public DNS unless the server blocks ads, so Cloudflare receives those lookups under its own privacy policy. These companies provide infrastructure for us; we don't send them your data for their own use.",
         "We'd only share data beyond this if the law requires it, and we can only share what's listed above.",
       ]],
       ["How long, and your controls", [
-        "In the extension, Remove this browser deletes its login straight away. On the Kiwi VPN page you can revoke any device.",
+        "In the extension, Remove this browser deletes its login straight away. Under My Devices you can delete any device.",
         "If your access ends, your devices are switched off and removed after 30 days. Deleting your Price Chat account removes your Kiwi VPN account, devices and browser logins with it.",
       ]],
       ["Changes and questions", ["We'll update this page if any of this changes. To ask about it, message us on Telegram or X (see Contact)."]],
