@@ -96,3 +96,15 @@ def revoke_sessions(db: DbSession, pc_session: SessionToken = None) -> dict[str,
     removed = db.query(MemberSession).filter(MemberSession.member_id == member.id, MemberSession.kind == "desktop").delete(synchronize_session=False)
     db.commit()
     return {"removed": removed}
+
+
+@router.post("/members/desktop/refresh", dependencies=[Depends(rate_limit.limit("signin"))])
+def refresh(db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    """Swaps the app's session for a new one with a fresh expiry, so an app in regular use isn't signed out every 90 days. The old token stops working here, so a copy of it is worthless after the next refresh."""
+    member = _require(db, pc_session)
+    row = db.query(MemberSession).filter(MemberSession.token_hash == service._hash(pc_session or "")).one_or_none()
+    if row is None or row.kind != "desktop":
+        raise HTTPException(403, "Only the Kiwi VPN app can do that.")
+    db.delete(row)
+    db.flush()
+    return {"token": service.new_session(db, member, SESSION_DAYS, DESKTOP_TOKEN_PREFIX, kind="desktop"), "expires_in_days": SESSION_DAYS}

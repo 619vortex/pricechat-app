@@ -4,7 +4,7 @@ A browser session can't start with this prefix: "." isn't in token_urlsafe's alp
 """
 
 DESKTOP_TOKEN_PREFIX = "kd."
-_EXACT = {"/api/members/vpn", "/api/members/me", "/api/members/logout"}
+_EXACT = {"/api/members/vpn", "/api/members/me", "/api/members/logout", "/api/members/desktop/refresh"}
 _UNDER = "/api/members/vpn/"
 
 

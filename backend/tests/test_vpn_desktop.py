@@ -176,3 +176,20 @@ def test_the_token_swap_marks_the_session(client: TestClient, db: Session) -> No
     code, verifier = code_for(client, db, "marked")
     client.post(TOKEN, json={"code": code, "verifier": verifier})
     assert db.query(MemberSession).filter(MemberSession.kind == "desktop").count() >= 1
+
+
+def test_refresh_replaces_the_app_session_and_the_old_token_dies(client: TestClient, db: Session) -> None:
+    m = member_at(db, "egg", "refresher", paid=False)
+    old = members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop")
+    client.cookies.set("pc_session", old)
+    new = client.post("/api/members/desktop/refresh").json()["token"]
+    assert new != old and new.startswith("kd.")
+    assert client.get("/api/members/me").status_code == 401, "the old token is gone"
+    client.cookies.set("pc_session", new)
+    assert client.get("/api/members/me").status_code == 200
+
+
+def test_a_browser_session_cant_be_turned_into_an_app_session(client: TestClient, db: Session) -> None:
+    client.cookies.set("pc_session", members.new_session(db, member_at(db, "egg", "browseronly", paid=False), 7))
+    assert client.post("/api/members/desktop/refresh").status_code == 403
+    assert client.get("/api/members/me").status_code == 200, "and it keeps working"
