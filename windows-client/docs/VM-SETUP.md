@@ -1,6 +1,6 @@
 # The build and test VM
 
-**Why a VM builds as well as tests:** this PC's Smart App Control blocked Cargo's compiled build helpers ("An Application Control policy has blocked this file", os error 4551), and the WireGuard build runs unsigned tools too. Don't turn Smart App Control off on the host: Microsoft documents that as hard to undo. A VM is also what keeps testing away from `client1`.
+**What builds where:** WireGuard's `tunnel.dll` and the debug service build on the host. Smart App Control blocks the service from running there, some test programs, and some Cargo build helpers (os error 4551), including the release build's. Don't turn it off on the host: Microsoft documents that as hard to undo. The release build and the desktop app, which has many more build helpers, are expected to need the VM. A VM is also what keeps testing away from `client1`.
 
 Everything goes on `D:`. `C:` has about 39 GB free, which is too tight for a VM.
 
@@ -47,9 +47,15 @@ Checkpoint-VM -Name KiwiVPN-Test -SnapshotName "clean"
 
 Every install and uninstall test starts from this.
 
-## 5. Build inside the VM
+## 5. The first real connection
 
-Copy `windows-client` into the VM (Enhanced Session lets you paste files), install Git for Windows there, then run `build-in-vm.ps1`.
+1. Copy `dist` and `connect-test.ps1` into one folder in the VM. Enhanced Session lets you paste files.
+2. In the VM's browser, sign in to Price Chat Admin and go to VPN. Make a device on **Germany** and download its config. No deploy is needed: Admin-made devices already work while the VPN is closed.
+3. Open PowerShell as administrator in the VM and run:
+   `powershell -ExecutionPolicy Bypass -File connect-test.ps1 -Config <the config file>`
+4. Send the output. Delete that test device in Admin afterwards.
+
+For the release build and the desktop app, run `build-in-vm.ps1` in the VM.
 
 ## Reading the test results
 

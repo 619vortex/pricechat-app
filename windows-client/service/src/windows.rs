@@ -382,8 +382,7 @@ pub fn serve(stop: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
             serve_client(pipe, &tunnel);
             unsafe {
                 FlushFileBuffers(pipe);
-                DisconnectNamedPipe(pipe);
-                CloseHandle(pipe);
+                CloseHandle(pipe); // closing, not DisconnectNamedPipe: that makes the client's read fail after it already has its answer
             }
         });
     }
@@ -402,7 +401,7 @@ pub fn ask(request: &Request) -> Result<Status, String> {
     line.push(b'\n');
     pipe.write_all(&line).map_err(|e| e.to_string())?;
     let mut text = String::new();
-    std::io::Read::read_to_string(&mut pipe, &mut text).map_err(|e| e.to_string())?;
+    std::io::BufRead::read_line(&mut std::io::BufReader::new(pipe), &mut text).map_err(|e| e.to_string())?;
     serde_json::from_str(text.trim()).map_err(|_| "The service gave an answer I can't read".to_string())
 }
 

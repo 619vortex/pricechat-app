@@ -8,7 +8,7 @@ pub const MAX_REQUEST: usize = 16 * 1024;
 pub const HANDSHAKE_FRESH_SECONDS: u64 = 180;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "cmd", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     Connect { config: String },
     Disconnect,
@@ -72,7 +72,19 @@ pub fn parse_request(line: &str) -> Result<Request, String> {
     if line.len() > MAX_REQUEST {
         return Err("request too large".into());
     }
-    serde_json::from_str(line).map_err(|_| "request not understood".to_string())
+    let bad = || "request not understood".to_string();
+    let value: serde_json::Value = serde_json::from_str(line).map_err(|_| bad())?;
+    let fields = value.as_object().ok_or_else(bad)?;
+    // serde lets extra fields through on a tagged enum, so they're refused here: nothing unexpected reaches a service running as SYSTEM
+    let allowed: &[&str] = match fields.get("cmd").and_then(|c| c.as_str()) {
+        Some("connect") => &["cmd", "config"],
+        Some("disconnect" | "status") => &["cmd"],
+        _ => return Err(bad()),
+    };
+    if fields.keys().any(|k| !allowed.contains(&k.as_str())) {
+        return Err(bad());
+    }
+    serde_json::from_value(value).map_err(|_| bad())
 }
 
 #[cfg(test)]
