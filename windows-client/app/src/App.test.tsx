@@ -1,27 +1,47 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "./App";
 import conf from "../src-tauri/tauri.conf.json";
-import { LOOKUPS, placeLine, readLookup } from "./exit";
-import { type Answer, type Status, formatBytes, formatDuration, phaseOf, ratesBetween, secondsUp } from "./vpn";
+import { App } from "./App";
+import { type Account, type AccountView, type Answer, type Status, formatBytes, formatDuration, phaseOf, ratesBetween, secondsUp, serverPlace } from "./vpn";
 
 const calls: string[] = [];
+const args: Record<string, unknown> = {};
 let reply: Answer;
-let connectReply: Answer | null = null;
-let testBuild = true;
+let view: AccountView;
+let ip: string | null;
+let testConfig = true;
+let refuse: Record<string, string> = {};
+let hold: Record<string, () => void> = {};
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (cmd: string) => {
+  invoke: async (cmd: string, a?: unknown) => {
     calls.push(cmd);
-    if (cmd === "test_build") return testBuild;
-    if (cmd === "vpn_connect_test_file") return connectReply;
-    return reply;
+    args[cmd] = a;
+    if (refuse[cmd]) throw refuse[cmd];
+    if (cmd === "account_state") return view;
+    if (cmd === "has_test_config") return testConfig;
+    if (cmd === "my_ip") { if (!ip) throw "no"; return ip; }
+    if (cmd === "sign_in") await new Promise<void>((done) => { hold.sign_in = done; });
+    if (cmd === "vpn_status" || cmd === "vpn_disconnect" || cmd === "vpn_connect") return reply;
+    return null;
   },
 }));
 
 const status = (over: Partial<Status>): Status => ({ state: "disconnected", handshake_age_seconds: null, rx_bytes: 0, tx_bytes: 0, error: null, connected_since: null, ...over });
+const off = (): Answer => ({ service: true, message: null, status: status({}) });
 const up = (over: Partial<Status> = {}): Answer => ({ service: true, message: null, status: status({ state: "connected", handshake_age_seconds: 5, rx_bytes: 2048, tx_bytes: 1024, ...over }) });
+const SERVERS: Account["servers"] = [
+  { id: 2, name: "Germany", region: "Falkenstein, Germany", country_code: "DE", online: true, recommended: false },
+  { id: 1, name: "Helsinki 1", region: "Finland", country_code: "FI", online: true, recommended: true },
+  { id: 3, name: "Tokyo", region: "Japan", country_code: "JP", online: false, recommended: false },
+];
+const account = (over: Partial<Account> = {}): Account => ({ enabled: true, eligible: true, reason: null, max_devices: 3, servers: SERVERS, devices: [], plan: null, trial: null, ...over });
+const signedIn = (over: Partial<AccountView> = {}): AccountView => ({ signed_in: true, account: account(), suggested: 1, last_server: null, error: null, ...over });
+const signedOut = (): AccountView => ({ signed_in: false, account: null, suggested: null, last_server: null, error: null });
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
-const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+const tick = (ms = 1000) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+const heading = () => screen.getByRole("heading").textContent;
+const main = () => document.querySelector<HTMLButtonElement>(".go")!;
+const country = (name: RegExp) => screen.getByRole("radio", { name }) as HTMLButtonElement;
 
 describe("what counts as connected", () => {
   it("needs the service's word and a recent handshake", () => {
@@ -41,135 +61,183 @@ describe("what counts as connected", () => {
 });
 
 describe("the numbers", () => {
-  it("formats sizes and time", () => {
+  it("formats sizes, time and places", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(1536)).toBe("1.5 KB");
     expect(formatBytes(5 * 1024 ** 3)).toBe("5.0 GB");
     expect(formatDuration(3725)).toBe("01:02:05");
+    expect(serverPlace(SERVERS[0])).toBe("Falkenstein, Germany");
+    expect(serverPlace(SERVERS[1])).toBe("Helsinki, Finland");
+    expect(serverPlace({ name: "Japan", region: "Japan", country_code: "JP" })).toBe("Japan");
   });
   it("works out speed, and refuses to invent one", () => {
     expect(ratesBetween({ at: 0, rx: 0, tx: 0 }, { at: 2000, rx: 4000, tx: 2000 })).toEqual({ rx: 2000, tx: 1000 });
     expect(ratesBetween(null, { at: 1, rx: 9, tx: 9 })).toEqual({ rx: 0, tx: 0 });
     expect(ratesBetween({ at: 0, rx: 100, tx: 100 }, { at: 1000, rx: 5, tx: 5 })).toEqual({ rx: 0, tx: 0 });
   });
-});
-
-describe("the outside view", () => {
-  it("reads a lookup, and refuses anything that isn't one", () => {
-    expect(readLookup({ ip: "2.31.133.78", city: "Falkenstein", country: "DE" })).toEqual({ ip: "2.31.133.78", city: "Falkenstein", country: "DE" });
-    expect(readLookup({ ip: "2a00:f2a::1", country: "ae" })).toEqual({ ip: "2a00:f2a::1", city: null, country: "AE" });
-    expect(readLookup({ ip: "<img src=x>", country: "DE" })).toBeNull();
-    expect(readLookup({ ip: "1.2.3.4", country: "<script>", city: "x".repeat(65) })).toEqual({ ip: "1.2.3.4", country: null, city: null });
-    for (const bad of [null, "1.2.3.4", {}, { ip: 7 }, { ip: "abcd" }]) expect(readLookup(bad)).toBeNull();
-  });
-  it("words the place from what it knows", () => {
-    expect(placeLine({ ip: "x", city: "Falkenstein", country: "DE" })).toBe("Falkenstein, Germany");
-    expect(placeLine({ ip: "x", city: null, country: "FI" })).toBe("Finland");
-    expect(placeLine({ ip: "x", city: null, country: null })).toBeNull();
-  });
-  it("the window's security policy allows every lookup, and nothing else out there", () => {
-    const csp = conf.app.security.csp;
-    const allowed = csp.split(";").find((d) => d.trim().startsWith("connect-src"))!.trim().split(/\s+/).filter((s) => s.startsWith("https:"));
-    expect(allowed.sort()).toEqual(LOOKUPS.map((u) => new URL(u).origin).sort());
-  });
-});
-
-describe("the timer", () => {
-  it("comes from the service's record, not from when this window opened", () => {
+  it("takes the timer from the service's record", () => {
     expect(secondsUp(1000, 1_060_000)).toBe(60);
     expect(secondsUp(2000, 1_000_000)).toBe(0);
     expect(secondsUp(null, 5)).toBeNull();
-    expect(secondsUp(undefined, 5)).toBeNull();
+  });
+  it("the window's security policy lets the page reach nothing on the internet", () => {
+    expect(conf.app.security.csp).not.toMatch(/https:/);
+    expect(conf.app.security.csp).toMatch(/connect-src ipc: http:\/\/ipc\.localhost;/);
   });
 });
 
 describe("the window", () => {
-  let lookupReply: unknown;
-  const fetched: string[] = [];
-  const stats = () => screen.getByLabelText("Connection statistics").textContent!;
   beforeEach(() => {
     vi.useFakeTimers();
-    calls.length = 0; fetched.length = 0; connectReply = null; testBuild = true;
-    reply = { service: true, message: null, status: status({}) };
-    lookupReply = { ip: "5.30.213.225", city: "Dubai", country: "AE" };
-    vi.stubGlobal("fetch", async (url: string) => { fetched.push(url); return { ok: lookupReply !== null, json: async () => lookupReply }; });
+    calls.length = 0; refuse = {}; hold = {}; testConfig = true;
+    reply = off(); view = signedIn(); ip = "5.30.213.225";
   });
-  afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-  it("never asks an outside service while disconnected, so it can't see the person's own address", async () => {
-    render(<App />);
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(fetched).toEqual([]);
-    expect(document.querySelector(".ip")!.textContent).toBe("–");
-    expect(document.querySelector(".place")!.textContent).toBe("–");
-    reply = { service: true, message: null, status: status({ state: "connecting" }) };
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(fetched).toEqual([]);
-  });
-
-  it("shows the server's place and address once connected", async () => {
+  it("says the service is offline first, whatever else is true, and offers nothing it can't do", async () => {
+    reply = { service: false, status: null, message: "Something other than the Kiwi VPN service is answering. Nothing was sent to it." };
+    view = signedOut();
     render(<App />);
     await settle();
-    lookupReply = { ip: "2.31.133.78", city: "Falkenstein", country: "DE" };
+    expect(heading()).toBe("Service offline");
+    expect(screen.getByRole("alert").textContent).toContain("Something other than");
+    expect(main().disabled).toBe(true);
+    expect(main().textContent).toBe("Connect");
+  });
+
+  it("signed out: offers sign-in, waits for the browser, can cancel, then shows countries", async () => {
+    view = signedOut();
+    render(<App />);
+    await settle();
+    expect(main().textContent).toBe("Sign in with Price Chat");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    fireEvent.click(main());
+    await settle();
+    expect(calls).toContain("sign_in");
+    expect(document.body.textContent).toContain("Finish signing in in your browser");
+    expect(main().textContent).toBe("Cancel");
+    fireEvent.click(main());
+    await settle();
+    expect(calls).toContain("cancel_sign_in");
+    view = signedIn();
+    await act(async () => { hold.sign_in(); await vi.advanceTimersByTimeAsync(0); });
+    expect(main().textContent).toBe("Connect");
+    expect(screen.getByRole("radiogroup")).toBeTruthy();
+  });
+
+  it("shows why signing in failed", async () => {
+    view = signedOut();
+    refuse.sign_in = "Signing in took too long. Please try again.";
+    render(<App />);
+    await settle();
+    fireEvent.click(main());
+    await settle();
+    expect(screen.getByRole("alert").textContent).toContain("took too long");
+    expect(main().textContent).toBe("Sign in with Price Chat");
+  });
+
+  it("shows countries with flags, the suggested one chosen and offline ones unavailable, and connects by naming only the server", async () => {
+    render(<App />);
+    await settle();
+    expect(country(/Helsinki/).getAttribute("aria-checked")).toBe("true");
+    expect(country(/Falkenstein/).querySelector<HTMLImageElement>(".flag img")!.getAttribute("src")).toBe("/flags/de.svg");
+    expect(country(/Tokyo/).disabled).toBe(true);
+    fireEvent.click(country(/Falkenstein/));
+    expect(calls).not.toContain("vpn_connect");
+    expect(country(/Falkenstein/).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(main());
+    await settle();
+    expect(args.vpn_connect).toEqual({ serverId: 2 });
+  });
+
+  it("never asks for a config file on the main screen: it's only under Settings, Advanced", async () => {
+    render(<App />);
+    await settle();
+    fireEvent.click(main());
+    await settle();
+    expect(calls).toContain("vpn_connect");
+    expect(calls).not.toContain("vpn_connect_test_file");
+    expect(document.body.textContent).not.toMatch(/config file|\.conf|WireGuard/i);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(document.querySelector<HTMLDetailsElement>("details.advanced")!.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Use a config file" }));
+    await settle();
+    expect(calls).toContain("vpn_connect_test_file");
+  });
+
+  it("a build without the config file option doesn't offer it", async () => {
+    testConfig = false;
+    render(<App />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.queryByRole("button", { name: "Use a config file" })).toBeNull();
+  });
+
+  it("switching country while connected reconnects straight away", async () => {
     reply = up({ connected_since: 1 });
-    await tick();
-    expect(document.querySelector(".ip")!.textContent).toBe("Checking");
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-    expect(document.querySelector(".ip")!.textContent).toBe("2.31.133.78");
-    expect(document.querySelector(".place")!.textContent).toBe("Falkenstein, Germany");
-    expect(document.querySelector<HTMLImageElement>(".flag img")!.getAttribute("src")).toBe("/flags/de.svg");
-  });
-
-  it("says when it couldn't check, rather than showing nothing or a guess", async () => {
-    lookupReply = null;
-    reply = up({ connected_since: 1 });
+    view = signedIn({ last_server: 1 });
     render(<App />);
     await settle();
-    expect(document.querySelector(".ip")!.textContent).toBe("Checking");
-    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
-    expect(document.querySelector(".ip")!.textContent).toBe("Couldn't check");
+    fireEvent.click(country(/Falkenstein/));
+    await settle();
+    expect(args.vpn_connect).toEqual({ serverId: 2 });
   });
 
-  it("an answer that arrives after the connection changed is thrown away", async () => {
-    let release: (v: unknown) => void = () => {};
-    vi.stubGlobal("fetch", (url: string) => { fetched.push(url); return new Promise((done) => { release = done; }); });
-    reply = up({ connected_since: 1 });
-    render(<App />);
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-    reply = { service: true, message: null, status: status({ state: "connecting" }) };
-    await tick();
-    await act(async () => { release({ ok: true, json: async () => ({ ip: "9.9.9.9", country: "DE" }) }); await vi.advanceTimersByTimeAsync(0); });
-    expect(document.body.textContent).not.toContain("9.9.9.9");
-  });
-
-  it("the timer picks up from the service when a window opens on a running tunnel", async () => {
-    vi.setSystemTime(new Date(1_000_000_000));
-    reply = up({ connected_since: 1_000_000 - 3725 });
+  it("explains a refusal in plain words, with the way to My Devices", async () => {
+    refuse.vpn_connect = "You've used all your devices. Remove one under My Devices on pricechat.live, then try again.";
     render(<App />);
     await settle();
-    expect(stats()).toContain("01:02:05");
+    fireEvent.click(main());
+    await settle();
+    expect(screen.getByRole("alert").textContent).toContain("used all your devices");
+    expect(heading()).toBe("Not connected");
+    fireEvent.click(screen.getByRole("button", { name: "Open My Devices" }));
+    expect(args.open_site).toEqual({ page: "devices" });
   });
 
-  it("says the service is offline, and offers nothing it can't do", async () => {
-    reply = { service: false, status: null, message: "The Kiwi VPN service isn't running." };
+  it("offers the free trial when that's the next step", async () => {
+    view = signedIn({ account: account({ eligible: false, reason: "Start your free 30-day trial", trial: { available: true, days: 30 } }) });
     render(<App />);
     await settle();
-    expect(screen.getByRole("heading").textContent).toBe("Service offline");
-    expect(screen.getByRole("alert").textContent).toContain("isn't running");
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+    expect(main().textContent).toBe("Start free trial: 30 days");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    fireEvent.click(main());
+    await settle();
+    expect(calls).toContain("start_trial");
+  });
+
+  it("says why an account can't connect, and shows the plans", async () => {
+    view = signedIn({ account: account({ eligible: false, reason: "Your time has run out." }) });
+    render(<App />);
+    await settle();
+    expect(main().disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Your time has run out");
+    fireEvent.click(screen.getByRole("button", { name: "See plans" }));
+    expect(args.open_site).toEqual({ page: "plans" });
+  });
+
+  it("signs out from Settings, through the app's Rust side", async () => {
+    render(<App />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    view = signedOut();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out of Kiwi VPN" }));
+    await settle();
+    expect(calls).toContain("sign_out");
+    expect(main().textContent).toBe("Sign in with Price Chat");
   });
 
   it("shows no connected state or speeds until the handshake is reported", async () => {
     reply = { service: true, message: null, status: status({ state: "connecting" }) };
     render(<App />);
     await settle();
-    expect(screen.getByRole("heading").textContent).toBe("Connecting");
+    expect(heading()).toBe("Connecting");
     expect(document.body.textContent).not.toContain("Connected");
-    expect(screen.getByRole("button").textContent).toBe("Disconnect");
+    expect(main().textContent).toBe("Disconnect");
     expect(screen.getByLabelText("Connection statistics").textContent).not.toMatch(/\/s/);
     reply = up();
     await tick();
-    expect(screen.getByRole("heading").textContent).toBe("Connected");
+    expect(heading()).toBe("Connected");
     expect(screen.getByRole("status").textContent).toContain("5 s ago");
   });
 
@@ -177,13 +245,13 @@ describe("the window", () => {
     reply = up();
     render(<App />);
     await settle();
-    expect(screen.getByRole("heading").textContent).toBe("Connected");
+    expect(heading()).toBe("Connected");
     reply = up({ handshake_age_seconds: 200 });
     await tick();
-    expect(screen.getByRole("heading").textContent).toBe("Connecting");
+    expect(heading()).toBe("Connecting");
   });
 
-  it("reports real speed and time from the service's counters", async () => {
+  it("reports real speed from the service's counters", async () => {
     reply = up({ rx_bytes: 0, tx_bytes: 0 });
     render(<App />);
     await settle();
@@ -194,37 +262,56 @@ describe("the window", () => {
     expect(text).toContain("1.0 KB/s");
   });
 
-  it("a cancelled file picker changes nothing, and a refused config shows why", async () => {
+  it("shows the location from the server list and the address from Price Chat", async () => {
+    render(<App />);
+    await tick();
+    expect(document.querySelector(".ip")!.textContent).toBe("5.30.213.225");
+    expect(document.querySelector(".place")!.textContent).toBe("–");
+    ip = "2.31.133.78";
+    view = signedIn({ last_server: 2 });
+    reply = up({ connected_since: 1 });
+    fireEvent.click(main());
+    await tick();
+    await tick(4000);
+    expect(document.querySelector(".ip")!.textContent).toBe("2.31.133.78");
+    expect(document.querySelector(".place")!.textContent).toBe("Falkenstein, Germany");
+    expect(screen.queryByText(/same as before connecting/)).toBeNull();
+  });
+
+  it("warns when the address is the same after connecting", async () => {
+    render(<App />);
+    await tick();
+    reply = up({ connected_since: 1 });
+    await tick();
+    await tick(4000);
+    expect(screen.getByText(/same as before connecting/)).toBeTruthy();
+  });
+
+  it("says when it couldn't check the address", async () => {
+    ip = null;
     render(<App />);
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(document.querySelector(".ip")!.textContent).toBe("Checking");
+    await tick(20_000);
+    expect(document.querySelector(".ip")!.textContent).toBe("Couldn't check");
+  });
+
+  it("the timer picks up from the service when a window opens on a running tunnel", async () => {
+    vi.setSystemTime(new Date(1_000_000_000));
+    reply = up({ connected_since: 1_000_000 - 3725 });
+    render(<App />);
     await settle();
-    expect(calls).toContain("vpn_connect_test_file");
-    expect(screen.getByRole("heading").textContent).toBe("Not connected");
-    connectReply = { service: true, message: null, status: status({ state: "failed", error: "the config must have one interface and one peer" }) };
-    reply = connectReply;
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await settle();
-    expect(screen.getByRole("heading").textContent).toBe("Couldn't connect");
-    expect(screen.getByRole("alert").textContent).toContain("one interface");
+    expect(screen.getByLabelText("Connection statistics").textContent).toContain("01:02:05");
   });
 
   it("disconnect goes to the service", async () => {
     reply = up();
     render(<App />);
     await settle();
-    reply = { service: true, message: null, status: status({}) };
+    reply = off();
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     await settle();
     expect(calls).toContain("vpn_disconnect");
-    expect(screen.getByRole("heading").textContent).toBe("Not connected");
-  });
-
-  it("a build without the config file can't connect until sign-in exists", async () => {
-    testBuild = false;
-    render(<App />);
-    await settle();
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("button").textContent).toBe("Sign in to connect");
+    expect(heading()).toBe("Not connected");
   });
 });

@@ -1,4 +1,4 @@
-"""Desktop sign-in: a code alone is useless, works once, expires, and the app's session works on the existing VPN routes. No password ever reaches the app."""
+﻿"""Desktop sign-in: a code alone is useless, works once, expires, and the app's session works on the existing VPN routes. No password ever reaches the app."""
 
 import base64
 import hashlib
@@ -9,8 +9,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
+from app.members import service as members
+from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.desktop import MemberDesktopCode
-from tests.test_vpn import member_at, signed_in
+from app.models.members import Member, MemberSession
+from tests.test_vpn import FakeNode, add_server, fake, member_at, open_vpn, signed_in  # noqa: F401
+
+DEVICES = "/api/members/vpn/devices"
 
 CODE, TOKEN = "/api/members/desktop/code", "/api/members/desktop/token"
 
@@ -102,3 +107,72 @@ def test_a_browser_session_is_not_limited(client: TestClient, db: Session) -> No
     c = signed_in(client, db, member_at(db, "egg", "browser", paid=False))
     assert not c.cookies.get("pc_session", "").startswith("kd.")
     assert c.get("/api/members/crew").json().get("code") != "desktop_scope"
+
+
+# --- the app makes its own key, and asks for the rest
+
+PUB = base64.b64encode(bytes(range(1, 33))).decode()
+
+
+def app_client(client: TestClient, db: Session, name: str) -> tuple[TestClient, Member]:
+    m = member_at(db, "egg", name, paid=True)
+    client.cookies.clear()
+    client.cookies.set("pc_session", members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop"))
+    return client, m
+
+
+def test_the_app_registers_its_own_key_and_the_server_never_sees_a_private_one(client: TestClient, db: Session, fake: FakeNode) -> None:
+    server = add_server(db, fake)
+    open_vpn(db)
+    c, _ = app_client(client, db, "ownkey")
+    r = c.post(DEVICES, json={"name": "DESKTOP DE", "server_id": server.id, "public_key": PUB})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert "config" not in body and "PrivateKey" not in r.text
+    peer = body["peer"]
+    assert peer["server_public_key"] == server.public_key and peer["endpoint_host"] == server.endpoint_host
+    assert peer["addresses"][0] == f"{body['device']['ip']}/32" and peer["keepalive"] == 25 and "0.0.0.0/0" in peer["allowed_ips"]
+    assert PUB in fake.peers
+    assert c.get(f"{DEVICES}/{body['device']['id']}/peer").json() == peer
+    assert c.post(DEVICES, json={"name": "again", "server_id": server.id, "public_key": PUB}).status_code == 409
+
+
+def test_a_bad_public_key_is_refused(client: TestClient, db: Session, fake: FakeNode) -> None:
+    server = add_server(db, fake)
+    open_vpn(db)
+    c, _ = app_client(client, db, "badkey")
+    for bad in ["A" * 44, base64.b64encode(bytes(32)).decode(), "!" * 44]:
+        assert c.post(DEVICES, json={"name": "x", "server_id": server.id, "public_key": bad}).status_code == 400, bad
+    assert c.post(DEVICES, json={"name": "x", "server_id": server.id, "public_key": "short"}).status_code == 422
+
+
+def test_nobody_reads_anothers_peer_details(client: TestClient, db: Session, fake: FakeNode) -> None:
+    server = add_server(db, fake)
+    open_vpn(db)
+    c, _ = app_client(client, db, "peerowner")
+    device = c.post(DEVICES, json={"name": "mine", "server_id": server.id, "public_key": PUB}).json()["device"]["id"]
+    other = signed_in(client, db, member_at(db, "egg", "peerother", paid=True))
+    assert other.get(f"{DEVICES}/{device}/peer").status_code == 404
+
+
+def test_app_sessions_are_recorded_apart_and_can_be_revoked_without_touching_browsers(client: TestClient, db: Session) -> None:
+    m = member_at(db, "egg", "twosessions", paid=False)
+    browser = members.new_session(db, m, 7)
+    app = members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop")
+    client.cookies.set("pc_session", browser)
+    assert client.get("/api/members/desktop/sessions").json() == {"count": 1}
+    assert client.post("/api/members/desktop/sessions/revoke").json() == {"removed": 1}
+    assert client.get("/api/members/me").status_code == 200, "the browser stays signed in"
+    client.cookies.set("pc_session", app)
+    assert client.get("/api/members/vpn").status_code == 401, "the app doesn't"
+
+
+def test_the_app_can_ask_its_own_address_without_signing_in(client: TestClient) -> None:
+    r = client.get("/api/members/vpn/ip")
+    assert r.status_code == 200 and r.json()["ip"] and r.headers["cache-control"] == "no-store"
+
+
+def test_the_token_swap_marks_the_session(client: TestClient, db: Session) -> None:
+    code, verifier = code_for(client, db, "marked")
+    client.post(TOKEN, json={"code": code, "verifier": verifier})
+    assert db.query(MemberSession).filter(MemberSession.kind == "desktop").count() >= 1

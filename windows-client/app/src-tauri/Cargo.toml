@@ -13,11 +13,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The service's own library: one definition of the pipe's protocol, used by both ends.
 kiwivpn-service = { path = "../../service" }
-# Only for the test build's "choose a config file" button.
+kiwivpn-client = { path = "../../client" }
+# Only for the "use a config file" option in Advanced settings.
 tauri-plugin-dialog = { version = "2", optional = true }
 
 [features]
-# Connecting from a config file exists until sign-in does (milestone 3). Release builds use --no-default-features.
+# The config file option stays for testing. A public release is built with --no-default-features, which removes it.
 default = ["test-config"]
 test-config = ["dep:tauri-plugin-dialog"]
 

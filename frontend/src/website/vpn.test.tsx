@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Downloads, VpnPage, VpnReviewerPage, ago, bytes, flag, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
-import { STORE_LINKS, visitorBrowser } from "./vpnConfig";
+import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
+import { PLAN, STORE_LINKS, WINDOWS_BETA, visitorBrowser, visitorOs } from "./vpnConfig";
+
+import { Flag, drawMap, place, placeLine } from "./vpnMap";
 
 /** TEST FIXTURES only: a fake Kiwi VPN API. No real config, keys or servers. */
 const HOME = { sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
@@ -67,7 +70,8 @@ describe("Free while payments are off", () => {
     await settle();
     const page = outsideRoyal(container);
     expect(page).toMatch(/1 connected/);
-    expect(page).toMatch(/Add a device/);
+    expect(page).toMatch(/My Devices/);
+    expect(page).not.toMatch(/Add a device/);
     expect(screen.queryByRole("heading", { name: "Your time" })).toBeNull();
     expect(page).not.toMatch(money);
   });
@@ -76,7 +80,7 @@ describe("Free while payments are off", () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: null })] });
     let view = render(<VpnPage />);
     await settle();
-    expect(screen.queryByRole("heading", { name: "Browser extension" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download the ZIP" })).toBeNull();
     view.unmount();
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: null, servers: [{ ...SERVERS[0], browser: true }] })] });
     view = render(<VpnPage />);
@@ -117,36 +121,81 @@ describe("Free while payments are off", () => {
     expect(visitorBrowser(`${CHROME} OPR/110.0.0.0`)).toBe("other");
   });
 
-  it("makes no store link before approval, and labels the manual install", () => {
+  const card = (c: HTMLElement, name: string) => [...c.querySelectorAll(".vpn-app")].find((x) => x.querySelector("h3")!.textContent!.startsWith(name))!;
+
+  it("shows the four platforms, each with an icon, a description and a status", () => {
+    const { container } = render(<Downloads agent={CHROME} />);
+    expect([...container.querySelectorAll(".vpn-app h3")].map((h) => h.childNodes[0].textContent)).toEqual(["Windows desktop", "Browser extension", "Android", "iOS / macOS"]);
+    for (const c of container.querySelectorAll(".vpn-app")) {
+      expect(c.querySelector(".vpn-app-icon")).toBeTruthy();
+      expect(c.querySelector("p")!.textContent!.length).toBeGreaterThan(10);
+      expect(c.querySelector(".vpn-status")).toBeTruthy();
+    }
+  });
+
+  it("claims nothing that isn't released: no download anywhere, and each status says so", () => {
     const { container } = render(<Downloads agent={CHROME} testers />);
-    expect([...container.querySelectorAll("a")].filter((a) => /chromewebstore|microsoftedge|mozilla|brave/.test(a.href))).toHaveLength(0);
-    expect(container.querySelector(".vpn-platform.is-mine")?.textContent).toMatch(/Google Chrome.*Your browser.*Coming Soon/);
-    expect(screen.getAllByText("Coming Soon")).toHaveLength(4);
+    expect([...container.querySelectorAll(".vpn-app .vpn-status")].map((x) => x.textContent)).toEqual(["In development", "Coming soon", "Coming soon", "Coming soon"]);
     expect(screen.queryByText("Available")).toBeNull();
+    expect([...container.querySelectorAll(".vpn-app a")].every((a) => a.getAttribute("href") === "/vpn/devices#manual")).toBe(true);
+    expect([...container.querySelectorAll("a")].filter((a) => /chromewebstore|microsoftedge|\.exe|\.msi|apps\.apple|play\.google/.test(a.href))).toHaveLength(0);
     expect(screen.getByText("Manual install, for testers (Chrome and Edge)")).toBeTruthy();
   });
 
-  it("marks a store Available only with a real address, highlights the visitor's browser, and drops the manual install", () => {
+  it("marks the extension Available only with a real store address, and drops the manual install", () => {
     Object.assign(STORE_LINKS, { chrome: "https://chromewebstore.google.com/detail/test", edge: "https://microsoftedge.microsoft.com/addons/detail/test" });
     try {
       const { container } = render(<Downloads agent={EDGE} testers />);
       expect(screen.getByRole("link", { name: "Get for Edge" }).getAttribute("href")).toBe(STORE_LINKS.edge);
       expect(screen.getByRole("link", { name: "Add to Chrome" }).getAttribute("href")).toBe(STORE_LINKS.chrome);
-      expect(screen.getAllByText("Available")).toHaveLength(2);
-      expect(screen.getAllByText("Coming Soon")).toHaveLength(2);  // Firefox and Brave
-      expect(container.querySelector(".vpn-platform.is-mine")?.textContent).toMatch(/Microsoft Edge/);
+      expect(card(container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Available");
+      expect(card(container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
       expect(screen.queryByText(/Manual install/)).toBeNull();
     } finally {
       Object.assign(STORE_LINKS, { chrome: "", edge: "" });
     }
   });
 
-  it("labels computers and phones WireGuard Setup, never a native app, and sends phones there", () => {
-    render(<Downloads agent={PHONE} testers />);
-    for (const os of ["Windows", "macOS", "Linux", "Android", "iOS"]) expect(screen.getByRole("link", { name: `WireGuard Setup for ${os}` })).toBeTruthy();
-    expect(screen.getByText(/A native Kiwi VPN app is coming soon/)).toBeTruthy();
-    expect(screen.getByText(/On a phone, use the WireGuard Setup/)).toBeTruthy();
-    expect(screen.queryByText(/Manual install/)).toBeNull();
+  it("offers the Windows beta only once a real installer is set, labelled Beta, promising no sign-in", () => {
+    let view = render(<Downloads agent={CHROME} />);
+    expect(screen.queryByRole("link", { name: /Download for Windows/ })).toBeNull();
+    view.unmount();
+    Object.assign(WINDOWS_BETA, { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.0" });
+    try {
+      view = render(<Downloads agent={CHROME} />);
+      const windows = card(view.container, "Windows");
+      expect(screen.getByRole("link", { name: /Download for Windows/ }).getAttribute("href")).toBe("/downloads/KiwiVPN-Setup.exe");
+      expect(windows.querySelector(".vpn-status")!.textContent).toBe("Beta");
+      expect(windows.textContent).toMatch(/temporary/);
+      expect(windows.textContent).not.toMatch(/sign in|one-click/i);
+      expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+      expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+    } finally {
+      Object.assign(WINDOWS_BETA, { href: "", version: "" });
+    }
+  });
+
+  it("keeps WireGuard out of the cards, one link away", () => {
+    const { container } = render(<Downloads agent={CHROME} />);
+    for (const c of container.querySelectorAll(".vpn-app")) expect(c.textContent).not.toMatch(/WireGuard/);
+    expect(screen.getByRole("link", { name: "Manual setup for Windows" }).getAttribute("href")).toBe("/vpn/devices#manual");
+    expect(screen.getByRole("link", { name: "Set it up manually" }).getAttribute("href")).toBe("/vpn/devices#manual");
+    expect(container.querySelector("#vpn-manual")).toBeNull();
+  });
+
+  it("marks the visitor's own device", () => {
+    expect(visitorOs(CHROME)).toBe("Windows");
+    expect(visitorOs(PHONE)).toBe("Android");
+    expect(visitorOs("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605")).toBe("macOS");
+    expect(visitorOs("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605", 5)).toBe("iOS");
+    expect(visitorOs("Mozilla/5.0 (X11; Linux x86_64) Firefox/130")).toBe("Linux");
+    let view = render(<Downloads agent={CHROME} />);
+    expect(card(view.container, "Windows").textContent).toMatch(/Your device/);
+    expect(card(view.container, "Browser").textContent).toMatch(/Your browser/);
+    view.unmount();
+    view = render(<Downloads agent={PHONE} />);
+    expect(card(view.container, "Android").textContent).toMatch(/Your device/);
+    expect(screen.getByText(/Browser extensions need a computer/)).toBeTruthy();
   });
 
   it("stays coming soon while closed, however it's priced", async () => {
@@ -154,7 +203,7 @@ describe("Free while payments are off", () => {
             "GET /api/members/vpn/public": [200, { enabled: false, payments: false, billing: null }] });
     const { container } = render(<VpnPage />);
     await settle();
-    expect(container.textContent).toMatch(/Coming soon/);
+    expect(container.querySelector(".vpn-hero")!.textContent).toMatch(/Opening soon/);
     expect(screen.queryByText("Free while we test")).toBeNull();
     expect(screen.queryByRole("link", { name: "Sign in to start" })).toBeNull();
   });
@@ -171,22 +220,28 @@ describe("The dashboard: plans, trial, Royal Kiwi and real figures", () => {
             "GET /api/members/vpn/stats": [200, STATS] });
     const { container } = render(<VpnPage />);
     await settle();
-    const bar = container.querySelector(".vpn-stats")!.textContent!;
-    expect(bar).toMatch(/Recently Active Users2/);
-    expect(bar).toMatch(/Available Countries1/);
-    expect(bar).toMatch(/Online Servers1/);
-    expect(bar).not.toMatch(/Uptime/);
-    expect(container.querySelector(".vpn-servers")!.textContent).toMatch(/Helsinki 1.*Recommended.*Finland/);
+    const net = container.querySelector(".vpn-network")!.textContent!;
+    expect(net).toMatch(/1 country · 1 server online · 2 active in the last 10 minutes/);
+    expect(container.textContent).not.toMatch(/Uptime|\d ?ms\b|Mbps|Gbps/);
+    expect(container.querySelector(".vpn-servers")!.textContent).toMatch(/Helsinki.*Recommended.*Finland/);
     expect(container.textContent).not.toMatch(/Amsterdam|Frankfurt|London|New York/);
   });
 
-  it("says Unavailable, with no invented numbers, when the figures can't be read", async () => {
+  it("doesn't dress up an idle network: no active count at zero", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "Sign in" }], "GET /api/members/vpn/public": [200, { enabled: false, payments: false, billing: null }],
+            "GET /api/members/vpn/stats": [200, { ...STATS, active_users: 0 }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-network")!.textContent).not.toMatch(/active in the last/);
+  });
+
+  it("says plainly when nothing can be read, with no invented numbers", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "Sign in" }], "GET /api/members/vpn/public": [200, { enabled: false, payments: false, billing: null }],
             "GET /api/members/vpn/stats": [500, { detail: "down" }] });
     const { container } = render(<VpnPage />);
     await settle();
-    expect(container.querySelector(".vpn-stats")!.textContent!.match(/Unavailable/g)).toHaveLength(3);
     expect(container.textContent).toMatch(/Server status is unavailable/);
+    expect(container.querySelector(".vpn-network")!.textContent).not.toMatch(/\d (country|countries|server)/);
   });
 
   it("shows no start button while the trial is off", async () => {
@@ -194,8 +249,8 @@ describe("The dashboard: plans, trial, Royal Kiwi and real figures", () => {
     render(<VpnPage />);
     await settle();
     expect(screen.queryByRole("button", { name: TRIAL_LABEL })).toBeNull();
-    expect(screen.getByText("30-day free trial coming soon")).toBeTruthy();
     expect(screen.getByText("Not Activated")).toBeTruthy();
+    expect(screen.getByText("Purchasing isn't open yet.")).toBeTruthy();
   });
 
   it("starts a trial through the server and then shows the days left, with no second offer", async () => {
@@ -208,8 +263,9 @@ describe("The dashboard: plans, trial, Royal Kiwi and real figures", () => {
     await settle();
     expect(calls.some((c) => c === "POST /api/members/vpn/trial")).toBe(true);
     expect(screen.queryByRole("button", { name: TRIAL_LABEL })).toBeNull();
-    expect(screen.getByText("Free trial · 30 days left")).toBeTruthy();
-    expect(screen.getByText("Free Trial")).toBeTruthy();
+    const my = document.querySelector<HTMLElement>(".vpn-my")!;
+    expect(my.querySelector(".vpn-big")!.textContent).toBe("Free Trial");
+    expect(my.textContent).toMatch(/30 days left/);
   });
 
   it("shows the server's refusal if a trial can't start", async () => {
@@ -234,7 +290,7 @@ describe("The dashboard: plans, trial, Royal Kiwi and real figures", () => {
     view = render(<VpnPage />);
     await settle();
     expect(screen.queryByText("Royal Kiwi Access Active")).toBeNull();
-    expect(screen.getByRole("link", { name: "Royal Kiwis — Free Forever" }).getAttribute("href")).toBe("#royal");
+    expect(document.querySelector(".vpn-hero")!.textContent).not.toMatch(/Forever/);
   });
 
   it("adds no navigation of its own", async () => {
@@ -292,7 +348,7 @@ describe("Paying and anonymous keys", () => {
     let sent: RequestInit | undefined;
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn/anon": [200, state({ anonymous: true, billing: BILL, devices: [DEVICE] })],
             "DELETE /api/members/vpn/anon/devices/7": (init) => { sent = init; return [204, null]; } });
-    render(<VpnPage />);
+    render(<VpnDevicesPage />);
     await settle();
     fireEvent.click(screen.getAllByRole("button", { name: /Delete/ })[0]);
     await settle();
@@ -349,23 +405,28 @@ describe("Kiwi VPN page", () => {
     expect(screen.getByText("Sign in").getAttribute("href")).toBe("/join");
   });
 
-  it("lists servers with flag, online dot and load, and devices with last connected and data used", async () => {
+  it("lists servers with flag, online dot and load", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ devices: [DEVICE] })] });
     const { container } = render(<VpnPage />);
     await settle();
     const rows = container.querySelectorAll(".vpn-servers li");
     expect(rows).toHaveLength(2);
-    expect(rows[0].querySelector(".vpn-flag")!.textContent).toBe("🇳🇿");
+    expect(rows[0].querySelector(".vpn-flag img")!.getAttribute("src")).toBe("/brand/flags/nz.svg");
     expect(rows[0].querySelector(".vpn-dot")!.getAttribute("aria-label")).toBe("Online");
     expect(rows[1].className).toContain("is-off");
     expect(rows[1].querySelector("[role=meter]")!.getAttribute("aria-valuenow")).toBe("90");
+  });
+
+  it("lists devices with last connected and data used, and won't offer an offline server", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ devices: [DEVICE] })] });
+    const { container } = render(<VpnDevicesPage />);
+    await settle();
     const dev = container.querySelector(".vpn-device")!.textContent!;
     expect(dev).toContain("My iPhone");
-    expect(dev).toContain("Auckland 1");
+    expect(dev).toContain("Auckland, New Zealand");
     expect(dev).toContain("5 min ago");
     expect(dev).toContain("1.5 GB this month");
-    // the offline server can't be picked for a new device
-    expect(screen.getByRole("option", { name: /Frankfurt 1/ }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("option", { name: /Frankfurt, Germany/ }).hasAttribute("disabled")).toBe(true);
   });
 
   it("creates a device and shows its config once: QR code, .conf download, copy and the save-it-now warning", async () => {
@@ -385,7 +446,7 @@ describe("Kiwi VPN page", () => {
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 
-    const { container } = render(<VpnPage />);
+    const { container } = render(<VpnDevicesPage />);
     await settle();
     fireEvent.change(screen.getByPlaceholderText("e.g. My iPhone"), { target: { value: "  Laptop " } });
     fireEvent.click(screen.getByRole("button", { name: "Add device" }));
@@ -419,7 +480,7 @@ describe("Kiwi VPN page", () => {
     [403, "Reach Scout Kiwi first."],
   ])("shows the API's message on %i", async (status, detail) => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state()], "POST /api/members/vpn/devices": [status, { detail }] });
-    render(<VpnPage />);
+    render(<VpnDevicesPage />);
     await settle();
     fireEvent.change(screen.getByPlaceholderText("e.g. My iPhone"), { target: { value: "Phone" } });
     fireEvent.click(screen.getByRole("button", { name: "Add device" }));
@@ -430,7 +491,7 @@ describe("Kiwi VPN page", () => {
 
   it("explains a 503 even without a message", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state()], "POST /api/members/vpn/devices": [503, {}] });
-    render(<VpnPage />);
+    render(<VpnDevicesPage />);
     await settle();
     fireEvent.change(screen.getByPlaceholderText("e.g. My iPhone"), { target: { value: "Phone" } });
     fireEvent.click(screen.getByRole("button", { name: "Add device" }));
@@ -445,7 +506,7 @@ describe("Kiwi VPN page", () => {
       "GET /api/members/vpn": () => [200, state({ devices })],
       "DELETE /api/members/vpn/devices/7": () => { devices = []; return [204, null]; },
     });
-    const { container } = render(<VpnPage />);
+    const { container } = render(<VpnDevicesPage />);
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Delete My iPhone" }));
     expect(calls.some((c) => c.startsWith("DELETE"))).toBe(false);
@@ -455,25 +516,34 @@ describe("Kiwi VPN page", () => {
     await settle();
     expect(calls).toContain("DELETE /api/members/vpn/devices/7");
     expect(container.querySelector(".vpn-device")).toBeNull();
-    expect(screen.getByText(/No devices yet/)).toBeTruthy();
+    expect(screen.getByText("No devices yet.")).toBeTruthy();
   });
 
-  it("preselects the recommended server and tags it; shows ad-blocking servers", async () => {
+  it("tags the recommended server and shows ad-blocking servers", async () => {
     const servers: VpnState["servers"] = [
       { ...SERVERS[0], load: 0.1, recommended: false },
       { ...SERVERS[1], online: true, load: 0.3, adblock: true, recommended: true },
     ];
-    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ servers })],
-            "POST /api/members/vpn/devices": [503, { detail: "busy" }] });
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ servers })] });
     const { container } = render(<VpnPage />);
     await settle();
     const rows = container.querySelectorAll(".vpn-servers li");
     expect(rows[0].querySelector(".vpn-tag")).toBeNull();
     expect(rows[1].querySelector(".vpn-tag")!.textContent).toBe("Recommended");
-    expect(rows[1].textContent).toContain("🛡️ Blocks ads & trackers");
+    expect(rows[1].textContent).toContain("Blocks ads & trackers");
     expect(rows[0].textContent).not.toContain("Blocks ads");
+  });
+
+  it("preselects the recommended server for a new device", async () => {
+    const servers: VpnState["servers"] = [
+      { ...SERVERS[0], load: 0.1, recommended: false },
+      { ...SERVERS[1], online: true, load: 0.3, adblock: true, recommended: true },
+    ];
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ servers })], "POST /api/members/vpn/devices": [503, { detail: "busy" }] });
+    const { container } = render(<VpnDevicesPage />);
+    await settle();
     expect((container.querySelector(".vpn-form select") as HTMLSelectElement).value).toBe("2");
-    expect(screen.getByRole("option", { name: /Frankfurt 1.*Recommended/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /Frankfurt.*Recommended/ })).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText("e.g. My iPhone"), { target: { value: "Phone" } });
     fireEvent.click(screen.getByRole("button", { name: "Add device" }));
     await settle();
@@ -488,14 +558,14 @@ describe("Kiwi VPN page", () => {
     expect(container.querySelector(".vpn-usage")!.textContent).toContain("15.0 GB of 50.0 GB this month");
     expect(screen.getByRole("meter", { name: "Data used this month" }).getAttribute("aria-valuenow")).toBe("30");
     expect(container.querySelector(".vpn-paused")).toBeNull();
-    expect(container.querySelector(".vpn-form")).toBeTruthy();
+    expect(container.querySelector(".vpn-form")).toBeNull();  // the main page never has the device form
   });
 
   it("says unlimited when there's no cap", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ usage: { ...USAGE, used_bytes: 1536 * 1024 ** 2 } })] });
     const { container } = render(<VpnPage />);
     await settle();
-    expect(container.textContent).toMatch(/Data This Month1\.5 GBThis month · no limit/);
+    expect(container.querySelector(".vpn-facts")!.textContent).toMatch(/Data this month1\.5 GBThis month · no limit/);
     expect(screen.queryByRole("meter", { name: "Data used this month" })).toBeNull();
   });
 
@@ -510,24 +580,251 @@ describe("Kiwi VPN page", () => {
     expect(banner).toContain("Paused for the rest of the month");
     expect(banner).toContain("50.0 GB");
     expect(banner).toContain("1 Nov");
-    expect(container.querySelector(".vpn-form")).toBeNull();
-    expect(container.querySelector(".vpn-device")!.textContent).toContain("Paused until 1 Nov");
     expect(screen.getByRole("meter", { name: "Data used this month" }).getAttribute("aria-valuenow")).toBe("100");
+    cleanup();
+    const devices = render(<VpnDevicesPage />);
+    await settle();
+    expect(devices.container.querySelector(".vpn-paused")).toBeTruthy();
+    expect(devices.container.querySelector(".vpn-form")).toBeNull();
+    expect(devices.container.querySelector(".vpn-device")!.textContent).toContain("Paused until 1 Nov");
   });
 
   it("hides the form at the device limit", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ max_devices: 1, devices: [DEVICE] })] });
-    const { container } = render(<VpnPage />);
+    const { container } = render(<VpnDevicesPage />);
     await settle();
     expect(container.querySelector(".vpn-form")).toBeNull();
     expect(screen.getByText(/all 1 of your devices/)).toBeTruthy();
   });
 });
 
+describe("The redesigned page", () => {
+  afterEach(() => { try { sessionStorage.clear(); } catch { /* none */ } });
+  const member = (over: Partial<VpnState> = {}) => ({ "/api/website/home": [200, HOME] as Route, "GET /api/members/vpn": [200, state(over)] as Route });
+
+  it("runs in the agreed order", async () => {
+    serve(member({ billing: BILL, plan: { kind: "trial", until: "2026-12-04T00:00:00+00:00", days_left: 12 }, trial: { available: false, days: 30 } }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    const order = [".vpn-hero", "#vpn-plans", "#vpn-downloads", ".vpn-my", "#vpn-network", "#royal", "#vpn-faq"].map((s) => container.querySelector(s)!);
+    order.forEach((el, i) => { if (i) expect(order[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); });
+  });
+
+  it.each([
+    ["signed out and closed", { "/api/website/home": [200, HOME] as Route, "GET /api/members/vpn": [401, { detail: "x" }] as Route, "GET /api/members/vpn/public": [200, { enabled: false, billing: null }] as Route }],
+    ["signed out and paying", { "/api/website/home": [200, HOME] as Route, "GET /api/members/vpn": [401, { detail: "x" }] as Route, "GET /api/members/vpn/public": [200, { enabled: true, trial: true, billing: BILL }] as Route }],
+    ["on a trial", member({ devices: [DEVICE], plan: { kind: "trial", until: "2026-12-04T00:00:00+00:00", days_left: 12 } })],
+    ["expired", member({ eligible: false, billing: BILL, plan: { kind: "expired", until: null, days_left: null } })],
+  ])("has no dead same-page link when %s", async (_n, routes) => {
+    serve(routes);
+    const { container } = render(<VpnPage />);
+    await settle();
+    const links = [...container.querySelectorAll<HTMLAnchorElement>('.vpn a[href^="#"]')];
+    expect(links.length).toBeGreaterThan(0);
+    for (const a of links) expect(container.querySelector(a.getAttribute("href")!), a.textContent!).toBeTruthy();
+  });
+
+  it("has no Connect button, and never says this browser is connected", async () => {
+    serve(member({ devices: [DEVICE] }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(screen.queryByRole("button", { name: /^connect/i })).toBeNull();
+    expect(container.querySelector(".vpn-my")!.textContent).toMatch(/1 connected in last 10 min/);  // a real handshake on a real device
+    expect(container.textContent).not.toMatch(/You are (now )?(connected|protected)/i);
+  });
+
+  it("makes no claim the service can't back up", async () => {
+    serve(member({ billing: BILL }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.textContent).not.toMatch(/military|100%|zero[- ]logs?|no[- ]logs|unhackable|fully anonymous|completely anonymous/i);
+  });
+
+  it("offers trial and buying only where the server allows, and says so when it doesn't", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: false, trial: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    const plans = container.querySelector("#vpn-plans")!;
+    expect(plans.textContent).toMatch(/\$9\.99.*per 30 days.*No automatic billing.*Purchasing isn't open yet/);
+    expect(plans.querySelectorAll("button")).toHaveLength(0);
+    expect(container.querySelector(".vpn-hero")!.textContent).toMatch(/Opening soon/);
+    expect(screen.queryByRole("link", { name: /Start Free Trial/ })).toBeNull();
+  });
+
+  it("sends a visitor to sign in for the trial while it's open", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: true, trial: true, billing: null }] });
+    render(<VpnPage />);
+    await settle();
+    expect(screen.getByRole("link", { name: "Start Free Trial — 30 Days" }).getAttribute("href")).toBe("/join");
+  });
+
+  it("opens the time section from the plan's button", async () => {
+    serve(member({ eligible: true, billing: BILL, plan: { kind: "paid", until: "2026-12-04T00:00:00+00:00", days_left: 12 } }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    const time = container.querySelector<HTMLDetailsElement>("#vpn-time")!;
+    expect(time.open).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Add Time" }));
+    expect(time.open).toBe(true);
+  });
+
+  it("has no device form, config or server choice on the main page, and links to My Devices", async () => {
+    serve(member({ devices: [DEVICE] }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-form")).toBeNull();
+    expect(container.querySelector("#vpn-manual")).toBeNull();
+    expect(screen.queryByRole("button", { name: /for a new device/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "My Devices" }).getAttribute("href")).toBe("/vpn/devices");
+  });
+
+  it("offers no manual setup while access is closed, because that page has nothing to give yet", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: false, trial: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector('a[href^="/vpn/devices"]')).toBeNull();
+    expect(container.querySelector("#vpn-faq")!.textContent).not.toMatch(/manual setup/i);
+    expect(container.querySelector(".vpn-app .vpn-status")!.textContent).toBe("In development");
+  });
+
+  it("replaces Explore Apps with Get Kiwi VPN, going to the apps", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: false, trial: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(screen.queryByText("Explore Apps")).toBeNull();
+    const cta = container.querySelector(".vpn-hero .site-button")!;
+    expect(cta.textContent).toBe("Get Kiwi VPN");
+    expect(cta.getAttribute("href")).toBe("#vpn-downloads");
+    expect(cta.className).toContain("is-go");
+  });
+
+  it("shows pricing to signed-out visitors even while payments are off, and what happens after the trial", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: true, trial: true, payments: false, billing: null }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    const plans = container.querySelector("#vpn-plans")!.textContent!;
+    expect(plans).toMatch(/30\s*days/);
+    expect(plans).toMatch(/\$9\.99\s*per 30 days/);
+    expect(plans).toMatch(/When your trial ends nothing is charged\. Your devices switch off and are kept for 30 days/);
+    expect(plans).toMatch(/Purchasing isn't open yet/);
+    expect(plans).not.toMatch(/annual|year|% off/i);
+  });
+
+  it("uses the server's price when it sends one", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: true, billing: { ...BILL, price_usd: 12.5, period_days: 28 } }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector("#vpn-plans")!.textContent).toMatch(/\$12\.5\s*per 28 days/);
+  });
+
+  it("keeps the fallback prices in step with the backend's", () => {
+    const billingPy = readFileSync("../backend/app/vpn/billing.py", "utf8");
+    const servicePy = readFileSync("../backend/app/vpn/service.py", "utf8");
+    expect(billingPy).toMatch(new RegExp(`^PRICE_USD = ${PLAN.price_usd}$`, "m"));
+    expect(billingPy).toMatch(new RegExp(`^PERIOD_DAYS = ${PLAN.period_days}$`, "m"));
+    expect(servicePy).toMatch(new RegExp(`^TRIAL_DAYS = ${PLAN.trial_days}$`, "m"));
+    expect(servicePy).toMatch(new RegExp(`^KEEP_LAPSED = timedelta\\(days=${PLAN.keep_days}\\)$`, "m"));
+  });
+
+  it("keeps manual setup on My Devices, folded, with the form and WireGuard links", async () => {
+    serve(member());
+    const { container } = render(<VpnDevicesPage />);
+    await settle();
+    const manual = container.querySelector<HTMLDetailsElement>("details#vpn-manual")!;
+    expect(manual.open).toBe(false);
+    for (const os of ["Windows", "macOS", "Linux", "Android", "iOS"]) expect(manual.querySelector(`a[aria-label="WireGuard Setup for ${os}"]`)).toBeTruthy();
+    expect(manual.querySelector(".vpn-form")).toBeTruthy();
+    expect(container.textContent).toMatch(/set themselves up when you sign in/);
+  });
+
+  it("asks a signed-out visitor on My Devices to sign in, still shows manual setup, and accepts a key", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: true, billing: BILL }],
+            "GET /api/members/vpn/anon": [200, state({ anonymous: true, billing: BILL })] });
+    const { container } = render(<VpnDevicesPage />);
+    await settle();
+    expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/join");
+    expect(container.querySelector("#vpn-manual")).toBeTruthy();
+    expect(container.querySelector("#vpn-manual .vpn-form")).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("KIWI-XXXX-…"), { target: { value: "KIWI-TEST" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use my key" }));
+    await settle();
+    expect(screen.getByRole("heading", { name: "Your devices" })).toBeTruthy();
+  });
+
+  it("explains why an account that can't add a device can't, with the way forward", async () => {
+    serve(member({ eligible: false, reason: "Your time has run out.", billing: BILL }));
+    const { container } = render(<VpnDevicesPage />);
+    await settle();
+    expect(container.querySelector("#vpn-manual .vpn-form")).toBeNull();
+    expect(container.querySelector("#vpn-manual")!.textContent).toMatch(/Your time has run out/);
+    expect(screen.getByRole("link", { name: "See pricing" }).getAttribute("href")).toBe("/vpn#vpn-plans");
+  });
+
+  it("makes no over-claim about privacy or the private key on the page", async () => {
+    serve(member({ billing: BILL }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.textContent).not.toMatch(/never keep|never stored|never record|no traffic logs/i);
+    expect(container.querySelector(".vpn-hero")!.textContent).toMatch(/We don't store your device's private key/);
+  });
+
+  it("shows each kind of Royal status only from the server's answer", async () => {
+    serve(member({ royal: false, plan: { kind: "trial", until: "2026-12-04T00:00:00+00:00", days_left: 12 } }));
+    let view = render(<VpnPage />);
+    await settle();
+    expect(view.container.querySelector("#royal")!.textContent).toMatch(/Your rank doesn't include this yet/);
+    view.unmount();
+    serve(member({ royal: false, anonymous: true }));
+    view = render(<VpnPage />);
+    await settle();
+    expect(view.container.querySelector("#royal")!.textContent).toMatch(/Ranks belong to a Kiwi Passport/);
+  });
+
+  it("keeps the test-mode note to testers", async () => {
+    serve(member({ test_mode: false }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-testmode")).toBeNull();
+  });
+
+  it("falls back to a country's letters when it has no flag picture", () => {
+    const { container } = render(<Flag cc="co" />);
+    expect(container.querySelector("img")!.getAttribute("src")).toBe("/brand/flags/co.svg");
+    fireEvent.error(container.querySelector("img")!);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.textContent).toBe("CO");
+  });
+
+  it("reads a location from whatever Admin typed", () => {
+    expect(place({ name: "Helsinki 1", region: "Finland", country_code: "FI" })).toEqual({ city: "Helsinki", country: "Finland" });
+    expect(place({ name: "Germany", region: "Falkenstein, Germany", country_code: "DE" })).toEqual({ city: "Falkenstein", country: "Germany" });
+    expect(place({ name: "Japan", region: "", country_code: "JP" })).toEqual({ city: "", country: "Japan" });
+    expect(placeLine({ name: "Helsinki 1", region: "Finland", country_code: "FI" })).toBe("Helsinki, Finland");
+    expect(placeLine({ name: "Japan", region: "Japan", country_code: "JP" })).toBe("Japan");
+  });
+
+  it("takes a new country from the server list with no change to the page", () => {
+    // a tiny fake world: France at the left, Japan at the right, with the sea between
+    const world = { step: 0.5, top: 60, columns: 720, rows: Array.from({ length: 200 }, () => `..300FR40..280JP40`) };
+    const server = (id: number, cc: string, online = true) => ({ id, name: `s${id}`, region: "", country_code: cc, online });
+    const one = drawMap(world, [server(1, "FR")]);
+    expect(one.pins).toHaveLength(1);
+    expect(one.lit).not.toBe("");
+    const both = drawMap(world, [server(1, "FR"), server(2, "JP")]);
+    expect(both.pins).toHaveLength(2);
+    both.pins.forEach((p) => { expect(p.x).toBeGreaterThan(0); expect(p.x).toBeLessThan(1000); });
+    // offline: a pin, but its country isn't lit
+    const down = drawMap(world, [server(1, "FR", false)]);
+    expect(down.lit).toBe("");
+    expect(down.off).not.toBe("");
+    expect(down.pins[0].online).toBe(false);
+    // a country the map doesn't know gets no pin rather than a wrong one
+    expect(drawMap(world, [server(3, "ZZ")]).pins).toHaveLength(0);
+  });
+});
+
 describe("helpers", () => {
-  it("formats flags, bytes and times", () => {
-    expect(flag("NZ")).toBe("🇳🇿");
-    expect(flag("x")).toBe("🌐");
+  it("formats bytes and times", () => {
     expect(bytes(0)).toBe("0 MB");
     expect(bytes(1536 * 1024)).toBe("1.5 MB");
     expect(ago(null)).toBe("Never connected");

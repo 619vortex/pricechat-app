@@ -1,4 +1,4 @@
-"""One-time sign-in codes for the Kiwi VPN desktop app, and named testers who may use the VPN while it's closed. Adds one table and one empty column.
+"""One-time sign-in codes for the Kiwi VPN desktop app, a mark on the sessions it holds, and named testers who may use the VPN while it's closed. Adds one table and two empty columns.
 
 Revision ID: 0102_desktop_codes
 Revises: 0101_newsdesk
@@ -30,9 +30,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_member_desktop_codes_member_id", "member_desktop_codes", ["member_id"])
     op.add_column("vpn_accounts", sa.Column("tester_until", sa.DateTime(timezone=True)))
+    op.add_column("member_sessions", sa.Column("kind", sa.String(16)))
 
 
 def downgrade() -> None:
+    with op.batch_alter_table("member_sessions") as batch:
+        batch.drop_column("kind")
     with op.batch_alter_table("vpn_accounts") as batch:
         batch.drop_column("tester_until")
     op.drop_table("member_desktop_codes")

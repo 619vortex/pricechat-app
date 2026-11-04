@@ -58,6 +58,12 @@ RemoveInstalled
 Push-Location "$Here\service"
 cargo test -- --test-threads=1
 Need ($LASTEXITCODE -eq 0) "The service's tests failed."
+Pop-Location
+Push-Location "$Here\client"
+cargo test
+Need ($LASTEXITCODE -eq 0) "The sign-in and key tests failed."
+Pop-Location
+Push-Location "$Here\service"
 cargo build --examples
 Need ($LASTEXITCODE -eq 0) "The security test's tools didn't build."
 cargo build --release --bins

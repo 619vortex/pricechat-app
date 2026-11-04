@@ -79,6 +79,7 @@ class MemberSession(IdMixin, TimestampMixin, Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    kind: Mapped[str | None] = mapped_column(String(16))  # "desktop" for the Kiwi VPN app; empty for a browser
 
 
 class LinkedIdentity(IdMixin, TimestampMixin, Base):

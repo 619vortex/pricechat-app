@@ -49,6 +49,17 @@ fn exe_dir() -> Result<PathBuf, String> {
     exe.parent().map(PathBuf::from).ok_or_else(|| "no install folder".to_string())
 }
 
+/// After Windows restarts: the config only exists while someone wants the tunnel, because Disconnect deletes it. So if it's there, bring the tunnel back. The network may not be up yet
+/// when the service starts, hence the tries. Pressing Disconnect at any point ends them, because the config is gone.
+fn resume_after_restart(tunnel: Arc<Tunnel>) {
+    for _ in 0..30 {
+        if tunnel.try_resume() {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(10));
+    }
+}
+
 /// Under the install folder, which only administrators can write to.
 fn tunnels_dir() -> Result<PathBuf, String> {
     Ok(exe_dir()?.join("tunnels"))
@@ -185,6 +196,27 @@ impl Tunnel {
                 Status::failed(e)
             }
         }
+    }
+
+    /// True once there's nothing more to do: nothing to resume, or the tunnel is running.
+    fn try_resume(&self) -> bool {
+        let _one_at_a_time = self.changing.lock().unwrap();
+        let Ok(path) = conf_path() else { return true };
+        if !path.exists() {
+            return true;
+        }
+        let Ok(scm) = manager() else { return false };
+        let service = match open_service(&scm, TUNNEL_SERVICE) {
+            Some(s) => s,
+            None => match create_tunnel_service(&scm, &path.display().to_string()) {
+                Ok(s) => s,
+                Err(_) => return false,
+            },
+        };
+        if matches!(service_state(&service), ServiceState::Running | ServiceState::Starting) {
+            return true;
+        }
+        unsafe { StartServiceW(service.0, 0, null()) != 0 || GetLastError() == ERROR_SERVICE_ALREADY_RUNNING }
     }
 
     fn start(&self, cfg: &config::Config) -> Result<(), String> {
@@ -451,6 +483,10 @@ fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> R
     let check_callers = sddl.is_some();
     let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tunnel = Arc::new(Tunnel::new());
+    if check_callers {
+        let tunnel = Arc::clone(&tunnel);
+        std::thread::spawn(move || resume_after_restart(tunnel));
+    }
     let mut first = FILE_FLAG_FIRST_PIPE_INSTANCE;
     while !stop.load(std::sync::atomic::Ordering::SeqCst) {
         let attrs = sd.as_ref().map(Descriptor::attributes);

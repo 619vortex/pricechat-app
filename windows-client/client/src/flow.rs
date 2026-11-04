@@ -1,0 +1,304 @@
+//! From "choose a server" to a working config, with nothing for the person to do: reuse this PC's device on that server, or make a key and register one.
+
+use crate::api::{Account, ApiError, Backend, Peer, Server};
+use crate::keys;
+use zeroize::Zeroizing;
+
+pub struct Saved {
+    pub device_id: i64,
+    pub private_b64: Zeroizing<String>,
+}
+
+/// What's kept on this PC. Encrypted in the real one: see `store`.
+pub trait Vault {
+    fn session(&self) -> Option<Zeroizing<String>>;
+    fn save_session(&self, token: &str) -> Result<(), String>;
+    fn device(&self, server_id: i64) -> Option<Saved>;
+    fn save_device(&self, server_id: i64, device_id: i64, private_b64: &str) -> Result<(), String>;
+    fn forget_device(&self, server_id: i64);
+    fn last_server(&self) -> Option<i64>;
+    fn save_last_server(&self, server_id: i64);
+    fn forget_all(&self);
+}
+
+pub const SIGNED_OUT: &str = "Please sign in again.";
+const FULL: &str = "You've used all your devices. Remove one under My Devices on pricechat.live, then try again.";
+
+/// This PC's name for its device on a server, up to the backend's 32 characters. It's how a reinstalled app finds the device it can no longer use.
+pub fn device_name(computer: &str, server: &Server) -> String {
+    let host: String = computer.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(22).collect();
+    let host = if host.is_empty() { "Windows PC".to_string() } else { host };
+    format!("{host} ({})", server.id)
+}
+
+fn friendly(e: ApiError) -> String {
+    match e.status {
+        401 => SIGNED_OUT.into(),
+        409 => FULL.into(),
+        429 => "Too many new devices. Please wait a few minutes and try again.".into(),
+        _ => e.message,
+    }
+}
+
+/// The config for the service, rebuilt from the server's answer. The service validates it again, so nothing unexpected reaches SYSTEM either way.
+pub fn render_config(private_b64: &str, peer: &Peer) -> Zeroizing<String> {
+    let host = if peer.endpoint_host.contains(':') { format!("[{}]", peer.endpoint_host) } else { peer.endpoint_host.clone() };
+    let mut out = format!("[Interface]\nPrivateKey = {private_b64}\nAddress = {}\n", peer.addresses.join(", "));
+    if !peer.dns.is_empty() {
+        out.push_str(&format!("DNS = {}\n", peer.dns.join(", ")));
+    }
+    out.push_str(&format!("\n[Peer]\nPublicKey = {}\nEndpoint = {host}:{}\nAllowedIPs = {}\n", peer.server_public_key, peer.listen_port, peer.allowed_ips.join(", ")));
+    if peer.keepalive > 0 {
+        out.push_str(&format!("PersistentKeepalive = {}\n", peer.keepalive));
+    }
+    Zeroizing::new(out)
+}
+
+/// Everything before asking the service to connect. On any failure nothing has changed on this PC's tunnel.
+pub fn config_for(backend: &dyn Backend, vault: &dyn Vault, computer: &str, server_id: i64) -> Result<Zeroizing<String>, String> {
+    let token = vault.session().ok_or(SIGNED_OUT)?;
+    let account: Account = backend.account(&token).map_err(|e| {
+        if e.signed_out() {
+            vault.forget_all();
+        }
+        friendly(e)
+    })?;
+    if !account.eligible {
+        return Err(account.reason.unwrap_or_else(|| "Your account doesn't include Kiwi VPN right now.".into()));
+    }
+    let server = account.servers.iter().find(|s| s.id == server_id).ok_or("That server is no longer available. Please choose another.")?;
+    if !server.online {
+        return Err("That server is offline right now. Please choose another.".into());
+    }
+    if let Some(saved) = vault.device(server_id) {
+        if account.devices.iter().any(|d| d.id == saved.device_id) {
+            let peer = backend.peer(&token, saved.device_id).map_err(friendly)?;
+            vault.save_last_server(server_id);
+            return Ok(render_config(&saved.private_b64, &peer));
+        }
+        vault.forget_device(server_id); // removed on the website: this key no longer works
+    }
+    let name = device_name(computer, server);
+    // a device with this PC's name whose key is gone, as after a reinstall: it can never connect again, so it shouldn't hold a slot
+    if let Some(stale) = account.devices.iter().find(|d| d.server_id == server_id && d.name == name) {
+        backend.delete_device(&token, stale.id).map_err(friendly)?;
+    }
+    let pair = keys::generate()?;
+    let added = backend.add_device(&token, &name, server_id, &pair.public_b64).map_err(friendly)?;
+    vault.save_device(server_id, added.device.id, &pair.private_b64)?;
+    vault.save_last_server(server_id);
+    Ok(render_config(&pair.private_b64, &added.peer))
+}
+
+/// The server to offer first: the last one used if it's still online, else the backend's recommendation, else any online one.
+pub fn suggested(servers: &[Server], last: Option<i64>) -> Option<i64> {
+    let online = |id: i64| servers.iter().any(|s| s.id == id && s.online);
+    last.filter(|&id| online(id)).or_else(|| servers.iter().find(|s| s.online && s.recommended).map(|s| s.id)).or_else(|| servers.iter().find(|s| s.online).map(|s| s.id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{Device, NewDevice};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct FakeVault {
+        session: RefCell<Option<String>>,
+        devices: RefCell<HashMap<i64, (i64, String)>>,
+        last: RefCell<Option<i64>>,
+    }
+
+    impl Vault for FakeVault {
+        fn session(&self) -> Option<Zeroizing<String>> {
+            self.session.borrow().clone().map(Zeroizing::new)
+        }
+        fn save_session(&self, token: &str) -> Result<(), String> {
+            *self.session.borrow_mut() = Some(token.into());
+            Ok(())
+        }
+        fn device(&self, id: i64) -> Option<Saved> {
+            self.devices.borrow().get(&id).map(|(d, k)| Saved { device_id: *d, private_b64: Zeroizing::new(k.clone()) })
+        }
+        fn save_device(&self, s: i64, d: i64, k: &str) -> Result<(), String> {
+            self.devices.borrow_mut().insert(s, (d, k.into()));
+            Ok(())
+        }
+        fn forget_device(&self, s: i64) {
+            self.devices.borrow_mut().remove(&s);
+        }
+        fn last_server(&self) -> Option<i64> {
+            *self.last.borrow()
+        }
+        fn save_last_server(&self, s: i64) {
+            *self.last.borrow_mut() = Some(s);
+        }
+        fn forget_all(&self) {
+            *self.session.borrow_mut() = None;
+            self.devices.borrow_mut().clear();
+        }
+    }
+
+    struct FakeBackend {
+        account: RefCell<Result<Account, ApiError>>,
+        add: RefCell<Option<ApiError>>,
+        calls: RefCell<Vec<String>>,
+    }
+
+    fn peer() -> Peer {
+        Peer { server_public_key: "SERVERKEY".into(), endpoint_host: "2.31.133.78".into(), listen_port: 51821, addresses: vec!["10.66.0.9/32".into()], dns: vec!["1.1.1.1".into()], allowed_ips: vec!["0.0.0.0/0".into(), "::/0".into()], keepalive: 25 }
+    }
+
+    impl Backend for FakeBackend {
+        fn account(&self, _: &str) -> Result<Account, ApiError> {
+            self.calls.borrow_mut().push("account".into());
+            self.account.borrow().clone()
+        }
+        fn start_trial(&self, _: &str) -> Result<Account, ApiError> {
+            self.account.borrow().clone()
+        }
+        fn peer(&self, _: &str, id: i64) -> Result<Peer, ApiError> {
+            self.calls.borrow_mut().push(format!("peer {id}"));
+            Ok(peer())
+        }
+        fn add_device(&self, _: &str, name: &str, server_id: i64, public_key: &str) -> Result<NewDevice, ApiError> {
+            self.calls.borrow_mut().push(format!("add {name} {server_id} {public_key}"));
+            if let Some(e) = self.add.borrow().clone() {
+                return Err(e);
+            }
+            Ok(NewDevice { device: Device { id: 50, name: name.into(), server_id }, peer: peer() })
+        }
+        fn delete_device(&self, _: &str, id: i64) -> Result<(), ApiError> {
+            self.calls.borrow_mut().push(format!("delete {id}"));
+            Ok(())
+        }
+        fn token(&self, _: &str, _: &str) -> Result<String, ApiError> {
+            Ok("t".into())
+        }
+        fn logout(&self, _: &str) -> Result<(), ApiError> {
+            Ok(())
+        }
+        fn my_ip(&self) -> Result<String, ApiError> {
+            Ok("1.2.3.4".into())
+        }
+    }
+
+    fn server(id: i64, online: bool, recommended: bool) -> Server {
+        Server { id, name: format!("s{id}"), region: String::new(), country_code: "DE".into(), online, recommended }
+    }
+
+    fn account(devices: Vec<Device>) -> Account {
+        Account { enabled: true, eligible: true, reason: None, max_devices: 3, servers: vec![server(2, true, false), server(3, false, false)], devices, plan: None, trial: None }
+    }
+
+    fn backend(a: Result<Account, ApiError>) -> FakeBackend {
+        FakeBackend { account: RefCell::new(a), add: RefCell::new(None), calls: RefCell::new(vec![]) }
+    }
+
+    fn signed_in() -> FakeVault {
+        let v = FakeVault::default();
+        v.save_session("token").unwrap();
+        v
+    }
+
+    #[test]
+    fn the_first_connect_makes_a_key_registers_only_the_public_half_and_keeps_the_private_one() {
+        let (b, v) = (backend(Ok(account(vec![]))), signed_in());
+        let config = config_for(&b, &v, "DESKTOP-1", 2).unwrap();
+        let calls = b.calls.borrow();
+        let add = calls.iter().find(|c| c.starts_with("add ")).unwrap();
+        let (private, public) = { let d = v.devices.borrow(); let k = d.get(&2).unwrap().1.clone(); (k, add.rsplit(' ').next().unwrap().to_string()) };
+        assert_ne!(private, public);
+        assert!(!add.contains(&private), "the private key never goes to the server");
+        assert!(config.contains(&format!("PrivateKey = {private}")));
+        assert!(config.contains("PublicKey = SERVERKEY") && config.contains("Endpoint = 2.31.133.78:51821") && config.contains("PersistentKeepalive = 25"));
+        assert_eq!(v.devices.borrow().get(&2).unwrap().0, 50);
+        assert_eq!(v.last_server(), Some(2));
+    }
+
+    #[test]
+    fn the_config_is_one_the_service_accepts() {
+        let pair = keys::generate().unwrap();
+        let mut p = peer();
+        p.server_public_key = pair.public_b64.clone();
+        let text = render_config(&pair.private_b64, &p);
+        let parsed = kiwivpn::config::parse(&text).expect("the service's own parser must accept what the app builds");
+        assert_eq!(parsed.private_key, *pair.private_b64);
+        assert_eq!(parsed.peer_public_key, pair.public_b64);
+        assert_eq!(parsed.endpoint, "2.31.133.78:51821");
+        assert_eq!(parsed.keepalive, 25);
+    }
+
+    #[test]
+    fn a_later_connect_reuses_the_device_and_makes_no_new_one() {
+        let (b, v) = (backend(Ok(account(vec![Device { id: 50, name: "x".into(), server_id: 2 }]))), signed_in());
+        v.save_device(2, 50, "SAVEDKEY").unwrap();
+        let config = config_for(&b, &v, "PC", 2).unwrap();
+        assert!(config.contains("PrivateKey = SAVEDKEY"));
+        assert!(b.calls.borrow().contains(&"peer 50".to_string()));
+        assert!(!b.calls.borrow().iter().any(|c| c.starts_with("add ")));
+    }
+
+    #[test]
+    fn a_device_removed_on_the_website_is_replaced() {
+        let (b, v) = (backend(Ok(account(vec![]))), signed_in());
+        v.save_device(2, 44, "OLDKEY").unwrap();
+        let config = config_for(&b, &v, "PC", 2).unwrap();
+        assert!(!config.contains("OLDKEY"));
+        assert_eq!(v.devices.borrow().get(&2).unwrap().0, 50);
+    }
+
+    #[test]
+    fn a_reinstall_clears_its_own_unusable_device_and_nobody_elses() {
+        let mine = device_name("PC", &server(2, true, false));
+        let (b, v) = (backend(Ok(account(vec![Device { id: 9, name: mine, server_id: 2 }, Device { id: 10, name: "My iPhone".into(), server_id: 2 }]))), signed_in());
+        config_for(&b, &v, "PC", 2).unwrap();
+        let calls = b.calls.borrow();
+        assert!(calls.contains(&"delete 9".to_string()));
+        assert!(!calls.contains(&"delete 10".to_string()));
+    }
+
+    #[test]
+    fn says_plainly_when_it_can_not_connect() {
+        let v = signed_in();
+        assert!(config_for(&backend(Ok(account(vec![]))), &v, "PC", 3).unwrap_err().contains("offline"));
+        assert!(config_for(&backend(Ok(account(vec![]))), &v, "PC", 99).unwrap_err().contains("no longer available"));
+        let mut locked = account(vec![]);
+        locked.eligible = false;
+        locked.reason = Some("Your time has run out.".into());
+        assert_eq!(config_for(&backend(Ok(locked)), &v, "PC", 2).unwrap_err(), "Your time has run out.");
+        let full = backend(Ok(account(vec![])));
+        *full.add.borrow_mut() = Some(ApiError { status: 409, message: "x".into() });
+        assert!(config_for(&full, &v, "PC", 2).unwrap_err().contains("My Devices"));
+        assert!(v.device(2).is_none(), "no key is kept for a device that was refused");
+    }
+
+    #[test]
+    fn an_expired_session_clears_what_it_held() {
+        let v = signed_in();
+        v.save_device(2, 50, "KEY").unwrap();
+        let e = config_for(&backend(Err(ApiError { status: 401, message: "x".into() })), &v, "PC", 2).unwrap_err();
+        assert_eq!(e, SIGNED_OUT);
+        assert!(v.session().is_none() && v.device(2).is_none());
+        assert_eq!(config_for(&backend(Ok(account(vec![]))), &FakeVault::default(), "PC", 2).unwrap_err(), SIGNED_OUT);
+    }
+
+    #[test]
+    fn device_names_fit_the_backend_and_stay_clean() {
+        let s = server(12, true, false);
+        assert_eq!(device_name("DESKTOP-F6OQ1KH", &s), "DESKTOP-F6OQ1KH (12)");
+        assert!(device_name(&"X".repeat(200), &s).len() <= 32);
+        assert_eq!(device_name("  !!", &s), "Windows PC (12)");
+    }
+
+    #[test]
+    fn suggests_the_last_server_then_the_recommended_then_any_online() {
+        let servers = vec![server(1, false, false), server(2, true, false), server(3, true, true)];
+        assert_eq!(suggested(&servers, Some(2)), Some(2));
+        assert_eq!(suggested(&servers, Some(1)), Some(3));
+        assert_eq!(suggested(&servers, None), Some(3));
+        assert_eq!(suggested(&[server(2, true, false)], None), Some(2));
+        assert_eq!(suggested(&[server(1, false, false)], None), None);
+    }
+}

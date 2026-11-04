@@ -1,0 +1,27 @@
+[package]
+name = "kiwivpn-client"
+version = "0.1.0"
+edition = "2021"
+description = "Kiwi VPN's sign-in, device keys and account calls: everything the app does that isn't a window. Kept apart from Tauri so it can be tested on its own."
+
+[lib]
+name = "kiwiclient"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+getrandom = "0.2"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = "1"
+# Windows' own TLS, so no C compiler or certificate bundle is needed.
+ureq = { version = "2", default-features = false, features = ["json", "native-tls"] }
+native-tls = "0.2"
+
+[dev-dependencies]
+kiwivpn-service = { path = "../service" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

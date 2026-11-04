@@ -8,6 +8,7 @@ node, then committing; if the node call fails nothing is kept. Only the public k
 """
 
 import base64
+import binascii
 import hashlib
 import ipaddress
 import logging
@@ -474,8 +475,44 @@ def owner_account(db: Session) -> VpnAccount:
     return acct
 
 
-def create_device(db: Session, who: Who, name: str, server_id: int, preview: bool = False) -> tuple[VpnDevice, str, str]:
+def clean_public_key(value: str) -> str:
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        raise VpnError("That isn't a valid public key.", 400) from None
+    if len(raw) != 32 or raw == bytes(32):
+        raise VpnError("That isn't a valid public key.", 400)
+    return value
+
+
+def peer_out(dev: VpnDevice, server: VpnServer) -> dict[str, Any]:
+    """Everything an app that holds its own private key needs to build its config. Nothing here is secret."""
+    ip6 = keys.ipv6_for(server.address, dev.ip, server.address6)
+    return {"server_public_key": server.public_key, "endpoint_host": server.endpoint_host, "listen_port": server.listen_port,
+            "addresses": [f"{dev.ip}/32"] + ([f"{ip6}/128"] if ip6 else []), "dns": _dns(server), "allowed_ips": ["0.0.0.0/0", "::/0"], "keepalive": 25}
+
+
+def device_peer(db: Session, who: Who, device_id: int) -> dict[str, Any]:
+    """Current connection details for one of this account's own devices, so an app follows a server's changes without a new key."""
+    acct = account_of(db, who)
+    dev = db.get(VpnDevice, device_id)
+    if dev is None or dev.account_id != acct.id:
+        raise VpnError("Device not found.", 404)
+    ok, reason = eligibility(db, acct, False)
+    if not ok:
+        raise VpnError(reason or "Kiwi VPN isn't available.", 403)
+    server = db.get(VpnServer, dev.server_id)
+    if server is None or not server.enabled:
+        raise VpnError("Server not found.", 404)
+    if not server.online or not server.public_key or not server.endpoint_host:
+        raise VpnError("This server is offline right now. Pick another one or try again later.", 503)
+    return peer_out(dev, server)
+
+
+def create_device(db: Session, who: Who, name: str, server_id: int, preview: bool = False, own_public_key: str | None = None) -> tuple[VpnDevice, str, str]:
     """(device, config text, filename). The config, holding the private key, exists only in this return value.
+
+    With `own_public_key`, the app made its key itself: the server never sees the private half, so the config and filename come back empty. See `peer_out`.
 
     The tunnel IP is protected by the unique (server_id, ip) constraint: if a concurrent creation took the same IP first,
     the flush fails, the transaction is rolled back and the next free IP is tried (checks re-run on the fresh state)."""
@@ -494,7 +531,12 @@ def create_device(db: Session, who: Who, name: str, server_id: int, preview: boo
         use = usage_out(db, acct, s)
         if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:
             raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
-    private_key, public_key = keys.generate_keypair()
+    if own_public_key is not None:
+        private_key, public_key = "", clean_public_key(own_public_key)
+        if db.scalar(select(VpnDevice.id).where(VpnDevice.public_key == public_key)) is not None:
+            raise VpnError("That key is already in use.", 409)
+    else:
+        private_key, public_key = keys.generate_keypair()
     tried: set[str] = set()
     for _ in range(8):
         server = _checked_server(db, acct_id, server_id, max_devices)
@@ -519,6 +561,8 @@ def create_device(db: Session, who: Who, name: str, server_id: int, preview: boo
         db.commit()
         logger.warning("vpn: adding a peer on server %s failed: %s", server_id, e)
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503) from None
+    if own_public_key is not None:
+        return dev, "", ""
     config = keys.render_config(private_key, ip, _dns(server), server.public_key, server.endpoint_host,
                                 server.listen_port, keys.ipv6_for(server.address, ip, server.address6))
     return dev, config, keys.filename(server.name, dev.name)

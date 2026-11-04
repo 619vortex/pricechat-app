@@ -3,8 +3,16 @@
 
 mod ipc;
 
-use kiwivpn::protocol::{Request, Status};
+use kiwiclient::api::{Account, Backend, Http, BASE};
+use kiwiclient::flow::{self, Vault};
+use kiwiclient::store::FileVault;
+use kiwiclient::{auth, opener};
+use kiwivpn::protocol::{Request, State, Status};
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+static CANCEL_SIGN_IN: AtomicBool = AtomicBool::new(false);
 
 /// What the window is told. `service` is false when the service can't be reached, and then there's no tunnel state to report: the window never guesses one.
 #[derive(Serialize)]
@@ -21,6 +29,10 @@ fn answer(result: Result<Status, String>) -> Answer {
     }
 }
 
+fn backend() -> Result<Http, String> {
+    Http::new(BASE)
+}
+
 #[tauri::command(async)]
 fn vpn_status() -> Answer {
     answer(ipc::ask(&Request::Status))
@@ -31,31 +43,112 @@ fn vpn_disconnect() -> Answer {
     answer(ipc::ask(&Request::Disconnect))
 }
 
-/// The test build's connect: the person picks a config file. It's read here, so the private key passes straight to the service and never enters the web page.
+/// Everything is decided here, not in the page: the page names a server, and the key and the config never reach it.
+#[tauri::command(async)]
+fn vpn_connect(server_id: i64) -> Result<Answer, String> {
+    let computer = std::env::var("COMPUTERNAME").unwrap_or_default();
+    let config = flow::config_for(&backend()?, &FileVault::open()?, &computer, server_id)?;
+    Ok(answer(ipc::ask(&Request::Connect { config: config.to_string() })))
+}
+
+/// Advanced Settings, for testing: connect from a config file. It's read here, so its key still never enters the page. Compiled out of a build made with --no-default-features.
 #[cfg(feature = "test-config")]
 #[tauri::command(async)]
-fn vpn_connect_test_file(app: tauri::AppHandle) -> Option<Answer> {
+fn vpn_connect_test_file(app: tauri::AppHandle) -> Result<Option<Answer>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let picked = app.dialog().file().add_filter("WireGuard config", &["conf"]).blocking_pick_file()?;
-    let path = match picked.into_path() {
-        Ok(p) => p,
-        Err(e) => return Some(failed(e.to_string())),
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(config) => Some(answer(ipc::ask(&Request::Connect { config }))),
-        Err(e) => Some(failed(format!("Can't read that file: {e}"))),
+    let Some(picked) = app.dialog().file().add_filter("WireGuard config", &["conf"]).blocking_pick_file() else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let config = std::fs::read_to_string(&path).map_err(|e| format!("Can't read that file: {e}"))?;
+    Ok(Some(answer(ipc::ask(&Request::Connect { config }))))
+}
+
+/// True in a build that has the config file option, so Advanced Settings can show it.
+#[tauri::command]
+fn has_test_config() -> bool {
+    cfg!(feature = "test-config")
+}
+
+#[derive(Serialize)]
+struct AccountView {
+    signed_in: bool,
+    account: Option<Account>,
+    suggested: Option<i64>,
+    last_server: Option<i64>,
+    error: Option<String>,
+}
+
+#[tauri::command(async)]
+fn account_state() -> Result<AccountView, String> {
+    let vault = FileVault::open()?;
+    let last_server = vault.last_server();
+    let empty = |signed_in, error| AccountView { signed_in, account: None, suggested: None, last_server, error };
+    let Some(token) = vault.session() else { return Ok(empty(false, None)) };
+    match backend()?.account(&token) {
+        Ok(account) => {
+            let suggested = flow::suggested(&account.servers, last_server);
+            Ok(AccountView { signed_in: true, account: Some(account), suggested, last_server, error: None })
+        }
+        Err(e) if e.signed_out() => {
+            vault.forget_all();
+            Ok(empty(false, None))
+        }
+        Err(e) => Ok(empty(true, Some(e.message))),
     }
 }
 
-#[cfg(feature = "test-config")]
-fn failed(error: String) -> Answer {
-    Answer { service: true, status: Some(Status::failed(error)), message: None }
+#[tauri::command(async)]
+fn sign_in() -> Result<(), String> {
+    CANCEL_SIGN_IN.store(false, Ordering::SeqCst);
+    let attempt = auth::Attempt::new()?;
+    let (listener, port) = auth::listen()?;
+    opener::open_in_browser(&attempt.page(BASE, port))?;
+    let code = auth::wait_for_code(&listener, &attempt.state, &CANCEL_SIGN_IN, Duration::from_secs(auth::SIGN_IN_MINUTES * 60))?;
+    let token = backend()?.token(&code, &attempt.verifier).map_err(|e| e.message)?;
+    FileVault::open()?.save_session(&token)
 }
 
-/// True in a build that has the config file button, so the window can show it.
 #[tauri::command]
-fn test_build() -> bool {
-    cfg!(feature = "test-config")
+fn cancel_sign_in() {
+    CANCEL_SIGN_IN.store(true, Ordering::SeqCst);
+}
+
+/// Closes the tunnel, ends the session on the server, and forgets everything on this PC. The device stays listed under My Devices until the next sign-in replaces it.
+#[tauri::command(async)]
+fn sign_out() -> Result<(), String> {
+    if let Ok(status) = ipc::ask(&Request::Status) {
+        if status.state != State::Disconnected {
+            let _ = ipc::ask(&Request::Disconnect);
+        }
+    }
+    let vault = FileVault::open()?;
+    if let Some(token) = vault.session() {
+        let _ = backend()?.logout(&token);
+    }
+    vault.forget_all();
+    Ok(())
+}
+
+#[tauri::command(async)]
+fn start_trial() -> Result<(), String> {
+    let vault = FileVault::open()?;
+    let token = vault.session().ok_or(flow::SIGNED_OUT)?;
+    backend()?.start_trial(&token).map(|_| ()).map_err(|e| e.message)
+}
+
+/// The address the outside world sees, from Price Chat's own endpoint.
+#[tauri::command(async)]
+fn my_ip() -> Result<String, String> {
+    backend()?.my_ip().map_err(|e| e.message)
+}
+
+/// Only these two pages: the window can't send the browser anywhere else.
+#[tauri::command]
+fn open_site(page: String) -> Result<(), String> {
+    match page.as_str() {
+        "plans" => opener::open_in_browser(&format!("{BASE}/vpn#vpn-plans")),
+        "devices" => opener::open_in_browser(&format!("{BASE}/vpn/devices")),
+        _ => Err("Unknown page.".into()),
+    }
 }
 
 fn main() {
@@ -65,8 +158,8 @@ fn main() {
     }
     let builder = tauri::Builder::default();
     #[cfg(feature = "test-config")]
-    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect_test_file, test_build]);
+    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site]);
     #[cfg(not(feature = "test-config"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, test_build]);
+    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site]);
     builder.run(tauri::generate_context!()).expect("Kiwi VPN couldn't start");
 }

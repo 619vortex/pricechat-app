@@ -24,7 +24,7 @@ from app.db.base import utcnow
 from app.members import service
 from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.desktop import MemberDesktopCode
-from app.models.members import Member
+from app.models.members import Member, MemberSession
 from app.security import rate_limit
 
 router = APIRouter(tags=["desktop"])
@@ -78,4 +78,21 @@ def swap_code(payload: TokenInput, db: DbSession) -> dict[str, Any]:
     member = db.get(Member, row.member_id)
     if member is None or member.status != "active":
         raise HTTPException(400, FAIL)
-    return {"token": service.new_session(db, member, SESSION_DAYS, DESKTOP_TOKEN_PREFIX), "expires_in_days": SESSION_DAYS}
+    return {"token": service.new_session(db, member, SESSION_DAYS, DESKTOP_TOKEN_PREFIX, kind="desktop"), "expires_in_days": SESSION_DAYS}
+
+
+@router.get("/members/desktop/sessions")
+def my_sessions(db: DbSession, pc_session: SessionToken = None) -> dict[str, int]:
+    """How many PCs hold a Kiwi VPN app session for this member."""
+    member = _require(db, pc_session)
+    count = db.query(MemberSession).filter(MemberSession.member_id == member.id, MemberSession.kind == "desktop", MemberSession.expires_at > utcnow()).count()
+    return {"count": count}
+
+
+@router.post("/members/desktop/sessions/revoke")
+def revoke_sessions(db: DbSession, pc_session: SessionToken = None) -> dict[str, int]:
+    """Signs the Kiwi VPN app out on every PC, leaving browsers signed in. A lost PC is the reason to press this."""
+    member = _require(db, pc_session)
+    removed = db.query(MemberSession).filter(MemberSession.member_id == member.id, MemberSession.kind == "desktop").delete(synchronize_session=False)
+    db.commit()
+    return {"removed": removed}

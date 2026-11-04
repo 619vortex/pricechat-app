@@ -1,7 +1,6 @@
 # Proves, on a real tunnel, that an unauthorised program can't control it and that the private key stays where it should. Run INSIDE THE VM, in a NORMAL PowerShell.
-#   powershell -ExecutionPolicy Bypass -File ipc-and-key-test.ps1 -Config C:\path\germany.conf
-# The config is read only to search for its key. The key is never printed or passed on a command line.
-param([Parameter(Mandatory)][string]$Config)
+#   powershell -ExecutionPolicy Bypass -File ipc-and-key-test.ps1
+# The key is read only to search for it, with administrator approval while connected. It's never printed or passed on a command line.
 $ErrorActionPreference = "Stop"
 $Here = $PSScriptRoot
 $Dir = "C:\Program Files\KiwiVPN"
@@ -20,12 +19,10 @@ function Run($exe, $arguments) {
 function Connected { (Run $Svc "status").Text -match "state: Connected" }
 
 if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw "Run this in a normal PowerShell, not as administrator." }
-foreach ($need in $Fake, $Svc, $Config) { if (-not (Test-Path $need)) { throw "Missing $need. Run build-app-in-vm.ps1 first." } }
-$key = (Select-String -Path $Config -Pattern '^\s*PrivateKey\s*=\s*(\S+)\s*$').Matches.Groups[1].Value
-if (-not $key) { throw "No private key found in $Config" }
+foreach ($need in $Fake, $Svc) { if (-not (Test-Path $need)) { throw "Missing $need. Run build-app-in-vm.ps1 first." } }
 
-Write-Host "Open KiwiVPN.exe, press Connect and choose this same config. Waiting up to 2 minutes for Connected..." -ForegroundColor Yellow
-$until = (Get-Date).AddMinutes(2)
+Write-Host "Open Kiwi VPN from the Start menu, sign in, choose a country and press Connect. Waiting up to 5 minutes for Connected..." -ForegroundColor Yellow
+$until = (Get-Date).AddMinutes(5)
 while (-not (Connected) -and (Get-Date) -lt $until) { Start-Sleep 2 }
 if (-not (Connected)) { throw "It never reported Connected." }
 
@@ -56,24 +53,34 @@ $canAdd = $true
 try { [IO.File]::WriteAllText("$Dir\kiwi-write-test.tmp", "x"); Remove-Item "$Dir\kiwi-write-test.tmp" -Force } catch { $canAdd = $false }
 Check "this user can't write to the install folder" (-not $canAdd)
 
+Write-Host "--- searching for the key while it's in use. Approve the prompt: the tunnel's folder and log are for administrators."
+$out = Join-Path $env:TEMP "kiwi-key-scan.txt"
+Remove-Item $out -Force -ErrorAction SilentlyContinue
+$data = Join-Path $env:LOCALAPPDATA "live.pricechat.kiwivpn"
+Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$Here\scan-for-key.ps1`" -Out `"$out`" -AppData `"$data`""
+$scan = if (Test-Path $out) { Get-Content $out } else { @() }
+Remove-Item $out -Force -ErrorAction SilentlyContinue
+Check "the scan found the key in the service's protected copy, so it knew what to look for" ($scan -contains "key: read") ($scan -join " | ")
+Check "the key isn't anywhere else in the install folder" ($scan -contains "install folder: clean")
+Check "the key isn't in the tunnel's log" (($scan -contains "log: clean") -or ($scan -contains "log: none"))
+Check "the key isn't readable in the app's own data, including the web page's storage" (($scan -contains "app data: clean") -or ($scan -contains "app data: none"))
+
 Write-Host ""
 Write-Host "Now press Disconnect in the app, and close the app." -ForegroundColor Yellow
 [void](Read-Host "Press Enter when that's done")
 Start-Sleep 2
 Check "it's disconnected" ((Run $Svc "status").Text -match "state: Disconnected")
-
-Write-Host "--- searching for the key. Approve the prompt: the tunnel's folder and log are for administrators."
-$out = Join-Path $env:TEMP "kiwi-key-scan.txt"
-Remove-Item $out -Force -ErrorAction SilentlyContinue
-$data = Join-Path $env:LOCALAPPDATA "live.pricechat.kiwivpn"
-Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$Here\scan-for-key.ps1`" -Config `"$Config`" -Out `"$out`" -AppData `"$data`""
-$scan = if (Test-Path $out) { Get-Content $out } else { @() }
-Remove-Item $out -Force -ErrorAction SilentlyContinue
-Check "the scan ran" ($scan -contains "done") ($scan -join " | ")
-Check "the config with the key is gone from the service" ($scan -contains "conf: gone")
-Check "the key isn't anywhere in the install folder" ($scan -contains "install folder: clean")
-Check "the key isn't in the tunnel's log" (($scan -contains "log: clean") -or ($scan -contains "log: none"))
-Check "the key isn't in the app's own data, which holds the web page's storage" (($scan -contains "app data: clean") -or ($scan -contains "app data: none"))
+$gone = $true
+try { [void][IO.File]::ReadAllBytes($Conf); $gone = $false } catch [IO.FileNotFoundException] { $gone = $true } catch [IO.DirectoryNotFoundException] { $gone = $true } catch { $gone = "unknown" }
+if ($gone -eq "unknown") {
+  Write-Host "Approve one more prompt, to confirm the config is gone."
+  $flag = Join-Path $env:TEMP "kiwi-conf-gone.txt"
+  Remove-Item $flag -Force -ErrorAction SilentlyContinue
+  Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -Command Set-Content -Path '$flag' -Value (Test-Path '$Conf')"
+  $gone = (Test-Path $flag) -and ((Get-Content $flag) -eq "False")
+  Remove-Item $flag -Force -ErrorAction SilentlyContinue
+}
+Check "the config with the key is gone from the service" ($gone -eq $true)
 
 if ($fails) { Write-Host "$fails FAILED" -ForegroundColor Red; exit 1 }
 Write-Host "ALL PASSED" -ForegroundColor Green

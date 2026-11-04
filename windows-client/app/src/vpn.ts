@@ -3,12 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * The window's only knowledge of the VPN is the service's answer. The words on screen come from `phaseOf`, which is the one place "connected" can be decided here.
  * It repeats the service's rule rather than trusting a label: no recent handshake, no "connected", whatever else the answer says.
+ * Account calls run in the app's Rust side: the session token and private keys never reach this page.
  */
 
 export type TunnelState = "disconnected" | "connecting" | "connected" | "stopping" | "failed";
 export interface Status { state: TunnelState; handshake_age_seconds: number | null; rx_bytes: number; tx_bytes: number; error: string | null; connected_since: number | null }
 export interface Answer { service: boolean; status: Status | null; message: string | null }
 export type Phase = "loading" | "no-service" | "off" | "connecting" | "on" | "stopping" | "failed";
+
+export interface Server { id: number; name: string; region: string; country_code: string; online: boolean; recommended: boolean }
+export interface Account { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number; servers: Server[]; devices: { id: number; name: string; server_id: number }[];
+  plan: { kind: string; days_left: number | null } | null; trial: { available: boolean; days: number } | null }
+export interface AccountView { signed_in: boolean; account: Account | null; suggested: number | null; last_server: number | null; error: string | null }
 
 /** The same limit as HANDSHAKE_FRESH_SECONDS in the service's protocol.rs. WireGuard rekeys about every two minutes. */
 export const HANDSHAKE_FRESH_SECONDS = 180;
@@ -26,9 +32,29 @@ export function phaseOf(answer: Answer | null): Phase {
 
 export const vpnStatus = () => invoke<Answer>("vpn_status");
 export const vpnDisconnect = () => invoke<Answer>("vpn_disconnect");
-/** Opens a file picker in the app's Rust side; the config never reaches this page. Null if the person cancelled. */
+export const vpnConnect = (serverId: number) => invoke<Answer>("vpn_connect", { serverId });
 export const vpnConnectTestFile = () => invoke<Answer | null>("vpn_connect_test_file");
-export const isTestBuild = () => invoke<boolean>("test_build");
+export const hasTestConfig = () => invoke<boolean>("has_test_config");
+export const accountState = () => invoke<AccountView>("account_state");
+export const signIn = () => invoke<void>("sign_in");
+export const cancelSignIn = () => invoke<void>("cancel_sign_in");
+export const signOut = () => invoke<void>("sign_out");
+export const startTrial = () => invoke<void>("start_trial");
+export const myIp = () => invoke<string>("my_ip");
+export const openSite = (page: "plans" | "devices") => invoke<void>("open_site", { page });
+
+/** "Falkenstein, Germany" from whatever Admin typed: "Germany" + "Falkenstein, Germany", or "Helsinki 1" + "Finland". */
+export function serverPlace(s: Pick<Server, "name" | "region" | "country_code">): string {
+  const parts = (s.region || "").split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) return `${parts[0]}, ${parts[parts.length - 1]}`;
+  const city = (s.name || "").replace(/\s*#?\d+$/, "").trim();
+  const country = parts[0] || countryName(s.country_code);
+  return city && city !== country ? `${city}, ${country}` : country;
+}
+
+export function countryName(code: string): string {
+  try { return new Intl.DisplayNames(["en"], { type: "region" }).of((code || "").toUpperCase()) ?? code; } catch { return code; }
+}
 
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;

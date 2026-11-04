@@ -15,7 +15,7 @@ from app.api.deps import DbSession
 from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
 from app.models.vpn import VpnAccount
-from app.security import admin_auth, rate_limit
+from app.security import admin_auth, client_ip, rate_limit
 from app.security import rate_limit
 from app.security.rate_limit import LIMITS
 from app.vpn import billing, service
@@ -80,6 +80,7 @@ def start_trial(request: Request, db: DbSession, pc_session: SessionToken = None
 class DeviceInput(StrictInput):
     name: str = Field(min_length=1, max_length=32)
     server_id: int
+    public_key: str | None = Field(default=None, min_length=44, max_length=44)  # the Kiwi VPN app makes its own key: the private half stays on the PC
 
 
 @router.post("/members/vpn/devices", status_code=status.HTTP_201_CREATED)
@@ -89,10 +90,28 @@ def create_device(payload: DeviceInput, request: Request, db: DbSession, pc_sess
     if wait is not None:
         raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:
-        dev, config, filename = service.create_device(db, member, payload.name, payload.server_id, _preview(db, request))
+        dev, config, filename = service.create_device(db, member, payload.name, payload.server_id, _preview(db, request), payload.public_key)
+        if payload.public_key is not None:
+            return {"device": service.device_out(dev), "peer": service.device_peer(db, member, dev.id)}
     except VpnError as e:
         raise _fail(e) from e
     return {"device": service.device_out(dev), "config": config, "filename": filename}
+
+
+@router.get("/members/vpn/devices/{device_id}/peer")
+def device_peer(device_id: int, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    member = _require(db, pc_session)
+    try:
+        return service.device_peer(db, member, device_id)
+    except VpnError as e:
+        raise _fail(e) from e
+
+
+@router.get("/members/vpn/ip", dependencies=[Depends(rate_limit.limit("earn"))])
+def my_ip(request: Request, response: Response) -> dict[str, str]:
+    """The address this request came from, so the Kiwi VPN app can check its tunnel without telling an outside service. It's only returned, never stored or logged here."""
+    response.headers["Cache-Control"] = "no-store"
+    return {"ip": client_ip.client_ip(request)}
 
 
 @router.delete("/members/vpn/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
