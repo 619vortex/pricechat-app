@@ -32,7 +32,9 @@
 .vpn-manual { display: grid; gap: 10px; }
 .vpn-manual[open] > * + * { margin-top: 10px; }
 .vpn-manual summary { cursor: pointer; font-size: 14px; color: var(--site-soft); }
-.vpn-manual .site-button { display: inline-block; }
+.vpn-manual .site-button { display: inline-flex; align-items: center; justify-content: center; width: fit-content; }
+.vpn-manual .vpn-steps { list-style: decimal; }
+.vpn-manual .vpn-steps li { display: list-item; }
 .vpn-privacy { justify-self: start; font-size: 13px; color: var(--site-muted); text-decoration: underline; }
 .vpn-start { padding: clamp(20px, 4vw, 30px); }
 .vpn-start > .site-button { justify-self: start; }
