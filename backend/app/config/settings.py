@@ -115,6 +115,10 @@ class Settings(BaseSettings):
     members_public_url: str = "http://127.0.0.1:5173"
     # The Kiwi VPN browser extension(s) allowed to use /api/members/vpn/browser. A Chrome Web Store listing gets its own id: add it here.
     vpn_extension_origins: list[str] = ["chrome-extension://gfajopjikiojbdlgmimbcmcnffbnjpfi"]
+    # The one store-review account (app/vpn/reviewer.py). All three or it stays off. Until: YYYY-MM-DD, UTC.
+    vpn_reviewer_email: str = ""
+    vpn_reviewer_password_hash: SecretStr | None = None
+    vpn_reviewer_until: str = ""
     # Vortex Realm online: the WebSocket URL the game connects to (the API host itself: Vercel's proxy carries no WebSockets).
     # Empty = derived from the ticket request's own host.
     realm_ws_url: str = ""

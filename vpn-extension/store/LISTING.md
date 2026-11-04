@@ -108,10 +108,10 @@ Certify, if true for the owner's business: data isn't sold or transferred to thi
 
 ## Reviewer access (notes for testers)
 
-**Not ready.** Sign-in is by emailed code, Google, X, Telegram or wallet, so a reviewer can't use a plain username and password yet. Once a method is approved, fill this in:
+Paste into the dashboard's test instructions, with the real email and password from your password manager. Account setup: `store/reviewer_account.py`.
 
 1. Install the extension and click its icon. It asks you to sign in.
-2. Open https://pricechat.live/join and sign in with: REVIEWER LOGIN GOES HERE
+2. Open https://pricechat.live/vpn/reviewer and sign in with the email and password below. Those pages are for reviewers only.
 3. Click the icon again, leave Helsinki 1 selected and press the round switch. It shows Connected and the server's IP address.
 4. Visit https://api.ipify.org to see that address. Press the switch again to return to the normal connection.
 
