@@ -66,6 +66,7 @@ class VpnAccount(IdMixin, TimestampMixin, Base):
     paid_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
     lapsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # when its devices were switched off for lack of time
     stripe_customer: Mapped[str | None] = mapped_column(String(64))
+    tester_until: Mapped[datetime | None] = mapped_column(UTCDateTime())  # may use the VPN while it's closed, until then; Admin names each tester
     trial_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # set once, never cleared: one trial per account
     trial_ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # the devices made in Admin: never charged, no key, no member

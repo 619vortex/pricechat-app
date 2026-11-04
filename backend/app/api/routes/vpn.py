@@ -282,6 +282,20 @@ def admin_settings(payload: SettingsUpdate, db: DbSession) -> dict[str, Any]:
         raise _fail(e) from e
 
 
+class TesterInput(StrictInput):
+    username: str = Field(min_length=1, max_length=64)
+    days: int = Field(ge=0, le=service.MAX_TESTER_DAYS)
+
+
+@router.post("/vpn/admin/testers")
+def admin_tester(payload: TesterInput, db: DbSession) -> dict[str, Any]:
+    """Let one named member use the VPN while it's closed, until a date. Days 0 ends it. The public stays closed out."""
+    try:
+        return service.set_tester(db, payload.username, payload.days)
+    except VpnError as e:
+        raise _fail(e) from e
+
+
 @router.get("/vpn/admin/customers")
 def admin_customers(db: DbSession) -> dict[str, Any]:
     return {"items": service.admin_customers(db)}

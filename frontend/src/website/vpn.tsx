@@ -23,7 +23,7 @@ export interface VpnDevice { id: number; name: string; server_id: number; ip: st
 /** This UTC month's data across the member's devices. cap_bytes 0 = unlimited; paused_until: over the cap, back on then. */
 export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number; paused_until: string | null }
 export interface VpnBilling { price_usd: number; period_days: number; min_usd: number; max_usd: number; usdt: boolean; card: boolean; networks: { key: string; name: string; min_usd?: number }[] }
-export type VpnPlanKind = "trial" | "royal" | "paid" | "expired" | "not_activated" | "free" | "owner" | "granted" | "blocked";
+export type VpnPlanKind = "tester" | "trial" | "royal" | "paid" | "expired" | "not_activated" | "free" | "owner" | "granted" | "blocked";
 export interface VpnPlan { kind: VpnPlanKind; until: string | null; days_left: number | null }
 export interface VpnState { enabled: boolean; test_mode?: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling | null;
   servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage; plan?: VpnPlan; royal?: boolean; trial?: { available: boolean; days: number } }
@@ -244,7 +244,7 @@ function StatsBar({ stats }: { stats: VpnStats | "unavailable" | null }) {
   );
 }
 
-const PLAN_NAME: Record<VpnPlanKind, string> = { trial: "Free Trial", royal: "Royal Kiwi", paid: "Paid", expired: "Expired", not_activated: "Not Activated",
+const PLAN_NAME: Record<VpnPlanKind, string> = { tester: "Tester", trial: "Free Trial", royal: "Royal Kiwi", paid: "Paid", expired: "Expired", not_activated: "Not Activated",
   free: "Free while we test", owner: "Owner", granted: "Included", blocked: "Blocked" };
 
 function planOf(s: VpnState): VpnPlan {

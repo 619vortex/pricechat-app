@@ -36,6 +36,7 @@ const FundingPage = lazy(() => import("./website/arbitrage").then((m) => ({ defa
 const KalshiPage = lazy(() => import("./website/kalshi").then((m) => ({ default: m.KalshiPage })));
 const LearnPage = lazy(() => import("./website/rewards").then((m) => ({ default: m.LearnPage })));
 const VpnPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.VpnPage })));
+const VpnDesktopPage = lazy(() => import("./website/vpnDesktop").then((m) => ({ default: m.VpnDesktopPage })));
 const VpnReviewerPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.VpnReviewerPage })));
 
 const page = (el: React.ReactNode) => <Suspense fallback={null}>{el}</Suspense>;
@@ -63,6 +64,7 @@ function PublicSite() {
         <Route path="learn" element={page(<LearnPage />)} />
         <Route path="vpn" element={page(<VpnPage />)} />
         <Route path="vpn/privacy" element={page(<LegalPage kind="vpnprivacy" />)} />
+        <Route path="vpn/desktop" element={page(<VpnDesktopPage />)} />
         <Route path="vpn/reviewer" element={page(<VpnReviewerPage />)} />
         <Route path="arena" element={<Navigate to="/passport#realm" replace />} />
         <Route path="realm" element={<Navigate to="/passport#realm" replace />} />

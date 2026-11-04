@@ -34,6 +34,8 @@ MAX_DEVICES_LIMIT = 10
 MAX_CAP_GB = 100000
 GB = 1024 ** 3  # the website shows sizes in powers of 1024
 TRIAL_DAYS = 30
+MAX_TESTERS = 10
+MAX_TESTER_DAYS = 90
 ROYAL_LEVEL = 7  # Royal Kiwi on the rank ladder; higher ranks count too
 LIVE_WINDOW = timedelta(minutes=10)  # the server reads handshakes and proxy use every 5 minutes
 SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0, "payments_enabled": False, "trial_enabled": True}  # min_rank: unused column, kept
@@ -128,6 +130,8 @@ def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime 
         return "blocked"
     if reviewer.is_reviewer(member):
         return "active" if reviewer.in_time(now) else "blocked"
+    if is_tester(acct, now):
+        return "active"
     if acct.is_owner or (r.free if r is not None else is_free(settings(db))):
         return "active"
     if is_royal(member):
@@ -184,6 +188,8 @@ def plan_out(db: Session, acct: VpnAccount, s: VpnSettings, state: str, now: dat
     if state == "active":
         if acct.is_owner:
             return {"kind": "owner", "until": None, "days_left": None}
+        if is_tester(acct, now):
+            return dated("tester", _aware(acct.tester_until))
         if is_royal(member):
             return {"kind": "royal", "until": None, "days_left": None}
         if is_free(s):
@@ -238,6 +244,39 @@ def qualifies(db: Session, who: Who, r: Rules | None = None) -> tuple[bool, str 
     return False, "Your account can't use Kiwi VPN." if state == "blocked" else no_access_reason(db, account_of(db, who))
 
 
+def is_tester(acct: VpnAccount, now: datetime | None = None) -> bool:
+    until = _aware(acct.tester_until)
+    return until is not None and until > (now or utcnow()) and acct.status == "active"
+
+
+def set_tester(db: Session, username: str, days: int, now: datetime | None = None) -> dict[str, Any]:
+    """A named member may use the VPN while it's closed, until the date. Days 0 ends it. Nothing else about the VPN changes for anyone."""
+    now = now or utcnow()
+    member = db.scalar(select(Member).where(func.lower(Member.username) == username.strip().lower()))
+    if member is None:
+        raise VpnError("No member has that username.", 404)
+    if member.status != "active":
+        raise VpnError("That member's account isn't active.", 409)
+    acct = account_of(db, member)
+    if days <= 0:
+        acct.tester_until = None
+        db.commit()
+        return {"username": member.username, "tester_until": None}
+    if not 1 <= days <= MAX_TESTER_DAYS:
+        raise VpnError(f"Testers can be added for 1 to {MAX_TESTER_DAYS} days.", 400)
+    others = db.scalar(select(func.count()).select_from(VpnAccount).where(VpnAccount.tester_until > now, VpnAccount.id != acct.id)) or 0
+    if others >= MAX_TESTERS:
+        raise VpnError(f"There can be at most {MAX_TESTERS} testers. End one first.", 409)
+    acct.tester_until = now + timedelta(days=days)
+    db.commit()
+    return {"username": member.username, "tester_until": _iso(acct.tester_until)}
+
+
+def _testing(db: Session, who: Who) -> bool:
+    acct = who if isinstance(who, VpnAccount) else db.scalar(select(VpnAccount).where(VpnAccount.member_id == who.id))
+    return acct is not None and is_tester(acct)
+
+
 def _reviewing(db: Session, who: Who) -> bool:
     """The store-review account, within its time (app/vpn/reviewer.py)."""
     member = who if isinstance(who, Member) else db.get(Member, who.member_id) if who.member_id is not None else None
@@ -247,7 +286,7 @@ def _reviewing(db: Session, who: Who) -> bool:
 def eligibility(db: Session, member: Who, preview: bool = False) -> tuple[bool, str | None]:
     """preview: the owner, signed in to Admin, testing while the VPN is closed to everyone else."""
     s = settings(db)
-    if not s.enabled and not preview and not _reviewing(db, member):
+    if not s.enabled and not preview and not _reviewing(db, member) and not _testing(db, member):
         return False, "Kiwi VPN isn't open yet."
     return qualifies(db, member)
 
@@ -368,7 +407,7 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
         servers = [v for v in servers if v.name == reviewer.SERVER]
     best = recommended_id(servers, counts)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
-    out = {"enabled": s.enabled or preview or review, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
+    out = {"enabled": s.enabled or preview or review or is_tester(acct), "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
@@ -714,7 +753,7 @@ def admin_customers(db: Session, limit: int = 200, now: datetime | None = None) 
     """Accounts that have paid or have devices, newest first. An anonymous account shows only its number: nothing else exists."""
     now = now or utcnow()
     accounts = list(db.scalars(select(VpnAccount).where(
-        (VpnAccount.paid_until.is_not(None)) | (VpnAccount.status != "active") | VpnAccount.id.in_(select(VpnDevice.account_id)) | VpnAccount.id.in_(select(VpnBrowser.account_id))).order_by(VpnAccount.id.desc()).limit(limit)))
+        (VpnAccount.paid_until.is_not(None)) | (VpnAccount.tester_until.is_not(None)) | (VpnAccount.status != "active") | VpnAccount.id.in_(select(VpnDevice.account_id)) | VpnAccount.id.in_(select(VpnBrowser.account_id))).order_by(VpnAccount.id.desc()).limit(limit)))
     ids = [a.id for a in accounts]
     devices: dict[int, list[VpnDevice]] = {}
     for d in db.scalars(select(VpnDevice).where(VpnDevice.account_id.in_(ids)).order_by(VpnDevice.id)) if ids else []:
@@ -732,7 +771,7 @@ def admin_customers(db: Session, limit: int = 200, now: datetime | None = None) 
         n, total = paid.get(a.id, (0, 0.0))
         out.append({"id": a.id, "owner": a.is_owner, "anonymous": a.member_id is None and not a.is_owner,
                     "label": "Admin" if a.is_owner else (m.username if m else "(member gone)") if a.member_id is not None else f"Anonymous #{a.id}",
-                    "state": access(db, a, r, now), "paid_until": _iso(a.paid_until), "lapsed_at": _iso(a.lapsed_at), "has_card": bool(a.stripe_customer),
+                    "state": access(db, a, r, now), "paid_until": _iso(a.paid_until), "tester_until": _iso(a.tester_until) if is_tester(a, now) else None, "lapsed_at": _iso(a.lapsed_at), "has_card": bool(a.stripe_customer),
                     "payments": int(n), "paid_usd": round(float(total or 0), 2),
                     "devices": [{"id": d.id, "name": d.name, "server": names.get(d.server_id, "?"), "ip": d.ip, "last_handshake": _iso(d.last_handshake),
                                  "rx_bytes": d.rx_bytes, "tx_bytes": d.tx_bytes} for d in devices.get(a.id, [])],

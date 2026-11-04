@@ -311,7 +311,7 @@ function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
 
 type AdminBrowser = { id: number; server: string; last_active: string | null; rx_bytes: number; tx_bytes: number };
 type AdminDevice = { id: number; name: string; server: string; ip: string; last_handshake: string | null; rx_bytes: number; tx_bytes: number };
-export type VpnCustomer = { id: number; owner?: boolean; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
+export type VpnCustomer = { tester_until?: string | null; id: number; owner?: boolean; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
   has_card: boolean; payments: number; paid_usd: number; devices: AdminDevice[]; browsers?: AdminBrowser[] };
 export type VpnPaymentRow = { id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
   created_at: string | null; credited_at: string | null; account: string | null };
@@ -343,6 +343,7 @@ function Customers({ payments, onChanged }: { payments: boolean; onChanged: () =
     <Card title="People">
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
       {note && <p><Badge tone={note.ok ? "good" : "bad"}>{note.text}</Badge></p>}
+      <AddTester onAdd={(username, days) => act(() => request("/vpn/admin/testers", { method: "POST", body: JSON.stringify({ username, days }) }), days ? `${username} can test for ${days} days. It stays closed to everyone else.` : `${username} is no longer a tester.`)} />
       {r.loading && !r.data ? <Loading /> : !r.data?.items?.length ? <Empty>Nobody yet. Devices you make and people who join appear here.</Empty> : (
         <div className="table-wrap"><table className="table">
           <thead><tr><th>Who</th><th>Status</th>{payments && <><th>Paid until</th><th>Paid</th></>}<th>Devices</th><th /></tr></thead>
@@ -382,6 +383,21 @@ function Customers({ payments, onChanged }: { payments: boolean; onChanged: () =
 }
 
 /** Someone reported a key: paste it to block whoever holds it. It's only hashed for the lookup, never stored or shown. */
+/** One named member may use the VPN while it's closed, until a date. */
+function AddTester({ onAdd }: { onAdd: (username: string, days: number) => Promise<void> }) {
+  const [name, setName] = useState("");
+  const [days, setDays] = useState("14");
+  const clean = name.trim();
+  return (
+    <form className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }} onSubmit={(e) => { e.preventDefault(); if (clean) void onAdd(clean, Number(days) || 0).then(() => setName("")); }}>
+      <input className="input" aria-label="Tester's username" placeholder="Tester's username" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="input" aria-label="Days" type="number" min={0} max={90} style={{ width: 80 }} value={days} onChange={(e) => setDays(e.target.value)} />
+      <button className="btn btn-sm" type="submit" disabled={!clean}>{Number(days) > 0 ? "Add tester" : "End tester"}</button>
+      <span className="muted small">Can use Kiwi VPN while it's closed. 0 days ends it.</span>
+    </form>
+  );
+}
+
 function BlockKey({ onDone }: { onDone: () => Promise<void> }) {
   const [key, setKey] = useState("");
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
