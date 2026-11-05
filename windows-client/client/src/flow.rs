@@ -92,6 +92,19 @@ pub fn config_for(backend: &dyn Backend, vault: &dyn Vault, computer: &str, serv
     Ok(render_config(&pair.private_b64, &added.peer))
 }
 
+/// `config_for`, allowing for the network taking a moment to settle: pressing Connect just after Disconnect can land while Windows is still taking the tunnel's routes away.
+/// Only a request that never reached Price Chat is tried again. Any answer from it stands.
+pub fn config_with_retry(backend: &dyn Backend, vault: &dyn Vault, computer: &str, server_id: i64, pause: &dyn Fn()) -> Result<Zeroizing<String>, String> {
+    const TRIES: u32 = 3;
+    for _ in 1..TRIES {
+        match config_for(backend, vault, computer, server_id) {
+            Err(e) if e == crate::api::UNREACHABLE => pause(),
+            done => return done,
+        }
+    }
+    config_for(backend, vault, computer, server_id)
+}
+
 const REFRESH_EVERY: u64 = 7 * 24 * 3600;
 
 /// Swaps the session for a fresh one about weekly, so regular use never hits the 90-day limit, and a copied token soon stops working. Failing to refresh changes nothing: the
@@ -303,6 +316,62 @@ mod tests {
         assert!(config.contains("PublicKey = SERVERKEY") && config.contains("Endpoint = 2.31.133.78:51821") && config.contains("PersistentKeepalive = 25"));
         assert_eq!(v.devices.borrow().get(&2).unwrap().0, 50);
         assert_eq!(v.last_server(), Some(2));
+    }
+
+    fn private_key_in(config: &str) -> String {
+        config.lines().find_map(|l| l.strip_prefix("PrivateKey = ")).unwrap().to_string()
+    }
+
+    /// Connect, Disconnect, Connect, through the real encrypted store: the second connect is the first time a saved key is read back, which is the path a fake store can't prove.
+    #[cfg(windows)]
+    #[test]
+    fn reconnecting_reads_the_same_key_back_through_the_real_store() {
+        let mut raw = [0u8; 8];
+        getrandom::getrandom(&mut raw).unwrap();
+        let dir = std::env::temp_dir().join(format!("kiwi-flow-{}", u64::from_le_bytes(raw)));
+        let v = crate::store::FileVault::at(dir.clone()).unwrap();
+        v.save_session("token").unwrap();
+        let b = backend(Ok(account(vec![])));
+        let first = config_for(&b, &v, "DESKTOP-1", 2).unwrap();
+        // the backend now lists the device the first connect registered, and Disconnect changes nothing on this side
+        *b.account.borrow_mut() = Ok(account(vec![Device { id: 50, name: "DESKTOP-1 (2)".into(), server_id: 2 }]));
+        let again = config_for(&b, &v, "DESKTOP-1", 2).unwrap();
+        assert_eq!(private_key_in(&first), private_key_in(&again));
+        kiwivpn::config::parse(&format!("{}", again.replace("SERVERKEY", &keys::generate().unwrap().public_b64))).expect("the service must accept a reconnect's config too");
+        let calls = b.calls.borrow();
+        assert_eq!(calls.iter().filter(|c| c.starts_with("add ")).count(), 1, "no second device");
+        assert!(calls.iter().any(|c| c == "peer 50"));
+        assert!(!calls.iter().any(|c| c.starts_with("delete ")), "and the working device isn't removed: {calls:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_network_gap_just_after_disconnect_is_waited_out() {
+        let gap = || Err(ApiError { status: 0, message: crate::api::UNREACHABLE.into() });
+        let (b, v) = (backend(gap()), signed_in());
+        let pauses = std::cell::Cell::new(0);
+        let config = config_with_retry(&b, &v, "PC", 2, &|| {
+            pauses.set(pauses.get() + 1);
+            if pauses.get() == 2 {
+                *b.account.borrow_mut() = Ok(account(vec![]));
+            }
+        });
+        assert!(config.is_ok());
+        assert_eq!(pauses.get(), 2);
+        assert_eq!(v.session().unwrap().as_str(), "token", "a network problem never signs anyone out");
+    }
+
+    #[test]
+    fn it_stops_retrying_when_the_network_stays_down_and_never_retries_an_answer() {
+        let gap = || Err(ApiError { status: 0, message: crate::api::UNREACHABLE.into() });
+        let (b, v) = (backend(gap()), signed_in());
+        let pauses = std::cell::Cell::new(0);
+        assert_eq!(config_with_retry(&b, &v, "PC", 2, &|| pauses.set(pauses.get() + 1)).unwrap_err(), crate::api::UNREACHABLE);
+        assert_eq!(pauses.get(), 2);
+        let (b, v) = (backend(Err(ApiError { status: 403, message: "no".into() })), signed_in());
+        let pauses = std::cell::Cell::new(0);
+        assert_eq!(config_with_retry(&b, &v, "PC", 2, &|| pauses.set(pauses.get() + 1)).unwrap_err(), "no");
+        assert_eq!(pauses.get(), 0);
     }
 
     #[test]

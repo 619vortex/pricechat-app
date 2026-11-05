@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub const BASE: &str = "https://pricechat.live";
+pub const UNREACHABLE: &str = "Couldn't reach Price Chat. Check your connection and try again.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApiError {
@@ -131,7 +132,7 @@ fn failure(e: ureq::Error) -> ApiError {
             let message = reply.into_json::<serde_json::Value>().ok().and_then(|v| v.get("detail").and_then(|d| d.as_str()).map(str::to_string)).unwrap_or_else(|| format!("Price Chat answered {status}."));
             ApiError { status, message }
         }
-        ureq::Error::Transport(_) => ApiError { status: 0, message: "Couldn't reach Price Chat. Check your connection and try again.".into() },
+        ureq::Error::Transport(_) => ApiError { status: 0, message: UNREACHABLE.into() },
     }
 }
 

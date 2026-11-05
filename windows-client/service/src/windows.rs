@@ -9,6 +9,7 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::*;
@@ -52,12 +53,14 @@ fn exe_dir() -> Result<PathBuf, String> {
 /// After Windows restarts: the config only exists while someone wants the tunnel, because Disconnect deletes it. So if it's there, bring the tunnel back. The network may not be up yet
 /// when the service starts, hence the tries. Pressing Disconnect at any point ends them, because the config is gone.
 fn resume_after_restart(tunnel: Arc<Tunnel>) {
+    tunnel.resuming.store(true, Ordering::SeqCst);
     for _ in 0..30 {
         if tunnel.try_resume() {
-            return;
+            break;
         }
         std::thread::sleep(Duration::from_secs(10));
     }
+    tunnel.resuming.store(false, Ordering::SeqCst);
 }
 
 /// Under the install folder, which only administrators can write to.
@@ -140,26 +143,49 @@ fn stop_and_delete(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn create_tunnel_service(scm: &Sc, conf: &str) -> Result<Sc, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let command = format!("\"{}\" tunnel \"{}\"", exe.display(), conf);
-    let deps: Vec<u16> = "Nsi\0TcpIp\0\0".encode_utf16().collect();
+/// Asks the tunnel to stop, and waits. True once it has stopped, or there's nothing left to stop.
+fn stop_and_wait(service: &Sc, limit: Duration) -> bool {
+    let mut s: SERVICE_STATUS = unsafe { zeroed() };
+    unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
     let start = Instant::now();
-    let h = loop {
-        let h = unsafe {
-            CreateServiceW(scm.0, wide(TUNNEL_SERVICE).as_ptr(), wide("Kiwi VPN tunnel").as_ptr(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
-                           wide(&command).as_ptr(), null(), null_mut(), deps.as_ptr(), null(), null())
-        };
-        // switching server: Windows finishes deleting the old tunnel only once every handle to it has closed, such as a status check running right now
-        if !h.is_null() || unsafe { GetLastError() } != ERROR_SERVICE_MARKED_FOR_DELETE || start.elapsed() > Duration::from_secs(10) {
-            break h;
+    loop {
+        if matches!(service_state(service), ServiceState::Stopped | ServiceState::Missing) {
+            return true;
+        }
+        if start.elapsed() >= limit {
+            return false;
         }
         std::thread::sleep(Duration::from_millis(200));
-    };
-    if h.is_null() {
-        return Err(format!("Can't create the tunnel: {}", last_error()));
     }
-    let service = Sc(h);
+}
+
+fn exit_code(service: &Sc) -> u32 {
+    let mut s: SERVICE_STATUS = unsafe { zeroed() };
+    if unsafe { QueryServiceStatus(service.0, &mut s) } == 0 {
+        return 0;
+    }
+    s.dwWin32ExitCode
+}
+
+/// The Kiwi tunnel's registration, made if it isn't there. It stays between connections, holding no key, because deleting it is what can stop a later Connect: Windows only finishes
+/// deleting a service once every handle to it has closed, and anything can hold one, such as the Services window or a PowerShell that ran Get-Service.
+fn tunnel_service(scm: &Sc, conf: &str) -> Result<Sc, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let command = wide(&format!("\"{}\" tunnel \"{}\"", exe.display(), conf));
+    let service = match open_service(scm, TUNNEL_SERVICE) {
+        Some(existing) => {
+            let ok = unsafe { ChangeServiceConfigW(existing.0, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, command.as_ptr(), null(), null_mut(), null(), null(), null(), null()) };
+            if ok != 0 {
+                existing
+            } else if unsafe { GetLastError() } == ERROR_SERVICE_MARKED_FOR_DELETE {
+                drop(existing); // left being deleted by an uninstall, or by an older version
+                create_tunnel_service(scm, &command)?
+            } else {
+                return Err(format!("Can't configure the tunnel: {}", last_error()));
+            }
+        }
+        None => create_tunnel_service(scm, &command)?,
+    };
     // WireGuard's documentation calls this essential: the driver's firewall rules depend on the service's SID.
     let mut sid = SERVICE_SID_INFO { dwServiceSidType: SERVICE_SID_TYPE_UNRESTRICTED };
     if unsafe { ChangeServiceConfig2W(service.0, SERVICE_CONFIG_SERVICE_SID_INFO, &mut sid as *mut _ as *mut c_void) } == 0 {
@@ -168,30 +194,131 @@ fn create_tunnel_service(scm: &Sc, conf: &str) -> Result<Sc, String> {
     Ok(service)
 }
 
+fn create_tunnel_service(scm: &Sc, command: &[u16]) -> Result<Sc, String> {
+    let deps: Vec<u16> = "Nsi\0TcpIp\0\0".encode_utf16().collect();
+    let start = Instant::now();
+    let h = loop {
+        let h = unsafe {
+            CreateServiceW(scm.0, wide(TUNNEL_SERVICE).as_ptr(), wide("Kiwi VPN tunnel").as_ptr(), SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
+                           command.as_ptr(), null(), null_mut(), deps.as_ptr(), null(), null())
+        };
+        if !h.is_null() || unsafe { GetLastError() } != ERROR_SERVICE_MARKED_FOR_DELETE || start.elapsed() > Duration::from_secs(30) {
+            break h;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    if h.is_null() {
+        return Err(if unsafe { GetLastError() } == ERROR_SERVICE_MARKED_FOR_DELETE {
+            "Windows is still removing the previous connection. Close the Services window if it's open, or restart your PC.".to_string()
+        } else {
+            format!("Can't create the tunnel: {}", last_error())
+        });
+    }
+    Ok(Sc(h))
+}
+
+/// True while the tunnel's network adapter exists. It goes as the old tunnel exits, and a new one can't take its name until then.
+fn adapter_exists() -> bool {
+    type Open = unsafe extern "system" fn(*const u16) -> *mut c_void;
+    type Close = unsafe extern "system" fn(*mut c_void);
+    let Ok(dir) = exe_dir() else { return false };
+    let dll = wide(&dir.join("wireguard.dll").display().to_string());
+    unsafe {
+        let lib = LoadLibraryW(dll.as_ptr());
+        if lib.is_null() {
+            return false;
+        }
+        let (Some(open), Some(close)) = (GetProcAddress(lib, c"WireGuardOpenAdapter".as_ptr() as *const u8), GetProcAddress(lib, c"WireGuardCloseAdapter".as_ptr() as *const u8)) else { return false };
+        let open: Open = std::mem::transmute(open);
+        let close: Close = std::mem::transmute(close);
+        let adapter = open(wide(TUNNEL_NAME).as_ptr());
+        if adapter.is_null() {
+            return false;
+        }
+        close(adapter);
+        true
+    }
+}
+
+fn wait_for_adapter_to_go(limit: Duration) {
+    let start = Instant::now();
+    while adapter_exists() && start.elapsed() < limit {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 pub struct Tunnel {
     error: Mutex<Option<String>>,
     since: Mutex<Option<u64>>,
     /// One connect or disconnect at a time: two running together could delete each other's tunnel.
     changing: Mutex<()>,
+    /// Bringing the tunnel back after a restart, which can take minutes if the network is slow to come up. It isn't a failure while that's going on.
+    resuming: AtomicBool,
+    /// When the person's latest Connect started the tunnel, for giving up if the server never answers.
+    started: Mutex<Option<u64>>,
+}
+
+fn now_seconds() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+}
+
+/// The service's own record of what happened to the tunnel, in an administrators-only folder. Only fixed text, states and Windows error codes: never a config or a key.
+fn log_event(message: &str) {
+    let Ok(dir) = exe_dir().map(|d| d.join("logs")) else { return };
+    if let Ok(sd) = Descriptor::new(PRIVATE_SDDL) {
+        let attrs = sd.attributes();
+        unsafe { CreateDirectoryW(wide(&dir.display().to_string()).as_ptr(), &attrs) };
+    }
+    let path = dir.join("service.log");
+    if std::fs::metadata(&path).map(|m| m.len() > 1024 * 1024).unwrap_or(false) {
+        let _ = std::fs::rename(&path, dir.join("service.old.log"));
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{} {message}", now_seconds());
+    }
+}
+
+const STOP_LIMIT: Duration = Duration::from_secs(30);
+const ADAPTER_LIMIT: Duration = Duration::from_secs(10);
+
+fn remove_conf() {
+    if let Ok(path) = conf_path() {
+        let _ = std::fs::remove_file(path); // holds the device's private key: never left behind
+    }
 }
 
 impl Tunnel {
     pub fn new() -> Self {
-        Tunnel { error: Mutex::new(None), since: Mutex::new(None), changing: Mutex::new(()) }
+        Tunnel { error: Mutex::new(None), since: Mutex::new(None), changing: Mutex::new(()), resuming: AtomicBool::new(false), started: Mutex::new(None) }
     }
 
     pub fn connect(&self, text: &str) -> Status {
         let _one_at_a_time = self.changing.lock().unwrap();
         *self.error.lock().unwrap() = None;
         *self.since.lock().unwrap() = None;
+        *self.started.lock().unwrap() = None;
+        log_event("connect: requested");
         let cfg = match config::parse(text) {
             Ok(c) => c,
-            Err(e) => return Status::failed(e),
+            Err(e) => {
+                log_event("connect: the config was refused");
+                return Status::failed(e);
+            }
         };
         match self.start(&cfg) {
-            Ok(()) => self.status(),
+            Ok(()) => {
+                *self.started.lock().unwrap() = Some(now_seconds());
+                log_event("connect: tunnel started, waiting for the server");
+                self.status()
+            }
             Err(e) => {
-                let _ = self.disconnect_inner();
+                log_event(&format!("connect: failed: {e}"));
+                remove_conf();
+                if let Ok(scm) = manager() {
+                    if let Some(service) = open_service(&scm, TUNNEL_SERVICE) {
+                        stop_and_wait(&service, Duration::from_secs(5)); // it may be what failed to stop: this was already waited for
+                    }
+                }
                 *self.error.lock().unwrap() = Some(e.clone());
                 Status::failed(e)
             }
@@ -206,13 +333,7 @@ impl Tunnel {
             return true;
         }
         let Ok(scm) = manager() else { return false };
-        let service = match open_service(&scm, TUNNEL_SERVICE) {
-            Some(s) => s,
-            None => match create_tunnel_service(&scm, &path.display().to_string()) {
-                Ok(s) => s,
-                Err(_) => return false,
-            },
-        };
+        let Ok(service) = tunnel_service(&scm, &path.display().to_string()) else { return false };
         if matches!(service_state(&service), ServiceState::Running | ServiceState::Starting) {
             return true;
         }
@@ -220,7 +341,14 @@ impl Tunnel {
     }
 
     fn start(&self, cfg: &config::Config) -> Result<(), String> {
-        stop_and_delete(TUNNEL_SERVICE)?; // switching server: the old tunnel always goes first
+        // the old tunnel always goes first, whether it's switching server or an earlier one never fully closed
+        remove_conf();
+        if let Some(old) = open_service(&manager()?, TUNNEL_SERVICE) {
+            if !stop_and_wait(&old, STOP_LIMIT) {
+                return Err("The previous connection is still closing. Please try again in a moment.".into());
+            }
+        }
+        wait_for_adapter_to_go(ADAPTER_LIMIT);
         let dir = tunnels_dir()?;
         let sd = Descriptor::new(PRIVATE_SDDL)?;
         let attrs = sd.attributes();
@@ -242,17 +370,22 @@ impl Tunnel {
             return Err("Can't save the tunnel settings".into());
         }
         let scm = manager()?;
-        let service = create_tunnel_service(&scm, &path.display().to_string())?;
+        let service = tunnel_service(&scm, &path.display().to_string())?;
         if unsafe { StartServiceW(service.0, 0, null()) } == 0 {
             return Err(format!("Can't start the tunnel: {}", last_error()));
         }
         Ok(())
     }
 
+    /// The private key goes first, so it's gone however long the tunnel takes to close. Only read when a tunnel starts, so the running one doesn't need it. If the tunnel is slow to stop,
+    /// the status reads as stopping until it has, and the next Connect waits for it.
     fn disconnect_inner(&self) -> Result<(), String> {
-        stop_and_delete(TUNNEL_SERVICE)?;
-        if let Ok(path) = conf_path() {
-            let _ = std::fs::remove_file(path); // holds the device's private key: never left behind
+        remove_conf();
+        let scm = manager()?;
+        if let Some(service) = open_service(&scm, TUNNEL_SERVICE) {
+            if stop_and_wait(&service, STOP_LIMIT) {
+                wait_for_adapter_to_go(ADAPTER_LIMIT);
+            }
         }
         Ok(())
     }
@@ -261,9 +394,18 @@ impl Tunnel {
         let _one_at_a_time = self.changing.lock().unwrap();
         *self.error.lock().unwrap() = None;
         *self.since.lock().unwrap() = None;
+        *self.started.lock().unwrap() = None;
+        log_event("disconnect: requested");
         match self.disconnect_inner() {
-            Ok(()) => self.status(),
-            Err(e) => Status::failed(e),
+            Ok(()) => {
+                let status = self.status();
+                log_event(&format!("disconnect: done, state {:?}", status.state));
+                status
+            }
+            Err(e) => {
+                log_event(&format!("disconnect: failed: {e}"));
+                Status::failed(e)
+            }
         }
     }
 
@@ -274,12 +416,40 @@ impl Tunnel {
         let Ok(scm) = manager() else { return Status::failed("Can't read the tunnel's state") };
         let Some(service) = open_service(&scm, TUNNEL_SERVICE) else { return Status::off() };
         let state = service_state(&service);
+        let busy = self.changing.try_lock().is_err() || self.resuming.load(Ordering::SeqCst);
+        let wanted = conf_path().map(|p| p.exists()).unwrap_or(false);
+        if protocol::tunnel_ended(state, wanted, busy) {
+            *self.since.lock().unwrap() = None;
+            let code = exit_code(&service);
+            // once per stop, not on every status check
+            if self.started.lock().unwrap().take().is_some() {
+                log_event(&format!("tunnel: stopped by itself, Windows exit code {code}"));
+            }
+            return Status::failed(protocol::ended_message(code));
+        }
         let (age, rx, tx) = if state == ServiceState::Running { peer_stats().unwrap_or((None, 0, 0)) } else { (None, 0, 0) };
         let mut status = protocol::decide(state, age, rx, tx);
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        let mut since = self.since.lock().unwrap();
-        *since = protocol::session_since(*since, &status, now);
-        status.connected_since = *since;
+        let now = now_seconds();
+        {
+            let mut since = self.since.lock().unwrap();
+            *since = protocol::session_since(*since, &status, now);
+            status.connected_since = *since;
+        }
+        let started = *self.started.lock().unwrap();
+        if protocol::connect_timed_out(started, &status, now) {
+            drop(service);
+            drop(scm);
+            // a connect or disconnect already under way decides for itself
+            if let Ok(_one_at_a_time) = self.changing.try_lock() {
+                log_event("connect: no answer from the server in time, closing");
+                let _ = self.disconnect_inner();
+                *self.started.lock().unwrap() = None;
+                *self.since.lock().unwrap() = None;
+                *self.error.lock().unwrap() = Some(protocol::NO_ANSWER.to_string());
+                return Status::failed(protocol::NO_ANSWER);
+            }
+            return status;
+        }
         status
     }
 }

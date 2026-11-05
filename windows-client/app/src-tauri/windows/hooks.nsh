@@ -29,6 +29,7 @@
 !macro NSIS_HOOK_POSTUNINSTALL
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "KiwiVPN"
   RMDir /r "$INSTDIR\tunnels"
+  RMDir /r "$INSTDIR\logs"
   ${IfNot} ${FileExists} "$PROGRAMFILES64\WireGuard\wireguard.exe"
     RMDir /r "$PROGRAMFILES64\WireGuard\Data"
     RMDir "$PROGRAMFILES64\WireGuard"

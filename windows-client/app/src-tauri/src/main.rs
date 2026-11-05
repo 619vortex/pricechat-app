@@ -7,7 +7,7 @@ use kiwiclient::api::{Account, Backend, Http, BASE};
 use kiwiclient::flow::{self, Vault};
 use kiwiclient::store::FileVault;
 use kiwiclient::settings::{self, Settings};
-use kiwiclient::{auth, opener};
+use kiwiclient::{applog, auth, opener};
 use kiwivpn::protocol::{Request, State, Status};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -42,6 +42,20 @@ fn backend() -> Result<Http, String> {
 fn settings_path() -> Result<PathBuf, String> {
     let base = std::env::var_os("LOCALAPPDATA").ok_or("Windows didn't say where app data goes.")?;
     Ok(PathBuf::from(base).join("live.pricechat.kiwivpn").join("settings.json"))
+}
+
+/// States and error messages only, in the app's own folder. See kiwiclient::applog.
+fn note(line: &str) {
+    if let Ok(settings) = settings_path() {
+        applog::write(&settings.with_file_name("kiwivpn.log"), line);
+    }
+}
+
+fn note_answer(what: &str, answer: &Answer) {
+    match &answer.status {
+        Some(status) => note(&format!("{what}: service says {:?} {}", status.state, status.error.as_deref().unwrap_or(""))),
+        None => note(&format!("{what}: no service: {}", answer.message.as_deref().unwrap_or(""))),
+    }
 }
 
 fn current_settings() -> Settings {
@@ -126,15 +140,29 @@ fn vpn_status() -> Answer {
 
 #[tauri::command(async)]
 fn vpn_disconnect() -> Answer {
-    answer(ipc::ask(&Request::Disconnect))
+    note("disconnect: pressed");
+    let done = answer(ipc::ask(&Request::Disconnect));
+    note_answer("disconnect", &done);
+    done
 }
 
 /// Everything is decided here, not in the page: the page names a server, and the key and the config never reach it.
 #[tauri::command(async)]
 fn vpn_connect(server_id: i64) -> Result<Answer, String> {
     let computer = std::env::var("COMPUTERNAME").unwrap_or_default();
-    let config = flow::config_for(&backend()?, &FileVault::open()?, &computer, server_id)?;
-    Ok(answer(ipc::ask(&Request::Connect { config: config.to_string() })))
+    note(&format!("connect: pressed, server {server_id}"));
+    let config = flow::config_with_retry(&backend()?, &FileVault::open()?, &computer, server_id, &|| {
+        note("connect: Price Chat unreachable, trying again");
+        std::thread::sleep(Duration::from_millis(1500));
+    })
+    .map_err(|e| {
+        note(&format!("connect: no config: {e}"));
+        e
+    })?;
+    note("connect: config ready, asking the service");
+    let done = answer(ipc::ask(&Request::Connect { config: config.to_string() }));
+    note_answer("connect", &done);
+    Ok(done)
 }
 
 /// Advanced Settings, for testing: connect from a config file. It's read here, so its key still never enters the page. Compiled out of a build made with --no-default-features.

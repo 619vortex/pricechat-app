@@ -71,6 +71,32 @@ pub fn decide(service: ServiceState, handshake_age: Option<u64>, rx: u64, tx: u6
     Status { state, handshake_age_seconds: handshake_age, rx_bytes: rx, tx_bytes: tx, error: None, connected_since: None }
 }
 
+/// Someone wants the tunnel, nothing is changing it, and it isn't running: it stopped by itself, such as failing just after starting. Without this it would read as an ordinary "not connected",
+/// and pressing Connect would seem to do nothing.
+pub fn tunnel_ended(service: ServiceState, wanted: bool, changing: bool) -> bool {
+    service == ServiceState::Stopped && wanted && !changing
+}
+
+/// The message for a tunnel that stopped by itself. Windows' exit code, when there is one, is what points to the reason.
+pub fn ended_message(exit_code: u32) -> String {
+    const NO_CODE: [u32; 2] = [0, 1077]; // ran and stopped normally, or never started
+    if NO_CODE.contains(&exit_code) {
+        "The connection stopped unexpectedly. Please try again.".into()
+    } else {
+        format!("The connection stopped unexpectedly (Windows error {exit_code}). Please try again.")
+    }
+}
+
+/// How long a new connection may wait for the server's first answer before it's given up on, and everything it set up is taken down.
+pub const CONNECT_LIMIT_SECONDS: u64 = 60;
+pub const NO_ANSWER: &str = "The server didn't answer, so the connection was closed. Please try again, or choose another country.";
+
+/// A connection this person just asked for that has never reached the server. A tunnel that had reached it and lost it is different, and keeps trying: that's a network interruption,
+/// and it recovers by itself. `started` is unset for a tunnel brought back after a restart, which may be waiting for the network to come up.
+pub fn connect_timed_out(started: Option<u64>, status: &Status, now: u64) -> bool {
+    status.state == State::Connecting && status.connected_since.is_none() && started.is_some_and(|at| now.saturating_sub(at) >= CONNECT_LIMIT_SECONDS)
+}
+
 /// The session's start, given what was known before and the latest reading. It's set by the first handshake seen, survives a handshake running late, and ends with the tunnel.
 pub fn session_since(previous: Option<u64>, status: &Status, now: u64) -> Option<u64> {
     match status.state {
@@ -135,6 +161,31 @@ mod tests {
         assert_eq!(decide(ServiceState::Stopping, Some(1), 0, 0).state, State::Stopping);
         assert_eq!(decide(ServiceState::Stopped, Some(1), 0, 0).state, State::Disconnected);
         assert_eq!(decide(ServiceState::Missing, None, 0, 0).state, State::Disconnected);
+    }
+
+    #[test]
+    fn a_new_connection_gives_up_and_an_established_one_keeps_trying() {
+        let waiting = decide(ServiceState::Running, None, 0, 0);
+        assert!(!connect_timed_out(Some(1000), &waiting, 1000 + CONNECT_LIMIT_SECONDS - 1));
+        assert!(connect_timed_out(Some(1000), &waiting, 1000 + CONNECT_LIMIT_SECONDS));
+        assert!(!connect_timed_out(None, &waiting, 9999), "brought back after a restart: the network may still be coming up");
+        let interrupted = Status { connected_since: Some(1005), ..decide(ServiceState::Running, Some(500), 0, 0) };
+        assert_eq!(interrupted.state, State::Connecting);
+        assert!(!connect_timed_out(Some(1000), &interrupted, 9999), "it reached the server before, so it's a network interruption");
+        assert!(!connect_timed_out(Some(1000), &decide(ServiceState::Running, Some(1), 0, 0), 9999));
+        assert!(!connect_timed_out(Some(1000), &Status::off(), 9999));
+    }
+
+    #[test]
+    fn a_tunnel_that_stops_by_itself_is_a_failure_and_a_disconnect_is_not() {
+        assert!(tunnel_ended(ServiceState::Stopped, true, false), "wanted, and nothing is changing it");
+        assert!(!tunnel_ended(ServiceState::Stopped, false, false), "the state after Disconnect, and before any Connect");
+        assert!(!tunnel_ended(ServiceState::Stopped, true, true), "a connect is starting it, or the service is retrying after a restart");
+        for state in [ServiceState::Running, ServiceState::Starting, ServiceState::Stopping, ServiceState::Missing] {
+            assert!(!tunnel_ended(state, true, false), "{state:?}");
+        }
+        assert!(ended_message(1168).contains("Windows error 1168"));
+        assert!(!ended_message(0).contains("Windows error") && !ended_message(1077).contains("Windows error"));
     }
 
     #[test]

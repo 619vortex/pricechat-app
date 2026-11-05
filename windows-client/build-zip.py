@@ -5,7 +5,7 @@ import sys
 import zipfile
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-paths = ["app", "client", "service", "docs/VM-CHECKLIST.md", "BUILDING.md", "build-app-in-vm.ps1", "fake-service-test.ps1", "ipc-and-key-test.ps1", "scan-for-key.ps1"]
+paths = ["app", "client", "service", "docs/VM-CHECKLIST.md", "BUILDING.md", "build-app-in-vm.ps1", "reconnect-test.ps1", "fake-service-test.ps1", "ipc-and-key-test.ps1", "scan-for-key.ps1"]
 files = subprocess.check_output(["git", "-C", root, "ls-files", *[f"windows-client/{p}" for p in paths]], text=True).split("\n")
 files = [f for f in files if f]
 with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:

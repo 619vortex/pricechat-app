@@ -431,4 +431,74 @@ describe("the window", () => {
     expect(calls).toContain("vpn_disconnect");
     expect(heading()).toBe("Not connected");
   });
+
+  it("Connect → Disconnect → Connect works in one sitting, without restarting the app", async () => {
+    render(<App />);
+    await settle();
+    expect(main().textContent).toBe("Connect");
+    for (let round = 1; round <= 3; round++) {
+      reply = up();
+      fireEvent.click(main());
+      await settle();
+      expect(heading()).toBe("Connected");
+      expect(calls.filter((c) => c === "vpn_connect").length).toBe(round);
+      reply = off();
+      fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+      await settle();
+      expect(heading()).toBe("Not connected");
+      expect(main().textContent).toBe("Connect");
+      expect(main().disabled).toBe(false);
+      expect(country(/Helsinki/).getAttribute("aria-checked")).toBe("true");
+      expect(document.body.textContent).not.toMatch(/stopped unexpectedly|Couldn't connect/);
+    }
+    expect(args.vpn_connect).toEqual({ serverId: 1 });
+  });
+
+  it("disconnecting checks the account again", async () => {
+    reply = up();
+    render(<App />);
+    await settle();
+    const before = calls.filter((c) => c === "account_state").length;
+    reply = off();
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    await settle();
+    expect(calls.filter((c) => c === "account_state").length).toBe(before + 1);
+  });
+
+  it("an account check that can't reach Price Chat keeps the countries and Connect, and says why", async () => {
+    render(<App />);
+    await settle();
+    view = signedIn({ account: null, suggested: null, error: "Couldn't reach Price Chat. Check your connection and try again." });
+    await tick(60_000);
+    expect(document.body.textContent).toContain("Couldn't reach Price Chat");
+    expect(main().textContent).toBe("Connect");
+    expect(main().disabled).toBe(false);
+    expect(country(/Helsinki/)).toBeTruthy();
+    view = signedIn();
+    await tick(60_000);
+    expect(document.body.textContent).not.toContain("Couldn't reach Price Chat");
+  });
+
+  it("a real sign-out from the server still takes effect through that check", async () => {
+    render(<App />);
+    await settle();
+    view = signedOut();
+    await tick(60_000);
+    expect(main().textContent).toBe("Sign in with Price Chat");
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+  });
+
+  it("a tunnel that stopped by itself says so, instead of quietly reading as not connected, and Try again starts it fresh", async () => {
+    reply = { service: true, message: null, status: status({ state: "failed", error: "The connection stopped unexpectedly (Windows error 1168). Please try again." }) };
+    render(<App />);
+    await settle();
+    expect(heading()).toBe("Couldn't connect");
+    expect(screen.getByRole("alert").textContent).toContain("Windows error 1168");
+    expect(main().textContent).toBe("Try again");
+    reply = up();
+    fireEvent.click(main());
+    await settle();
+    expect(calls).toContain("vpn_connect");
+    expect(heading()).toBe("Connected");
+  });
 });

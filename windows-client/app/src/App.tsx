@@ -116,8 +116,11 @@ export function App() {
   }, []);
 
   const loadAccount = useCallback(async () => {
-    try { setView(await accountState()); }
-    catch (e) { setProblem(String(e)); }
+    try {
+      const next = await accountState();
+      // A failed check, such as one landing while the tunnel is closing, tells us nothing new about the account. It mustn't take away the countries and Connect.
+      setView((was) => (next.signed_in && !next.account && was?.signed_in && was.account ? { ...was, error: next.error } : next));
+    } catch (e) { setProblem(String(e)); }
   }, []);
 
   useEffect(() => {
@@ -148,7 +151,7 @@ export function App() {
     finally { setAction(null); }
   };
   const connect = (serverId: number) => run("connect", async () => { take(await vpnConnect(serverId)); await loadAccount(); });
-  const disconnect = () => run("disconnect", async () => { meantToStop.current = true; take(await vpnDisconnect()); });
+  const disconnect = () => run("disconnect", async () => { meantToStop.current = true; take(await vpnDisconnect()); await loadAccount(); });
   const login = () => run("sign-in", async () => { await signIn(); await loadAccount(); });
   const trial = () => run("trial", async () => { await startTrial(); await loadAccount(); });
   const logout = () => run("disconnect", async () => { meantToStop.current = true; await signOut(); setChosen(null); setSettings(false); await loadAccount(); });
