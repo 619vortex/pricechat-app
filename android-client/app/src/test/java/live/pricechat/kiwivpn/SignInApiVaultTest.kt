@@ -175,6 +175,25 @@ class ApiTest {
         }
     }
 
+    @Test fun the_shared_state_parses_with_passport_and_capabilities() = runTest {
+        val reply = """{"api_version":1,"refresh_after_seconds":60,"capabilities":{"passport_enabled":true,"auto_call_enabled":true,"gaming_mode_enabled":false},"vpn":{"eligible":true},"missions":[],
+          "passport":{"username":"kiwi","display_name":"Kiwi","xp":2500,"bonus_xp":0,"xp_suspended":false,
+            "rank":{"current":{"level":3,"key":"warrior","name":"Warrior","min_xp":2000,"description":"x","art":{"a":1}},"next":{"level":4,"key":"k","name":"Next","min_xp":3000,"description":"","art":{}},"score":2500,"xp_to_next":500,"progress":0.5},
+            "badges":[{"key":"b","name":"First","description":"d","awarded_at":"2026-01-01","awarded_by":"automatic"}],"standing":{"position":84,"board":"all"},
+            "referral":{"code":"kiwi123456","link":"https://x/website/join/kiwi123456","joined":2,"qualified":1,"xp_earned":10,"reward_xp":10}}}"""
+        val s = api(body = reply).unifiedState("t", "0.1.0-beta1")
+        assertEquals(2500L, s.passport!!.xp)
+        assertEquals("Warrior", s.passport!!.rank.current.name)
+        assertEquals(500L, s.passport!!.rank.xpToNext)
+        assertEquals(84L, s.passport!!.standing!!.position)
+        assertEquals("kiwi123456", s.passport!!.referral!!.code)
+        assertEquals(true, s.capabilities["auto_call_enabled"])
+        val url = seen.single().url
+        assertEquals("android", url.queryParameter("platform"))
+        assertEquals("0.1.0-beta1", url.queryParameter("version"))
+        assertEquals("/api/members/vpn/v1/state", url.encodedPath)
+    }
+
     @Test fun only_tls_is_accepted() {
         assertThrows(IllegalArgumentException::class.java) { HttpKiwiApi("http://pricechat.live") }
     }

@@ -1,5 +1,6 @@
 package live.pricechat.kiwivpn.ui
 
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
@@ -23,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -98,6 +100,11 @@ private fun LinkRow(title: String, detail: String? = null, onClick: () -> Unit) 
     }
 }
 
+private fun openIntentChooser(context: Context, text: String) {
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+    context.startActivity(Intent.createChooser(send, "Share your invite link"))
+}
+
 fun countryName(code: String): String = if (code.isBlank()) "" else Locale.Builder().setRegion(code.uppercase()).build().displayCountry
 
 // --- Locations -------------------------------------------------------------------------------------------------------
@@ -141,6 +148,7 @@ fun LocationsScreen(ui: UiState, state: ConnectionState, onSelect: (Server) -> U
 
 @Composable
 fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, openUrl: (String) -> Unit) {
+    val context = LocalContext.current
     val status = accountStatus(ui.account)
     var confirm by remember { mutableStateOf<Long?>(null) }
     val running = when (state) {
@@ -149,6 +157,25 @@ fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, open
         else -> null
     }
     Page("Account") {
+        ui.passport?.let { p ->
+            Card {
+                Text(p.displayName.ifBlank { p.username }, style = MaterialTheme.typography.titleMedium)
+                Text("Kiwi Passport: ${p.rank.current.name}, level ${p.rank.current.level}", color = Kiwi.LimeBright, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(progress = { p.rank.progress.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), color = Kiwi.Lime, trackColor = Kiwi.Forest3)
+                Spacer(Modifier.height(6.dp))
+                Fact("XP", "%,d".format(p.xp))
+                p.rank.next?.let { Fact("To ${it.name}", "%,d points".format(p.rank.xpToNext)) }
+                p.standing?.let { Fact("Leaderboard", "#${it.position}") }
+                if (p.badges.isNotEmpty()) Fact("Achievements", p.badges.joinToString(", ") { it.name })
+                p.referral?.let { invite ->
+                    Fact("Friends invited", "${invite.joined} joined, ${invite.qualified} verified")
+                    LinkRow("Share your invite link") {
+                        openIntentChooser(context, invite.link)
+                    }
+                }
+            }
+        }
         Card {
             Text(ui.who ?: "Price Chat account", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
@@ -208,7 +235,7 @@ fun SettingsScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, 
             Text("Those are Android's own controls. Kiwi VPN doesn't have a kill switch of its own, and this combination hasn't finished testing.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Warn)
             LinkRow("Open VPN settings") { openIntent(Intent(Settings.ACTION_VPN_SETTINGS)) }
         }
-        AutoCallCard(model, ui, openIntent)
+        if (ui.capabilities["auto_call_enabled"] != false) AutoCallCard(model, ui, openIntent)
         Card {
             LinkRow("Connection diagnostics", onClick = onDiagnostics)
             LinkRow("Privacy policy") { openUrl("$BASE_URL/vpn/privacy") }
@@ -305,7 +332,7 @@ fun DiagnosticsScreen(model: AppViewModel, ui: UiState, state: ConnectionState, 
             Fact("Received", bytes(link?.rxBytes))
             Fact("Sent", bytes(link?.txBytes))
             val exit = link?.publicIp
-            Fact("Public IPv4", if (exit == null) "Not checked" else if (link.ipMatchesServer) "$exit (the server's)" else "$exit (not the server's)")
+            Fact("Public IPv4", if (exit == null) "Not checked" else if (link?.ipMatchesServer == true) "$exit (the server's)" else "$exit (not the server's)")
             (state as? ConnectionState.Failed)?.let { Fact("Error", it.message) }
         }
         Card {

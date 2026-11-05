@@ -17,9 +17,9 @@ fun accountStatus(account: Account?): AccountStatus {
     val offer = account.trial?.available == true
     val plan = account.plan
     return when (plan?.kind) {
-        "trial" -> AccountStatus(StatusKind.TRIAL, "Free trial: ${days(plan.daysLeft)}", null, account.eligible, false)
-        "paid" -> AccountStatus(StatusKind.PAID, "Subscription: ${days(plan.daysLeft)}", null, account.eligible, false)
-        "tester" -> AccountStatus(StatusKind.TESTER, "Tester access: ${days(plan.daysLeft)}", null, account.eligible, false)
+        "trial" -> AccountStatus(StatusKind.TRIAL, "Free trial: ${days(plan?.daysLeft)}", null, account.eligible, false)
+        "paid" -> AccountStatus(StatusKind.PAID, "Subscription: ${days(plan?.daysLeft)}", null, account.eligible, false)
+        "tester" -> AccountStatus(StatusKind.TESTER, "Tester access: ${days(plan?.daysLeft)}", null, account.eligible, false)
         "owner", "royal", "free", "granted" -> AccountStatus(StatusKind.UNLIMITED, "Active", null, account.eligible, false)
         "not_activated" ->
             if (offer) AccountStatus(StatusKind.NEEDS_TRIAL, "Free ${account.trial?.days ?: 30}-day trial available", "One per account.", false, true)

@@ -16,6 +16,7 @@ import live.pricechat.kiwivpn.auth.SignInAttempt
 import live.pricechat.kiwivpn.autocall.AutoCallController
 import live.pricechat.kiwivpn.log.Diag
 import live.pricechat.kiwivpn.model.Account
+import live.pricechat.kiwivpn.model.Passport
 import live.pricechat.kiwivpn.model.Server
 import live.pricechat.kiwivpn.model.ref
 import live.pricechat.kiwivpn.model.suggestedServer
@@ -35,6 +36,9 @@ data class UiState(
     val error: String? = null,
     val settings: AppSettings = AppSettings(),
     val testReport: String? = null,
+    val passport: Passport? = null,
+    /** Empty until the shared API answers. A feature is hidden only if the server explicitly says no. */
+    val capabilities: Map<String, Boolean> = emptyMap(),
 )
 
 private const val SIGN_IN_MS = 5 * 60 * 1000L
@@ -69,6 +73,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val current = app.vault.read().session ?: return@launch
                 val account = app.api.account(current)
                 val who = runCatching { app.api.me(current).member }.getOrNull()
+                // Optional: production doesn't have this route until it's approved. Any failure keeps what was last shown, and never affects the VPN.
+                val shared = runCatching { app.api.unifiedState(current, BuildConfig.VERSION_NAME) }.getOrNull()
+                if (shared != null) _ui.update { it.copy(passport = shared.passport ?: it.passport, capabilities = shared.capabilities) }
                 _ui.update { s ->
                     val keep = s.selected?.let { old -> account.servers.firstOrNull { it.id == old.id && it.online } }
                     s.copy(account = account, who = who?.displayName ?: who?.username ?: s.who, selected = keep ?: suggestedServer(account.servers, app.vault.read().lastServer?.id), checked = true, error = null)

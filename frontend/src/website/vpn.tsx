@@ -4,7 +4,7 @@ import { SitePage } from "./community";
 import { reducedMotion } from "./motion";
 import { pageHead } from "./seo";
 import { site } from "./websiteData";
-import { PLAN, STORE_LINKS, WINDOWS_BETA, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
 import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
@@ -482,7 +482,23 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
         <AppCard icons={<><ChromeIcon className="vpn-app-icon" /><EdgeIcon className="vpn-app-icon" /></>} name="Browser extension" text="For Chrome and Edge. Covers that browser only." status={stores.length ? "Available" : "Coming soon"} on={stores.length > 0} mine={browser === "chrome" || browser === "edge" ? "Your browser" : null}>
           {stores.map((x) => <a key={x.key} className="site-button is-small" href={x.href} target="_blank" rel="noopener noreferrer">{x.action}</a>)}
         </AppCard>
-        <AppCard icons={<AndroidIcon className="vpn-app-icon" />} name="Android" text="Covers every app on your phone." status="Coming soon" mine={os === "Android" ? "Your device" : null}>{manual("Android")}</AppCard>
+        {ANDROID_BETA.href ? (
+          <AppCard icons={<AndroidIcon className="vpn-app-icon" />} name="Android" text="Covers every app on your phone. Install it, sign in, choose a country and connect." status="Public beta" on mine={os === "Android" ? "Your device" : null}>
+            <a className="site-button is-small vpn-android-go" href={ANDROID_BETA.href} download><AndroidIcon className="vpn-picon" />Download for Android</a>
+            <details className="vpn-checksum">
+              <summary>Public beta {ANDROID_BETA.version}: read this first</summary>
+              <ul className="vpn-beta-notes">
+                <li>This is an APK, not yet on Google Play. Your phone will ask you to allow installing it.</li>
+                <li>The app has no kill switch of its own. Android's Always-on VPN can block traffic when the VPN is off, and that combination is still being tested.</li>
+                <li>Connection, security, DNS leak and IPv6 leak testing aren't finished.</li>
+              </ul>
+              <p>SHA-256 of the APK:</p>
+              <code>{ANDROID_BETA.sha256}</code>
+            </details>
+          </AppCard>
+        ) : (
+          <AppCard icons={<AndroidIcon className="vpn-app-icon" />} name="Android" text="Covers every app on your phone." status="Coming soon" mine={os === "Android" ? "Your device" : null}>{manual("Android")}</AppCard>
+        )}
         <AppCard icons={<AppleIcon className="vpn-app-icon" />} name="iOS / macOS" text="For iPhone, iPad and Mac. Covers every app on your device." status="Coming soon" mine={os === "iOS" || os === "macOS" ? "Your device" : null}>{manual(os === "macOS" ? "macOS" : "iOS")}</AppCard>
       </ul>
       {browser === "phone" && <p className="vpn-note">Browser extensions need a computer.</p>}

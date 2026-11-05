@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
-import { PLAN, STORE_LINKS, WINDOWS_BETA, visitorBrowser, visitorOs } from "./vpnConfig";
+import { PLAN, STORE_LINKS, ANDROID_BETA, WINDOWS_BETA, visitorBrowser, visitorOs } from "./vpnConfig";
 
 import { Flag, drawMap, place, placeLine } from "./vpnMap";
 
@@ -193,6 +193,27 @@ describe("Free while payments are off", () => {
       expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
     } finally {
       Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" });
+    }
+  });
+
+  it("keeps the Android download switched off until an APK is approved, and labels it honestly when it is", () => {
+    expect(ANDROID_BETA).toEqual({ href: "", version: "", sha256: "" });
+    let view = render(<Downloads agent={CHROME} />);
+    expect(screen.queryByRole("link", { name: /Download for Android/ })).toBeNull();
+    expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+    view.unmount();
+    Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", version: "0.1.0", sha256: "DEF456" });
+    try {
+      view = render(<Downloads agent={CHROME} />);
+      const android = card(view.container, "Android");
+      expect(screen.getByRole("link", { name: /Download for Android/ }).getAttribute("href")).toBe("/downloads/KiwiVPN.apk");
+      expect(android.querySelector(".vpn-status")!.textContent).toBe("Public beta");
+      expect(android.textContent).toMatch(/no kill switch of its own/);
+      expect(android.textContent).toMatch(/DNS leak and IPv6 leak testing aren't finished/);
+      expect(android.textContent).not.toMatch(/passed|verified|audited/i);
+      expect(android.textContent).toContain("DEF456");
+    } finally {
+      Object.assign(ANDROID_BETA, { href: "", version: "", sha256: "" });
     }
   });
 

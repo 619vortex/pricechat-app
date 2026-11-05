@@ -8,17 +8,17 @@ calls are in app.vpn.service, not here. A device's config (with its private key)
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import Field
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, Runtime
 from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
 from app.models.vpn import VpnAccount
 from app.security import admin_auth, client_ip, rate_limit
 from app.security import rate_limit
 from app.security.rate_limit import LIMITS
-from app.vpn import billing, service
+from app.vpn import billing, service, unified
 from app.vpn.billing import BillingError
 from app.vpn.service import VpnError
 
@@ -105,6 +105,20 @@ def device_peer(device_id: int, db: DbSession, pc_session: SessionToken = None) 
         return service.device_peer(db, member, device_id)
     except VpnError as e:
         raise _fail(e) from e
+
+
+@router.get("/members/vpn/v1/state", dependencies=[Depends(rate_limit.limit("earn"))])
+def unified_state(db: DbSession, runtime: Runtime, platform: str | None = Query(None, max_length=16), version: str | None = Query(None, max_length=40), pc_session: SessionToken = None) -> dict[str, Any]:
+    """One account, the same on every client: see app.vpn.unified. Writes no XP and starts no trial."""
+    return unified.state(db, _require(db, pc_session), runtime.settings.members_public_url, platform, version)
+
+
+@router.get("/members/vpn/v1/capabilities", dependencies=[Depends(rate_limit.limit("earn"))])
+def unified_capabilities(db: DbSession, platform: str | None = Query(None, max_length=16), version: str | None = Query(None, max_length=40)) -> dict[str, bool]:
+    """What a client of this platform and version may show, signed in or not. It grants nothing: every route checks the account for itself."""
+    out = unified.capabilities(db, platform, version)
+    db.commit()  # the first call may seed the program settings row
+    return out
 
 
 @router.get("/members/vpn/ip", dependencies=[Depends(rate_limit.limit("earn"))])

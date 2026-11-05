@@ -69,6 +69,46 @@ data class MemberInfo(
 @Serializable
 data class Me(val member: MemberInfo? = null)
 
+// GET /members/vpn/v1/state: backend/app/vpn/unified.py. Not on production until it's approved and deployed, so everything here is optional to the app.
+
+@Serializable
+data class RankInfo(val level: Int = 1, val key: String = "", val name: String = "")
+
+@Serializable
+data class RankProgress(
+    val current: RankInfo = RankInfo(),
+    val next: RankInfo? = null,
+    val score: Long = 0,
+    @SerialName("xp_to_next") val xpToNext: Long = 0,
+    val progress: Float = 0f,
+)
+
+@Serializable
+data class Badge(val key: String, val name: String, val description: String = "")
+
+@Serializable
+data class Standing(val position: Long)
+
+@Serializable
+data class ReferralInfo(val code: String, val link: String, val joined: Long = 0, val qualified: Long = 0)
+
+@Serializable
+data class Passport(
+    val username: String = "",
+    @SerialName("display_name") val displayName: String = "",
+    val xp: Long = 0,
+    val rank: RankProgress = RankProgress(),
+    val badges: List<Badge> = emptyList(),
+    val standing: Standing? = null,
+    val referral: ReferralInfo? = null,
+)
+
+@Serializable
+data class UnifiedState(
+    val capabilities: Map<String, Boolean> = emptyMap(),
+    val passport: Passport? = null,
+)
+
 /** A server as the connection code needs it, and as it's remembered between runs. */
 @Serializable
 data class ServerRef(val id: Long, val name: String, val countryCode: String = "")

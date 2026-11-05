@@ -14,6 +14,8 @@ import live.pricechat.kiwivpn.model.Account
 import live.pricechat.kiwivpn.model.Me
 import live.pricechat.kiwivpn.model.NewDevice
 import live.pricechat.kiwivpn.model.Peer
+import live.pricechat.kiwivpn.model.UnifiedState
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -39,6 +41,8 @@ interface KiwiApi {
     suspend fun addDevice(token: String, name: String, serverId: Long, publicKey: String): NewDevice
     suspend fun deleteDevice(token: String, deviceId: Long)
     suspend fun me(token: String): Me
+    /** Passport and capabilities. Answers 404 until the shared API is deployed, which the app treats as "not available yet". */
+    suspend fun unifiedState(token: String, version: String): UnifiedState
     suspend fun exchangeCode(code: String, verifier: String): String
     suspend fun refresh(token: String): String
     suspend fun logout(token: String)
@@ -120,6 +124,11 @@ class HttpKiwiApi(base: String = BASE_URL, client: OkHttpClient? = null, private
     }
 
     override suspend fun me(token: String): Me = parse(serializer(), send(request("/members/me", token).get().build()))
+
+    override suspend fun unifiedState(token: String, version: String): UnifiedState {
+        val url = "$base/api/members/vpn/v1/state".toHttpUrl().newBuilder().addQueryParameter("platform", "android").addQueryParameter("version", version).build()
+        return parse(serializer(), send(request("/members/vpn/v1/state", token).url(url).get().build()))
+    }
 
     override suspend fun exchangeCode(code: String, verifier: String): String =
         parse<TokenReply>(serializer(), send(request("/members/desktop/token", null).post(bodyOf(TokenInput(code, verifier))).build())).token

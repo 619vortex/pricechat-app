@@ -8,6 +8,7 @@ import live.pricechat.kiwivpn.model.Peer
 import live.pricechat.kiwivpn.model.Plan
 import live.pricechat.kiwivpn.model.Server
 import live.pricechat.kiwivpn.model.ServerRef
+import live.pricechat.kiwivpn.model.UnifiedState
 import live.pricechat.kiwivpn.net.ApiException
 import live.pricechat.kiwivpn.net.KiwiApi
 import live.pricechat.kiwivpn.net.UNREACHABLE
@@ -103,6 +104,7 @@ class FakeApi(var current: Account = account()) : KiwiApi {
         current = current.copy(devices = current.devices.filter { it.id != deviceId })
     }
     override suspend fun me(token: String) = Me()
+    override suspend fun unifiedState(token: String, version: String) = UnifiedState()
     override suspend fun exchangeCode(code: String, verifier: String) = "kd.token"
     override suspend fun refresh(token: String) = "kd.fresh"
     override suspend fun logout(token: String) { calls += "logout" }

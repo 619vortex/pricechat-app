@@ -9,6 +9,9 @@ export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_day
 /** The Windows beta: the button appears only while this names a hosted installer. All three together, from the build. Clear them and nothing on the page offers a download. */
 export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.1", sha256: "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598" };
 
+/** The Android test APK. Empty on purpose: the card stays Coming soon, and nothing offers a download, until the APK has passed real-phone testing and the owner approves it. See android-client/docs/DEVICE-TEST-PLAN.md. */
+export const ANDROID_BETA: { href: string; version: string; sha256: string } = { href: "", version: "", sha256: "" };
+
 export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
 
 /** Which install button to put first. Edge's and Opera's agents also say Chrome, so they're ruled out first. */

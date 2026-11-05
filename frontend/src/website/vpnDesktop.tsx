@@ -9,7 +9,7 @@ import "./vpn.css";
  * code goes to 127.0.0.1 only. The code is useless without the secret the app kept, so another site sending someone here gains nothing. See routes/desktop.py.
  */
 
-export interface DesktopRequest { challenge: string; port: number; state: string }
+export interface DesktopRequest { challenge: string; port: number; state: string; client?: "android" }
 
 /** null unless every part is exactly what the app sends: nothing from the address bar reaches a redirect otherwise. */
 export function readRequest(search: string): DesktopRequest | null {
@@ -17,7 +17,7 @@ export function readRequest(search: string): DesktopRequest | null {
   const challenge = q.get("challenge") ?? "", state = q.get("state") ?? "", raw = q.get("port") ?? "";
   const port = /^\d{4,5}$/.test(raw) ? Number(raw) : 0;
   if (!/^[A-Za-z0-9_-]{43}$/.test(challenge) || !/^[A-Za-z0-9_-]{16,64}$/.test(state) || port < 1024 || port > 65535) return null;
-  return { challenge, port, state };
+  return q.get("client") === "android" ? { challenge, port, state, client: "android" } : { challenge, port, state };  // wording only: it changes nothing about where the code can go
 }
 
 export function callbackUrl(r: DesktopRequest, code: string): string {
@@ -33,7 +33,7 @@ const PENDING_KEY = "kiwi-vpn-desktop-signin";
 const PENDING_MS = 5 * 60 * 1000;  // how long the app waits: SIGN_IN_MINUTES in windows-client/client/src/auth.rs
 
 function pageFor(r: DesktopRequest): string {
-  return `/vpn/desktop?challenge=${r.challenge}&port=${r.port}&state=${r.state}`;
+  return `/vpn/desktop?challenge=${r.challenge}&port=${r.port}&state=${r.state}${r.client ? `&client=${r.client}` : ""}`;
 }
 
 export function rememberDesktopSignIn(r: DesktopRequest, now = Date.now()): void {
@@ -91,22 +91,24 @@ export function VpnDesktopPage({ search = location.search, go = (url: string) =>
     } finally { setBusy(false); }
   }
   const name = who && who !== "loading" ? who.member?.display_name ?? who.member?.username : null;
+  const phone = request?.client === "android";
+  const platform = phone ? "Android" : "Windows", device = phone ? "phone" : "PC";
   return (
-    <SitePage title="Sign in to Kiwi VPN for Windows" description="Connect the Kiwi VPN app to your Price Chat account." path="/vpn/desktop" noindex>
+    <SitePage title={`Sign in to Kiwi VPN for ${platform}`} description="Connect the Kiwi VPN app to your Price Chat account." path="/vpn/desktop" noindex>
       <section className="vpn">
         <section className="vpn-card vpn-start" aria-labelledby="vpn-desktop">
-          <h2 id="vpn-desktop">Kiwi VPN for Windows</h2>
-          {!request ? <p className="site-error" role="alert">This link isn't valid. Open Kiwi VPN on your PC and press Sign in.</p>
+          <h2 id="vpn-desktop">Kiwi VPN for {platform}</h2>
+          {!request ? <p className="site-error" role="alert">This link isn't valid. Open Kiwi VPN on your device and press Sign in.</p>
             : done ? <p className="site-muted" role="status">You're signed in. You can close this tab and go back to Kiwi VPN.</p>
             : who === "loading" ? <p className="site-muted" role="status">Checking your account…</p>
             : who === null ? (
               <>
-                <p className="site-muted">Sign in with your Price Chat account to use Kiwi VPN on this PC.</p>
+                <p className="site-muted">Sign in with your Price Chat account to use Kiwi VPN on this {device}.</p>
                 <button className="site-button" onClick={openLogin}>Sign in</button>
               </>
             ) : (
               <>
-                <p className="site-muted">Allow the Kiwi VPN app on <b>this PC</b> to use {name ? <b>{name}</b> : "your account"}? Only continue if you just pressed Sign in in the app.</p>
+                <p className="site-muted">Allow the Kiwi VPN app on <b>this {device}</b> to use {name ? <b>{name}</b> : "your account"}? Only continue if you just pressed Sign in in the app.</p>
                 <button className="site-button" disabled={busy} onClick={() => void allow()}>{busy ? "Signing in…" : "Allow"}</button>
               </>
             )}
