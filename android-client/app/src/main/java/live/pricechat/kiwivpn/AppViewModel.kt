@@ -1,0 +1,229 @@
+package live.pricechat.kiwivpn
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import live.pricechat.kiwivpn.auth.LoopbackListener
+import live.pricechat.kiwivpn.auth.SignInAttempt
+import live.pricechat.kiwivpn.autocall.AutoCallController
+import live.pricechat.kiwivpn.log.Diag
+import live.pricechat.kiwivpn.model.Account
+import live.pricechat.kiwivpn.model.Server
+import live.pricechat.kiwivpn.model.ref
+import live.pricechat.kiwivpn.model.suggestedServer
+import live.pricechat.kiwivpn.net.ApiException
+import live.pricechat.kiwivpn.net.BASE_URL
+import live.pricechat.kiwivpn.security.AppSettings
+import live.pricechat.kiwivpn.vpn.ConnectionState
+import live.pricechat.kiwivpn.vpn.TunnelDriver
+
+data class UiState(
+    val signedIn: Boolean = false,
+    val signingIn: Boolean = false,
+    val who: String? = null,
+    val account: Account? = null,
+    val selected: Server? = null,
+    val checked: Boolean = false,
+    val error: String? = null,
+    val settings: AppSettings = AppSettings(),
+    val testReport: String? = null,
+)
+
+private const val SIGN_IN_MS = 5 * 60 * 1000L
+private const val REFRESH_EVERY_MS = 7 * 24 * 3600 * 1000L
+private const val ACCOUNT_EVERY_MS = 60_000L
+
+class AppViewModel(application: Application) : AndroidViewModel(application) {
+    private val app = application as KiwiApp
+    private val _ui = MutableStateFlow(UiState(signedIn = app.vault.read().session != null, settings = app.vault.read().settings))
+    val ui: StateFlow<UiState> = _ui.asStateFlow()
+    val connection = app.connection.state
+    val autoCallStatus = app.autoCall.status
+    val autoCallTraces = app.autoCall.traces
+    private var signIn: Job? = null
+    private var autoConnected = false
+
+    init {
+        viewModelScope.launch {
+            while (isActive) {
+                if (_ui.value.signedIn) load()
+                delay(ACCOUNT_EVERY_MS)
+            }
+        }
+    }
+
+    /** A failed check keeps the last good answer: a brief network gap, as while the tunnel changes, mustn't take away the countries and Connect. Windows 0.1.0 had exactly this bug. A real sign-out still applies. */
+    fun load() {
+        viewModelScope.launch {
+            val token = app.vault.read().session ?: return@launch
+            try {
+                refreshIfDue(token)
+                val current = app.vault.read().session ?: return@launch
+                val account = app.api.account(current)
+                val who = runCatching { app.api.me(current).member }.getOrNull()
+                _ui.update { s ->
+                    val keep = s.selected?.let { old -> account.servers.firstOrNull { it.id == old.id && it.online } }
+                    s.copy(account = account, who = who?.displayName ?: who?.username ?: s.who, selected = keep ?: suggestedServer(account.servers, app.vault.read().lastServer?.id), checked = true, error = null)
+                }
+                maybeAutoConnect()
+            } catch (e: ApiException) {
+                if (e.signedOut) {
+                    Diag.event("session_expired")
+                    app.vault.update { it.copy(session = null) }
+                    _ui.update { it.copy(signedIn = false, account = null, who = null, checked = true, error = "Your session ended. Please sign in again.") }
+                } else {
+                    _ui.update { it.copy(checked = true, error = if (it.account == null) e.message else it.error) }
+                }
+            }
+        }
+    }
+
+    /** About weekly, so regular use never reaches the 90-day limit and a copied token soon stops working. Failing changes nothing: the current session still works. */
+    private suspend fun refreshIfDue(token: String) {
+        val now = System.currentTimeMillis()
+        val last = app.vault.read().refreshedAt
+        if (last == null) {
+            app.vault.update { it.copy(refreshedAt = now) }
+        } else if (now - last >= REFRESH_EVERY_MS) {
+            try {
+                val fresh = app.api.refresh(token)
+                app.vault.update { it.copy(session = fresh, refreshedAt = now) }
+            } catch (e: ApiException) {
+                if (e.signedOut) throw e
+            }
+        }
+    }
+
+    private fun maybeAutoConnect() {
+        val s = _ui.value
+        val server = s.selected
+        if (autoConnected || !s.settings.autoConnect || s.account?.eligible != true || server == null) return
+        autoConnected = true
+        if (app.connection.state.value is ConnectionState.Disconnected && !app.connection.needsPermission()) app.userConnect(server.ref())
+    }
+
+    /** Opens the browser through `open`. The result comes back on the loopback listener, and only the code with this attempt's state is taken. */
+    fun signIn(open: (String) -> Unit) {
+        signIn?.cancel()
+        signIn = viewModelScope.launch {
+            _ui.update { it.copy(signingIn = true, error = null) }
+            val attempt = SignInAttempt.create()
+            try {
+                LoopbackListener().use { listener ->
+                    open(attempt.pageUrl(BASE_URL, listener.port))
+                    val code = listener.awaitCode(attempt.state, SIGN_IN_MS)
+                    if (code == null) {
+                        _ui.update { it.copy(signingIn = false, error = "Signing in took too long. Please try again.") }
+                        return@launch
+                    }
+                    val token = app.api.exchangeCode(code, attempt.verifier)
+                    // A different account from the last one on this phone gets none of its keys.
+                    app.vault.update { it.copy(session = token, refreshedAt = System.currentTimeMillis()) }
+                    Diag.event("signed_in")
+                    _ui.update { it.copy(signingIn = false, signedIn = true, error = null) }
+                    load()
+                }
+            } catch (e: ApiException) {
+                _ui.update { it.copy(signingIn = false, error = e.message) }
+            } catch (e: java.io.IOException) {
+                _ui.update { it.copy(signingIn = false, error = "Couldn't start signing in. Please try again.") }
+            }
+        }
+    }
+
+    fun cancelSignIn() {
+        signIn?.cancel()
+        _ui.update { it.copy(signingIn = false) }
+    }
+
+    /** Only ever on the person's own press. The server allows one per account, and says so if it's been used. */
+    fun startTrial() {
+        viewModelScope.launch {
+            val token = app.vault.read().session ?: return@launch
+            try {
+                val account = app.api.startTrial(token)
+                _ui.update { it.copy(account = account, selected = it.selected ?: suggestedServer(account.servers, null), error = null) }
+            } catch (e: ApiException) {
+                _ui.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    fun select(server: Server) {
+        _ui.update { it.copy(selected = server) }
+        app.vault.update { it.copy(lastServer = server.ref()) }
+        if (app.connection.state.value.isActive) app.userConnect(server.ref())
+    }
+
+    fun needsVpnPermission() = app.connection.needsPermission()
+
+    fun connect() {
+        val server = _ui.value.selected ?: return
+        app.userConnect(server.ref())
+    }
+
+    fun disconnect() = app.userDisconnect()
+
+    fun removeDevice(id: Long) {
+        viewModelScope.launch {
+            val token = app.vault.read().session ?: return@launch
+            try {
+                app.api.deleteDevice(token, id)
+                app.vault.update { v -> v.copy(devices = v.devices.filterValues { it.deviceId != id }) }
+                load()
+            } catch (e: ApiException) {
+                _ui.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    /** Tunnel down, this phone's devices removed so they don't hold slots, session ended on the server, and keys wiped here. If the network is down the keys still go, and the slots free up the next time this phone signs in. */
+    fun signOut() {
+        viewModelScope.launch {
+            app.userDisconnect()
+            app.autoCall.disabled()
+            val v = app.vault.read()
+            val token = v.session
+            if (token != null) {
+                v.devices.values.forEach { runCatching { app.api.deleteDevice(token, it.deviceId) } }
+                runCatching { app.api.logout(token) }
+            }
+            app.vault.forgetAccount()
+            Diag.event("signed_out")
+            _ui.update { UiState(settings = it.settings) }
+        }
+    }
+
+    fun changeSettings(change: (AppSettings) -> AppSettings) {
+        val before = app.vault.read().settings
+        val after = change(before)
+        app.vault.update { it.copy(settings = after) }
+        _ui.update { it.copy(settings = after) }
+        if (before.autoCallEnabled && !after.autoCallEnabled) app.autoCall.disabled()
+    }
+
+    fun hasNotificationAccess() = AutoCallController.hasNotificationAccess(getApplication())
+
+    fun alwaysOn(): Pair<Boolean, Boolean>? = app.driver.alwaysOn()
+
+    /** Debug builds only: the real connection code, the real server, N times. Its report holds no secrets, and is for pasting into a test report. */
+    fun runCycleTest(rounds: Int) {
+        val servers = _ui.value.account?.servers?.filter { it.online }?.map { it.ref() }.orEmpty()
+        if (servers.isEmpty()) {
+            _ui.update { it.copy(testReport = "No servers online.") }
+            return
+        }
+        viewModelScope.launch {
+            val tester = live.pricechat.kiwivpn.vpn.CycleTest(app.connection)
+            tester.run(servers, rounds) { line -> _ui.update { it.copy(testReport = line) } }
+        }
+    }
+}

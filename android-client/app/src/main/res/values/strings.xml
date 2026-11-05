@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kiwi VPN</string>
+    <string name="autocall_listener_label">Kiwi VPN Auto-Call</string>
+    <string name="channel_connection">VPN connection</string>
+    <string name="channel_autocall">Auto-Call VPN</string>
+</resources>
