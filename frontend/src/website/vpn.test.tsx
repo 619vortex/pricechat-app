@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
-import { PLAN, STORE_LINKS, ANDROID_BETA, WINDOWS_BETA, visitorBrowser, visitorOs } from "./vpnConfig";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, hostedDownload, visitorBrowser, visitorOs } from "./vpnConfig";
 
 import { Flag, drawMap, place, placeLine } from "./vpnMap";
 
@@ -41,6 +41,22 @@ async function settle() {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 // What the site really offers. Each test starts with the button off, and a test that's about the button turns it on.
+const PUBLISHED_ANDROID = { ...ANDROID_BETA };
+describe("The Android APK", () => {
+  it("is either not offered, or is a real hosted file with the hash the page shows", () => {
+    if (!PUBLISHED_ANDROID.href) {
+      expect(PUBLISHED_ANDROID.sha256).toBe("");
+      expect(readdirSync(`${process.cwd()}/public/downloads`).filter((f) => f.endsWith(".apk") || f.endsWith(".ipa"))).toEqual([]);
+      return;
+    }
+    expect(hostedDownload(PUBLISHED_ANDROID.href)).toBe(PUBLISHED_ANDROID.href);
+    expect(PUBLISHED_ANDROID.href.endsWith(".apk")).toBe(true);
+    expect(existsSync(`${process.cwd()}/public${PUBLISHED_ANDROID.href}`)).toBe(true);
+    const file = readFileSync(`${process.cwd()}/public${PUBLISHED_ANDROID.href}`);
+    expect(createHash("sha256").update(file).digest("hex").toUpperCase()).toBe(PUBLISHED_ANDROID.sha256);
+  });
+});
+
 const PUBLISHED = { ...WINDOWS_BETA };
 beforeEach(() => { Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" }); });
 
@@ -135,11 +151,11 @@ describe("Free while payments are off", () => {
     expect(visitorBrowser(`${CHROME} OPR/110.0.0.0`)).toBe("other");
   });
 
-  const card = (c: HTMLElement, name: string) => [...c.querySelectorAll(".vpn-app")].find((x) => x.querySelector("h3")!.textContent!.startsWith(name))!;
+  const card = (c: HTMLElement, name: string) => [...c.querySelectorAll(".vpn-app")].find((x) => x.querySelector("h3")!.textContent!.includes(name))!;
 
-  it("shows the four platforms, each with an icon, a description and a status", () => {
+  it("shows the three apps, then the extension, each with an icon, a description and a status", () => {
     const { container } = render(<Downloads agent={CHROME} />);
-    expect([...container.querySelectorAll(".vpn-app h3")].map((h) => h.childNodes[0].textContent)).toEqual(["Windows desktop", "Browser extension", "Android", "iOS / macOS"]);
+    expect([...container.querySelectorAll(".vpn-app h3")].map((h) => h.childNodes[0].textContent)).toEqual(["Kiwi VPN for Windows", "Kiwi VPN for Android", "Kiwi VPN for iPhone", "Browser extension"]);
     for (const c of container.querySelectorAll(".vpn-app")) {
       expect(c.querySelector(".vpn-app-icon")).toBeTruthy();
       expect(c.querySelector("p")!.textContent!.length).toBeGreaterThan(10);
@@ -149,7 +165,8 @@ describe("Free while payments are off", () => {
 
   it("claims nothing that isn't released: no download anywhere, and each status says so", () => {
     const { container } = render(<Downloads agent={CHROME} testers />);
-    expect([...container.querySelectorAll(".vpn-app .vpn-status")].map((x) => x.textContent)).toEqual(["In development", "Coming soon", "Coming soon", "Coming soon"]);
+    expect([...container.querySelectorAll(".vpn-app .vpn-status")].map((x) => x.textContent)).toEqual(["In development", "Public beta", "Coming soon", "Coming soon"]);
+    for (const b of container.querySelectorAll<HTMLButtonElement>(".vpn-platform-action button")) expect(b.disabled).toBe(true);
     expect(screen.queryByText("Available")).toBeNull();
     expect([...container.querySelectorAll(".vpn-app a")].every((a) => a.getAttribute("href") === "/vpn/devices#manual")).toBe(true);
     expect([...container.querySelectorAll("a")].filter((a) => /chromewebstore|microsoftedge|\.exe|\.msi|apps\.apple|play\.google/.test(a.href))).toHaveLength(0);
@@ -163,7 +180,7 @@ describe("Free while payments are off", () => {
       expect(screen.getByRole("link", { name: "Get for Edge" }).getAttribute("href")).toBe(STORE_LINKS.edge);
       expect(screen.getByRole("link", { name: "Add to Chrome" }).getAttribute("href")).toBe(STORE_LINKS.chrome);
       expect(card(container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Available");
-      expect(card(container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+      expect((screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.queryByText(/Manual install/)).toBeNull();
     } finally {
       Object.assign(STORE_LINKS, { chrome: "", edge: "" });
@@ -190,31 +207,107 @@ describe("Free while payments are off", () => {
       expect(windows.textContent).toContain("ABC123");
       expect(windows.textContent).not.toMatch(/WireGuard|\.conf|config file/i);
       expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
-      expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+      expect((screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement).disabled).toBe(true);
     } finally {
       Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" });
     }
   });
 
-  it("keeps the Android download switched off until an APK is approved, and labels it honestly when it is", () => {
-    expect(ANDROID_BETA).toEqual({ href: "", version: "", sha256: "" });
-    let view = render(<Downloads agent={CHROME} />);
-    expect(screen.queryByRole("link", { name: /Download for Android/ })).toBeNull();
-    expect(card(view.container, "Android").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
-    view.unmount();
-    Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", version: "0.1.0", sha256: "DEF456" });
+  it("keeps the Android download disabled until an APK is hosted, with no link to a file that isn't there", () => {
+    expect(ANDROID_BETA.href).toBe("");
+    expect(ANDROID_BETA.version).toBe("0.1.0-beta2");
+    const { container } = render(<Downloads agent={CHROME} />);
+    const android = card(container, "Android");
+    const button = screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(android.querySelector('a[href$=".apk"]')).toBeNull();
+    expect(android.textContent).toMatch(/isn't available to download yet/);
+    expect(android.textContent).toMatch(/permission to install it from outside Google Play/);
+    expect(android.textContent).toMatch(/three App-Based VPN modes/);
+  });
+
+  it("labels a debug-signed APK as a test build once it's hosted", () => {
+    Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", sha256: "DEF456" });
     try {
-      view = render(<Downloads agent={CHROME} />);
-      const android = card(view.container, "Android");
-      expect(screen.getByRole("link", { name: /Download for Android/ }).getAttribute("href")).toBe("/downloads/KiwiVPN.apk");
-      expect(android.querySelector(".vpn-status")!.textContent).toBe("Public beta");
+      const { container } = render(<Downloads agent={CHROME} />);
+      const android = card(container, "Android");
+      expect(screen.getByRole("link", { name: /Download APK/ }).getAttribute("href")).toBe("/downloads/KiwiVPN.apk");
+      expect(android.querySelector(".vpn-status")!.textContent).toBe("Test build");
+      expect(android.textContent).toMatch(/test build, not a production release/);
       expect(android.textContent).toMatch(/no kill switch of its own/);
       expect(android.textContent).toMatch(/DNS leak and IPv6 leak testing aren't finished/);
       expect(android.textContent).not.toMatch(/passed|verified|audited/i);
       expect(android.textContent).toContain("DEF456");
     } finally {
-      Object.assign(ANDROID_BETA, { href: "", version: "", sha256: "" });
+      Object.assign(ANDROID_BETA, { href: "", sha256: "" });
     }
+  });
+
+  it("calls a release build Public beta, with no test-build label", () => {
+    Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", sha256: "DEF456", testBuild: false });
+    try {
+      const { container } = render(<Downloads agent={CHROME} />);
+      expect(card(container, "Android").querySelector(".vpn-status")!.textContent).toBe("Public beta");
+      expect(card(container, "Android").textContent).not.toMatch(/test build/i);
+    } finally {
+      Object.assign(ANDROID_BETA, { href: "", sha256: "", testBuild: true });
+    }
+  });
+
+  it("never lets a local path, another site or a page enable a download", () => {
+    for (const bad of ["C:\\AI\\pc-wt\\kiwi-release\\android\\KiwiVPN.apk", "C:/AI/KiwiVPN.apk", "file:///C:/KiwiVPN.apk", "https://evil.example/KiwiVPN.apk", "//evil.example/x.apk", "/downloads/../secret.apk", "/vpn", "/downloads/KiwiVPN.zip", "/downloads/", ""]) {
+      expect(hostedDownload(bad)).toBeNull();
+    }
+    expect(hostedDownload("/downloads/KiwiVPN-Setup.exe")).toBe("/downloads/KiwiVPN-Setup.exe");
+    expect(hostedDownload("/downloads/KiwiVPN-0.1.0-beta2.apk")).toBe("/downloads/KiwiVPN-0.1.0-beta2.apk");
+    Object.assign(ANDROID_BETA, { href: "C:\\AI\\KiwiVPN.apk" });
+    try {
+      const { container } = render(<Downloads agent={CHROME} />);
+      expect((screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(container.querySelector('a[href*="AI"]')).toBeNull();
+    } finally {
+      Object.assign(ANDROID_BETA, { href: "" });
+    }
+  });
+
+  it("keeps the iPhone card honest: coming soon, disabled, and no store or IPA", () => {
+    const { container } = render(<Downloads agent={CHROME} />);
+    const iphone = card(container, "iPhone");
+    expect(iphone.querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+    expect((screen.getByRole("button", { name: "Download for iPhone" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(iphone.textContent).toMatch(/native SwiftUI app/i);
+    expect(iphone.textContent).toMatch(/isn't on the App Store or TestFlight yet/);
+    expect(container.querySelector('a[href$=".ipa"], a[href*="apps.apple"], a[href*="testflight"]')).toBeNull();
+  });
+
+  it("offers no Notify me, because there's nothing behind it", () => {
+    render(<Downloads agent={CHROME} />);
+    expect(screen.queryByText(/notify me/i)).toBeNull();
+  });
+
+  it("says one account, and links to device management only when it leads somewhere", () => {
+    let view = render(<Downloads agent={CHROME} />);
+    expect(view.container.textContent).toContain("One Price Chat account. Kiwi VPN across your devices.");
+    expect(screen.getByRole("link", { name: "Manage your devices" }).getAttribute("href")).toBe("/vpn/devices");
+    view.unmount();
+    view = render(<Downloads agent={CHROME} manualOpen={false} />);
+    expect(screen.queryByRole("link", { name: "Manage your devices" })).toBeNull();
+    expect(view.container.textContent).toContain("One Price Chat account.");
+  });
+
+  it("compares the apps without advertising anything that isn't real", () => {
+    const { container } = render(<Downloads agent={CHROME} />);
+    const compare = container.querySelector(".vpn-compare")!;
+    const col = (name: string) => [...compare.querySelectorAll(".vpn-compare-col")].find((c) => c.querySelector("h4")!.textContent === name)!.textContent!;
+    expect(col("Windows")).toMatch(/WireGuard VPN/);
+    expect(col("Android")).toMatch(/Three App-Based VPN modes/);
+    expect(col("Android")).toMatch(/Auto-Call VPN \(experimental\)/);
+    expect(col("iPhone")).toMatch(/in development/);
+    const section = container.querySelector("#vpn-downloads")!.textContent!;
+    expect(section).not.toMatch(/gaming/i);
+    expect(col("iPhone")).not.toMatch(/per-app|app-based|auto-call|whatsapp|call detection/i);
+    expect(col("Windows") + col("Android")).not.toMatch(/passport/i);
+    expect(section).not.toMatch(/kill switch (is|protects)|leak protection|passport.*(sync|live)/i);
   });
 
   it("keeps WireGuard out of the cards, one link away", () => {
