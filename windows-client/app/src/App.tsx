@@ -195,6 +195,8 @@ export function App() {
   const offline = phase === "no-service" || phase === "loading";
   const signedOut = view !== null && !view.signed_in;
   const locked = !!account && !account.eligible;
+  const closed = !!account && !account.enabled;  // the whole service is off: nothing about plans or trials applies
+  const planName = closed ? "" : PLAN[account?.plan?.kind ?? ""] ?? "";
 
   let button: { label: string; run?: () => void; off?: boolean; quiet?: boolean };
   if (phase === "stopping") button = { label: "Disconnecting", off: true };
@@ -208,7 +210,7 @@ export function App() {
 
   const note = signedOut && !offline ? (action === "sign-in" ? "Finish signing in in your browser." : "Sign in to choose a country and connect.")
     : locked && !account?.trial?.available ? account?.reason ?? "Your account doesn't include Kiwi VPN right now."
-    : view?.error ?? null;
+    : view?.error ?? (account && !locked && !picked ? "No servers are available right now. Please try again soon." : null);
 
   if (settings) {
     return (
@@ -268,12 +270,12 @@ export function App() {
         <p className="detail" role={phase === "failed" || phase === "no-service" ? "alert" : "status"}>{note && !tunnelUp && !offline ? note : detail(phase, answer, slow)}</p>
         {problem && <p className="problem" role="alert">{problem}</p>}
         {unchanged && <p className="problem" role="alert">Your public IP is the same as before connecting, so traffic may not be leaving through the server.</p>}
-        {locked && !account?.trial?.available && <button type="button" className="link" onClick={() => void openSite("plans")}>See plans</button>}
+        {locked && !closed && !account?.trial?.available && <button type="button" className="link" onClick={() => void openSite("plans")}>See plans</button>}
         {problem?.includes("My Devices") && <button type="button" className="link" onClick={() => void openSite("devices")}>Open My Devices</button>}
       </section>
 
-      {view?.signed_in && account && (
-        <p className="plan">{PLAN[account.plan?.kind ?? ""] ?? ""}{account.plan?.days_left != null ? ` · ${account.plan.days_left} ${account.plan.days_left === 1 ? "day" : "days"} left` : ""}</p>
+      {view?.signed_in && account && planName && (
+        <p className="plan">{planName}{account.plan?.days_left != null ? ` · ${account.plan.days_left} ${account.plan.days_left === 1 ? "day" : "days"} left` : ""}</p>
       )}
       {view?.signed_in && servers.length > 0 && !locked && (
         <div className="picker" role="radiogroup" aria-label="Country">

@@ -37,7 +37,7 @@ def _preview(db: DbSession, request: Request) -> bool:
 def _open_or_preview(db: DbSession, request: Request) -> None:
     """Nobody buys or gets a key while the VPN is closed, except the owner testing it."""
     if not service.settings(db).enabled and not _preview(db, request):
-        raise HTTPException(403, "Kiwi VPN isn't open yet.")
+        raise HTTPException(403, service.CLOSED)
 
 
 def _payments_on(db: DbSession) -> None:

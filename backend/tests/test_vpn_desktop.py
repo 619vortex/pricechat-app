@@ -13,6 +13,8 @@ from app.members import service as members
 from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.desktop import MemberDesktopCode
 from app.models.members import Member, MemberSession
+from app.models.vpn import VpnAccount
+from app.vpn import service as vpn
 from tests.test_vpn import FakeNode, add_server, fake, member_at, open_vpn, signed_in  # noqa: F401
 
 DEVICES = "/api/members/vpn/devices"
@@ -112,6 +114,69 @@ def test_a_browser_session_is_not_limited(client: TestClient, db: Session) -> No
 # --- the app makes its own key, and asks for the rest
 
 PUB = base64.b64encode(bytes(range(1, 33))).decode()
+PUB2 = base64.b64encode(bytes(range(2, 34))).decode()
+
+
+def test_public_beta_a_new_customer_needs_no_admin_and_no_tester_listing(client: TestClient, db: Session, fake: FakeNode) -> None:
+    server = add_server(db, fake)
+    open_vpn(db, payments_enabled=False, trial_enabled=True, max_devices=1)
+    m = member_at(db, "egg", "newcustomer", paid=False)
+    client.cookies.clear()
+    client.cookies.set("pc_session", members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop"))
+    first = client.get("/api/members/vpn").json()
+    assert first["enabled"] is True and first["eligible"] is False and first["trial"] == {"available": True, "days": 30} and [s["id"] for s in first["servers"]] == [server.id]
+    # the same call the app makes by itself, with the app's limited session
+    started = client.post("/api/members/vpn/trial")
+    assert started.status_code == 200, started.text
+    body = started.json()
+    assert body["eligible"] is True and body["reason"] is None and body["plan"]["kind"] == "trial" and body["plan"]["days_left"] in (29, 30) and body["trial"]["available"] is False
+    assert db.query(VpnAccount).filter_by(member_id=m.id).one().tester_until is None
+    assert client.post("/api/members/vpn/trial").status_code == 409, "one trial per account"
+    assert client.post(DEVICES, json={"name": "PC (1)", "server_id": server.id, "public_key": PUB}).status_code == 201
+    assert client.post(DEVICES, json={"name": "PC (2)", "server_id": server.id, "public_key": PUB2}).status_code == 409, "the device limit still holds"
+
+
+def test_closed_shows_unavailable_and_never_a_running_trial_and_the_trial_comes_back(client: TestClient, db: Session, fake: FakeNode) -> None:
+    server = add_server(db, fake)
+    open_vpn(db, payments_enabled=False, trial_enabled=True)
+    m = member_at(db, "egg", "closedcustomer", paid=False)
+    c = signed_in(client, db, m)
+    assert c.post("/api/members/vpn/trial").json()["plan"]["kind"] == "trial"
+    vpn.update_settings(db, {"enabled": False})
+    closed = c.get("/api/members/vpn").json()
+    assert closed["enabled"] is False and closed["eligible"] is False and closed["reason"] == vpn.CLOSED
+    assert closed["plan"] == {"kind": "closed", "until": None, "days_left": None} and closed["trial"]["available"] is False
+    assert c.post(DEVICES, json={"name": "PC", "server_id": server.id, "public_key": PUB}).status_code == 403
+    vpn.update_settings(db, {"enabled": True})
+    back = c.get("/api/members/vpn").json()
+    assert back["eligible"] is True and back["plan"]["kind"] == "trial" and back["plan"]["days_left"] in (29, 30)
+
+
+def test_closed_offers_no_trial_to_a_new_customer(client: TestClient, db: Session, fake: FakeNode) -> None:
+    add_server(db, fake)
+    open_vpn(db, payments_enabled=False, trial_enabled=True)
+    vpn.update_settings(db, {"enabled": False})
+    c = signed_in(client, db, member_at(db, "egg", "tooearly", paid=False))
+    out = c.get("/api/members/vpn").json()
+    assert out["trial"]["available"] is False and out["plan"]["kind"] == "closed"
+    assert c.post("/api/members/vpn/trial").status_code == 403
+
+
+def test_a_tester_still_gets_in_while_closed(client: TestClient, db: Session, fake: FakeNode) -> None:
+    add_server(db, fake)
+    m = member_at(db, "egg", "tester1", paid=False)
+    vpn.set_tester(db, "tester1", 7)
+    out = signed_in(client, db, m).get("/api/members/vpn").json()
+    assert out["enabled"] is True and out["eligible"] is True and out["plan"]["kind"] == "tester"
+
+
+def test_a_customer_can_not_reach_the_admin_controls(client: TestClient, db: Session) -> None:
+    m = member_at(db, "egg", "notadmin", paid=False)
+    client.cookies.clear()
+    client.cookies.set("pc_session", members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop"))
+    refused = client.put("/api/vpn/admin/settings", json={"enabled": True})
+    assert refused.status_code == 403 and refused.json()["code"] == "desktop_scope"
+    assert client.post("/api/vpn/admin/testers", json={"username": "notadmin", "days": 7}).status_code == 403
 
 
 def app_client(client: TestClient, db: Session, name: str) -> tuple[TestClient, Member]:

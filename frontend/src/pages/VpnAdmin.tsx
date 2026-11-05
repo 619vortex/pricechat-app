@@ -36,7 +36,7 @@ function Controls({ s, canCharge, onSaved }: { s: VpnSettings; canCharge: boolea
           <span className="vpna-control-state">{s.enabled ? "Open to members" : "Closed"}</span>
           <label className="toggle" title={s.enabled ? "Open" : "Closed"}>
             <input type="checkbox" aria-label="VPN open" checked={s.enabled} disabled={busy} onChange={(e) => void flip({ enabled: e.target.checked }, e.target.checked
-              ? `Open Kiwi VPN? ${free ? "Anyone with a Passport can use it for free" : "Anyone can buy it, with real money"}, and their traffic leaves through your servers' IP addresses.`
+              ? `Open Kiwi VPN? ${free ? (s.trial_enabled ? "Anyone with a Passport gets one 30-day free trial when they sign in to the app, or start it at /vpn" : "Anyone with a Passport can use it for free") : "Anyone can buy it, with real money"}, and their traffic leaves through your servers' IP addresses.`
               : "Close Kiwi VPN? Nobody new can join and members can't add devices. Devices already connected keep working.")} /><span />
           </label>
           <p>{s.enabled ? (free && !s.trial_enabled ? "Anyone with a Passport can sign in at /vpn and connect." : s.trial_enabled ? "Members can start one free trial at /vpn." : "Anyone can pay and connect at /vpn.")

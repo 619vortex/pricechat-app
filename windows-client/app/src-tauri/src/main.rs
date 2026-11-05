@@ -172,7 +172,7 @@ fn account_state() -> Result<AccountView, String> {
     }
     let empty = |signed_in, error| AccountView { signed_in, account: None, suggested: None, last_server, error };
     let Some(token) = vault.session() else { return Ok(empty(false, None)) };
-    match backend()?.account(&token) {
+    match flow::account_starting_trial(&backend()?, &token) {
         Ok(account) => {
             let suggested = flow::suggested(&account.servers, last_server);
             Ok(AccountView { signed_in: true, account: Some(account), suggested, last_server, error: None })

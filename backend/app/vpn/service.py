@@ -284,11 +284,14 @@ def _reviewing(db: Session, who: Who) -> bool:
     return reviewer.is_reviewer(member) and reviewer.in_time()
 
 
+CLOSED = "Kiwi VPN is unavailable right now. Please try again later."
+
+
 def eligibility(db: Session, member: Who, preview: bool = False) -> tuple[bool, str | None]:
     """preview: the owner, signed in to Admin, testing while the VPN is closed to everyone else."""
     s = settings(db)
     if not s.enabled and not preview and not _reviewing(db, member) and not _testing(db, member):
-        return False, "Kiwi VPN isn't open yet."
+        return False, CLOSED
     return qualifies(db, member)
 
 
@@ -408,14 +411,16 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
         servers = [v for v in servers if v.name == reviewer.SERVER]
     best = recommended_id(servers, counts)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
-    out = {"enabled": s.enabled or preview or review or is_tester(acct), "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
+    open_here = s.enabled or preview or review or is_tester(acct)
+    out = {"enabled": open_here, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
            "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": bill}
     state = access(db, acct)
     member = _member_of(db, acct)
-    out["plan"] = plan_out(db, acct, s, state)
+    # While the VPN is closed to this person, a plan can't be used, so none is claimed. Their trial or paid time is kept and shows again when it opens.
+    out["plan"] = plan_out(db, acct, s, state) if open_here else {"kind": "closed", "until": None, "days_left": None}
     out["royal"] = is_royal(member)
     out["trial"] = {"available": (s.enabled or preview) and s.trial_enabled and member is not None and acct.trial_started_at is None and state == "lapsed", "days": TRIAL_DAYS}
     db.commit()  # first call seeds the settings row

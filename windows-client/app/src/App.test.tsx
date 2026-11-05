@@ -213,6 +213,40 @@ describe("the window", () => {
     expect(calls).toContain("start_trial");
   });
 
+  it("the service switched off: says so, and shows no trial, plan, countries or plans link", async () => {
+    // even if something still reports a running trial, it isn't shown beside the unavailable message
+    view = signedIn({ account: account({ enabled: false, eligible: false, reason: "Kiwi VPN is unavailable right now. Please try again later.", plan: { kind: "trial", days_left: 30 }, trial: { available: false, days: 30 } }) });
+    render(<App />);
+    await settle();
+    expect(document.body.textContent).toContain("Kiwi VPN is unavailable right now");
+    expect(document.body.textContent).not.toMatch(/Free trial|days left|See plans/);
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(main().textContent).toBe("Connect");
+    expect(main().disabled).toBe(true);
+  });
+
+  it("a running trial with servers online: shows the trial and countries, and Connect works", async () => {
+    view = signedIn({ account: account({ plan: { kind: "trial", days_left: 30 } }) });
+    render(<App />);
+    await settle();
+    expect(document.querySelector(".plan")!.textContent).toBe("Free trial · 30 days left");
+    expect(country(/Falkenstein/)).toBeTruthy();
+    expect(country(/Helsinki/)).toBeTruthy();
+    expect(main().disabled).toBe(false);
+    expect(document.body.textContent).not.toMatch(/unavailable/);
+    fireEvent.click(main());
+    await settle();
+    expect(args.vpn_connect).toEqual({ serverId: 1 });
+  });
+
+  it("access but no server online: says why Connect is off", async () => {
+    view = signedIn({ suggested: null, account: account({ plan: { kind: "trial", days_left: 30 }, servers: [{ ...SERVERS[0], online: false }] }) });
+    render(<App />);
+    await settle();
+    expect(main().disabled).toBe(true);
+    expect(document.body.textContent).toContain("No servers are available right now");
+  });
+
   it("says why an account can't connect, and shows the plans", async () => {
     view = signedIn({ account: account({ eligible: false, reason: "Your time has run out." }) });
     render(<App />);

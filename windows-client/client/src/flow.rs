@@ -112,6 +112,20 @@ pub fn refresh_if_due(backend: &dyn Backend, vault: &dyn Vault, now: u64) {
     }
 }
 
+/// The account, with its free trial started if one's on offer, so a new customer can go straight from signing in to connecting. The backend decides whether it's on offer, and allows one per account.
+/// If starting it fails, the person still sees the offer and can press the button. Only a signed-out session is an error here.
+pub fn account_starting_trial(backend: &dyn Backend, token: &str) -> Result<Account, ApiError> {
+    let account = backend.account(token)?;
+    if account.eligible || !account.trial.as_ref().is_some_and(|t| t.available) {
+        return Ok(account);
+    }
+    match backend.start_trial(token) {
+        Ok(started) => Ok(started),
+        Err(e) if e.signed_out() => Err(e),
+        Err(_) => Ok(account),
+    }
+}
+
 /// The server to offer first: the last one used if it's still online, else the backend's recommendation, else any online one.
 pub fn suggested(servers: &[Server], last: Option<i64>) -> Option<i64> {
     let online = |id: i64| servers.iter().any(|s| s.id == id && s.online);
@@ -171,6 +185,7 @@ mod tests {
 
     struct FakeBackend {
         account: RefCell<Result<Account, ApiError>>,
+        trial: RefCell<Option<Result<Account, ApiError>>>,
         add: RefCell<Option<ApiError>>,
         calls: RefCell<Vec<String>>,
     }
@@ -185,7 +200,8 @@ mod tests {
             self.account.borrow().clone()
         }
         fn start_trial(&self, _: &str) -> Result<Account, ApiError> {
-            self.account.borrow().clone()
+            self.calls.borrow_mut().push("start_trial".into());
+            self.trial.borrow().clone().unwrap_or_else(|| self.account.borrow().clone())
         }
         fn peer(&self, _: &str, id: i64) -> Result<Peer, ApiError> {
             self.calls.borrow_mut().push(format!("peer {id}"));
@@ -229,7 +245,43 @@ mod tests {
     }
 
     fn backend(a: Result<Account, ApiError>) -> FakeBackend {
-        FakeBackend { account: RefCell::new(a), add: RefCell::new(None), calls: RefCell::new(vec![]) }
+        FakeBackend { account: RefCell::new(a), trial: RefCell::new(None), add: RefCell::new(None), calls: RefCell::new(vec![]) }
+    }
+
+    fn offering_trial() -> Account {
+        Account { eligible: false, reason: Some("Start your free trial".into()), trial: Some(crate::api::Trial { available: true, days: 30 }), ..account(vec![]) }
+    }
+
+    #[test]
+    fn a_new_customer_has_their_trial_started_and_can_connect() {
+        let b = backend(Ok(offering_trial()));
+        *b.trial.borrow_mut() = Some(Ok(account(vec![])));
+        let got = account_starting_trial(&b, "token").unwrap();
+        assert!(got.eligible);
+        assert_eq!(*b.calls.borrow(), vec!["account", "start_trial"]);
+    }
+
+    #[test]
+    fn no_trial_is_started_unless_the_backend_offers_one() {
+        let closed = Account { enabled: false, eligible: false, reason: Some("unavailable".into()), trial: Some(crate::api::Trial { available: false, days: 30 }), ..account(vec![]) };
+        let used = Account { eligible: false, reason: Some("expired".into()), trial: None, ..account(vec![]) };
+        for a in [closed, used, account(vec![])] {
+            let b = backend(Ok(a.clone()));
+            assert_eq!(account_starting_trial(&b, "token").unwrap(), a);
+            assert_eq!(*b.calls.borrow(), vec!["account"]);
+        }
+    }
+
+    #[test]
+    fn a_failed_trial_start_leaves_the_offer_showing_and_a_signed_out_one_says_so() {
+        let refused = ApiError { status: 409, message: "no".into() };
+        let b = backend(Ok(offering_trial()));
+        *b.trial.borrow_mut() = Some(Err(refused));
+        assert_eq!(account_starting_trial(&b, "token").unwrap(), offering_trial());
+        let gone = ApiError { status: 401, message: "no".into() };
+        let b = backend(Ok(offering_trial()));
+        *b.trial.borrow_mut() = Some(Err(gone.clone()));
+        assert_eq!(account_starting_trial(&b, "token").unwrap_err(), gone);
     }
 
     fn signed_in() -> FakeVault {

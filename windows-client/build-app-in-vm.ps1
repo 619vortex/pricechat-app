@@ -80,7 +80,8 @@ npm ci
 Need ($LASTEXITCODE -eq 0) "npm ci failed."
 npm test
 Need ($LASTEXITCODE -eq 0) "The window's tests failed."
-npm run tauri -- build
+# A public build: --no-default-features removes the "use a config file" testing option.
+npm run tauri -- build -- --no-default-features
 Need ($LASTEXITCODE -eq 0) "The installer didn't build."
 Pop-Location
 $Built = Get-ChildItem "$Work\target-app\release\bundle\nsis\*-setup.exe" | Sort-Object LastWriteTime | Select-Object -Last 1
