@@ -129,6 +129,27 @@ async def test_a_new_headline_on_a_story_already_carried_is_a_duplicate(db: Sess
     assert len(tg.sent) == 1
 
 
+async def test_the_same_wording_is_a_duplicate_even_with_no_name_to_match(db: Session) -> None:
+    now = utcnow()
+    verified(db, "crypto fund flows hit weekly record after rate decision", now=now)
+    tg = Tg()
+    await run(db, tg, now)
+    verified(db, "crypto fund flows hit weekly record after central rate decision", now=now)
+    await run(db, tg, now + timedelta(hours=2))
+    assert len(tg.sent) == 1
+
+
+async def test_a_story_that_failed_the_checks_is_only_tried_once(db: Session) -> None:
+    story(db, "SEC approves spot crypto fund from Acme", "SEC", summary=ONE, tier=0)
+    now = utcnow()
+    tg = Tg()
+    await run(db, tg, now)
+    await run(db, tg, now + timedelta(minutes=5))
+    assert [p.status for p in rows(db)] == ["refused"] and tg.sent == []
+    good, seen = lane.candidates(db, now + timedelta(minutes=5))
+    assert good == [] and seen["duplicate"] == 1
+
+
 @pytest.mark.parametrize("title,over", [
     ("Federal judge rules in the Acme bank case", {"category": "economics"}),
     ("Bitcoin reportedly set to double on Acme rumour", {}),
