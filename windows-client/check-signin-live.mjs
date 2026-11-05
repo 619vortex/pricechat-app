@@ -1,5 +1,5 @@
 // LIVE check, signed out, changing nothing, in headless Edge. A tab that opened the app's sign-in page leaves the site and arrives at /passport the way Google sends it back:
-// it should return to the app's page, once. A fresh tab, with no app involved, should behave as normal. Exits 1 if not.
+// it should return to the app's page. A fresh tab, with no app involved, should behave as normal. Exits 1 if not.
 import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,9 +37,7 @@ check("the tab left the site", (await a.where()).startsWith("https://example.com
 await a.go(`${SITE}/passport?welcome=google`);
 const back = await a.where();
 check("coming back to /passport returns to the app's page", back === PAGE, back);
-await a.go(`${SITE}/passport?welcome=google`);
-const again = await a.where();
-check("it happens once: a later /passport isn't sent back", !again.includes("/vpn/desktop"), again);
+// Not checked here: that it happens only once. This browser is still signed out, so the app's page remembers the request again, as it should. Once signed in, it forgets it. That needs a session: see vpnDesktop.test.tsx.
 
 const { targetId } = await a.send("Target.createTarget", { url: "about:blank" });
 const fresh = (await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json()).find((t) => t.id === targetId);
