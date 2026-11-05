@@ -24,11 +24,44 @@ export function callbackUrl(r: DesktopRequest, code: string): string {
   return `http://127.0.0.1:${r.port}/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(r.state)}`;
 }
 
-type Who = { username?: string; display_name?: string } | null;
+/**
+ * Signing in leaves this page. Google and X send the whole tab away, and every sign-in method ends on /passport, so the app's request would be lost and the app would wait forever.
+ * So this tab remembers the request and /passport sends it back here. Normal sign-ins have nothing remembered and stay on /passport. It's only ever this same page again, with the
+ * same checks, and Allow still has to be pressed. sessionStorage belongs to one tab, and it survives the trip to Google and back.
+ */
+const PENDING_KEY = "kiwi-vpn-desktop-signin";
+const PENDING_MS = 5 * 60 * 1000;  // how long the app waits: SIGN_IN_MINUTES in windows-client/client/src/auth.rs
+
+function pageFor(r: DesktopRequest): string {
+  return `/vpn/desktop?challenge=${r.challenge}&port=${r.port}&state=${r.state}`;
+}
+
+export function rememberDesktopSignIn(r: DesktopRequest, now = Date.now()): void {
+  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ search: pageFor(r).split("?")[1], at: now })); } catch { /* storage off: signing in again from the app still works */ }
+}
+
+export function forgetDesktopSignIn(): void {
+  try { sessionStorage.removeItem(PENDING_KEY); } catch { /* nothing to forget */ }
+}
+
+/** Where to send this tab to finish signing in to the app, or null. It works once, and what's stored is checked as strictly as the address bar. */
+export function desktopSignInToResume(now = Date.now()): string | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(PENDING_KEY);
+    const { search, at } = JSON.parse(raw) as { search?: unknown; at?: unknown };
+    if (typeof search !== "string" || typeof at !== "number" || now < at || now - at > PENDING_MS) return null;
+    const request = readRequest(search);
+    return request && pageFor(request);
+  } catch { return null; }
+}
+
+type Who = { member?: { username?: string; display_name?: string } } | null;
 
 export function VpnDesktopPage({ search = location.search, go = (url: string) => location.assign(url) }: { search?: string; go?: (url: string) => void }) {
   const [request] = useState(() => readRequest(search));
-  const [who, setWho] = useState<Who | "loading">("loading");
+  const [who, setWho] = useState<Who | "loading">("loading");  // null: signed out, or Price Chat couldn't be reached
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +74,11 @@ export function VpnDesktopPage({ search = location.search, go = (url: string) =>
     const id = window.setInterval(() => void check(), 4000);  // notices the sign-in finishing in the popup
     return () => window.clearInterval(id);
   }, [check]);
+  useEffect(() => {
+    if (!request || who === "loading") return;
+    if (who === null) rememberDesktopSignIn(request);  // for any sign-in button on the page, including the header's
+    else forgetDesktopSignIn();
+  }, [request, who]);
   async function allow() {
     if (!request) return;
     setBusy(true); setError(null);
@@ -52,7 +90,7 @@ export function VpnDesktopPage({ search = location.search, go = (url: string) =>
       setError(e instanceof Error ? e.message : "Couldn't sign in. Please try again.");
     } finally { setBusy(false); }
   }
-  const name = who && who !== "loading" ? who.display_name ?? who.username : null;
+  const name = who && who !== "loading" ? who.member?.display_name ?? who.member?.username : null;
   return (
     <SitePage title="Sign in to Kiwi VPN for Windows" description="Connect the Kiwi VPN app to your Price Chat account." path="/vpn/desktop" noindex>
       <section className="vpn">

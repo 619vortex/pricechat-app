@@ -471,6 +471,15 @@ describe("community reputation", () => {
     expect(container.querySelector(".pp-connected")!.textContent).toBe("X connected @kiwifan Verified");
     window.history.pushState({}, "", "/");
   });
+
+  it("a normal Google sign-in stays on the Passport: only a sign-in that began in the Kiwi VPN app goes back", async () => {
+    serveV3(base(v3()));
+    window.history.pushState({}, "", "/passport?welcome=google");
+    const { container } = await show(<ProfilePage />);
+    expect(location.pathname).toBe("/passport");
+    expect(container.querySelector(".pp-play")).not.toBeNull();
+    window.history.pushState({}, "", "/");
+  });
 });
 
 describe("public profile", () => {

@@ -24,6 +24,7 @@ import { WatchEarn } from "./watch";
 import { XFeedSection } from "./xfeed";
 import { VipStatus } from "./crew";
 import { VpnStatus } from "./vpn";
+import { desktopSignInToResume } from "./vpnDesktop";
 import { RankRewards, useRewards } from "./rewards";
 import "./rewards.css";
 
@@ -47,7 +48,17 @@ function ago(iso: string | null | undefined): string {
 /** A connection that came back with an error (?error=…&code=…&platform=…): shown on that account's row. */
 type LinkError = { platform: string; message: string; code: string } | null;
 
+/** Every sign-in ends here. If this tab was signing in to the Kiwi VPN app, it goes back to finish that, before the Passport loads. */
 export function ProfilePage() {
+  const [leaving] = useState(() => {
+    const page = desktopSignInToResume();
+    if (page) location.replace(page);
+    return !!page;
+  });
+  return leaving ? null : <Passport />;
+}
+
+function Passport() {
   useCanonicalOrigin();
   const [p, setP] = useState<Passport | null>(null);
   const [tab, setTab] = useState(() => (typeof location !== "undefined" ? location.hash.replace("#", "") : "") || "passport");
