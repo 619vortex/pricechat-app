@@ -7,7 +7,7 @@ export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox
 export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_days: 30 };
 
 /** The Windows beta: the button appears only while this names a hosted installer. All three together, from the build. Clear them and nothing on the page offers a download. */
-export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.0", sha256: "AD90933509BC954757FC041B26C8AA8EAD5F59EDA4ED30B4E875D7E25234E39D" };
+export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.1", sha256: "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598" };
 
 export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
 
