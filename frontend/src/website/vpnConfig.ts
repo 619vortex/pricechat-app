@@ -9,6 +9,15 @@ export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_day
 /** The Windows beta: the button appears only while this names a hosted installer. All three together, from the build. Clear them and nothing on the page offers a download. */
 export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.1", sha256: "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598" };
 
+/** The Android APK. `href` is empty on purpose: the button stays disabled until an APK is hosted and the owner approves it. Fill `href` and `sha256` together, and a test ties them to the file.
+ *  `testBuild`: true for a debug-signed build, which the card labels as a test build and not a production release. */
+export const ANDROID_BETA: { href: string; version: string; sha256: string; testBuild: boolean } = { href: "", version: "0.1.0-beta2", sha256: "", testBuild: true };
+
+/** A download button only ever gets a file hosted on this site: never a local path, another site or a page. Anything else leaves the button disabled. */
+export function hostedDownload(href: string): string | null {
+  return /^\/downloads\/[A-Za-z0-9][A-Za-z0-9._-]*\.(exe|apk)$/.test(href) ? href : null;
+}
+
 export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
 
 /** Which install button to put first. Edge's and Opera's agents also say Chrome, so they're ruled out first. */

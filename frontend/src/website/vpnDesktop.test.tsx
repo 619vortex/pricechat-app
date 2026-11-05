@@ -29,6 +29,47 @@ describe("signing in to the desktop app", () => {
       `?challenge=${CHALLENGE}&port=49152@evil.example&state=${STATE}`, `?challenge=${CHALLENGE}&port=49152&state=a/b`]) expect(readRequest(bad)).toBeNull();
   });
 
+  it("says phone for the Android app, says PC otherwise, and the code still goes only to this device", async () => {
+    expect(readRequest(`${GOOD}&client=android`)).toEqual({ ...REQUEST, client: "android" });
+    expect(readRequest(`${GOOD}&client=evil`)).toEqual(REQUEST);
+    expect(callbackUrl({ ...REQUEST, client: "android" }, "x")).toBe(`http://127.0.0.1:49152/callback?code=x&state=${STATE}`);
+    serve(true);
+    const phone = render(<VpnDesktopPage search={`${GOOD}&client=android`} go={vi.fn()} />);
+    await settle();
+    expect(phone.container.textContent).toMatch(/Kiwi VPN for Android/);
+    expect(phone.container.textContent).toMatch(/this phone/);
+    phone.unmount();
+    const pc = render(<VpnDesktopPage search={GOOD} go={vi.fn()} />);
+    await settle();
+    expect(pc.container.textContent).toMatch(/Kiwi VPN for Windows/);
+    expect(pc.container.textContent).toMatch(/this PC/);
+  });
+
+  it("sends an iPhone's code only to the app's own scheme, and nothing else can pick a destination", async () => {
+    expect(readRequest(`${GOOD}&client=ios`)).toEqual({ ...REQUEST, client: "ios" });
+    expect(callbackUrl({ ...REQUEST, client: "ios" }, "a b")).toBe(`kiwivpn://callback?code=a%20b&state=${STATE}`);
+    expect(callbackUrl(readRequest(`${GOOD}&client=https://evil.example`)!, "x")).toBe(`http://127.0.0.1:49152/callback?code=x&state=${STATE}`);
+    serve(true);
+    const go = vi.fn();
+    const page = render(<VpnDesktopPage search={`${GOOD}&client=ios`} go={go} />);
+    await settle();
+    expect(page.container.textContent).toMatch(/Kiwi VPN for iPhone/);
+    expect(page.container.textContent).toMatch(/this iPhone/);
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await settle();
+    expect(go).toHaveBeenCalledWith(`kiwivpn://callback?code=abc%2B1&state=${STATE}`);
+  });
+
+  it("keeps saying iPhone after a trip to Google and back", () => {
+    rememberDesktopSignIn({ ...REQUEST, client: "ios" }, 1000);
+    expect(desktopSignInToResume(2000)).toBe(`${PAGE}&client=ios`);
+  });
+
+  it("keeps saying phone after a trip to Google and back", () => {
+    rememberDesktopSignIn({ ...REQUEST, client: "android" }, 1000);
+    expect(desktopSignInToResume(2000)).toBe(`${PAGE}&client=android`);
+  });
+
   it("only ever sends the code to this PC", () => {
     expect(callbackUrl({ challenge: CHALLENGE, port: 49152, state: STATE }, "a b")).toBe(`http://127.0.0.1:49152/callback?code=a%20b&state=${STATE}`);
   });

@@ -4,7 +4,7 @@ import { SitePage } from "./community";
 import { reducedMotion } from "./motion";
 import { pageHead } from "./seo";
 import { site } from "./websiteData";
-import { PLAN, STORE_LINKS, WINDOWS_BETA, configQr, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, hostedDownload, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
 import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
@@ -447,6 +447,42 @@ function AppCard({ icons, name, text, status, on = false, mine, children }: { ic
   );
 }
 
+/** One app. The rows line up across the three cards, so every download button sits at the same height. */
+function PlatformCard({ icon, name, text, status, on = false, mine, action, extra, children }: { icon: React.ReactNode; name: string; text: string; status: string; on?: boolean; mine?: string | null; action: React.ReactNode; extra?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <li className={`vpn-app vpn-platform${mine ? " is-mine" : ""}`}>
+      <div className="vpn-platform-top"><span className="vpn-app-icons">{icon}</span><span className={`vpn-status${on ? " is-on" : ""}`}>{status}</span></div>
+      <h3>{name}{mine && <small className="vpn-yours">{mine}</small>}</h3>
+      <p>{text}</p>
+      <div className="vpn-platform-action">{action}</div>
+      <div className="vpn-platform-notes">{children}{extra}</div>
+    </li>
+  );
+}
+
+/** What each app does today. Only what's true: nothing about Gaming Mode, and nothing about per-app VPN or call detection on iPhone, which iOS doesn't allow. */
+const PLATFORM_FEATURES: { name: string; Icon: typeof WindowsIcon; items: string[] }[] = [
+  { name: "Windows", Icon: WindowsIcon, items: ["WireGuard VPN", "Server selection", "Price Chat account"] },
+  { name: "Android", Icon: AndroidIcon, items: ["WireGuard VPN", "Server selection", "Price Chat account", "Three App-Based VPN modes", "Auto-Call VPN (experimental)"] },
+  { name: "iPhone", Icon: AppleIcon, items: ["Native iOS app, in development", "WireGuard integration planned, pending device testing", "Shared Price Chat account", "Kiwi Passport integration in development"] },
+];
+
+function PlatformCompare() {
+  return (
+    <div className="vpn-compare">
+      <h3>What each app does</h3>
+      <div className="vpn-compare-grid">
+        {PLATFORM_FEATURES.map(({ name, Icon, items }) => (
+          <div key={name} className="vpn-compare-col">
+            <h4><Icon className="vpn-picon" />{name}</h4>
+            <ul>{items.map((item) => <li key={item}><Tick />{item}</li>)}</ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Available means a real, working store link. Anything else says so plainly and offers only the manual route. Nothing here is a download until it exists. */
 export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTouchPoints, testers = false, manualOpen = true }: { agent?: string; touch?: number; /** the tester ZIP: a signed-in member, with a server that takes it */ testers?: boolean; /** manual setup leads somewhere only once access is open */ manualOpen?: boolean }) {
   const browser = visitorBrowser(agent);
@@ -457,34 +493,75 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
     { key: "edge", href: STORE_LINKS.edge, action: "Get for Edge" },
   ].filter((x) => x.href);
   const manual = (name: string) => manualOpen && <a className="vpn-textlink" aria-label={`Manual setup for ${name}`} href="/vpn/devices#manual">Manual setup</a>;
+  const windows = hostedDownload(WINDOWS_BETA.href);
+  const android = hostedDownload(ANDROID_BETA.href);
   return (
     <section id="vpn-downloads" className="vpn-band vpn-downloads site-reveal" aria-labelledby="vpn-download">
       <SectionHead id="vpn-download" kicker="Apps" title="Get Kiwi VPN" />
-      <ul className="vpn-apps">
-        {WINDOWS_BETA.href ? (
-          <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC. Install it, sign in, choose a country and connect." status="Public beta" on mine={os === "Windows" ? "Your device" : null}>
-            <a className="site-button is-small vpn-windows-go" href={WINDOWS_BETA.href} download><WindowsIcon className="vpn-picon" />Download for Windows</a>
-            <details className="vpn-checksum">
-              <summary>Public beta {WINDOWS_BETA.version}: read this first</summary>
-              <ul className="vpn-beta-notes">
-                {!manualOpen && <li>Kiwi VPN isn't open to everyone yet, so the app can't connect until it is.</li>}
-                <li>The installer isn't code signed yet. Windows will warn about an unknown publisher, and a PC with Smart App Control turned on will block it.</li>
-                <li>There's no kill switch: if the connection drops, traffic can leave without the VPN. Other advanced security features aren't available yet either.</li>
-                <li>Connection, security, DNS leak and IPv6 leak testing aren't finished.</li>
-              </ul>
-              <p>SHA-256 of the installer:</p>
-              <code>{WINDOWS_BETA.sha256}</code>
-            </details>
-          </AppCard>
-        ) : (
-          <AppCard icons={<WindowsIcon className="vpn-app-icon" />} name="Windows desktop" text="Covers every app on your PC." status="In development" mine={os === "Windows" ? "Your device" : null}>{manual("Windows")}</AppCard>
-        )}
+      <p className="vpn-one-account"><b>One Price Chat account. Kiwi VPN across your devices.</b>{manualOpen && <> <a className="vpn-textlink" href="/vpn/devices">Manage your devices</a></>}</p>
+      <ul className="vpn-platforms">
+        <PlatformCard
+          icon={<WindowsIcon className="vpn-app-icon" />} name="Kiwi VPN for Windows" text={windows ? "Covers every app on your PC. Install it, sign in, choose a country and connect." : "Covers every app on your PC."}
+          status={windows ? "Public beta" : "In development"} on={!!windows} mine={os === "Windows" ? "Your device" : null}
+          action={windows ? <a className="site-button is-small vpn-windows-go" href={windows} download><WindowsIcon className="vpn-picon" />Download for Windows</a> : <button type="button" className="site-button is-small" disabled>Download for Windows</button>}
+          extra={manual("Windows")}
+        >
+          {windows && (
+            <>
+              <p className="vpn-platform-warn">Not code signed yet. Windows will warn about an unknown publisher, and a PC with Smart App Control turned on will block it.</p>
+              <details className="vpn-checksum">
+                <summary>Public beta {WINDOWS_BETA.version}: read this first</summary>
+                <ul className="vpn-beta-notes">
+                  {!manualOpen && <li>Kiwi VPN isn't open to everyone yet, so the app can't connect until it is.</li>}
+                  <li>The installer isn't code signed yet. Windows will warn about an unknown publisher, and a PC with Smart App Control turned on will block it.</li>
+                  <li>There's no kill switch: if the connection drops, traffic can leave without the VPN. Other advanced security features aren't available yet either.</li>
+                  <li>Connection, security, DNS leak and IPv6 leak testing aren't finished.</li>
+                </ul>
+                <p>SHA-256 of the installer:</p>
+                <code>{WINDOWS_BETA.sha256}</code>
+              </details>
+            </>
+          )}
+        </PlatformCard>
+        <PlatformCard
+          icon={<AndroidIcon className="vpn-app-icon" />} name="Kiwi VPN for Android" text="Covers the apps you choose on your phone: three App-Based VPN modes, all apps, only the ones you pick, or all except the ones you pick."
+          status={android && ANDROID_BETA.testBuild ? "Test build" : "Public beta"} on={!!android} mine={os === "Android" ? "Your device" : null}
+          action={android ? <a className="site-button is-small vpn-android-go" href={android} download><AndroidIcon className="vpn-picon" />Download APK</a> : <button type="button" className="site-button is-small" disabled>Download APK</button>}
+          extra={manual("Android")}
+        >
+          {android ? (
+            <>
+              {ANDROID_BETA.testBuild && <p className="vpn-platform-warn">This is a test build, not a production release.</p>}
+              <details className="vpn-checksum">
+                <summary>Version {ANDROID_BETA.version}: read this first</summary>
+                <ul className="vpn-beta-notes">
+                  <li>This is an APK, not from Google Play. Android may ask your permission to install it.</li>
+                  <li>The app has no kill switch of its own. Android's Always-on VPN can block traffic when the VPN is off, and that combination is still being tested.</li>
+                  <li>Connection, security, DNS leak and IPv6 leak testing aren't finished.</li>
+                </ul>
+                <p>SHA-256 of the APK:</p>
+                <code>{ANDROID_BETA.sha256}</code>
+              </details>
+            </>
+          ) : (
+            <p className="vpn-platform-note">Version {ANDROID_BETA.version} isn't available to download yet. When it is, Android may ask your permission to install it from outside Google Play.</p>
+          )}
+        </PlatformCard>
+        <PlatformCard
+          icon={<AppleIcon className="vpn-app-icon" />} name="Kiwi VPN for iPhone" text="A native SwiftUI app for iPhone, in development."
+          status="Coming soon" mine={os === "iOS" ? "Your device" : null}
+          action={<button type="button" className="site-button is-small" disabled>Download for iPhone</button>}
+          extra={manual("iOS")}
+        >
+          <p className="vpn-platform-note">It isn't on the App Store or TestFlight yet.</p>
+        </PlatformCard>
+      </ul>
+      <ul className="vpn-apps vpn-apps-extra">
         <AppCard icons={<><ChromeIcon className="vpn-app-icon" /><EdgeIcon className="vpn-app-icon" /></>} name="Browser extension" text="For Chrome and Edge. Covers that browser only." status={stores.length ? "Available" : "Coming soon"} on={stores.length > 0} mine={browser === "chrome" || browser === "edge" ? "Your browser" : null}>
           {stores.map((x) => <a key={x.key} className="site-button is-small" href={x.href} target="_blank" rel="noopener noreferrer">{x.action}</a>)}
         </AppCard>
-        <AppCard icons={<AndroidIcon className="vpn-app-icon" />} name="Android" text="Covers every app on your phone." status="Coming soon" mine={os === "Android" ? "Your device" : null}>{manual("Android")}</AppCard>
-        <AppCard icons={<AppleIcon className="vpn-app-icon" />} name="iOS / macOS" text="For iPhone, iPad and Mac. Covers every app on your device." status="Coming soon" mine={os === "iOS" || os === "macOS" ? "Your device" : null}>{manual(os === "macOS" ? "macOS" : "iOS")}</AppCard>
       </ul>
+      <PlatformCompare />
       {browser === "phone" && <p className="vpn-note">Browser extensions need a computer.</p>}
       {testers && (!STORE_LINKS.chrome || !STORE_LINKS.edge) && browser !== "phone" && (
         <details className="vpn-fold is-small">
@@ -668,7 +745,7 @@ function Faq({ member, free, paid, open }: { member: VpnState | null; free: bool
     ["Do you keep logs?", <>We don't log the websites you visit, your DNS lookups or the content of your traffic. We do keep your account, your devices' names and keys, and how much data each one used this month and when it was last active. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
     ["Is there a Kiwi VPN app?", WINDOWS_BETA.href
-      ? "A Windows app is available as a public beta. It isn't code signed yet, so a PC with Smart App Control turned on will block it. It has no kill switch, and its connection, security, DNS leak and IPv6 leak testing isn't finished. Android, iPhone, Mac and browser versions aren't available yet."
+      ? `A Windows app is available as a public beta. It isn't code signed yet, so a PC with Smart App Control turned on will block it. It has no kill switch, and its connection, security, DNS leak and IPv6 leak testing isn't finished. ${ANDROID_BETA.href ? "An Android test build is available too. iPhone, Mac and browser versions aren't available yet." : "Android, iPhone, Mac and browser versions aren't available yet."}`
       : `Not yet. A native Windows app is our first, and it's in development.${open ? " Until then, manual setup connects any device with the free WireGuard app." : ""} Browser extensions appear here once each store approves them.`],
     ["Do I have to set up each device myself?", `With the apps, no: signing in will set the device up.${open ? " Manual setup is there for anything else, under My Devices." : ""}`],
     ...(member ? [["How many devices can I use?", `Your account can have ${member.max_devices} ${member.max_devices === 1 ? "device" : "devices"} at a time. Delete one to add another.`] as [string, React.ReactNode]] : []),
