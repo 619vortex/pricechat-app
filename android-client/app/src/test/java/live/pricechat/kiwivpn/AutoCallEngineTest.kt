@@ -187,6 +187,16 @@ class AutoCallEngineTest {
         assertEquals(0, e.onPosted(2, active, tunnelOn = false).connects())
     }
 
+    @Test fun a_vpn_it_no_longer_owns_isnt_disconnected_when_the_wait_ends() {
+        val e = AutoCallEngine()
+        e.onPosted(1, active, false)
+        e.onRemoved(1, confirmedEnd = true, now = 1_000)
+        assertEquals(16_000L, e.deadline)
+        e.onConnectFailed()
+        assertFalse(e.owned)
+        assertEquals(0, e.onTick(16_000, false).disconnects())
+    }
+
     @Test fun turning_it_off_leaves_the_vpn_alone() {
         val e = AutoCallEngine()
         e.onPosted(1, active, false)
