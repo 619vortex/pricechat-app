@@ -2,6 +2,7 @@
 //! `flow` puts them together: sign in, choose a server, get a config. The private key is made here, stays on this PC, and reaches the service only over the checked pipe.
 
 pub mod api;
+pub mod applog;
 pub mod auth;
 pub mod flow;
 pub mod keys;
