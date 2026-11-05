@@ -4,6 +4,9 @@
 
 The earlier `DEVICE-TEST-PLAN.md` has more detail. This is what has to pass before the APK goes on the website.
 
+## What an Android 16 emulator has already shown
+No account or server was involved, and an emulator isn't a phone. `RealVpnInterfaceTest` showed, from Android's own report, that each mode's interface covers the right apps, that switching replaces the lists, that 10 quick rounds of up and down end clean, and that no handshake is claimed when nothing answers. Android logged the foreground service as allowed. The signed APK installed and opened with no crash. **It didn't show traffic reaching a real server, sign-in, phone makers' changes, or versions other than 16.** So every line below still needs a real phone.
+
 ## Before you start
 1. **In the old debug app:** press Sign out. It removes its devices from your account. The debug app and this one are separate apps, and this one can't find the debug app's devices: each stays until it's removed, and an account has 3.
 2. Uninstall the debug app. Two VPN apps side by side make results hard to read.
