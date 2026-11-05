@@ -67,7 +67,11 @@ def strip(text: str) -> str:
 
 
 PAIRS = {")": "(", "]": "[", "}": "{"}
-swift = sorted(ROOT.rglob("*.swift"))
+def ours(path: Path) -> bool:
+    return "Vendor" not in path.relative_to(ROOT).parts
+
+
+swift = sorted(p for p in ROOT.rglob("*.swift") if ours(p))
 if not swift:
     fail("No Swift files")
 stripped: dict[Path, str] = {}
@@ -189,12 +193,12 @@ else:
 
 # --- plists, JSON and keychain groups -------------------------------------------------------------------------------
 plists = {}
-for path in [*ROOT.rglob("*.plist"), *ROOT.rglob("*.entitlements")]:
+for path in [p for p in [*ROOT.rglob("*.plist"), *ROOT.rglob("*.entitlements")] if ours(p)]:
     try:
         plists[path.relative_to(ROOT).as_posix()] = plistlib.loads(path.read_bytes())
     except Exception as e:  # plistlib raises several kinds
         fail(f"{path.name} doesn't parse: {e}")
-for path in ROOT.rglob("*.json"):
+for path in [p for p in ROOT.rglob("*.json") if ours(p)]:
     try:
         json.loads(path.read_text(encoding="utf-8"))
     except ValueError as e:
