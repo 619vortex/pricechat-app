@@ -345,6 +345,23 @@ describe("legal pages", () => {
       cleanup();
     }
   });
+
+  it("states Kiwi VPN's price, manual renewal and refund rules, marked as drafts", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const terms = (await show(<LegalPage kind="vpnterms" />)).container.textContent!;
+    expect(terms).toMatch(/\$9\.99 for 30 days/);
+    expect(terms).toMatch(/Nothing renews or charges by itself/);
+    expect(terms).toMatch(/added after any paid time or free trial/);
+    expect(screen.getByRole("note").textContent).toContain("Draft");
+    expect(terms).not.toMatch(/Stripe|credit card/i);
+    cleanup();
+    const refunds = (await show(<LegalPage kind="vpnrefunds" />)).container.textContent!;
+    expect(refunds).toMatch(/can't reverse them/);
+    expect(refunds).toMatch(/Check now/);
+    expect(refunds).toMatch(/KV-/);
+    expect(refunds).toMatch(/rights the law gives you/);
+    expect(screen.getByRole("note").textContent).toContain("Draft");
+  });
 });
 
 describe("rank art", () => {

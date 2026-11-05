@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
+from app.members import notify
 from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
 from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings
@@ -830,12 +831,12 @@ def admin_customers(db: Session, limit: int = 200, now: datetime | None = None) 
 
 
 def admin_payments(db: Session, limit: int = 50) -> list[dict[str, Any]]:
-    """Recent payments. Older anonymous ones have lost their account link on purpose (billing.scrub)."""
+    """Recent payments. Older anonymous ones have lost their account link on purpose (billing.scrub). Anything needing a person comes with a note."""
     rows = db.execute(select(VpnPayment, VpnAccount).join(VpnAccount, VpnAccount.id == VpnPayment.account_id, isouter=True)
                       .order_by(VpnPayment.id.desc()).limit(limit)).all()
     people = dict(db.execute(select(Member.id, Member.username).where(Member.id.in_([a.member_id for _, a in rows if a is not None and a.member_id]))).all())
     return [{"id": p.id, "provider": p.provider, "network": p.network, "amount_usd": p.amount_usd, "paid_usd": p.paid_usd, "status": p.status,
-             "days": round(p.seconds / 86400, 1), "created_at": _iso(p.created_at), "credited_at": _iso(p.credited_at),
+             "days": round(p.seconds / 86400, 1), "created_at": _iso(p.created_at), "credited_at": _iso(p.credited_at), "note": p.note, "can_check": bool(p.provider_ref) and p.status in billing.UNFINISHED,
              "account": None if a is None else (people.get(a.member_id, "(member gone)") if a.member_id else f"Anonymous #{a.id}")} for p, a in rows]
 
 
@@ -874,6 +875,153 @@ def admin_delete_device(db: Session, device_id: int) -> None:
     db.commit()
 
 
+# --- payments arriving -------------------------------------------------------------------------------------------------
+
+
+def activate(db: Session, account_id: int) -> int:
+    """A payment just arrived: devices switched off for lack of time come back now, not at the next sync. Best effort: the sync does the same within 5 minutes if a server doesn't answer."""
+    acct = db.get(VpnAccount, account_id)
+    if acct is None or acct.lapsed_at is None or access(db, acct) != "active" or not settings(db).enabled:
+        return 0
+    now, restored = utcnow(), 0
+    acct.lapsed_at = None
+    devices = [d for d in db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id)) if not _paused(d, now)]
+    browsers = list(db.scalars(select(VpnBrowser).where(VpnBrowser.account_id == acct.id)))
+    capped = settings(db).monthly_cap_gb > 0 and account_usage(db, acct.id, now) >= settings(db).monthly_cap_gb * GB
+    db.commit()
+    for server_id in sorted({d.server_id for d in devices} | {b.server_id for b in browsers}):
+        server = db.get(VpnServer, server_id)
+        if server is None or not server.enabled or not server.online:
+            continue
+        try:
+            with node.client_for(server) as agent:
+                for dev in (d for d in devices if d.server_id == server_id):
+                    agent.put_peer(dev.public_key, f"{dev.ip}/32")
+                    dev.rx_counter = dev.tx_counter = 0  # a fresh peer starts counting from zero
+                    restored += 1
+                for b in (b for b in browsers if b.server_id == server_id and not capped and server.proxy_host):
+                    agent.put_proxy_user(b.username, b.secret_hash)
+                    b.rx_counter = b.tx_counter = 0
+                    restored += 1
+        except node.NodeError as e:
+            logger.info("vpn: restoring access on server %s failed (sync retries): %s", server_id, e)
+    db.commit()
+    return restored
+
+
+def payment_of(db: Session, acct: VpnAccount, payment_id: int) -> VpnPayment:
+    pay = db.get(VpnPayment, payment_id)
+    if pay is None or pay.account_id != acct.id:
+        raise VpnError("Payment not found.", 404)
+    return pay
+
+
+def check_my_payment(db: Session, acct: VpnAccount, payment_id: int) -> str:
+    """Check now: the customer asks about their own payment. Access comes back straight away if the money's there."""
+    pay = payment_of(db, acct, payment_id)
+    try:
+        status, credited = billing.check_payment(db, pay)
+    except billing.BillingError as e:
+        raise VpnError(str(e), e.status) from None
+    if credited is not None:
+        activate(db, credited)
+    return status
+
+
+def admin_check_payment(db: Session, payment_id: int) -> dict[str, Any]:
+    pay = db.get(VpnPayment, payment_id)
+    if pay is None:
+        raise VpnError("Payment not found.", 404)
+    try:
+        status, credited = billing.check_payment(db, pay)
+    except billing.BillingError as e:
+        raise VpnError(str(e), e.status) from None
+    if credited is not None:
+        activate(db, credited)
+    return {"id": payment_id, "status": status, "credited": credited is not None}
+
+
+def admin_credit_payment(db: Session, payment_id: int, usd: float, reason: str, account_id: int | None = None, key: str | None = None) -> dict[str, Any]:
+    pay = db.get(VpnPayment, payment_id)
+    if pay is None:
+        raise VpnError("Payment not found.", 404)
+    acct = billing.by_key(db, key) if key else db.get(VpnAccount, account_id) if account_id is not None else None
+    if (key or account_id is not None) and acct is None:
+        raise VpnError("No account matches that.", 404)
+    try:
+        target = billing.credit_by_hand(db, pay, usd, reason, acct)
+    except billing.BillingError as e:
+        raise VpnError(str(e), e.status) from None
+    activate(db, target.id)
+    db.refresh(target)
+    return {"id": payment_id, "status": pay.status, "account": target.id, "paid_until": _iso(target.paid_until)}
+
+
+def admin_refund_payment(db: Session, payment_id: int, reason: str) -> dict[str, Any]:
+    pay = db.get(VpnPayment, payment_id)
+    if pay is None:
+        raise VpnError("Payment not found.", 404)
+    try:
+        billing.refund_by_hand(db, pay, reason)
+    except billing.BillingError as e:
+        raise VpnError(str(e), e.status) from None
+    return {"id": payment_id, "status": pay.status}
+
+
+def reconcile_payments(db: Session, now: datetime | None = None) -> dict[str, Any]:
+    out = billing.reconcile(db, now)
+    restored = sum(activate(db, a) for a in out.pop("accounts"))
+    return {**out, "restored": restored}
+
+
+# --- expiry reminders (the vpn.reminders job) ----------------------------------------------------------------------------
+
+REMINDER_DAYS = (3, 1)
+STOP_REMINDING_AFTER = timedelta(days=7)  # someone long gone doesn't hear about it for the first time weeks later
+
+
+def _reminder_text(end_kind: str, stage: int, until: datetime, can_pay: bool) -> tuple[str, str]:
+    what = "free trial" if end_kind == "trial" else "paid time"
+    when = f"{until.day} {until.strftime('%b %Y')}"
+    renew = " Add time on the Kiwi VPN page: $9.99 for 30 days, and nothing renews by itself." if can_pay else " Paid plans aren't open yet."
+    if stage == 0:
+        return f"Your Kiwi VPN {what} has ended", f"Your devices are switched off and kept for 30 days.{renew}"
+    days = "1 day" if stage == 1 else f"{stage} days"
+    return f"Your Kiwi VPN {what} ends in {days}", f"It ends on {when}. After that your devices switch off.{renew}"
+
+
+def due_reminders(db: Session, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Each Passport member hears once at 3 days left, once at 1 and once when it ends, in their notifications. Anonymous accounts have no way to be reached, so their page shows it instead.
+    Anyone with free access (owner, tester, Royal, a grant) isn't told their time is ending. Returns what also should go by email."""
+    now = now or utcnow()
+    s = settings(db)
+    if not s.enabled:
+        return []
+    accounts = list(db.scalars(select(VpnAccount).where(VpnAccount.member_id.is_not(None), VpnAccount.status == "active", (VpnAccount.paid_until.is_not(None)) | (VpnAccount.trial_ends_at.is_not(None)))))
+    r = rules(db, sorted({a.member_id for a in accounts if a.member_id is not None}))
+    emails: list[dict[str, Any]] = []
+    for acct in accounts:
+        paid, trial = _aware(acct.paid_until), _aware(acct.trial_ends_at)
+        until = max(d for d in (paid, trial) if d is not None)
+        kind = "paid" if paid is not None and paid == until else "trial"
+        left = until - now
+        if left < -STOP_REMINDING_AFTER or left > timedelta(days=REMINDER_DAYS[0]):
+            continue
+        member = r.people.get(acct.member_id) if r.people else None
+        if member is None or access(db, acct, r, max(now, until + timedelta(seconds=1))) != "lapsed":  # a rank, a grant or free access carries them on: nothing is ending for them
+            continue
+        stage = 0 if left <= timedelta(0) else 1 if left <= timedelta(days=1) else 3
+        if _aware(acct.reminded_until) == until and acct.reminder_stage is not None and acct.reminder_stage <= stage:
+            continue
+        title, body = _reminder_text(kind, stage, until, s.payments_enabled)
+        notify.notify(db, member.id, "vpn_expiry", title, body, {"until": until.isoformat(), "stage": stage})
+        acct.reminded_until, acct.reminder_stage = until, stage
+        if member.email:
+            emails.append({"to": member.email, "subject": title, "text": body})
+    db.commit()
+    return emails
+
+
 # --- sync (the vpn.sync job) -------------------------------------------------------------------------------------------
 
 
@@ -893,6 +1041,20 @@ def _usage(dev: VpnDevice, peer: dict[str, Any], month: str) -> None:
         dev.last_handshake = hs
 
 
+def _sync_state(db: Session, acct: VpnAccount, r: Rules, now: datetime, enabled: bool) -> str:
+    """access(), and also "closed": Admin has closed the VPN, so everyone but the owner, testers and the store reviewer is off until it opens. Their devices are kept."""
+    state = access(db, acct, r, now)
+    if state != "active" or enabled or acct.is_owner or is_tester(acct, now):
+        return state
+    member = r.people.get(acct.member_id) if acct.member_id is not None and r.people is not None else None
+    return "active" if reviewer.is_reviewer(member) else "closed"
+
+
+def _keep_off(state: str, acct: VpnAccount, now: datetime) -> bool:
+    """Off for now with its row kept: closed, or out of time and not for too long."""
+    return state == "closed" or (state == "lapsed" and now - _aware(acct.lapsed_at) < KEEP_LAPSED)
+
+
 def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowser], accounts: dict[int, VpnAccount], r: Rules,
                    users: dict[str, dict[str, int]], states: dict[int, str], out: dict[str, Any], now: datetime) -> None:
     """Make the proxy's logins match: active accounts under their data cap are on it; out of time or over the cap, off and kept; blocked, gone."""
@@ -901,7 +1063,7 @@ def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowse
     for b in browsers:
         acct = accounts[b.account_id]
         if b.account_id not in states:
-            states[b.account_id] = access(db, acct, r, now)
+            states[b.account_id] = _sync_state(db, acct, r, now, settings(db).enabled)
             acct.lapsed_at = (acct.lapsed_at or now) if states[b.account_id] == "lapsed" else None
         state, seen = states[b.account_id], users.get(b.username)
         if seen is not None:
@@ -912,7 +1074,7 @@ def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowse
                 b.rx_bytes += rx - b.rx_counter if rx >= b.rx_counter else rx  # a smaller counter: the proxy restarted
                 b.tx_bytes += tx - b.tx_counter if tx >= b.tx_counter else tx
                 b.rx_counter, b.tx_counter, b.last_active = rx, tx, now
-        if state != "active" and not (state == "lapsed" and now - _aware(acct.lapsed_at) < KEEP_LAPSED):
+        if state != "active" and not _keep_off(state, acct, now):
             db.delete(b)  # blocked or banned, or out of time for too long; its login goes with the unknown ones below
             out["revoked"] += 1
             continue
@@ -959,13 +1121,13 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             for dev in devices:
                 acct = accounts[dev.account_id]
                 if dev.account_id not in states:
-                    states[dev.account_id] = access(db, acct, r, now)
+                    states[dev.account_id] = _sync_state(db, acct, r, now, s.enabled)
                     if states[dev.account_id] == "lapsed":
                         acct.lapsed_at = acct.lapsed_at or now
                     else:
                         acct.lapsed_at = None
                 state = states[dev.account_id]
-                if state == "lapsed" and now - _aware(acct.lapsed_at) < KEEP_LAPSED:  # out of time: off, kept, back on when paid
+                if _keep_off(state, acct, now):  # out of time or closed: off, kept, back on when paid or opened
                     ours.add(dev.public_key)
                     peer = peers.get(dev.public_key)
                     if peer is not None:

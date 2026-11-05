@@ -819,6 +819,92 @@ describe("The redesigned page", () => {
     expect(time.open).toBe(true);
   });
 
+  const PAID_SOON = { eligible: true, billing: BILL, paid_until: "2026-12-04T00:00:00+00:00", plan: { kind: "paid" as const, until: "2026-12-04T00:00:00+00:00", days_left: 2 } };
+
+  it("warns when time is nearly out, and offers more only if it can be bought", async () => {
+    serve(member(PAID_SOON));
+    const { container, unmount } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-expiring")!.textContent).toBe("Your paid time ends soon. Add time to keep your devices on.");
+    unmount();
+    serve(member({ ...PAID_SOON, billing: null, plan: { kind: "trial", until: "2026-12-04T00:00:00+00:00", days_left: 1 } }));
+    const second = render(<VpnPage />);
+    await settle();
+    expect(second.container.querySelector(".vpn-expiring")!.textContent).toBe("Your free trial ends soon. Paid plans aren't open yet.");
+  });
+
+  it("doesn't warn with plenty of time left, or for Royal Kiwis", async () => {
+    serve(member({ ...PAID_SOON, plan: { kind: "paid", until: "2026-12-04T00:00:00+00:00", days_left: 4 } }));
+    const { container, unmount } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector(".vpn-expiring")).toBeNull();
+    unmount();
+    serve(member({ ...PAID_SOON, plan: { kind: "royal", until: null, days_left: null } }));
+    const second = render(<VpnPage />);
+    await settle();
+    expect(second.container.querySelector(".vpn-expiring")).toBeNull();
+  });
+
+  it("says how to get help with a payment, and renews by hand, with links to the policies", async () => {
+    serve(member(PAID_SOON));
+    const { container } = render(<VpnPage />);
+    await settle();
+    const fine = container.querySelector("#vpn-time .vpn-fine")!;
+    expect(fine.textContent).toMatch(/nothing is charged automatically/);
+    expect(fine.textContent).toMatch(/starts after any time or free trial you have left/);
+    expect(fine.textContent).not.toMatch(/can't be refunded/);
+    expect([...fine.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["/vpn/refunds", "/vpn/terms"]);
+  });
+
+  const ROW = { id: 41, receipt: "KV-000041", created_at: "2026-11-01T00:00:00+00:00", credited_at: null, network_name: "USDT on Solana", amount_usd: 9.99, paid_usd: 0, days: 0, status: "pending", address: "SoLAddr", amount: 9.97, can_check: true };
+
+  it("lists no payment history until there is one", async () => {
+    serve({ ...member(PAID_SOON), "GET /api/members/vpn/payments": [200, { items: [] }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector("#vpn-payments")).toBeNull();
+  });
+
+  it("still shows the page if the payment history can't load", async () => {
+    serve({ ...member(PAID_SOON), "GET /api/members/vpn/payments": [500, { detail: "x" }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    expect(container.querySelector("#vpn-payments")).toBeNull();
+    expect(container.querySelector("#my-vpn")).not.toBeNull();
+  });
+
+  it("shows receipts, the address for one still waiting, and Check now reloads the account", async () => {
+    let done = false;
+    serve({ ...member(PAID_SOON),
+      "GET /api/members/vpn/payments": (() => [200, { items: done ? [{ ...ROW, status: "credited", paid_usd: 9.99, days: 30, address: null, amount: null, can_check: false }] : [ROW, { ...ROW, id: 12, receipt: "KV-000012", status: "refunded", address: null, amount: null, can_check: false }] }]) as Route,
+      "POST /api/members/vpn/payments/41/check": (() => { done = true; return [200, { status: "credited" }]; }) as Route });
+    const { container } = render(<VpnPage />);
+    await settle();
+    const fold = container.querySelector("#vpn-payments")!;
+    expect(fold.textContent).toMatch(/2 payments/);
+    const [waiting, refunded] = [...fold.querySelectorAll("li")];
+    expect(waiting.textContent).toMatch(/KV-000041.*Waiting for payment/);
+    expect(waiting.textContent).toMatch(/Send exactly 9\.97 USDT/);
+    expect(waiting.querySelector("code")!.textContent).toBe("SoLAddr");
+    expect(refunded.textContent).toMatch(/KV-000012.*Refunded/);
+    expect(refunded.querySelector("button")).toBeNull();
+    expect(refunded.querySelector("code")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Check now" }));
+    await settle();
+    expect(calls).toContain("POST /api/members/vpn/payments/41/check");
+    expect(container.querySelector("#vpn-payments li")!.textContent).toMatch(/Credited.*\$9\.99 · 30 days/);
+    expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
+  });
+
+  it("says so when Check now can't reach the provider", async () => {
+    serve({ ...member(PAID_SOON), "GET /api/members/vpn/payments": [200, { items: [ROW] }], "POST /api/members/vpn/payments/41/check": [502, { detail: "The payment service didn't answer. Try again in a moment." }] });
+    const { container } = render(<VpnPage />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Check now" }));
+    await settle();
+    expect(container.querySelector("#vpn-payments .site-error")!.textContent).toMatch(/didn't answer/);
+  });
+
   it("has no device form, config or server choice on the main page, and links to My Devices", async () => {
     serve(member({ devices: [DEVICE] }));
     const { container } = render(<VpnPage />);

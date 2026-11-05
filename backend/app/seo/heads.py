@@ -33,6 +33,8 @@ PAGES: dict[str, tuple[str, str]] = {
     "learn": ("Beginner content · Price Chat", "Exclusive beginner lessons for Kiwi Chicks and above."),
     "vpn": ("Kiwi VPN · Price Chat", "A WireGuard VPN from Price Chat. We don't log the sites you visit. 30-day free trial, then $9.99 for 30 days."),
     "vpn/privacy": ("Kiwi VPN Privacy · Price Chat", "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions."),
+    "vpn/terms": ("Kiwi VPN Terms · Price Chat", "What you get with Kiwi VPN, what it costs, how renewal works and when access ends."),
+    "vpn/refunds": ("Kiwi VPN Refund Policy · Price Chat", "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong."),
     "website/privacy": ("Privacy · Price Chat", "How Price Chat handles member data, connected accounts and Kiwi XP."),
     "website/terms": ("Terms · Price Chat", "The rules of the Price Chat community and Kiwi XP."),
     "website/disclaimer": ("Disclaimer · Price Chat", "Price Chat content is for information and entertainment."),

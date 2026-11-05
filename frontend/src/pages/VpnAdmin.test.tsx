@@ -74,7 +74,7 @@ describe("VPN admin: access, payments, customers and blocking", () => {
     const { container } = render(<VpnAdminPage />);
     await flush();
     expect((screen.getByLabelText("Payments on") as HTMLInputElement).disabled).toBe(true);
-    expect(container.textContent).toMatch(/Add the NOWPayments or Stripe keys/);
+    expect(container.textContent).toMatch(/Add the NOWPayments keys/);
   });
 
   it("makes a device here and shows its config once", async () => {

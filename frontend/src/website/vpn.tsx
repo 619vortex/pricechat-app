@@ -163,6 +163,7 @@ export function VpnPage() {
               <MyVpn s={member} onStarted={setState} />
               <PausedNote s={member} />
               <AddTime s={member} reload={load} />
+              <PaymentHistory s={member} reload={load} />
             </section>
           </CallCtx.Provider>
         )}
@@ -397,6 +398,9 @@ function MyVpn({ s, onStarted }: { s: VpnState; onStarted: (s: VpnState) => void
           <h2 id="vpn-my-title">My Kiwi VPN</h2>
           <p className="vpn-big">{PLAN_NAME[plan.kind]}</p>
           {detail && <p className="vpn-my-detail">{detail}</p>}
+          {(plan.kind === "trial" || plan.kind === "paid") && plan.days_left != null && plan.days_left <= 3 && (
+            <p className="vpn-expiring" role="status">{plan.kind === "trial" ? "Your free trial ends soon." : "Your paid time ends soon."} {s.billing ? "Add time to keep your devices on." : "Paid plans aren't open yet."}</p>
+          )}
         </div>
       </div>
       <dl className="vpn-facts">
@@ -768,10 +772,57 @@ function Faq({ member, free, paid, open }: { member: VpnState | null; free: bool
           <p>The team answers fastest on Telegram or X.</p>
           <a href="/website/contact">Contact Price Chat</a>
           <a className="vpn-privacy" href="/vpn/privacy">How Kiwi VPN handles your data</a>
-          <a href="/website/terms">Terms</a>
+          <a href="/vpn/terms">Kiwi VPN terms</a>
+          <a href="/vpn/refunds">Refund policy</a>
         </aside>
       </div>
     </section>
+  );
+}
+
+type PaymentRow = { id: number; receipt: string; created_at: string; credited_at: string | null; network_name: string; amount_usd: number; paid_usd: number; days: number; status: string; address: string | null; amount: number | null; can_check: boolean };
+const PAYMENT_STATUS: Record<string, string> = { pending: "Waiting for payment", credited: "Credited", failed: "Failed", expired: "Expired", refunded: "Refunded", review: "Being checked", unmatched: "Being checked" };
+
+/** Every payment on this account: a receipt number to quote, what it bought, and for one still waiting, the address again and a way to ask about it. */
+function PaymentHistory({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
+  const call = useContext(CallCtx);
+  const [items, setItems] = useState<PaymentRow[] | null>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    call<{ items: PaymentRow[] }>("/payments").then((r) => { if (live) setItems(r.items); }).catch(() => { /* the rest of the page still works */ });
+    return () => { live = false; };
+  }, [call, s]);
+  async function check(id: number) {
+    setBusy(id); setErr(null);
+    try {
+      await call<{ status: string }>(`/payments/${id}/check`, { method: "POST" });
+      await reload();
+    } catch (e) { setErr(vpnError(e)); } finally { setBusy(null); }
+  }
+  if (!items?.length) return null;
+  return (
+    <details className="vpn-fold" id="vpn-payments">
+      <summary><span>Payment history<small>{items.length === 1 ? "1 payment" : `${items.length} payments`}</small></span></summary>
+      <div className="vpn-fold-body">
+        <ul className="vpn-payments">
+          {items.map((p) => (
+            <li key={p.id}>
+              <div className="vpn-payment-top"><b>{p.receipt}</b><span className={`vpn-payment-status is-${p.status}`}>{PAYMENT_STATUS[p.status] ?? p.status}</span></div>
+              <p>{day(p.created_at)} · {p.network_name} · ${(p.status === "credited" ? p.paid_usd : p.amount_usd).toFixed(2)}{p.days ? ` · ${p.days} days` : ""}</p>
+              {p.address && <>
+                <p className="site-muted">Send exactly {p.amount} USDT on {p.network_name} to:</p>
+                <code className="vpn-key">{p.address}</code>
+              </>}
+              {p.can_check && <button className="site-button is-ghost" disabled={busy !== null} onClick={() => void check(p.id)}>{busy === p.id ? "Checking…" : "Check now"}</button>}
+            </li>
+          ))}
+        </ul>
+        {err && <p className="site-error" role="alert">{err}</p>}
+        <p className="site-muted vpn-fine">Paid and it hasn't appeared? Press Check now, then see the <a href="/vpn/refunds">refund policy</a> for what to do next, with your receipt number.</p>
+      </div>
+    </details>
   );
 }
 
@@ -957,7 +1008,7 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
         </form>
       ))}
       {err && <p className="site-error" role="alert">{err}</p>}
-      <p className="site-muted vpn-fine">$9.99 buys 30 days and any amount buys its share. You renew by hand: nothing is charged automatically. Network fees are yours. USDT payments can't be refunded.</p>
+      <p className="site-muted vpn-fine">$9.99 buys 30 days and any amount buys its share. You renew by hand: nothing is charged automatically. Time you add starts after any time or free trial you have left. Network fees are yours. <a href="/vpn/refunds">Refund policy</a> · <a href="/vpn/terms">Kiwi VPN terms</a></p>
       </div>
     </details>
   );
