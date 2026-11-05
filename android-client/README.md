@@ -2,9 +2,16 @@
 
 Native Kotlin and Compose, using the official WireGuard library and the existing Price Chat backend. Version `0.1.0-beta1`.
 
-**Nothing is built or run on the main PC.** It has no Android tools, and the project's rule keeps toolchains off it. The VM does all building.
+**Android is built on the main PC,** as the owner decided on 2026-11-05. The tools are under `%LOCALAPPDATA%\Android`: `Sdk`, `gradle-9.6.0` and `jdk-21*`. Android Studio is at `C:\Program Files\Android\Android Studio`. This applies to Android only: the rule against Rust toolchains on the main PC still stands.
 
-## Build
+## Build on the main PC
+From `android-client`, with `local.properties` holding `sdk.dir` and `JAVA_HOME` set to the JDK above:
+```powershell
+& "$env:LOCALAPPDATA\Android\gradle-9.6.0\bin\gradle.bat" "-PkiwiCommit=$(git rev-parse --short HEAD)" :app:testDebugUnitTest :app:assembleDebug
+```
+The APK is at `app\build\outputs\apk\debug\app-debug.apk`. Or open this folder in Android Studio.
+
+## Build in the VM (the earlier route, no longer the default)
 1. **Main PC:** commit, then run:
    ```powershell
    powershell -ExecutionPolicy Bypass -File android-client\prepare-vm-build.ps1

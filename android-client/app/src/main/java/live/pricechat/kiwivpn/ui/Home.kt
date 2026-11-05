@@ -104,7 +104,8 @@ private fun reducedMotion(): Boolean {
 fun HomeScreen(ui: UiState, state: ConnectionState, onConnect: () -> Unit, onDisconnect: () -> Unit, onStartTrial: () -> Unit, onLocations: () -> Unit) {
     val status = accountStatus(ui.account)
     val haptics = LocalHapticFeedback.current
-    val canConnect = ui.selected != null && (status.canConnect || (ui.account == null && ui.selected != null))
+    // With no answer from Price Chat there's still a server to try: the last one used, with saved details. The server decides whether its key still works.
+    val canConnect = ui.selected != null && (status.canConnect || ui.account == null)
     val busy = state is ConnectionState.Disconnecting
     val turnOff = state.isActive
 

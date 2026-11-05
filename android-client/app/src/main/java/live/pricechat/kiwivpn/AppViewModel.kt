@@ -47,7 +47,14 @@ private const val ACCOUNT_EVERY_MS = 60_000L
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as KiwiApp
-    private val _ui = MutableStateFlow(UiState(signedIn = app.vault.read().session != null, settings = app.vault.read().settings))
+    private val _ui = MutableStateFlow(
+        UiState(
+            signedIn = app.vault.read().session != null,
+            settings = app.vault.read().settings,
+            // So Connect works before the account has loaded, or when it can't load, as with "Block connections without VPN" on
+            selected = app.vault.read().lastServer?.let { Server(it.id, it.name, "", it.countryCode, online = true) },
+        ),
+    )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     val connection = app.connection.state
     val autoCallStatus = app.autoCall.status

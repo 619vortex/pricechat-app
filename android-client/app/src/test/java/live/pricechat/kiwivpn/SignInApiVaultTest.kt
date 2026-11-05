@@ -75,6 +75,7 @@ class SignInTest {
             assertTrue(listener.port >= 1024)
             val waiting = async(Dispatchers.IO) { listener.awaitCode("mine", 10_000) }
             fun send(line: String): String = Socket(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), listener.port).use { s ->
+                s.soTimeout = 10_000 // a listener that has stopped accepting fails this test rather than hanging it
                 s.getOutputStream().write("$line\r\nHost: x\r\n\r\n".toByteArray())
                 s.getInputStream().readBytes().toString(Charsets.UTF_8)
             }
@@ -162,8 +163,18 @@ class ApiTest {
     }
 
     @Test fun no_answer_is_unreachable_and_status_401_is_signed_out() = runTest {
-        try { api(thrown = IOException("down")).account("t") } catch (e: ApiException) { assertTrue(e.unreachable) }
-        try { api(401, """{"detail":"Sign in"}""").account("t") } catch (e: ApiException) { assertTrue(e.signedOut) }
+        try {
+            api(thrown = IOException("down")).account("t")
+            throw AssertionError("Should have thrown")
+        } catch (e: ApiException) {
+            assertTrue(e.unreachable)
+        }
+        try {
+            api(401, """{"detail":"Sign in"}""").account("t")
+            throw AssertionError("Should have thrown")
+        } catch (e: ApiException) {
+            assertTrue(e.signedOut)
+        }
     }
 
     @Test fun a_garbled_success_is_an_error_not_a_crash() = runTest {
@@ -183,10 +194,10 @@ class ApiTest {
             "referral":{"code":"kiwi123456","link":"https://x/website/join/kiwi123456","joined":2,"qualified":1,"xp_earned":10,"reward_xp":10}}}"""
         val s = api(body = reply).unifiedState("t", "0.1.0-beta1")
         assertEquals(2500L, s.passport!!.xp)
-        assertEquals("Warrior", s.passport!!.rank.current.name)
-        assertEquals(500L, s.passport!!.rank.xpToNext)
-        assertEquals(84L, s.passport!!.standing!!.position)
-        assertEquals("kiwi123456", s.passport!!.referral!!.code)
+        assertEquals("Warrior", s.passport.rank.current.name)
+        assertEquals(500L, s.passport.rank.xpToNext)
+        assertEquals(84L, s.passport.standing!!.position)
+        assertEquals("kiwi123456", s.passport.referral!!.code)
         assertEquals(true, s.capabilities["auto_call_enabled"])
         val url = seen.single().url
         assertEquals("android", url.queryParameter("platform"))

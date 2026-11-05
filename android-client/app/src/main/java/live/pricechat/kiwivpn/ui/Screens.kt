@@ -332,7 +332,7 @@ fun DiagnosticsScreen(model: AppViewModel, ui: UiState, state: ConnectionState, 
             Fact("Received", bytes(link?.rxBytes))
             Fact("Sent", bytes(link?.txBytes))
             val exit = link?.publicIp
-            Fact("Public IPv4", if (exit == null) "Not checked" else if (link?.ipMatchesServer == true) "$exit (the server's)" else "$exit (not the server's)")
+            Fact("Public IPv4", if (exit == null) "Not checked" else if (link.ipMatchesServer) "$exit (the server's)" else "$exit (not the server's)")
             (state as? ConnectionState.Failed)?.let { Fact("Error", it.message) }
         }
         Card {
