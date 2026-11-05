@@ -26,7 +26,7 @@ The APK is at `app\build\outputs\apk\debug\app-debug.apk`. Or open this folder i
 
 Gradle and the JDK are pinned. The dependencies are pinned by version in `app/build.gradle.kts`, but they aren't verified by hash yet: add Gradle dependency verification before any release.
 
-Android Studio can open the `android-client` folder. Use it in the VM, not on the main PC.
+Android Studio can open the `android-client` folder.
 
 ## Tests
 - **Unit tests** run in the build: `gradle :app:testDebugUnitTest`.
