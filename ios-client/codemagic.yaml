@@ -1,4 +1,4 @@
-# Cloud Mac builds of Kiwi VPN for iPhone. docs/CLOUD-BUILD.md explains them.
+# Cloud Mac builds of Kiwi VPN for iPhone.
 # No workflow has a trigger: each starts only when asked. No workflow has a publishing section: nothing goes to TestFlight, the App Store or anywhere else.
 definitions:
   mac: &mac
@@ -46,7 +46,7 @@ workflows:
       - name: Fail if the logic tests failed
         script: test ! -e build/logs/tests-failed.log
 
-  # Needs the Apple Developer account: see docs/CLOUD-BUILD.md. Makes an Ad Hoc IPA for the registered iPhone, and uploads it nowhere.
+  # Needs the Apple Developer account, the App Store Connect key named kiwi, and the kiwi_signing group. Makes an Ad Hoc IPA for the registered iPhone, and uploads it nowhere.
   kiwi-adhoc-ipa:
     name: Kiwi VPN signed Ad Hoc IPA
     <<: *mac

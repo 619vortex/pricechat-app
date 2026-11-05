@@ -1,5 +1,5 @@
 # WINDOWS. Copies the committed iOS source into the small private repository Codemagic builds, and pushes it. Compiles nothing.
-# Only ios-client goes, with no history of the main repository, and without docs/ (internal notes the build doesn't need).
+# Only ios-client goes, with no history of the main repository, and without docs/ or the Windows helper scripts (internal, and the build doesn't need them).
 #   powershell -ExecutionPolicy Bypass -File ios-client\tools\sync-cloud-repo.ps1 -RepoUrl git@github.com:OWNER/kiwi-vpn-ios.git [-NoPush]
 param([Parameter(Mandatory)][string]$RepoUrl, [switch]$NoPush)
 $ErrorActionPreference = "Stop"
@@ -16,10 +16,11 @@ if (-not (Test-Path "$Cloud\.git")) {
     git -C $Cloud config user.email "kiwi-build@users.noreply.github.com"
     git -C $Cloud remote add origin $RepoUrl
 }
+git -C $Cloud remote set-url origin $RepoUrl
 Get-ChildItem $Cloud -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
 
 $Tar = Join-Path $env:TEMP "kiwi-ios-$PID.tar"
-git -C "$Source\ios-client" archive --format=tar -o $Tar HEAD -- . ":(exclude)docs"
+git -C "$Source\ios-client" archive --format=tar -o $Tar HEAD -- . ":(exclude)docs" ":(exclude)prepare-mac-package.ps1" ":(exclude)tools/sync-cloud-repo.ps1"
 if ($LASTEXITCODE -ne 0) { throw "git archive failed" }
 tar -xf $Tar -C $Cloud
 if ($LASTEXITCODE -ne 0) { throw "unpacking failed" }

@@ -17,7 +17,7 @@ Native Swift and SwiftUI, with a Packet Tunnel Provider extension using the offi
 - A **paid Apple Developer account**. Testing needs only that. **The App Store needs one enrolled as an organization:** see `docs/APPLE-CHECKLIST.md`.
 
 ## Build in the cloud, from Windows
-Codemagic's Macs build it: see `docs/CLOUD-BUILD.md`.
+Codemagic's Macs build it, from `codemagic.yaml`. `kiwi-compile` needs no Apple account. `kiwi-adhoc-ipa` needs a paid Apple Developer account. Neither starts by itself or uploads anything to Apple.
 
 ## Build on a Mac
 1. **On Windows,** make the package:
