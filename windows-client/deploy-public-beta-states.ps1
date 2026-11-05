@@ -30,14 +30,9 @@ if ($code -ne 0) { Stop-Here "the Railway deploy failed. Railway keeps the previ
 Write-Host "[5/6] Checking the backend"
 $ok = $false
 for ($i = 0; $i -lt 8 -and -not $ok; $i++) {
-  try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$Live/api/members/vpn/card" | Out-Null }
-  catch {
-    $body = ""
-    try { $body = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd() } catch {}
-    # the new wording while closed; signed out with the VPN open answers 401 or 403 from the payment checks instead
-    if ($body -match "unavailable right now" -or $_.Exception.Response.StatusCode.value__ -eq 401) { $ok = $true }
-  }
-  if (-not $ok) { Start-Sleep 15 }
+  # curl, because PowerShell 5.1 has already read an error's body by the time it can be looked at. The new wording while closed; open and signed out, the payment checks refuse with their own.
+  $body = curl.exe -s -X POST "$Live/api/members/vpn/card"
+  if ($body -match "unavailable right now|Payments are off|Sign in|sign in") { $ok = $true } else { Start-Sleep 15 }
 }
 if (-not $ok) { Stop-Here "the new backend isn't answering yet. Check Railway's logs" }
 try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$Live/api/members/desktop/token" -ContentType "application/json" -Body '{"code":"not-a-real-code-not-a-real-code","verifier":"not-a-real-verifier-not-a-real-verifier-xxxxx"}' | Out-Null; Stop-Here "a fake sign-in code was accepted" }

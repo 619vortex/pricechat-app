@@ -467,9 +467,10 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
             <details className="vpn-checksum">
               <summary>Public beta {WINDOWS_BETA.version}: read this first</summary>
               <ul className="vpn-beta-notes">
-                <li>The installer isn't code signed yet, so Windows will warn about an unknown publisher.</li>
+                {!manualOpen && <li>Kiwi VPN isn't open to everyone yet, so the app can't connect until it is.</li>}
+                <li>The installer isn't code signed yet. Windows will warn about an unknown publisher, and a PC with Smart App Control turned on will block it.</li>
                 <li>There's no kill switch: if the connection drops, traffic can leave without the VPN. Other advanced security features aren't available yet either.</li>
-                <li>Security, DNS leak and IPv6 leak testing aren't finished.</li>
+                <li>Connection, security, DNS leak and IPv6 leak testing aren't finished.</li>
               </ul>
               <p>SHA-256 of the installer:</p>
               <code>{WINDOWS_BETA.sha256}</code>
@@ -667,7 +668,7 @@ function Faq({ member, free, paid, open }: { member: VpnState | null; free: bool
     ["Do you keep logs?", <>We don't log the websites you visit, your DNS lookups or the content of your traffic. We do keep your account, your devices' names and keys, and how much data each one used this month and when it was last active. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
     ["Is there a Kiwi VPN app?", WINDOWS_BETA.href
-      ? "A Windows app is available as a public beta. It isn't code signed yet and has no kill switch, and its security, DNS leak and IPv6 leak testing isn't finished. Android, iPhone, Mac and browser versions aren't available yet."
+      ? "A Windows app is available as a public beta. It isn't code signed yet, so a PC with Smart App Control turned on will block it. It has no kill switch, and its connection, security, DNS leak and IPv6 leak testing isn't finished. Android, iPhone, Mac and browser versions aren't available yet."
       : `Not yet. A native Windows app is our first, and it's in development.${open ? " Until then, manual setup connects any device with the free WireGuard app." : ""} Browser extensions appear here once each store approves them.`],
     ["Do I have to set up each device myself?", `With the apps, no: signing in will set the device up.${open ? " Manual setup is there for anything else, under My Devices." : ""}`],
     ...(member ? [["How many devices can I use?", `Your account can have ${member.max_devices} ${member.max_devices === 1 ? "device" : "devices"} at a time. Delete one to add another.`] as [string, React.ReactNode]] : []),

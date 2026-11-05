@@ -168,7 +168,8 @@ describe("Free while payments are off", () => {
       expect(windows.querySelector(".vpn-status")!.textContent).toBe("Public beta");
       expect(windows.textContent).toMatch(/isn't code signed/);
       expect(windows.textContent).toMatch(/no kill switch/);
-      expect(windows.textContent).toMatch(/Security, DNS leak and IPv6 leak testing aren't finished/);
+      expect(windows.textContent).toMatch(/Connection, security, DNS leak and IPv6 leak testing aren't finished/);
+      expect(windows.textContent).toMatch(/Smart App Control turned on will block it/);
       expect(windows.textContent).not.toMatch(/passed|verified|audited/i);
       expect(windows.textContent).toMatch(/sign in, choose a country and connect/);
       expect(windows.textContent).toMatch(/Public beta 0\.1\.0/);
