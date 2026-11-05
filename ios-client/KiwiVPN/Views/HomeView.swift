@@ -95,7 +95,7 @@ struct HomeView: View {
 
 /// The timer counts from when iOS says the connection came up, so it stays right after the app has been closed and reopened.
 struct Session: View {
-    let link: Link
+    let link: TunnelLink
 
     var body: some View {
         VStack(spacing: 2) {

@@ -18,7 +18,7 @@ public protocol TunnelDriver: AnyObject, Sendable {
     func setOnDemand(_ on: Bool, settings: AdvancedSettings) async throws
 }
 
-public struct Link: Equatable, Sendable {
+public struct TunnelLink: Equatable, Sendable {
     public var since: Date
     public var endpoint: String
     public var dns: [String]
@@ -37,9 +37,9 @@ public enum ConnectionState: Equatable, Sendable {
     public enum Step: Sendable { case preparing, starting, waitingForServer }
     case disconnected(notice: String?)
     case connecting(target: ServerRef, step: Step)
-    case connected(server: ServerRef, link: Link, notice: String?)
+    case connected(server: ServerRef, link: TunnelLink, notice: String?)
     /// The tunnel is up and the server has stopped answering, as when the network drops. WireGuard keeps trying.
-    case reconnecting(server: ServerRef, link: Link)
+    case reconnecting(server: ServerRef, link: TunnelLink)
     case disconnecting(server: ServerRef?)
     case failed(message: String, target: ServerRef?)
 
@@ -71,7 +71,7 @@ public enum ConnectionState: Equatable, Sendable {
         }
     }
 
-    public var link: Link? {
+    public var link: TunnelLink? {
         switch self {
         case .connected(_, let l, _), .reconnecting(_, let l): return l
         default: return nil
@@ -105,7 +105,7 @@ public final class ConnectionCoordinator: ObservableObject {
     private var generation = 0
     /// Set while connect or disconnect is doing the work, so a status check doesn't talk over it.
     private var working = 0
-    private var lastLink: Link?
+    private var lastLink: TunnelLink?
 
     public init(driver: TunnelDriver, source: ProfileSource, ip: @escaping @Sendable () async throws -> String, settings: @escaping @Sendable () -> AdvancedSettings,
                 now: @escaping @Sendable () -> Date = { Date() }, sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }, timings: Timings = Timings()) {
@@ -212,7 +212,7 @@ public final class ConnectionCoordinator: ObservableObject {
     }
 
     private func adopt(server: ServerRef, profile: TunnelProfile, stats: TunnelStats, since: Date, notice: String?) {
-        let link = Link(since: since, endpoint: profile.endpointHost, dns: profile.dns, lastHandshake: stats.lastHandshake, rxBytes: stats.rxBytes, txBytes: stats.txBytes)
+        let link = TunnelLink(since: since, endpoint: profile.endpointHost, dns: profile.dns, lastHandshake: stats.lastHandshake, rxBytes: stats.rxBytes, txBytes: stats.txBytes)
         lastLink = link
         state = .connected(server: server, link: link, notice: notice)
     }
@@ -294,7 +294,7 @@ public final class ConnectionCoordinator: ObservableObject {
         }
         let since = await driver.connectedDate() ?? lastLink?.since ?? now()
         guard mine == generation else { return }
-        var link = lastLink ?? Link(since: since, endpoint: profile.endpointHost, dns: profile.dns)
+        var link = lastLink ?? TunnelLink(since: since, endpoint: profile.endpointHost, dns: profile.dns)
         link.since = since
         link.endpoint = profile.endpointHost
         link.dns = profile.dns
