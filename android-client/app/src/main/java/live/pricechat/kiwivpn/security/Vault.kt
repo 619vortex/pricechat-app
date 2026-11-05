@@ -41,6 +41,8 @@ data class VaultData(
     /** Auto-Call VPN started the running connection, so it may end it. Nothing about any call is ever saved: this is the only Auto-Call state on disk. */
     val autoCallOwned: Boolean = false,
     val settings: AppSettings = AppSettings(),
+    /** Only on a phone with no usable ANDROID_ID: see DeviceIdentity. Kept across signing out, so this phone keeps its name. */
+    val fallbackDeviceId: String? = null,
 )
 
 /**
@@ -64,7 +66,7 @@ class Vault(private val file: File, private val sealer: Sealer) {
     }
 
     /** Signed out: the keys and session go, and the settings stay. */
-    fun forgetAccount(): VaultData = update { VaultData(settings = it.settings, autoCallOwned = false) }
+    fun forgetAccount(): VaultData = update { VaultData(settings = it.settings, autoCallOwned = false, fallbackDeviceId = it.fallbackDeviceId) }
 
     private fun load(): VaultData {
         if (!file.exists()) return VaultData()

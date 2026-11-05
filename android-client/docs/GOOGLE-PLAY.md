@@ -29,7 +29,7 @@ The app uses `systemExempted`, because Android's documentation lists "VPN apps" 
 | Data | Collected? | Purpose |
 |---|---|---|
 | Account identifier (session, username) | Yes, by the existing account | App function |
-| Device name (phone model) | Yes, on device registration | Showing it under My Devices |
+| Device name (phone model, and a short one-way hash of the app's ANDROID_ID) | Yes, on device registration | Showing it under My Devices, and telling two identical phones apart. Declare it under device IDs if Play's form asks |
 | WireGuard public key, tunnel IP | Yes | Running the VPN |
 | Last handshake time, bytes used | Yes: `sync_server` records them for each device | Showing use, monthly caps |
 | IP address | The VPN server necessarily sees it; `/members/vpn/ip` returns it unstored | App function |

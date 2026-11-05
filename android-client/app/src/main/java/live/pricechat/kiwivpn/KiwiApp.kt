@@ -2,6 +2,7 @@ package live.pricechat.kiwivpn
 
 import android.app.Application
 import android.os.Build
+import android.provider.Settings
 import com.wireguard.android.backend.GoBackend
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,11 +20,13 @@ import live.pricechat.kiwivpn.security.Vault
 import live.pricechat.kiwivpn.vpn.ConnectionManager
 import live.pricechat.kiwivpn.vpn.ConnectionMemory
 import live.pricechat.kiwivpn.vpn.ConnectionState
+import live.pricechat.kiwivpn.vpn.DeviceIdentity
 import live.pricechat.kiwivpn.vpn.GoTunnelDriver
 import live.pricechat.kiwivpn.vpn.Provisioner
 import live.pricechat.kiwivpn.vpn.TunnelService
 import live.pricechat.kiwivpn.vpn.WireGuardKeyMaker
 import java.io.File
+import java.util.UUID
 
 /** Holds the app's single instances. The connection outlives every screen, so it lives here rather than in a ViewModel. */
 class KiwiApp : Application() {
@@ -81,9 +84,13 @@ class KiwiApp : Application() {
         connection.disconnect()
     }
 
-    /** Up to the backend's 32 characters. It's how a reinstalled app finds the device whose key it no longer has. A model name is all it says about the phone. */
-    fun deviceName(serverId: Long): String {
-        val model = Build.MODEL.orEmpty().filter { it.isLetterOrDigit() && it.code < 128 || it == '-' }.take(16)
-        return "Android ${model.ifEmpty { "phone" }} ($serverId)"
+    /** See DeviceIdentity: unique to this phone, and the same after a reinstall. A random value kept in the Vault stands in on the rare phone with no usable ANDROID_ID. */
+    private val stableDeviceId: String by lazy {
+        val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+        if (DeviceIdentity.isUsable(androidId)) androidId else {
+            vault.read().fallbackDeviceId ?: UUID.randomUUID().toString().also { made -> vault.update { it.copy(fallbackDeviceId = made) } }
+        }
     }
+
+    fun deviceName(serverId: Long): String = DeviceIdentity.name(Build.MODEL, stableDeviceId, serverId)
 }

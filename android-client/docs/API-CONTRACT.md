@@ -33,6 +33,7 @@ The app's session goes as the cookie `pc_session=kd.<token>`. A `kd.` token can 
 
 ## Limits that shaped the app
 - **`vpn_device`: 5, then 1 every 10 minutes, per member.** Creating a device or starting a trial spends it, and `DELETE` doesn't refund it. So the app keeps a device for each country and reuses it.
+- **Device names** are `Android <model> <tag> (<server>)`. The tag is a hash of Android's per-app `ANDROID_ID`, so two identical phones never share a name, and a reinstalled app can still find its own lost device. Names from older betas, with no tag, could be any phone, so they're never cleaned up automatically.
 - **A device is one key on one server, and an account has 3 by default.** A PC and a phone each using both countries would need 4. When the account is full, the phone gives up its own device on another country, and nothing else.
 - **`dns` always has an entry:** the server's resolver, or `1.1.1.1` if it reports none.
 - **IPv6:** `allowed_ips` always includes `::/0`, but `addresses` only has an IPv6 address if the server has a pool. On an IPv4-only server, IPv6 is routed into the tunnel and goes nowhere.

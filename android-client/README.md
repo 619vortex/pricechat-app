@@ -1,6 +1,6 @@
 # Kiwi VPN for Android
 
-Native Kotlin and Compose, using the official WireGuard library and the existing Price Chat backend. Version `0.1.0-beta2`.
+Native Kotlin and Compose, using the official WireGuard library and the existing Price Chat backend. Version `0.1.0-rc1`.
 
 **Android is built on the main PC,** as the owner decided on 2026-11-05. The tools are under `%LOCALAPPDATA%\Android`: `Sdk`, `gradle-9.6.0` and `jdk-21*`. Android Studio is at `C:\Program Files\Android\Android Studio`. This applies to Android only: the rule against Rust toolchains on the main PC still stands.
 
