@@ -2,6 +2,7 @@ import { useState } from "react";
 import { request } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type Tone } from "../../components/ui";
+import { TelegramLane } from "./TelegramLane";
 
 /** Admin › X › News Desk: Price Chat's automatic news account. The server decides everything; this page shows it and holds the switches. */
 
@@ -62,6 +63,8 @@ export function NewsDesk() {
           <Stat label="Last run" value={data.last_run?.at ? relativeTime(data.last_run.at) : "Not yet"} />
         </div>
       </Card>
+
+      <TelegramLane />
 
       <Card title="Settings">
         <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>

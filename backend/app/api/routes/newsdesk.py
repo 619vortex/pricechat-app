@@ -10,6 +10,7 @@ from app.api.schemas import StrictInput
 from app.db.base import utcnow
 from app.models.newsdesk import NdPost
 from app.newsdesk import engine, sources
+from app.newsdesk import telegram as telegram_lane
 from app.services.agent_service import get_agent_config
 
 router = APIRouter(prefix="/x/newsdesk", tags=["newsdesk"])
@@ -62,6 +63,30 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
         setattr(s, k, v)
     db.commit()
     return engine.overview(db, runtime.settings)
+
+
+@router.get("/telegram")
+def telegram_overview(db: DbSession) -> dict[str, Any]:
+    return telegram_lane.overview(db)
+
+
+class TelegramInput(StrictInput):
+    enabled: bool | None = None
+    max_per_day: int | None = Field(None, ge=1, le=48)
+    gap_minutes: int | None = Field(None, ge=5, le=720)
+    resume: bool | None = None
+
+
+@router.put("/telegram")
+def telegram_update(payload: TelegramInput, db: DbSession) -> dict[str, Any]:
+    s = telegram_lane.settings_row(db)
+    data = payload.model_dump(exclude_none=True)
+    if data.pop("resume", False):
+        s.state = {k: v for k, v in (s.state or {}).items() if k not in ("paused_until", "problem")}
+    for k, v in data.items():
+        setattr(s, k, v)
+    db.commit()
+    return telegram_lane.overview(db)
 
 
 class TextInput(StrictInput):

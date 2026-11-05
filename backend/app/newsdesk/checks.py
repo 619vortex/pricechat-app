@@ -63,7 +63,7 @@ def similarity(a: str, b: str) -> float:
     return len(x & y) / len(x | y) if x and y else 0.0
 
 
-def check_post(text: str, *, source_text: str, source_names: list[str], breaking: bool = False, as_edited: bool = False) -> Result:
+def check_post(text: str, *, source_text: str, source_names: list[str], breaking: bool = False, as_edited: bool = False, max_len: int = MAX_LEN) -> Result:
     """source_text: everything the sources said, plus the verified figures. as_edited: a person changed it, and may add figures they checked."""
     checks: list[dict[str, Any]] = []
 
@@ -71,7 +71,7 @@ def check_post(text: str, *, source_text: str, source_names: list[str], breaking
         checks.append({"check": name, "passed": bool(passed), "detail": detail or name})
 
     t = (text or "").strip()
-    add("length", 0 < len(t) <= MAX_LEN, f"{len(t)} characters (limit {MAX_LEN})")
+    add("length", 0 < len(t) <= max_len, f"{len(t)} characters (limit {max_len})")
     add("no_link", not URLISH.search(t), "It contains a link or web address, which costs $0.20 instead of $0.015 on X")
     add("no_mentions", "@" not in t, "It mentions an account")
     add("hashtags", t.count("#") <= 1, "Too many hashtags")

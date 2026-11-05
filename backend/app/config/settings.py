@@ -281,6 +281,7 @@ class Settings(BaseSettings):
     # The News Desk (app/newsdesk). The model only rewrites headlines, and only with an Anthropic key; without one, posts are the attributed headline.
     newsdesk_model: str = "claude-haiku-5-5"
     job_newsdesk_seconds: int = Field(300, ge=60)
+    job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     job_pokemon_pulse_seconds: int = Field(900, ge=300)  # Market Pulse X search (only when enabled in the dashboard)
     x_daily_budget_usd: float = Field(1.0, ge=0)
     x_monthly_budget_usd: float = Field(20.0, ge=0)

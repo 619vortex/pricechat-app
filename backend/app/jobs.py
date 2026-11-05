@@ -488,6 +488,17 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         return await desk.tick(ctx.db, s, runtime.x, get_agent_config(ctx.db).id, ctx.now)
 
+    async def newsdesk_telegram(ctx: JobContext) -> dict[str, Any]:
+        from app.newsdesk import telegram as lane
+
+        if not s.telegram_configured:
+            raise JobSkipped("Telegram bot token not set")
+        client = make_client(s)
+        try:
+            return await lane.tick(ctx.db, s, client, ctx.now)
+        finally:
+            await client.aclose()
+
     async def newsdesk_metrics(ctx: JobContext) -> dict[str, Any]:
         from app.newsdesk import engine as desk
 
@@ -601,6 +612,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         JobSpec("x.ingest", "X reading", "Read own posts, mentions, monitoring rules and watched accounts (read-only, budgeted)", s.job_x_ingest_seconds, x_ingest, initial_delay_seconds=60, timeout_seconds=300),
         JobSpec("newsdesk.tick", "News Desk", "Read news and prices, verify and queue posts for X, publish what's due (dry run until switched live in X › News Desk)",
                 s.job_newsdesk_seconds, newsdesk_tick, initial_delay_seconds=120, timeout_seconds=240),
+        JobSpec("newsdesk.telegram", "News Desk: Telegram", "Post verified crypto stories to the announcement channel through the Price Chat bot, within its limits (Admin › X › News Desk)",
+                s.job_newsdesk_telegram_seconds, newsdesk_telegram, initial_delay_seconds=60, timeout_seconds=150),
         JobSpec("newsdesk.metrics", "News Desk: post metrics", "Read impressions, likes and reposts of the last 3 days' posts (X charges per post read)",
                 86400, newsdesk_metrics, initial_delay_seconds=1800, timeout_seconds=120),
         JobSpec("x.own", "X: Price Chat's own posts", "Read Price Chat's own new X posts for Read & Earn (one incremental request, budgeted)",

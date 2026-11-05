@@ -90,8 +90,9 @@ class TelegramBotClient:
 
     # --- Trading OS (app/tradingos): the bot answers commands in private chats with members who wrote to it first, and
     # posts / updates signal cards in the one signal group set in Admin → Trading OS. Nothing else is ever sent.
+    # The News Desk's Telegram lane (app/newsdesk/telegram) also posts here, to the one announcement channel, after checking the bot's rights.
     async def send_message(self, chat_id: int | str, text: str, buttons: list[list[dict[str, str]]] | None = None, html: bool = False,
-                           reply_to: int | None = None) -> dict[str, Any]:
+                           reply_to: int | None = None, silent: bool = False) -> dict[str, Any]:
         params: dict[str, Any] = {"chat_id": chat_id, "text": text[:4096], "disable_web_page_preview": True}
         if buttons:
             params["reply_markup"] = {"inline_keyboard": buttons}
@@ -99,6 +100,8 @@ class TelegramBotClient:
             params["parse_mode"] = "HTML"
         if reply_to:
             params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
+        if silent:
+            params["disable_notification"] = True
         return _sent(await self._call("sendMessage", params))
 
     async def send_photo(self, chat_id: int | str, png: bytes, caption: str, buttons: list[list[dict[str, str]]] | None = None,

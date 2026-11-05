@@ -82,3 +82,24 @@ describe("News Desk", () => {
     expect(screen.getByRole("link", { name: "Open on X" })).toBeTruthy();
   });
 });
+
+describe("News Desk: Telegram", () => {
+  it("shows what Telegram confirmed, and stops with one press", async () => {
+    const lane = { enabled: true, max_per_day: 10, gap_minutes: 45, channel: "@Pricechatupdates", problem: null, paused_until: null, last_run: null,
+      posts: [{ id: 1, status: "delivered", headline: "Samsung Wallet adds USDC", source: "Decrypt", message_id: 144, url: "https://t.me/Pricechatupdates/144", error: null, created_at: null, delivered_at: null },
+        { id: 2, status: "uncertain", headline: "Another story", source: "SEC", message_id: null, url: null, error: "Telegram didn't answer", created_at: null, delivered_at: null }] };
+    const puts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "PUT") puts.push(`${input} ${init.body}`);
+      return new Response(JSON.stringify(input.includes("/telegram") ? lane : desk()), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    render(<NewsDesk />);
+    await settle();
+    expect(screen.getByRole("link", { name: "Samsung Wallet adds USDC" }).getAttribute("href")).toBe("https://t.me/Pricechatupdates/144");
+    expect(screen.getByText("Message 144")).toBeTruthy();
+    expect(screen.getByText("Check the channel")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Stop posting to Telegram" }));
+    await settle();
+    expect(puts[0]).toMatch(/\/x\/newsdesk\/telegram .*"enabled":false/);
+  });
+});

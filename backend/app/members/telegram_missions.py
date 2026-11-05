@@ -29,6 +29,7 @@ from app.members import missions as mx
 from app.members.referrals import program
 from app.members.verified import meaningful
 from app.models.members import LinkedIdentity, Member, MemberMission, Mission
+from app.models.newsdesk import NdTelegramPost
 from app.models.telegram import TelegramMessage, TelegramSource
 
 logger = logging.getLogger(__name__)
@@ -140,10 +141,13 @@ def generate(db: Session) -> int:
     group = db.scalar(select(TelegramSource).where(TelegramSource.chat_id == s.channel_linked_chat_id, TelegramSource.enabled.is_(True))) \
         if s.channel_linked_chat_id else None
     if group is not None:
-        post = db.scalar(select(TelegramMessage).where(
+        forwards = db.scalars(select(TelegramMessage).where(
             TelegramMessage.chat_id == group.chat_id, TelegramMessage.author_id == TELEGRAM_SERVICE_USER,
             TelegramMessage.forward_from.is_not(None), TelegramMessage.sent_at >= now - timedelta(days=s.discussion_window_days))
-            .order_by(TelegramMessage.sent_at.desc()))
+            .order_by(TelegramMessage.sent_at.desc()).limit(50))
+        # the automatic news posts aren't announcements: each one would otherwise replace the mission and pay XP again
+        news = set(db.scalars(select(NdTelegramPost.headline).where(NdTelegramPost.status != "refused", NdTelegramPost.created_at >= now - timedelta(days=s.discussion_window_days + 1))))
+        post = next((f for f in forwards if not any(h in (f.text or "") for h in news)), None)
         if post is not None:
             key = f"tg-discuss:{post.chat_id}:{post.message_id}"
             if db.scalar(select(Mission.id).where(Mission.key == key)) is None:
