@@ -12,6 +12,8 @@ import live.pricechat.kiwivpn.autocall.AutoCallController
 import live.pricechat.kiwivpn.log.Diag
 import live.pricechat.kiwivpn.model.ServerRef
 import live.pricechat.kiwivpn.net.HttpKiwiApi
+import live.pricechat.kiwivpn.routing.AppCatalog
+import live.pricechat.kiwivpn.routing.RoutingPolicy
 import live.pricechat.kiwivpn.security.KeystoreSealer
 import live.pricechat.kiwivpn.security.Vault
 import live.pricechat.kiwivpn.vpn.ConnectionManager
@@ -42,6 +44,7 @@ class KiwiApp : Application() {
             ip = { api.myIp() },
             networkChanged = { api.dropConnections() },
             blocking = Dispatchers.IO,
+            routing = { RoutingPolicy.plan(vault.read().settings.routing, packageName) { AppCatalog.isInstalled(this, it) } },
         )
     }
 

@@ -5,6 +5,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import live.pricechat.kiwivpn.model.Peer
 import live.pricechat.kiwivpn.model.ServerRef
+import live.pricechat.kiwivpn.routing.RoutingPrefs
 import java.io.File
 import java.security.GeneralSecurityException
 
@@ -25,6 +26,8 @@ data class AppSettings(
     val autoCallWhatsApp: Boolean = false,
     val autoCallTelegram: Boolean = false,
     val autoCallConsented: Boolean = false,
+    /** Which apps use the VPN. On this phone only: never sent to Price Chat. */
+    val routing: RoutingPrefs = RoutingPrefs(),
 )
 
 @Serializable

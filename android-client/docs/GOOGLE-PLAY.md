@@ -38,6 +38,9 @@ The app uses `systemExempted`, because Android's documentation lists "VPN apps" 
 
 Encrypted in transit: yes. Deleting data: check that deleting a member removes VPN devices before saying so.
 
+## Installed apps (App-Based VPN)
+Listing apps uses a `<queries>` MAIN/LAUNCHER intent, **not** `QUERY_ALL_PACKAGES`, the permission Google Play restricts. The list and the choices stay encrypted on the phone and are never sent anywhere. Say so in the Data safety form.
+
 ## Billing
 Payments are off, and the app shows no purchase. If paid access is sold inside an Android app distributed through Play, Google Play's billing rules apply to digital goods. Whether existing website payments (card, USDT) may be linked from the app depends on the program and region. **Check it and take advice before turning on payments.** Nothing's implemented.
 

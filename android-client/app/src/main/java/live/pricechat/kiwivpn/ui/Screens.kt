@@ -54,6 +54,9 @@ import live.pricechat.kiwivpn.log.Diag
 import live.pricechat.kiwivpn.model.Server
 import live.pricechat.kiwivpn.model.accountStatus
 import live.pricechat.kiwivpn.net.BASE_URL
+import live.pricechat.kiwivpn.routing.AppCatalog
+import live.pricechat.kiwivpn.routing.RoutingMode
+import live.pricechat.kiwivpn.routing.RoutingPolicy
 import live.pricechat.kiwivpn.vpn.ConnectionState
 import java.util.Locale
 
@@ -221,7 +224,7 @@ fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, open
 // --- Settings --------------------------------------------------------------------------------------------------------
 
 @Composable
-fun SettingsScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, openIntent: (Intent) -> Unit, onDiagnostics: () -> Unit, onSignOut: () -> Unit) {
+fun SettingsScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, openIntent: (Intent) -> Unit, onDiagnostics: () -> Unit, onAppRouting: () -> Unit, onSignOut: () -> Unit) {
     val s = ui.settings
     Page("Settings") {
         Card {
@@ -234,6 +237,11 @@ fun SettingsScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, 
             Text("Android can keep Kiwi VPN running from startup, and can block all traffic when the VPN isn't connected. Open VPN settings, press the gear beside Kiwi VPN, and turn on Always-on VPN and, if you want it, Block connections without VPN.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Soft)
             Text("Those are Android's own controls. Kiwi VPN doesn't have a kill switch of its own, and this combination hasn't finished testing.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Warn)
             LinkRow("Open VPN settings") { openIntent(Intent(Settings.ACTION_VPN_SETTINGS)) }
+        }
+        if (ui.capabilities["app_routing_enabled"] != false) {
+            Card {
+                LinkRow("App-Based VPN", RoutingPolicy.modeName(s.routing.mode) + if (s.routing.mode == RoutingMode.ALL_APPS) "" else ": " + RoutingPolicy.countText(s.routing), onClick = onAppRouting)
+            }
         }
         if (ui.capabilities["auto_call_enabled"] != false) AutoCallCard(model, ui, openIntent)
         Card {
@@ -282,6 +290,9 @@ private fun AutoCallCard(model: AppViewModel, ui: UiState, openIntent: (Intent) 
             Toggle("WhatsApp", if (installed("com.whatsapp", "com.whatsapp.w4b")) null else "Not installed on this phone", s.autoCallWhatsApp) { on -> model.changeSettings { it.copy(autoCallWhatsApp = on) } }
             Toggle("Telegram", if (installed("org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram")) null else "Not installed on this phone", s.autoCallTelegram) { on -> model.changeSettings { it.copy(autoCallTelegram = on) } }
             Fact("Status", status.message)
+            RoutingPolicy.autoCallWarnings(s.routing, s.autoCallWhatsApp, s.autoCallTelegram) { AppCatalog.isInstalled(context, it) }.forEach {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = Kiwi.Warn)
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text("Not yet proven on real phones. It can only act after the call has started, so the start of a call can happen before the VPN is up, and turning a VPN on can interrupt a call. Don't rely on it for your safety.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Warn)
@@ -327,6 +338,7 @@ fun DiagnosticsScreen(model: AppViewModel, ui: UiState, state: ConnectionState, 
         TextButton(onClick = onBack) { Text("Back to Settings") }
         Card {
             Fact("Tunnel state", statusWord(state))
+            Fact("App routing on the interface", link?.let { RoutingPolicy.modeName(it.routing.mode) + if (it.routing.chosenCount > 0) " (${it.routing.chosenCount})" else "" } ?: "None")
             Fact("Endpoint", link?.endpoint?.ifBlank { null } ?: "None")
             Fact("Last handshake", link?.lastHandshakeMs?.takeIf { it > 0 }?.let { "${((now - it) / 1000).coerceAtLeast(0)} s ago" } ?: "None")
             Fact("Received", bytes(link?.rxBytes))

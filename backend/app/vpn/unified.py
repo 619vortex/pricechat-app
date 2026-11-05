@@ -28,6 +28,7 @@ _CAPABILITIES: dict[str, dict[str, str]] = {
     "passport_enabled": {"android": "0.1.0", "website": "0", "windows": "0.2.0"},  # Windows 0.1.1 has no Passport screen yet
     "referrals_enabled": {"android": "0.1.0", "website": "0", "windows": "0.2.0"},  # also needs the program switch: see capabilities()
     "auto_call_enabled": {"android": "0.1.0"},  # uses Android's notification access, so it can't exist elsewhere
+    "app_routing_enabled": {"android": "0.1.0"},  # per-app VPN, chosen and stored on the phone: the server never sees the list
     "gaming_mode_enabled": {},
     "smart_routing_enabled": {},
     "vpn_missions_enabled": {},

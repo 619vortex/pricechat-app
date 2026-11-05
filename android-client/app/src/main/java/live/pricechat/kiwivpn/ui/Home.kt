@@ -60,6 +60,8 @@ import live.pricechat.kiwivpn.UiState
 import live.pricechat.kiwivpn.model.ServerRef
 import live.pricechat.kiwivpn.model.StatusKind
 import live.pricechat.kiwivpn.model.accountStatus
+import live.pricechat.kiwivpn.routing.RoutingMode
+import live.pricechat.kiwivpn.routing.RoutingPolicy
 import live.pricechat.kiwivpn.vpn.ConnectionState
 
 /** The word the person sees. Protected appears only with a real handshake: nothing else can reach ConnectionState.Connected. */
@@ -193,6 +195,9 @@ private fun Session(state: ConnectionState.Connected) {
     }
     Spacer(Modifier.height(6.dp))
     Text(durationText(now - state.link.sinceMs), color = Kiwi.Text, fontWeight = FontWeight.SemiBold)
+    if (state.link.routing.mode != RoutingMode.ALL_APPS) {
+        Text(RoutingPolicy.describe(state.link.routing), style = MaterialTheme.typography.bodySmall, color = Kiwi.LimeBright, textAlign = TextAlign.Center)
+    }
     state.link.publicIp?.let { ip ->
         Text(if (state.link.ipMatchesServer) "Public IP: $ip (verified: the server's)" else "Public IP: $ip (not the server's address)", style = MaterialTheme.typography.bodySmall, color = if (state.link.ipMatchesServer) Kiwi.Soft else Kiwi.Warn, textAlign = TextAlign.Center)
     }

@@ -22,6 +22,7 @@ import live.pricechat.kiwivpn.model.ref
 import live.pricechat.kiwivpn.model.suggestedServer
 import live.pricechat.kiwivpn.net.ApiException
 import live.pricechat.kiwivpn.net.BASE_URL
+import live.pricechat.kiwivpn.routing.RoutingPrefs
 import live.pricechat.kiwivpn.security.AppSettings
 import live.pricechat.kiwivpn.vpn.ConnectionState
 import live.pricechat.kiwivpn.vpn.TunnelDriver
@@ -222,6 +223,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         app.vault.update { it.copy(settings = after) }
         _ui.update { it.copy(settings = after) }
         if (before.autoCallEnabled && !after.autoCallEnabled) app.autoCall.disabled()
+    }
+
+    /** Saved first, so the choice survives whatever happens next. If a VPN is running, it's rebuilt with the new lists. If not, they apply on the next connection. */
+    fun saveRouting(prefs: RoutingPrefs) {
+        changeSettings { it.copy(routing = prefs) }
+        if (app.connection.state.value.isActive) app.connection.applyRouting()
     }
 
     fun hasNotificationAccess() = AutoCallController.hasNotificationAccess(getApplication())

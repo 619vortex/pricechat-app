@@ -24,6 +24,8 @@ import live.pricechat.kiwivpn.KiwiApp
 import live.pricechat.kiwivpn.MainActivity
 import live.pricechat.kiwivpn.R
 import live.pricechat.kiwivpn.log.Diag
+import live.pricechat.kiwivpn.routing.RoutePlan
+import live.pricechat.kiwivpn.routing.RoutingMode
 
 /**
  * The persistent notification, and what keeps the process running with the screen off. The tunnel itself lives in the library's own VpnService. Started only once the person has given VPN permission,
@@ -74,13 +76,20 @@ class TunnelService : Service() {
             if (app.vault.read().settings.notificationShowsCountry && server != null) ": ${server.name}" else ""
         }
         return when (state) {
-            is ConnectionState.Connected -> "Protected" + where(state.server)
+            is ConnectionState.Connected -> "Protected" + where(state.server) + routed(state.link.routing)
             is ConnectionState.Connecting -> "Connecting" + where(state.target)
             is ConnectionState.Reconnecting -> "Reconnecting: the server isn't answering"
             is ConnectionState.Disconnecting -> "Disconnecting"
             is ConnectionState.Disconnected -> "Unprotected"
             is ConnectionState.Failed -> "Connection failed"
         }
+    }
+
+    /** "Protected" alone would overclaim when only some apps use the VPN. */
+    private fun routed(plan: RoutePlan): String = when {
+        plan.mode == RoutingMode.ONLY_SELECTED -> " (only ${plan.chosenCount} selected)"
+        plan.mode == RoutingMode.ALL_EXCEPT && plan.chosenCount > 0 -> " (except ${plan.chosenCount} apps)"
+        else -> ""
     }
 
     private fun build(app: KiwiApp, state: ConnectionState): Notification {

@@ -8,7 +8,9 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import live.pricechat.kiwivpn.model.ServerRef
+import live.pricechat.kiwivpn.routing.RoutePlan
+import live.pricechat.kiwivpn.routing.RoutingError
+import live.pricechat.kiwivpn.routing.RoutingMode
 import live.pricechat.kiwivpn.vpn.ConnectionManager
 import live.pricechat.kiwivpn.vpn.ConnectionState
 import live.pricechat.kiwivpn.vpn.Profile
@@ -32,13 +34,14 @@ private class FakeDriver(private val clock: () -> Long) : TunnelDriver {
     var downs = 0
     var maxRunning = 0
     var upFails: String? = null
-    var hangOnDown = false
+    var lastConfig = ""
     private var onDown: () -> Unit = {}
     override fun needsPermission() = false
     override fun up(config: String) {
         upFails?.let { throw TunnelFailure(it) }
         ups++
         running = true
+        lastConfig = config
         maxRunning = maxOf(maxRunning, 1)
         handshakeAt = 0
     }
@@ -66,7 +69,7 @@ private class FakeSource(var fail: ProfileError? = null) : ProfileSource {
         asked += serverId to keepServer
         if (limitOnce) { limitOnce = false; throw ProfileError.DeviceLimit(tooMany = false) }
         fail?.let { throw it }
-        return Profile("config", "5.75.10.20", listOf("10.66.0.1"), fromCache = false)
+        return Profile("[Interface]\nPrivateKey = x\n\n[Peer]\nPublicKey = y\n", "5.75.10.20", listOf("10.66.0.1"), fromCache = false)
     }
 }
 
@@ -78,6 +81,7 @@ class ConnectionManagerTest {
         val source = FakeSource()
         val memory = FakeMemory()
         var drops = 0
+        var plan: () -> RoutePlan = { RoutePlan.ALL }
         val manager = ConnectionManager(
             scope = TestScope(dispatcher),
             driver = driver,
@@ -88,6 +92,7 @@ class ConnectionManagerTest {
             blocking = dispatcher,
             now = { test.currentTime + 1 },
             timings = Timings(),
+            routing = { plan() },
         )
         val state get() = manager.state.value
         fun settle() { test.advanceTimeBy(2_000); test.runCurrent() }
@@ -259,6 +264,121 @@ class ConnectionManagerTest {
         r.manager.disconnect()
         r.settle()
         assertEquals(2, r.drops)
+    }
+
+    private val selected = RoutePlan(RoutingMode.ONLY_SELECTED, listOf("com.whatsapp", "live.pricechat.kiwivpn"), 1)
+    private val excepted = RoutePlan(RoutingMode.ALL_EXCEPT, listOf("com.bank"), 1)
+
+    @Test fun all_apps_puts_no_app_list_on_the_interface() = scenario { r ->
+        r.manager.connect(GERMANY)
+        r.settle()
+        assertFalse(r.driver.lastConfig.contains("Applications"))
+        assertEquals(RoutingMode.ALL_APPS, (r.state as ConnectionState.Connected).link.routing.mode)
+    }
+
+    @Test fun the_selected_apps_reach_the_real_interface_config_in_the_interface_section() = scenario { r ->
+        r.plan = { selected }
+        r.manager.connect(GERMANY)
+        r.settle()
+        val config = r.driver.lastConfig
+        assertTrue(config.contains("IncludedApplications = com.whatsapp, live.pricechat.kiwivpn"))
+        assertFalse(config.contains("ExcludedApplications"))
+        assertTrue("It has to be in [Interface]", config.indexOf("IncludedApplications") < config.indexOf("[Peer]"))
+    }
+
+    @Test fun the_excluded_apps_reach_the_real_interface_config() = scenario { r ->
+        r.plan = { excepted }
+        r.manager.connect(GERMANY)
+        r.settle()
+        assertTrue(r.driver.lastConfig.contains("ExcludedApplications = com.bank"))
+        assertFalse(r.driver.lastConfig.contains("IncludedApplications"))
+    }
+
+    @Test fun a_mode_isnt_active_until_the_server_has_answered() = scenario { r ->
+        r.plan = { selected }
+        r.driver.answers = false
+        r.manager.connect(GERMANY)
+        r.settle()
+        assertTrue(r.state is ConnectionState.Connecting)
+        r.driver.answers = true
+        r.settle()
+        assertEquals(RoutingMode.ONLY_SELECTED, (r.state as ConnectionState.Connected).link.routing.mode)
+    }
+
+    @Test fun changing_routing_while_connected_rebuilds_the_interface_and_reports_the_new_mode() = scenario { r ->
+        r.manager.connect(GERMANY)
+        r.settle()
+        assertEquals(1, r.driver.ups)
+        r.plan = { excepted }
+        r.manager.applyRouting()
+        r.settle()
+        assertEquals("A new interface, because Android can't change the list on a running one", 2, r.driver.ups)
+        assertEquals(GERMANY, (r.state as ConnectionState.Connected).server)
+        assertEquals(RoutingMode.ALL_EXCEPT, (r.state as ConnectionState.Connected).link.routing.mode)
+        assertTrue(r.driver.lastConfig.contains("ExcludedApplications = com.bank"))
+    }
+
+    @Test fun switching_through_all_three_modes_while_connected_works() = scenario { r ->
+        r.manager.connect(GERMANY)
+        r.settle()
+        for (next in listOf(selected, excepted, RoutePlan.ALL, selected)) {
+            r.plan = { next }
+            r.manager.applyRouting()
+            r.settle()
+            assertEquals(next.mode, (r.state as ConnectionState.Connected).link.routing.mode)
+        }
+        assertEquals(5, r.driver.ups)
+    }
+
+    @Test fun applying_routing_while_off_starts_nothing() = scenario { r ->
+        r.plan = { selected }
+        r.manager.applyRouting()
+        r.settle()
+        assertEquals(0, r.driver.ups)
+        assertEquals(ConnectionState.Disconnected(), r.state)
+    }
+
+    @Test fun a_refused_plan_starts_no_tunnel_and_says_why() = scenario { r ->
+        r.plan = { throw RoutingError("No apps are selected") }
+        r.manager.connect(GERMANY)
+        r.settle()
+        assertEquals("No apps are selected", (r.state as ConnectionState.Failed).message)
+        assertEquals(0, r.driver.ups)
+    }
+
+    @Test fun a_refused_change_while_connected_keeps_the_mode_really_on_the_interface_and_says_so() = scenario { r ->
+        r.plan = { excepted }
+        r.manager.connect(GERMANY)
+        r.settle()
+        r.plan = { throw RoutingError("No apps are selected") }
+        r.manager.applyRouting()
+        r.settle()
+        val s = r.state as ConnectionState.Connected
+        assertEquals(RoutingMode.ALL_EXCEPT, s.link.routing.mode)
+        assertTrue(s.notice!!.contains("weren't applied"))
+        assertEquals(1, r.driver.ups)
+    }
+
+    @Test fun a_failed_rebuild_shows_an_error_not_the_new_mode() = scenario { r ->
+        r.manager.connect(GERMANY)
+        r.settle()
+        r.plan = { selected }
+        r.driver.upFails = "Android refused to create the VPN."
+        r.manager.applyRouting()
+        r.settle()
+        assertEquals("Android refused to create the VPN.", (r.state as ConnectionState.Failed).message)
+    }
+
+    @Test fun changing_country_keeps_the_mode() = scenario { r ->
+        r.plan = { selected }
+        r.manager.connect(GERMANY)
+        r.settle()
+        r.manager.connect(FINLAND)
+        r.settle()
+        val s = r.state as ConnectionState.Connected
+        assertEquals(FINLAND, s.server)
+        assertEquals(RoutingMode.ONLY_SELECTED, s.link.routing.mode)
+        assertTrue(r.driver.lastConfig.contains("IncludedApplications"))
     }
 
     @Test fun device_limit_while_switching_stops_the_old_tunnel_then_retries_with_nothing_kept() = scenario { r ->

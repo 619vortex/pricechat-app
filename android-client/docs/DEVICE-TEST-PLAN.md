@@ -73,5 +73,33 @@ Run each for **WhatsApp** and **Telegram**, voice and video, with the VPN starti
 
 **Results decide what's said about this feature.** If 27 to 33 don't hold on a given phone and app, the setting should say so, or be removed.
 
+## App-Based VPN
+Use an outside site in Chrome, such as ipleak.net, to see each app's address. Check WhatsApp or Telegram with a second app you can see an address in if you have one. **"Uses the VPN" means the address is the server's. "Normal" means it's your own.**
+
+| # | Test | Pass means |
+|---|---|---|
+| 47 | **First, on Android 14 or later:** connect with any mode, and watch for a crash | Stays running with the notification showing. If it crashes, send the Android version: see the open risk in `APP-ROUTING.md` |
+| 48 | All Apps: Chrome | Server's address |
+| 49 | Only Selected, Chrome selected | Server's address |
+| 50 | Only Selected, Chrome not selected, another app selected | Your own address |
+| 51 | All Except, Chrome excluded | Your own address |
+| 52 | All Except, Chrome not excluded | Server's address |
+| 53 | Only Selected, nothing selected | Save is disabled, with the reason shown |
+| 54 | Only Selected, then uninstall the only selected app, then Connect | Refuses and says why. It must **not** connect every app |
+| 55 | Change mode while connected, for each pair of modes | The prompt appears, it reconnects, "Active now" changes only after it reconnects, and test 48 to 52 still hold |
+| 56 | Change mode while connected with the server unreachable | An error shows. It doesn't claim the new mode |
+| 57 | Change mode, restart the app | Choice kept |
+| 58 | Change mode, reboot the phone | Choice kept |
+| 59 | Switch mode back and forth | Each mode's app list is as you left it |
+| 60 | Germany to Finland in each mode | Mode stays, address changes for routed apps only |
+| 61 | Search, Select all, Bypass all, Clear selection | The counts and each switch match. Select all acts only on what the search shows |
+| 62 | Always-on VPN with Only Selected or All Except | Reconnects with the same mode after reboot |
+| 63 | Block connections without VPN with Only Selected or All Except | **Record what happens to apps outside the VPN.** Google warns they can lose their connection |
+| 64 | DNS test site in an included app, then in an excluded app | Included: the server's resolver only. Excluded: your normal resolver, as expected |
+| 65 | IPv6 test site in an included app, then in an excluded app | Included: no real IPv6 address of yours. Excluded: your normal IPv6 |
+| 66 | Auto-Call with Only Selected and WhatsApp not selected | The warning shows. During a call, the VPN comes up and the call doesn't use it |
+| 67 | Auto-Call with WhatsApp selected, then a call | VPN comes up in that mode, and your selections aren't changed |
+| 68 | Is a work-profile app listed? Does it follow the rules? | Record it. Android keeps work profiles separate |
+
 ## Results to send back
 Phone and Android version, the app's build, the output of test 8, any failure's on-screen message, Diagnostics > Recent events, and the Auto-Call lines.

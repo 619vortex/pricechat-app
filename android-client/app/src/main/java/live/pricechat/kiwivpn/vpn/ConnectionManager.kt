@@ -19,6 +19,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import live.pricechat.kiwivpn.log.Diag
 import live.pricechat.kiwivpn.model.ServerRef
+import live.pricechat.kiwivpn.routing.RoutePlan
+import live.pricechat.kiwivpn.routing.RoutingError
+import live.pricechat.kiwivpn.routing.RoutingPolicy
 
 data class TunnelStats(val lastHandshakeMs: Long, val rxBytes: Long, val txBytes: Long)
 
@@ -58,6 +61,8 @@ data class Link(
     val txBytes: Long,
     val publicIp: String? = null,
     val ipMatchesServer: Boolean = false,
+    /** The app routing on the running interface. Set only once it has been applied and answered, so a saved choice can't read as active. */
+    val routing: RoutePlan = RoutePlan.ALL,
 )
 
 /** What's remembered about the connection across a restart of the process. */
@@ -91,6 +96,7 @@ class ConnectionManager(
     private val blocking: CoroutineDispatcher,
     private val now: () -> Long = System::currentTimeMillis,
     private val timings: Timings = Timings(),
+    private val routing: () -> RoutePlan = { RoutePlan.ALL },
 ) {
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -118,15 +124,33 @@ class ConnectionManager(
                 is ConnectionState.Reconnecting -> if (s.server.id == server.id) return
                 else -> Unit
             }
-            val previous = activeServer()
-            val old = job
-            // Set here, before any coroutine runs, so a second press in the same moment sees it
-            _state.value = ConnectionState.Connecting(server, previous)
-            Diag.event("connect_requested", "server" to server.id, "switching" to (previous != null))
-            job = scope.launch {
-                old?.cancelAndJoin()
-                run(server, previous)
+            start(server, applying = false)
+        }
+    }
+
+    /** App routing can only be set when a VPN interface is built, so a change needs a new one: Android's own rule. A failure leaves an honest state, with the mode that's really on the interface. */
+    fun applyRouting() {
+        synchronized(guard) {
+            val server = when (val s = _state.value) {
+                is ConnectionState.Connected -> s.server
+                is ConnectionState.Reconnecting -> s.server
+                is ConnectionState.Connecting -> s.target
+                else -> return
             }
+            Diag.event("routing_reapply")
+            start(server, applying = true)
+        }
+    }
+
+    private fun start(server: ServerRef, applying: Boolean) {
+        val previous = activeServer()
+        val old = job
+        // Set here, before any coroutine runs, so a second press in the same moment sees it
+        _state.value = ConnectionState.Connecting(server, previous)
+        Diag.event("connect_requested", "server" to server.id, "switching" to (previous != null))
+        job = scope.launch {
+            old?.cancelAndJoin()
+            run(server, previous, applying)
         }
     }
 
@@ -181,9 +205,16 @@ class ConnectionManager(
         else -> null
     }
 
-    private suspend fun run(server: ServerRef, previous: ServerRef?) {
+    private suspend fun run(server: ServerRef, previous: ServerRef?, applying: Boolean) {
         var running = previous
         memory.setWanted(server)
+        val plan = try {
+            routing()
+        } catch (e: RoutingError) {
+            Diag.event("routing_refused")
+            giveUp(e.message ?: "The app routing couldn't be used.", server, running, applying)
+            return
+        }
         val profile = try {
             // Fetched before the old tunnel goes. With "Block connections without VPN" nothing could reach Price Chat afterwards, and a failure here leaves the person protected rather than not.
             try {
@@ -197,13 +228,13 @@ class ConnectionManager(
             }
         } catch (e: ProfileError) {
             Diag.event("profile_failed", "kind" to (e::class.simpleName ?: "?"))
-            giveUp(e.message ?: "Couldn't get the connection details.", server, running)
+            giveUp(e.message ?: "Couldn't get the connection details.", server, running, applying)
             return
         }
         _state.value = ConnectionState.Connecting(server, running, ConnectionState.Connecting.Step.STARTING)
         try {
             changing = true
-            bounded(timings.stopLimitMs, "Android didn't start the tunnel.") { driver.up(profile.config) }
+            bounded(timings.stopLimitMs, "Android didn't start the tunnel.") { driver.up(RoutingPolicy.applyTo(profile.config, plan)) }
         } catch (e: TunnelFailure) {
             Diag.event("tunnel_start_failed")
             withContext(NonCancellable) { silentStop() }
@@ -236,18 +267,19 @@ class ConnectionManager(
             _state.value = ConnectionState.Failed(if (profile.fromCache) "The server didn't answer. Check your connection and try again." else "The server didn't answer in time. Check your connection, or try another country.", server)
             return
         }
-        Diag.event("connected", "server" to server.id, "from_cache" to profile.fromCache)
-        watch(server, Link(now(), profile.endpoint, profile.dns, first.lastHandshakeMs, first.rxBytes, first.txBytes))
+        Diag.event("connected", "server" to server.id, "from_cache" to profile.fromCache, "routing" to plan.mode.name, "apps" to plan.chosenCount)
+        watch(server, Link(now(), profile.endpoint, profile.dns, first.lastHandshakeMs, first.rxBytes, first.txBytes, routing = plan))
     }
 
     /** Stays on the old tunnel if there is one, since a failed switch shouldn't cost the working connection. */
-    private fun giveUp(message: String, server: ServerRef, running: ServerRef?) {
+    private fun giveUp(message: String, server: ServerRef, running: ServerRef?, applying: Boolean) {
+        val notice = if (applying) "Your app choices weren't applied, so the previous ones are still active: $message" else "Couldn't switch: $message"
         if (running != null && driver.isUp()) {
             memory.setWanted(running)
             val stats = driver.stats()
             val link = (lastLink ?: Link(now(), "", emptyList(), 0, 0, 0)).copy(lastHandshakeMs = stats?.lastHandshakeMs ?: 0, rxBytes = stats?.rxBytes ?: 0, txBytes = stats?.txBytes ?: 0)
-            _state.value = ConnectionState.Connected(running, link, notice = "Couldn't switch: $message")
-            job = scope.launch { watch(running, link, notice = "Couldn't switch: $message") }
+            _state.value = ConnectionState.Connected(running, link, notice = notice)
+            job = scope.launch { watch(running, link, notice = notice) }
         } else {
             memory.setWanted(null)
             _state.value = ConnectionState.Failed(message, server)

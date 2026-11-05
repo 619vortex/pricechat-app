@@ -1,6 +1,6 @@
 # Kiwi VPN for Android
 
-Native Kotlin and Compose, using the official WireGuard library and the existing Price Chat backend. Version `0.1.0-beta1`.
+Native Kotlin and Compose, using the official WireGuard library and the existing Price Chat backend. Version `0.1.0-beta2`.
 
 **Android is built on the main PC,** as the owner decided on 2026-11-05. The tools are under `%LOCALAPPDATA%\Android`: `Sdk`, `gradle-9.6.0` and `jdk-21*`. Android Studio is at `C:\Program Files\Android\Android Studio`. This applies to Android only: the rule against Rust toolchains on the main PC still stands.
 
@@ -34,4 +34,4 @@ Android Studio can open the `android-client` folder. Use it in the VM, not on th
 - **`docs/DEVICE-TEST-PLAN.md`** is the real test. A passing unit test proves nothing about a real tunnel.
 
 ## Docs
-`docs/API-CONTRACT.md`, `ARCHITECTURE.md`, `AUTO-CALL-FEASIBILITY.md`, `DEVICE-TEST-PLAN.md`, `GOOGLE-PLAY.md`, `SIGNING.md`, `BACKEND-CHANGES-PROPOSED.md`.
+`docs/API-CONTRACT.md`, `ARCHITECTURE.md`, `APP-ROUTING.md`, `AUTO-CALL-FEASIBILITY.md`, `DEVICE-TEST-PLAN.md`, `GOOGLE-PLAY.md`, `SIGNING.md`, `BACKEND-CHANGES-PROPOSED.md`.

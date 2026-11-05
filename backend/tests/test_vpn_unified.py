@@ -194,7 +194,8 @@ def test_each_platform_gets_only_what_it_supports(client: TestClient, db: Sessio
     android = client.get(CAPS, params={"platform": "android", "version": "0.1.0-beta1"}).json()
     windows_today = client.get(CAPS, params={"platform": "windows", "version": "0.1.1"}).json()
     website = client.get(CAPS, params={"platform": "website", "version": "1"}).json()
-    assert android["auto_call_enabled"] is True and android["passport_enabled"] is True
+    assert android["auto_call_enabled"] is True and android["passport_enabled"] is True and android["app_routing_enabled"] is True
+    assert windows_today["app_routing_enabled"] is False and website["app_routing_enabled"] is False
     assert windows_today["auto_call_enabled"] is False and windows_today["passport_enabled"] is False
     assert website["auto_call_enabled"] is False and website["passport_enabled"] is True
 

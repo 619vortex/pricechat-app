@@ -59,12 +59,15 @@ fun KiwiRoot(model: AppViewModel, openBrowser: (String) -> Unit, openUrl: (Strin
 private fun SignedIn(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, openIntent: (Intent) -> Unit, connect: () -> Unit) {
     var tabName by rememberSaveable { mutableStateOf(Tab.HOME.name) }
     var diagnostics by rememberSaveable { mutableStateOf(false) }
+    var appRouting by rememberSaveable { mutableStateOf(false) }
     val tab = Tab.valueOf(tabName)
     val state by model.connection.collectAsStateWithLifecycle()
 
-    BackHandler(enabled = diagnostics || tab != Tab.HOME) {
+    BackHandler(enabled = diagnostics || appRouting || tab != Tab.HOME) {
         if (diagnostics) {
             diagnostics = false
+        } else if (appRouting) {
+            appRouting = false
         } else {
             tabName = Tab.HOME.name
         }
@@ -75,8 +78,8 @@ private fun SignedIn(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit
             NavigationBar(containerColor = Kiwi.Forest) {
                 Tab.entries.forEach { t ->
                     NavigationBarItem(
-                        selected = t == tab && !diagnostics,
-                        onClick = { tabName = t.name; diagnostics = false },
+                        selected = t == tab && !diagnostics && !appRouting,
+                        onClick = { tabName = t.name; diagnostics = false; appRouting = false },
                         icon = { Icon(painterResource(t.icon), contentDescription = null) },
                         label = { Text(t.label) },
                         colors = NavigationBarItemDefaults.colors(selectedIconColor = Kiwi.Ink, indicatorColor = Kiwi.Lime, selectedTextColor = Kiwi.LimeBright, unselectedIconColor = Kiwi.Muted, unselectedTextColor = Kiwi.Muted),
@@ -88,10 +91,11 @@ private fun SignedIn(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit
         Box(Modifier.padding(padding).fillMaxSize()) {
             when {
                 diagnostics -> DiagnosticsScreen(model, ui, state, onBack = { diagnostics = false })
+                appRouting -> AppRoutingScreen(model, ui, state, onBack = { appRouting = false })
                 tab == Tab.HOME -> HomeScreen(ui, state, onConnect = connect, onDisconnect = model::disconnect, onStartTrial = model::startTrial, onLocations = { tabName = Tab.LOCATIONS.name })
                 tab == Tab.LOCATIONS -> LocationsScreen(ui, state, onSelect = { model.select(it); tabName = Tab.HOME.name })
                 tab == Tab.ACCOUNT -> AccountScreen(model, ui, state, openUrl)
-                else -> SettingsScreen(model, ui, openUrl, openIntent, onDiagnostics = { diagnostics = true }, onSignOut = model::signOut)
+                else -> SettingsScreen(model, ui, openUrl, openIntent, onDiagnostics = { diagnostics = true }, onAppRouting = { appRouting = true }, onSignOut = model::signOut)
             }
         }
     }

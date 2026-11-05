@@ -1,6 +1,7 @@
 package live.pricechat.kiwivpn.vpn
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.SystemClock
@@ -51,6 +52,10 @@ class GoTunnelDriver(private val context: Context) : TunnelDriver {
             backend.setState(tunnel, Tunnel.State.UP, parsed)
         } catch (e: TunnelFailure) {
             throw e
+        } catch (_: PackageManager.NameNotFoundException) {
+            // Checked just before, so this means it was removed in that moment.
+            Diag.event("routing_app_missing")
+            throw TunnelFailure("An app in your App-Based VPN list isn't installed any more. Please try again.")
         } catch (e: BackendException) {
             Diag.event("backend_error", "reason" to e.reason.name)
             throw TunnelFailure(friendly(e.reason))

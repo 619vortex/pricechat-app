@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -14,6 +15,11 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
+        </intent>
+        <!-- App-Based VPN's list: apps a person can open. Deliberately not QUERY_ALL_PACKAGES, which Google Play restricts. The list never leaves the phone. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
         <!-- Only to show whether they're installed under Auto-Call VPN. No other app is ever looked up. -->
         <package android:name="com.whatsapp" />
@@ -56,7 +62,9 @@
         <service
             android:name=".vpn.TunnelService"
             android:exported="false"
-            android:foregroundServiceType="systemExempted" />
+            android:foregroundServiceType="systemExempted"
+            tools:ignore="ForegroundServicePermission" />
+        <!-- Lint only knows the exact-alarm route to this type. Android's documentation also lists "VPN apps", which is what this is, so no alarm permission is added. To be confirmed on a real phone: DEVICE-TEST-PLAN.md, test 47. -->
 
         <service
             android:name=".autocall.CallListenerService"
