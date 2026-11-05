@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
 import { PLAN, STORE_LINKS, WINDOWS_BETA, visitorBrowser, visitorOs } from "./vpnConfig";
 
@@ -38,6 +39,19 @@ async function settle() {
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+// What the site really offers. Each test starts with the button off, and a test that's about the button turns it on.
+const PUBLISHED = { ...WINDOWS_BETA };
+beforeEach(() => { Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" }); });
+
+describe("The published Windows installer", () => {
+  it("is the file the page names, with the hash the page shows", () => {
+    expect(PUBLISHED.href).toBe("/downloads/KiwiVPN-Setup.exe");
+    const file = readFileSync(`${process.cwd()}/public${PUBLISHED.href}`);
+    expect(createHash("sha256").update(file).digest("hex").toUpperCase()).toBe(PUBLISHED.sha256);
+    expect(PUBLISHED.version).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+});
 
 const BILL = { price_usd: 9.99, period_days: 30, min_usd: 5, max_usd: 500, usdt: true, card: true,
                networks: [{ key: "ethereum", name: "USDT on Ethereum" }, { key: "tron", name: "USDT on Tron", min_usd: 10.96 }, { key: "solana", name: "USDT on Solana" }] };

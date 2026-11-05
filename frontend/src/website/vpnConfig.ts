@@ -6,8 +6,8 @@ export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox
  *  stop matching backend/app/vpn/billing.py (PRICE_USD, PERIOD_DAYS) and service.py (TRIAL_DAYS, KEEP_LAPSED). When the server does send billing, its figures are used. */
 export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_days: 30 };
 
-/** The Windows beta. Empty until a real, tested installer is hosted: then the button appears, and until then nothing on the page offers a download. All three together, from the build. */
-export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "", version: "", sha256: "" };
+/** The Windows beta: the button appears only while this names a hosted installer. All three together, from the build. Clear them and nothing on the page offers a download. */
+export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.0", sha256: "AD90933509BC954757FC041B26C8AA8EAD5F59EDA4ED30B4E875D7E25234E39D" };
 
 export type VisitorBrowser = "chrome" | "edge" | "phone" | "other";
 
