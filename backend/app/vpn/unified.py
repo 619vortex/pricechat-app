@@ -20,13 +20,13 @@ from app.vpn import service
 
 API_VERSION = 1
 REFRESH_SECONDS = 60
-PLATFORMS = ("android", "windows", "website")
+PLATFORMS = ("android", "ios", "windows", "website")
 
 # Feature -> the lowest app version on each platform that has it. A platform not listed doesn't have it. A capability only says a client may show a feature: every route still checks the account for itself.
 # Off everywhere until each feature is real and approved: gaming_mode_enabled, smart_routing_enabled, vpn_missions_enabled.
 _CAPABILITIES: dict[str, dict[str, str]] = {
-    "passport_enabled": {"android": "0.1.0", "website": "0", "windows": "0.2.0"},  # Windows 0.1.1 has no Passport screen yet
-    "referrals_enabled": {"android": "0.1.0", "website": "0", "windows": "0.2.0"},  # also needs the program switch: see capabilities()
+    "passport_enabled": {"android": "0.1.0", "ios": "0.1.0", "website": "0", "windows": "0.2.0"},  # Windows 0.1.1 has no Passport screen yet
+    "referrals_enabled": {"android": "0.1.0", "ios": "0.1.0", "website": "0", "windows": "0.2.0"},  # also needs the program switch: see capabilities()
     "auto_call_enabled": {"android": "0.1.0"},  # uses Android's notification access, so it can't exist elsewhere
     "app_routing_enabled": {"android": "0.1.0"},  # per-app VPN, chosen and stored on the phone: the server never sees the list
     "gaming_mode_enabled": {},

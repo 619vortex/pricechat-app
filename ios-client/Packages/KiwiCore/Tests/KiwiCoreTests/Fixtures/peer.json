@@ -1,0 +1,1 @@
+{"server_public_key":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=","endpoint_host":"5.75.10.20","listen_port":51821,"addresses":["10.66.0.9/32"],"dns":["10.66.0.1"],"allowed_ips":["0.0.0.0/0","::/0"],"keepalive":25}

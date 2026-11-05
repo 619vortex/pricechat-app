@@ -200,6 +200,14 @@ def test_each_platform_gets_only_what_it_supports(client: TestClient, db: Sessio
     assert website["auto_call_enabled"] is False and website["passport_enabled"] is True
 
 
+def test_iphone_gets_passport_but_nothing_ios_cant_do(client: TestClient) -> None:
+    ios = client.get(CAPS, params={"platform": "ios", "version": "0.1.0"}).json()
+    assert ios["passport_enabled"] is True
+    assert ios["auto_call_enabled"] is False, "No public iOS API can detect WhatsApp or Telegram calls"
+    assert ios["app_routing_enabled"] is False, "Per-app VPN on iOS needs MDM"
+    assert ios["gaming_mode_enabled"] is False
+
+
 def test_unfinished_features_are_off_everywhere(db: Session) -> None:
     for platform in unified.PLATFORMS:
         caps = unified.capabilities(db, platform, "99.0")
@@ -207,7 +215,7 @@ def test_unfinished_features_are_off_everywhere(db: Session) -> None:
 
 
 def test_an_unknown_platform_or_unreadable_version_gets_nothing(db: Session) -> None:
-    for platform, version in (("ios", "1.0"), (None, "1.0"), ("android", None), ("android", ""), ("android", "abc"), ("android", "1.0; drop table"), ("android", "0.0.9")):
+    for platform, version in (("blackberry", "1.0"), (None, "1.0"), ("android", None), ("android", ""), ("android", "abc"), ("android", "1.0; drop table"), ("android", "0.0.9")):
         assert not any(unified.capabilities(db, platform, version).values()), (platform, version)
 
 

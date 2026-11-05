@@ -1,0 +1,8 @@
+{"api_version":1,"refresh_after_seconds":60,
+ "capabilities":{"passport_enabled":true,"referrals_enabled":true,"auto_call_enabled":false,"app_routing_enabled":false,"gaming_mode_enabled":false,"smart_routing_enabled":false,"vpn_missions_enabled":false},
+ "missions":[],
+ "passport":{"username":"kiwi","display_name":"Kiwi","xp":2500,"bonus_xp":0,"xp_suspended":false,
+  "rank":{"current":{"level":3,"key":"warrior","name":"Warrior","min_xp":2000,"description":"x","art":{"treatment":"none"}},"next":{"level":4,"key":"next","name":"Next","min_xp":3000,"description":"","art":{}},"score":2500,"xp_to_next":500,"progress":0.5},
+  "badges":[{"key":"b","name":"First","description":"d","awarded_at":"2026-01-01","awarded_by":"automatic"}],
+  "standing":{"position":84,"board":"all"},
+  "referral":{"code":"kiwi123456","link":"https://pricechat.live/website/join/kiwi123456","joined":2,"qualified":1,"xp_earned":10,"reward_xp":10}}}

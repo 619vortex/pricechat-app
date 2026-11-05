@@ -45,6 +45,26 @@ describe("signing in to the desktop app", () => {
     expect(pc.container.textContent).toMatch(/this PC/);
   });
 
+  it("sends an iPhone's code only to the app's own scheme, and nothing else can pick a destination", async () => {
+    expect(readRequest(`${GOOD}&client=ios`)).toEqual({ ...REQUEST, client: "ios" });
+    expect(callbackUrl({ ...REQUEST, client: "ios" }, "a b")).toBe(`kiwivpn://callback?code=a%20b&state=${STATE}`);
+    expect(callbackUrl(readRequest(`${GOOD}&client=https://evil.example`)!, "x")).toBe(`http://127.0.0.1:49152/callback?code=x&state=${STATE}`);
+    serve(true);
+    const go = vi.fn();
+    const page = render(<VpnDesktopPage search={`${GOOD}&client=ios`} go={go} />);
+    await settle();
+    expect(page.container.textContent).toMatch(/Kiwi VPN for iPhone/);
+    expect(page.container.textContent).toMatch(/this iPhone/);
+    fireEvent.click(screen.getByRole("button", { name: "Allow" }));
+    await settle();
+    expect(go).toHaveBeenCalledWith(`kiwivpn://callback?code=abc%2B1&state=${STATE}`);
+  });
+
+  it("keeps saying iPhone after a trip to Google and back", () => {
+    rememberDesktopSignIn({ ...REQUEST, client: "ios" }, 1000);
+    expect(desktopSignInToResume(2000)).toBe(`${PAGE}&client=ios`);
+  });
+
   it("keeps saying phone after a trip to Google and back", () => {
     rememberDesktopSignIn({ ...REQUEST, client: "android" }, 1000);
     expect(desktopSignInToResume(2000)).toBe(`${PAGE}&client=android`);

@@ -9,7 +9,7 @@ import "./vpn.css";
  * code goes to 127.0.0.1 only. The code is useless without the secret the app kept, so another site sending someone here gains nothing. See routes/desktop.py.
  */
 
-export interface DesktopRequest { challenge: string; port: number; state: string; client?: "android" }
+export interface DesktopRequest { challenge: string; port: number; state: string; client?: "android" | "ios" }
 
 /** null unless every part is exactly what the app sends: nothing from the address bar reaches a redirect otherwise. */
 export function readRequest(search: string): DesktopRequest | null {
@@ -17,10 +17,13 @@ export function readRequest(search: string): DesktopRequest | null {
   const challenge = q.get("challenge") ?? "", state = q.get("state") ?? "", raw = q.get("port") ?? "";
   const port = /^\d{4,5}$/.test(raw) ? Number(raw) : 0;
   if (!/^[A-Za-z0-9_-]{43}$/.test(challenge) || !/^[A-Za-z0-9_-]{16,64}$/.test(state) || port < 1024 || port > 65535) return null;
-  return q.get("client") === "android" ? { challenge, port, state, client: "android" } : { challenge, port, state };  // wording only: it changes nothing about where the code can go
+  const client = q.get("client");
+  return client === "android" || client === "ios" ? { challenge, port, state, client } : { challenge, port, state };
 }
 
 export function callbackUrl(r: DesktopRequest, code: string): string {
+  // iPhone: ASWebAuthenticationSession hands this scheme back to the app that opened the sheet and no other, and the code is useless without the secret that app kept. Everything else: this device only.
+  if (r.client === "ios") return `kiwivpn://callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(r.state)}`;
   return `http://127.0.0.1:${r.port}/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(r.state)}`;
 }
 
@@ -91,8 +94,8 @@ export function VpnDesktopPage({ search = location.search, go = (url: string) =>
     } finally { setBusy(false); }
   }
   const name = who && who !== "loading" ? who.member?.display_name ?? who.member?.username : null;
-  const phone = request?.client === "android";
-  const platform = phone ? "Android" : "Windows", device = phone ? "phone" : "PC";
+  const platform = request?.client === "android" ? "Android" : request?.client === "ios" ? "iPhone" : "Windows";
+  const device = request?.client === "android" ? "phone" : request?.client === "ios" ? "iPhone" : "PC";
   return (
     <SitePage title={`Sign in to Kiwi VPN for ${platform}`} description="Connect the Kiwi VPN app to your Price Chat account." path="/vpn/desktop" noindex>
       <section className="vpn">
