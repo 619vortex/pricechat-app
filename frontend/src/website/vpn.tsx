@@ -525,13 +525,13 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
         </PlatformCard>
         <PlatformCard
           icon={<AndroidIcon className="vpn-app-icon" />} name="Kiwi VPN for Android" text="Covers the apps you choose on your phone: three App-Based VPN modes, all apps, only the ones you pick, or all except the ones you pick."
-          status={android && ANDROID_BETA.testBuild ? "Test build" : "Public beta"} on={!!android} mine={os === "Android" ? "Your device" : null}
+          status={android && ANDROID_BETA.testing ? "Android Release Candidate — Testing" : "Public beta"} on={!!android} mine={os === "Android" ? "Your device" : null}
           action={android ? <a className="site-button is-small vpn-android-go" href={android} download><AndroidIcon className="vpn-picon" />Download APK</a> : <button type="button" className="site-button is-small" disabled>Download APK</button>}
           extra={manual("Android")}
         >
           {android ? (
             <>
-              {ANDROID_BETA.testBuild && <p className="vpn-platform-warn">This is a test build, not a production release.</p>}
+              {ANDROID_BETA.testing && <p className="vpn-platform-warn">Version {ANDROID_BETA.version}. Real-device VPN routing and sign-in testing are still pending.</p>}
               <details className="vpn-checksum">
                 <summary>Version {ANDROID_BETA.version}: read this first</summary>
                 <ul className="vpn-beta-notes">
@@ -745,7 +745,7 @@ function Faq({ member, free, paid, open }: { member: VpnState | null; free: bool
     ["Do you keep logs?", <>We don't log the websites you visit, your DNS lookups or the content of your traffic. We do keep your account, your devices' names and keys, and how much data each one used this month and when it was last active. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
     ["Is there a Kiwi VPN app?", WINDOWS_BETA.href
-      ? `A Windows app is available as a public beta. It isn't code signed yet, so a PC with Smart App Control turned on will block it. It has no kill switch, and its connection, security, DNS leak and IPv6 leak testing isn't finished. ${ANDROID_BETA.href ? "An Android test build is available too. iPhone, Mac and browser versions aren't available yet." : "Android, iPhone, Mac and browser versions aren't available yet."}`
+      ? `A Windows app is available as a public beta. It isn't code signed yet, so a PC with Smart App Control turned on will block it. It has no kill switch, and its connection, security, DNS leak and IPv6 leak testing isn't finished. ${ANDROID_BETA.href ? "An Android release candidate is available too, for testing: real-device VPN routing and sign-in testing are still pending. iPhone, Mac and browser versions aren't available yet." : "Android, iPhone, Mac and browser versions aren't available yet."}`
       : `Not yet. A native Windows app is our first, and it's in development.${open ? " Until then, manual setup connects any device with the free WireGuard app." : ""} Browser extensions appear here once each store approves them.`],
     ["Do I have to set up each device myself?", `With the apps, no: signing in will set the device up.${open ? " Manual setup is there for anything else, under My Devices." : ""}`],
     ...(member ? [["How many devices can I use?", `Your account can have ${member.max_devices} ${member.max_devices === 1 ? "device" : "devices"} at a time. Delete one to add another.`] as [string, React.ReactNode]] : []),

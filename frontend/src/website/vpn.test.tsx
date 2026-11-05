@@ -55,10 +55,25 @@ describe("The Android APK", () => {
     const file = readFileSync(`${process.cwd()}/public${PUBLISHED_ANDROID.href}`);
     expect(createHash("sha256").update(file).digest("hex").toUpperCase()).toBe(PUBLISHED_ANDROID.sha256);
   });
+
+  it("is the release candidate, versioned in its filename and still marked as testing", () => {
+    expect(PUBLISHED_ANDROID.href).toBe("/downloads/KiwiVPN-0.1.0-rc1.apk");
+    expect(PUBLISHED_ANDROID.version).toBe("0.1.0-rc1");
+    expect(PUBLISHED_ANDROID.sha256).toBe("CB52F93919F40BA9E14FFFAD1D80417FB48446F56A182071C59B7B9987C706C7");
+    expect(PUBLISHED_ANDROID.testing).toBe(true);
+  });
+
+  it("never publishes a debug build, a signing key or a mapping file", () => {
+    const files = readdirSync(`${process.cwd()}/public/downloads`);
+    expect(files.filter((f) => /debug|mapping|\.(keystore|jks|p12|dpapi|txt|map|ipa)$/i.test(f))).toEqual([]);
+  });
 });
 
 const PUBLISHED = { ...WINDOWS_BETA };
-beforeEach(() => { Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" }); });
+beforeEach(() => {
+  Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" });
+  Object.assign(ANDROID_BETA, { href: "", sha256: "", testing: true });
+});
 
 describe("The published Windows installer", () => {
   it("is the file the page names, with the hash the page shows", () => {
@@ -215,7 +230,6 @@ describe("Free while payments are off", () => {
 
   it("keeps the Android download disabled until an APK is hosted, with no link to a file that isn't there", () => {
     expect(ANDROID_BETA.href).toBe("");
-    expect(ANDROID_BETA.version).toBe("0.1.0-beta2");
     const { container } = render(<Downloads agent={CHROME} />);
     const android = card(container, "Android");
     const button = screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement;
@@ -226,14 +240,16 @@ describe("Free while payments are off", () => {
     expect(android.textContent).toMatch(/three App-Based VPN modes/);
   });
 
-  it("labels a debug-signed APK as a test build once it's hosted", () => {
+  it("labels a release candidate clearly as testing, with its version and what's still pending", () => {
     Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", sha256: "DEF456" });
     try {
       const { container } = render(<Downloads agent={CHROME} />);
       const android = card(container, "Android");
       expect(screen.getByRole("link", { name: /Download APK/ }).getAttribute("href")).toBe("/downloads/KiwiVPN.apk");
-      expect(android.querySelector(".vpn-status")!.textContent).toBe("Test build");
-      expect(android.textContent).toMatch(/test build, not a production release/);
+      expect(android.querySelector(".vpn-status")!.textContent).toBe("Android Release Candidate — Testing");
+      expect(android.querySelector(".vpn-platform-warn")!.textContent).toBe("Version 0.1.0-rc1. Real-device VPN routing and sign-in testing are still pending.");
+      expect(android.querySelector(".vpn-status.is-on")).toBeTruthy();
+      expect(android.textContent).toMatch(/not from Google Play/);
       expect(android.textContent).toMatch(/no kill switch of its own/);
       expect(android.textContent).toMatch(/DNS leak and IPv6 leak testing aren't finished/);
       expect(android.textContent).not.toMatch(/passed|verified|audited/i);
@@ -243,14 +259,14 @@ describe("Free while payments are off", () => {
     }
   });
 
-  it("calls a release build Public beta, with no test-build label", () => {
-    Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", sha256: "DEF456", testBuild: false });
+  it("drops the testing label only once it's turned off", () => {
+    Object.assign(ANDROID_BETA, { href: "/downloads/KiwiVPN.apk", sha256: "DEF456", testing: false });
     try {
       const { container } = render(<Downloads agent={CHROME} />);
       expect(card(container, "Android").querySelector(".vpn-status")!.textContent).toBe("Public beta");
-      expect(card(container, "Android").textContent).not.toMatch(/test build/i);
+      expect(card(container, "Android").textContent).not.toMatch(/still pending|release candidate/i);
     } finally {
-      Object.assign(ANDROID_BETA, { href: "", sha256: "", testBuild: true });
+      Object.assign(ANDROID_BETA, { href: "", sha256: "", testing: true });
     }
   });
 

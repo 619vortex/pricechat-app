@@ -476,6 +476,7 @@
 .vpn-platforms { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; list-style: none; }
 .vpn-platform { grid-template-rows: auto auto 1fr auto auto; }
 .vpn-platform-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.vpn-platform-top .vpn-status { min-width: 0; padding: 4px 10px; line-height: 1.25; text-align: center; white-space: normal; }
 .vpn-platform-action { margin-top: 10px; }
 .vpn .vpn-platform-action .site-button.is-small { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 50px; }
 .vpn-platform-action .vpn-picon { width: 18px; height: 18px; color: currentColor; }

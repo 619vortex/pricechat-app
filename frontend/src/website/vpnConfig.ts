@@ -9,9 +9,9 @@ export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_day
 /** The Windows beta: the button appears only while this names a hosted installer. All three together, from the build. Clear them and nothing on the page offers a download. */
 export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "0.1.1", sha256: "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598" };
 
-/** The Android APK. `href` is empty on purpose: the button stays disabled until an APK is hosted and the owner approves it. Fill `href` and `sha256` together, and a test ties them to the file.
- *  `testBuild`: true for a debug-signed build, which the card labels as a test build and not a production release. */
-export const ANDROID_BETA: { href: string; version: string; sha256: string; testBuild: boolean } = { href: "", version: "0.1.0-beta2", sha256: "", testBuild: true };
+/** The Android APK. Fill `href` and `sha256` together, and a test ties them to the file. Clear them and the button goes back to disabled.
+ *  `testing`: true while real-phone testing is unfinished, so the card says so plainly rather than presenting a verified release. Set it false only once that testing has passed. */
+export const ANDROID_BETA: { href: string; version: string; sha256: string; testing: boolean } = { href: "/downloads/KiwiVPN-0.1.0-rc1.apk", version: "0.1.0-rc1", sha256: "CB52F93919F40BA9E14FFFAD1D80417FB48446F56A182071C59B7B9987C706C7", testing: true };
 
 /** A download button only ever gets a file hosted on this site: never a local path, another site or a page. Anything else leaves the button disabled. */
 export function hostedDownload(href: string): string | null {
