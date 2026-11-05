@@ -2,7 +2,7 @@
 #   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1            (as administrator)
 #   powershell -ExecutionPolicy Bypass -File build-app-in-vm.ps1 -Remove    removes Kiwi VPN and everything it put on the machine
 # Not for the host: Smart App Control blocks these builds there, and no Kiwi service may ever run on the PC with client1. It stops itself there.
-param([switch]$Remove, [switch]$NoLaunch)
+param([switch]$Remove, [switch]$NoLaunch, [string]$ReturnTo = "\\tsclient\C\AI\pc-wt\kiwi-release")
 $ErrorActionPreference = "Stop"
 $Here = $PSScriptRoot
 $Dir = "C:\Program Files\KiwiVPN"
@@ -93,7 +93,25 @@ New-Item -ItemType Directory -Force "$Here\test-tools" | Out-Null
 Copy-Item "$Work\target-app\debug\examples\fake_service.exe" "$Here\test-tools" -Force
 
 Write-Host ""
+$Sha = (Get-FileHash "$Here\KiwiVPN-Setup.exe" -Algorithm SHA256).Hash
+"$Sha  KiwiVPN-Setup.exe" | Set-Content "$Here\KiwiVPN-Setup.exe.sha256" -Encoding ascii
 Write-Host "Built: $Here\KiwiVPN-Setup.exe" -ForegroundColor Green
-Write-Host ("SHA-256: " + (Get-FileHash "$Here\KiwiVPN-Setup.exe" -Algorithm SHA256).Hash + "   Size: " + [math]::Round((Get-Item "$Here\KiwiVPN-Setup.exe").Length / 1MB, 1) + " MB")
-Write-Host "Double-click it in File Explorer, as a customer would."
+Write-Host ("SHA-256: " + $Sha + "   Size: " + [math]::Round((Get-Item "$Here\KiwiVPN-Setup.exe").Length / 1MB, 1) + " MB")
+
+# Back to the main PC. It's only a copy: nothing runs on that side. Needs the VM's window in Enhanced Session with the C: drive shared; if not, it says so and the build still stands.
+$Sent = $false
+if ($ReturnTo) {
+  try {
+    New-Item -ItemType Directory -Force $ReturnTo -ErrorAction Stop | Out-Null
+    $Names = @("KiwiVPN-Setup.exe", "KiwiVPN-Setup.exe.sha256") + @(if (Test-Path "$Here\BUILD-INFO.txt") { "BUILD-INFO.txt" })
+    foreach ($n in $Names) { Copy-Item "$Here\$n" "$ReturnTo\$n" -Force -ErrorAction Stop }
+    if ((Get-FileHash "$ReturnTo\KiwiVPN-Setup.exe" -Algorithm SHA256).Hash -ne $Sha) { throw "the copy's hash doesn't match" }
+    $Sent = $true
+    Write-Host "Copied to the main PC: $ReturnTo" -ForegroundColor Green
+  } catch {
+    Write-Host "Couldn't copy it to the main PC automatically: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+}
+if (-not $Sent) { Write-Host "Copy these from $Here to C:\AI\pc-wt\kiwi-release on the main PC: KiwiVPN-Setup.exe, KiwiVPN-Setup.exe.sha256, BUILD-INFO.txt" }
+Write-Host "To test it, double-click it in File Explorer, as a customer would."
 if (-not $NoLaunch) { Start-Process explorer.exe $Here }
