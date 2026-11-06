@@ -45,7 +45,7 @@ How it works:
 Kiwi VPN must be open to your account. Each account gets one free 30-day trial, started on the Kiwi VPN page. After that it's $9.99 for 30 days when paid plans are open, renewed by hand with no automatic billing, and free for members with Royal Kiwi rank or higher. Nothing can be bought inside the extension.
 
 Important:
-- Kiwi VPN covers this browser only, not other apps. For a whole device, use Kiwi VPN with the free WireGuard app.
+- Kiwi VPN covers this browser only, not other apps. For a whole device, use the Kiwi VPN apps.
 - pricechat.live and addresses on your own network don't go through it. Private windows are covered only if you allow the extension in them.
 - Your traffic passes through our server. Pages on plain http aren't encrypted beyond our server.
 - It doesn't guarantee complete anonymity, and it doesn't protect you from malware or from websites you sign in to.

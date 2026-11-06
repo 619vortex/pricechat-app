@@ -69,3 +69,26 @@ test("the manifest asks for what it needs and no more", async () => {
   // only the account API and the check the proxy answers: the proxy's password request reaches the extension without access to every site
   assert.deepEqual(m.host_permissions, ["https://pricechat.live/*", "http://check.kiwi-vpn.invalid/*"]);
 });
+
+test("the plan reads like the website's, and never says it's a free test", async () => {
+  const { planLabel } = await import("./lib.js");
+  assert.equal(planLabel({ kind: "trial", days_left: 23 }), "Free trial · 23 days left");
+  assert.equal(planLabel({ kind: "trial", days_left: 1 }), "Free trial · 1 day left");
+  assert.equal(planLabel({ kind: "paid", days_left: 30 }), "30 days left");
+  assert.equal(planLabel({ kind: "tester", days_left: 2 }), "Tester · 2 days left");
+  assert.equal(planLabel({ kind: "royal" }), "Royal Kiwi");
+  assert.equal(planLabel({ kind: "owner" }), "Owner");
+  assert.equal(planLabel({ kind: "free" }), "Free access");
+  assert.equal(planLabel({ kind: "granted" }), "Included");
+  for (const kind of ["expired", "not_activated", "blocked", "closed"]) assert.equal(planLabel({ kind }), null);
+  assert.equal(planLabel(undefined), null);
+  for (const kind of ["trial", "paid", "tester", "royal", "owner", "free", "granted"]) assert.doesNotMatch(planLabel({ kind, days_left: 3 }), /while we test/i);
+});
+
+test("servers without a browser proxy are listed apart, never offered for the browser", async () => {
+  const { appOnlyServers } = await import("./lib.js");
+  const account = { servers: [S({ id: 1 }), S({ id: 2, name: "Germany", browser: false })] };
+  assert.deepEqual(appOnlyServers(account).map((s) => s.id), [2]);
+  assert.deepEqual(browserServers(account).map((s) => s.id), [1]);
+  assert.deepEqual(appOnlyServers({}), []);
+});

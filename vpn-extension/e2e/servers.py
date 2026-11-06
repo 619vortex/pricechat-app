@@ -22,7 +22,7 @@ from cryptography.x509.oid import NameOID  # noqa: E402
 
 tmp = tempfile.mkdtemp(prefix="kiwi-e2e-")
 users_file = os.path.join(tmp, "users.json")
-SEEN = {"origin": [], "api": []}
+SEEN = {"origin": [], "api": [], "resolved": [], "origin6": 0}
 STATE = {"refuse_new": False, "proxy_port": 0, "issued": 0}
 
 
@@ -50,7 +50,8 @@ def http(status, body, ctype="application/json", extra=""):
 
 
 ACCOUNT = {"enabled": True, "test_mode": False, "payments": False, "eligible": True, "reason": None, "max_devices": 3, "billing": None, "plan": {"kind": "trial", "until": None, "days_left": 23}, "devices": [],
-           "servers": [{"id": 1, "name": "Helsinki 1", "region": "Finland", "country_code": "FI", "online": True, "load": 0.1, "adblock": False, "recommended": True, "browser": True}],
+           "servers": [{"id": 1, "name": "Helsinki 1", "region": "Finland", "country_code": "FI", "online": True, "load": 0.1, "adblock": False, "recommended": True, "browser": True},
+                       {"id": 2, "name": "Germany", "region": "Falkenstein, Germany", "country_code": "DE", "online": True, "load": 0.1, "adblock": False, "recommended": False, "browser": False}],
            "usage": {"month": "2026-11", "used_bytes": 1610612736, "cap_bytes": 0, "paused_until": None}}
 
 
@@ -126,6 +127,11 @@ async def origin(r, w):
         w.close()
 
 
+async def origin6(r, w):
+    SEEN["origin6"] += 1  # only the proxy can reach it: the name resolves to IPv6 on the "server" alone
+    await origin(r, w)
+
+
 async def main():
     set_users({})
     c, k = cert()
@@ -134,9 +140,11 @@ async def main():
     plain_site = await asyncio.start_server(origin, "127.0.0.1", 0)
     tls_site = await asyncio.start_server(origin, "127.0.0.1", 0, ssl=tls)
     account_api = await asyncio.start_server(api, "127.0.0.1", 0)
+    v6_site = await asyncio.start_server(origin6, "::1", plain_site.sockets[0].getsockname()[1])  # same port, IPv6 only
 
     async def resolve(host, port):
-        return ["127.0.0.1"] if host == "origin.test" else []
+        SEEN["resolved"].append(host)  # the names the browser sent here instead of resolving them itself
+        return ["127.0.0.1"] if host == "origin.test" else ["::1"] if host == "origin6.test" else []
 
     px = P.Proxy({"USERS_FILE": users_file, "USAGE_FILE": os.path.join(tmp, "usage.json"), "PUBLIC_IPS": "203.0.113.10"}, dest_ok=lambda ip: True, resolve=resolve)
     server = await px.serve(tls, "127.0.0.1", 0)

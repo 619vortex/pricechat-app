@@ -1,5 +1,5 @@
 // The popup only shows state and asks the service worker to act. It never sees the proxy password.
-import { PRIVACY_URL, SIGN_IN_URL, VPN_URL, browserServers, bytes, flag, pickServer, refusal } from "./lib.js";
+import { PRIVACY_URL, SIGN_IN_URL, VPN_URL, appOnlyServers, browserServers, bytes, flag, pickServer, planLabel, refusal } from "./lib.js";
 
 const app = document.getElementById("app");
 const POWER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>`;
@@ -24,8 +24,9 @@ function el(tag, attrs = {}, ...kids) {
 }
 
 const head = (s) => {
-  return el("header", { class: "head" }, el("img", { src: "icons/48.png", alt: "" }), el("b", {}, "Kiwi VPN"),
-    s?.account?.plan?.kind === "free" ? el("span", { class: "pill" }, "Free while we test") : null);
+  const plan = planLabel(s?.account?.plan);
+  return el("header", { class: "head" }, el("img", { src: "icons/48.png", alt: "" }), el("b", { class: "brand" }, "Kiwi VPN"),
+    plan ? el("span", { class: "pill" }, plan) : null);
 };
 
 function gate(title, text, action) {
@@ -57,13 +58,19 @@ function view(s) {
     statusBlock(s, () => Number(picker.value)),
     flash ? el("p", { class: "error", role: "alert" }, flash) : null,
     el("label", { class: "field" }, "Server", picker),
+    appOnly(s.account),
     el("div", { class: "stats" },
       el("span", {}, el("b", {}, bytes(used?.used_bytes ?? 0)), used?.cap_bytes ? ` of ${bytes(used.cap_bytes)} this month` : " this month"),
       s.exitIp && s.on ? el("span", {}, "IP ", el("b", {}, s.exitIp)) : null),
-    el("p", { class: "note" }, "Covers this browser only, not other apps. Use the WireGuard app for your whole device."),
-    el("p", { class: "note" }, "While on, this browser's traffic goes through Kiwi VPN's server. We don't log the sites you visit."),
+    el("p", { class: "note" }, "Covers this browser only; the Kiwi VPN apps cover your whole device. We don't log the sites you visit."),
     el("button", { class: "link", onclick: () => { if (confirm("Switch off and remove this browser from your account?")) void act("forget"); } }, "Remove this browser"),
   ];
+}
+
+/** Servers the account has in the apps but not here yet (no browser proxy on them), so they don't look lost. */
+function appOnly(account) {
+  const names = appOnlyServers(account).map((x) => `${flag(x.country_code)} ${x.name}`);
+  return names.length ? el("p", { class: "soon" }, el("b", {}, names.join(", ")), " in the Kiwi VPN apps; not in the browser yet.") : null;
 }
 
 function statusBlock(s, server) {

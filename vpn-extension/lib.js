@@ -32,6 +32,29 @@ export function browserServers(account) {
   return (account.servers ?? []).filter((s) => s.browser);
 }
 
+/** Servers that exist for the apps but have no browser proxy yet: shown, so nobody wonders where they went, but never selectable. */
+export function appOnlyServers(account) {
+  return (account.servers ?? []).filter((s) => !s.browser);
+}
+
+const left = (n) => (n === 1 ? "1 day left" : `${n} days left`);
+
+/** The plan in a few words, from the account's own `plan` (the same kinds the website shows). null = say nothing. */
+export function planLabel(plan) {
+  if (!plan) return null;
+  const days = Number.isFinite(plan.days_left) ? plan.days_left : null;
+  switch (plan.kind) {
+    case "trial": return days != null ? `Free trial · ${left(days)}` : "Free trial";
+    case "paid": return days != null ? left(days) : "Active";
+    case "tester": return days != null ? `Tester · ${left(days)}` : "Tester";
+    case "royal": return "Royal Kiwi";
+    case "owner": return "Owner";
+    case "free": return "Free access";
+    case "granted": return "Included";
+    default: return null;  // expired, not activated, blocked, closed: the gate explains those
+  }
+}
+
 /** The server to preselect: the last one used if still there and online, else the recommended one, else any online one, else the first. */
 export function pickServer(servers, lastId) {
   const online = servers.filter((s) => s.online);
