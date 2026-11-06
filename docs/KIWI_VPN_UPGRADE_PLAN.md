@@ -1,7 +1,7 @@
 # Kiwi VPN: next major upgrade plan
 
 Smart Connect, a verified kill switch, DNS/IPv6/WebRTC leak protection, automatic failover, optional ad/tracker blocking and
-better Chrome diagnostics. Written 2026-11-06 from a read-only audit of main and the client branches. Nothing here is built yet.
+better Chrome diagnostics. Written 2026-11-06 from a read-only audit of main and the client branches. Status at the end: see "Progress".
 
 Rules for every stage: security and stability first; Helsinki connectivity, wg0/client1 and sign-in stay untouched unless a
 step says otherwise; each stage ships alone with its tests; no deploy, server change or store publish without approval.
@@ -33,7 +33,12 @@ step says otherwise; each stage ships alone with its tests; no deploy, server ch
 ### Stage 0: safety fixes (before any new feature)
 1. **Chrome: revoked-login status bug.** Make the popup report "Connection problem" whenever the proxy refuses the login, reliably, then add a regression test that runs 20 times. *Extension only.*
 2. **Proxy: refuse the server's own IPv6.** Already on `feat/kiwi-germany-proxy`. Apply to Helsinki (proxy and agent restart for a few seconds, WireGuard untouched). *Server change: approval.*
-3. **Shared nodes: reject IPv6 from customers quickly.** On wg1 only, an ip6tables reject (`icmp6-adm-prohibited`) so apps fall back to IPv4 at once instead of timing out. wg0 untouched; the script stops if wg0 changes. *Server change: approval.*
+3. **Shared nodes: IPv6 from customers.** *Corrected after a closer look:* a server-side ip6tables reject can't work on its own.
+   Shared nodes run with `POOL6=` empty, so customers' peers have only an IPv4 allowed-IP, and WireGuard drops their IPv6
+   packets (wrong source) before the firewall sees them. Nothing leaks (it's dropped inside the tunnel), but an app has to wait
+   for Happy Eyeballs to fall back to IPv4. The real fix is `POOL6` on wg1 (the agent and backend already support a ULA per
+   peer, `address6`) plus either a fast `icmp6-adm-prohibited` reject or NAT66 for real IPv6. It changes every customer's
+   config, so it moves to Stage 1: measure the fallback delay first, then decide. *Server + config change: approval.*
 4. **Backend: no single-failure offline flips.** Mark a server offline after 2 consecutive failed syncs (the alert already waits for 2). *Backend deploy: approval.*
 5. **Windows: verify the kill switch.** VM test: kill the network path and the tunnel service while connected, then check for leaks. Only then change "Not available yet".
 
@@ -65,7 +70,7 @@ A matrix of IPv4 exit, IPv6 exit, DNS resolvers and WebRTC; on/off/reconnect/sle
 |---|---|---|
 | 0.1 Chrome status bug | store update | your submit/go-live |
 | 0.2 proxy IPv6 on Helsinki | server | approval |
-| 0.3 shared-node IPv6 reject | server | approval |
+| 0.3 shared-node IPv6 (moved to Stage 1: measure first) | server + every config | decision + approval |
 | 0.4 offline flap guard | backend deploy | approval |
 | 0.5 Windows kill-switch test | no | VM run |
 | 1 leak matrix | no | a test account on real servers |
@@ -73,3 +78,13 @@ A matrix of IPv4 exit, IPv6 exit, DNS resolvers and WebRTC; on/off/reconnect/sle
 | 3 Smart Connect | backend + nodes + clients | approval per part |
 | 4 failover | Chrome first; apps need a backend decision | decision + approval |
 | 5 ad blocking | servers + clients | approval |
+
+## Progress (2026-11-06)
+
+| Item | State | Where |
+|---|---|---|
+| 0.1 Chrome status bug | fixed: all-site access restored (as live 1.0.0), privacy page and listing text updated | `feat/kiwi-ext-103` |
+| 0.2 proxy own IPv6 | Helsinki: `apply-proxy-ipv6-fix.sh` ready, tested on a fake server, **not run**. Germany: built into its first install | `feat/kiwi-germany-proxy` |
+| 0.3 shared-node IPv6 | re-scoped (above) | – |
+| 0.4 flap guard | done, 124 VPN/alert tests pass, **not deployed** | `fix/kiwi-stage0` |
+| 0.5 Windows kill switch | needs the Hyper-V VM (not enabled on this PC) | – |
