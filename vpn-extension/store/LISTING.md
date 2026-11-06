@@ -79,8 +79,7 @@ Sends the browser's web traffic through an encrypted proxy on a Kiwi VPN server,
 | `webRequestAuthProvider` | Answers that password request with the login issued to this browser. Only the proxy's own challenge is answered, never a website's. |
 | `privacy` | Sets WebRTC to use only the proxy while connected, so it can't reveal the user's real address, and restores it on disconnect. |
 | `storage` | Keeps the on/off state, chosen server and this browser's proxy login on the device, so the connection survives a browser restart. |
-| Host access `https://pricechat.live/*` | Reaches the Kiwi VPN account API with the user's Kiwi Passport sign-in, to read their access and get a proxy login. |
-| Host access `http://check.kiwi-vpn.invalid/*` | This address exists only inside the Kiwi VPN proxy. The extension requests it to confirm traffic really goes through the proxy, and to show the exit IP. No content scripts run on any page. |
+| Host access `<all_urls>` | Chrome only passes the proxy's password request, and a refused login, to an extension for sites it has access to. The proxy carries every site, so the extension needs access to every site to sign in to it and to notice when the login is refused (otherwise it can't tell the user the connection stopped). It also reaches the Kiwi VPN account API on pricechat.live, and `http://check.kiwi-vpn.invalid/`, an address that exists only inside the proxy, to confirm traffic goes through it and show the exit IP. It doesn't read or change page content, and no content scripts run on any page. |
 
 **Remote code:** No, I am not using remote code.
 

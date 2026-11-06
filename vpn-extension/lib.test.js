@@ -66,8 +66,9 @@ test("the manifest asks for what it needs and no more", async () => {
   assert.deepEqual([...m.permissions].sort(), ["privacy", "proxy", "storage", "webRequest", "webRequestAuthProvider"]);
   for (const bad of ["cookies", "history", "tabs", "scripting", "webRequestBlocking"]) assert.ok(!m.permissions.includes(bad));
   assert.equal(m.content_scripts, undefined);
-  // only the account API and the check the proxy answers: the proxy's password request reaches the extension without access to every site
-  assert.deepEqual(m.host_permissions, ["https://pricechat.live/*", "http://check.kiwi-vpn.invalid/*"]);
+  // Chrome only tells an extension about the proxy's password request (and a refused login) for sites it has access to.
+  // With narrower access Chrome answers it itself and the popup can keep saying "Connected" after a login is revoked.
+  assert.deepEqual(m.host_permissions, ["<all_urls>"]);
 });
 
 test("the plan reads like the website's, and never says it's a free test", async () => {

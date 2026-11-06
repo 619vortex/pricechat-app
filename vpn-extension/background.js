@@ -143,7 +143,12 @@ chrome.webRequest.onAuthRequired.addListener((details, reply) => {
 
 const settled = ({ requestId }) => { asked.delete(requestId); };
 chrome.webRequest.onCompleted.addListener(settled, { urls: ["<all_urls>"] });
-chrome.webRequest.onErrorOccurred.addListener(settled, { urls: ["<all_urls>"] });
+// Chrome sometimes fails a request whose proxy login was refused without asking us a second time. A request we gave the
+// login to that then fails, or a proxy/tunnel error, triggers the check, so the popup never says "Connected" while traffic is held.
+chrome.webRequest.onErrorOccurred.addListener(({ requestId, error }) => {
+  const answered = asked.delete(requestId);
+  if (answered || /PROXY|TUNNEL/.test(error || "")) void recheck();
+}, { urls: ["<all_urls>"] });
 
 // One site failing also lands here, so this only triggers a check: the check decides whether the connection is really down.
 chrome.proxy.onProxyError.addListener(() => { void recheck(); });

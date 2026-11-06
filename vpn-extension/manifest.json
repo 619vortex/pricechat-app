@@ -14,8 +14,7 @@
     "privacy"
   ],
   "host_permissions": [
-    "https://pricechat.live/*",
-    "http://check.kiwi-vpn.invalid/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js",

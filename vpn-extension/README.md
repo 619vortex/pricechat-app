@@ -10,7 +10,7 @@ Browsers can't run WireGuard, so this covers the browser only; the WireGuard app
 
 ## Files
 
-It has site access only to pricechat.live and the proxy's check address: tested in Edge, the proxy's password request reaches it on any page without access to every site. `background.js` owns the proxy setting and answers the proxy's password request. `popup.*` only displays state and never sees the password. `lib.js` holds the logic with no browser APIs.
+It has access to all sites (`<all_urls>`), as 1.0.0 did: Chrome only passes the proxy's password request, and a refused login, to an extension for sites it has access to. 1.0.1 to 1.0.3 drafts tried narrower access; in Chrome the popup then sometimes kept saying Connected after a login was revoked, because Chrome answered the proxy itself. It doesn't read or change pages and runs no content scripts. `background.js` owns the proxy setting and answers the proxy's password request. `popup.*` only displays state and never sees the password. `lib.js` holds the logic with no browser APIs.
 
 ## Tests
 
