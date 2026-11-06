@@ -41,6 +41,23 @@ Undo: `bash install-proxy.sh --uninstall` on the server, then remove the two fir
 
 Root (or sudo) on 2.31.133.78. The `kiwi_vpn` key on the build PC is refused there; Helsinki accepts it. Options: add `~/.ssh/kiwi_vpn.pub` to `/root/.ssh/authorized_keys` on Germany (Hetzner console or rescue), or run the two scripts yourself. While you're there, consider `PasswordAuthentication no` in sshd once a key works (not part of this change).
 
-## Helsinki (separate, optional, recommended)
+## Helsinki: the same IPv6 fix, applied on its own
 
-Re-running the updated `install-proxy.sh` on Helsinki (`PROXY_HOST=hel1.vpn.pricechat.live`, default `OTHER_IF=wg0`, which protects client1) closes the same IPv6 gap. Effect: the proxy and agent restart for a few seconds; browser users reconnect on their own; WireGuard, wg0 and client1 are untouched (the script stops if wg0 changes). The certificate is kept (`--keep-until-expiring`).
+Helsinki already runs the proxy, so it doesn't need the installer again (that would also replace agent.py and restart the
+agent). `apply-proxy-ipv6-fix.sh` changes only the proxy:
+
+1. Copy `apply-proxy-ipv6-fix.sh` and the new `proxy.py` to one folder on the server, e.g. `/root/kiwi-ipv6fix/`.
+2. `bash apply-proxy-ipv6-fix.sh` (read-only, the default): prints every WireGuard interface with its config hash, port and
+   peers, the proxy.py hash change, and the exact diff of `proxy.env` and `rules.sh`. Nothing changes.
+3. `bash apply-proxy-ipv6-fix.sh --apply`: backs up the three files to `/root/kiwi-pre-ipv6fix-<time>/`, installs them,
+   restarts **only** `kiwi-vpn-proxy` (about 2 s; browser users reconnect by themselves), and checks the new ip6tables reject is
+   loaded, 443 listens, and WireGuard (wg0 with client1, and wg1) is byte-for-byte as before. If the proxy doesn't come back it
+   restores the backup itself.
+4. Undo any time: `bash apply-proxy-ipv6-fix.sh --rollback /root/kiwi-pre-ipv6fix-<time>`.
+
+It refuses to run if the installed proxy.py isn't the 2026-11-04 version (sha256 be1bf8be...), so a hand edit is never
+overwritten blindly. Tested against a fake server in `test_apply_ipv6_fix.py` (9 tests: dry run changes nothing, only
+`wg show` is ever called, only the proxy restarts, rollback on a failed start, stops on a WireGuard change, refuses bad
+networks, idempotent, rollback restores).
+
+Germany gets the fix as part of its first install (`install-proxy.sh` already fills `OWN_NETS`).
