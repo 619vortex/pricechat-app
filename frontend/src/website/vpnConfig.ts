@@ -2,6 +2,16 @@
  *  brave: the Chrome listing, once the extension has actually been tested in Brave. firefox: needs its own Firefox extension first. */
 export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox: string } = { chrome: "", edge: "", brave: "", firefox: "" };
 
+/** A store button only ever gets the store's own listing address, in its official form with the extension id: Chrome
+ *  https://chromewebstore.google.com/detail/<slug>/<id>, Edge https://microsoftedge.microsoft.com/addons/detail/<slug>/<id>.
+ *  Anything else (another site, a search page, a missing or malformed id) leaves the extension on Coming Soon. */
+export function storeLink(store: "chrome" | "edge", href: string): string | null {
+  const form = store === "chrome"
+    ? /^https:\/\/chromewebstore\.google\.com\/detail\/[a-z0-9][a-z0-9-]*\/[a-p]{32}$/
+    : /^https:\/\/microsoftedge\.microsoft\.com\/addons\/detail\/[a-z0-9][a-z0-9-]*\/[a-z]{32}$/;
+  return form.test(href) ? href : null;
+}
+
 /** What the server charges and how long a trial lasts, for visitors while payments are off: the public API only sends prices once payments are on. A test fails if these
  *  stop matching backend/app/vpn/billing.py (PRICE_USD, PERIOD_DAYS) and service.py (TRIAL_DAYS, KEEP_LAPSED). When the server does send billing, its figures are used. */
 export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_days: 30 };

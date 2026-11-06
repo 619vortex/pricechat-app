@@ -3,9 +3,13 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
-import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, hostedDownload, visitorBrowser, visitorOs } from "./vpnConfig";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, hostedDownload, storeLink, visitorBrowser, visitorOs } from "./vpnConfig";
 
 import { Flag, drawMap, place, placeLine } from "./vpnMap";
+
+// Well-formed but made up: never a real listing.
+const FAKE_CHROME = "https://chromewebstore.google.com/detail/kiwi-vpn/" + "abcdefghijklmnop".repeat(2);
+const FAKE_EDGE = "https://microsoftedge.microsoft.com/addons/detail/kiwi-vpn/" + "qrstuvwxyzabcdef".repeat(2);
 
 /** TEST FIXTURES only: a fake Kiwi VPN API. No real config, keys or servers. */
 const HOME = { sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [],
@@ -188,8 +192,47 @@ describe("Free while payments are off", () => {
     expect(screen.getByText("Manual install, for testers (Chrome and Edge)")).toBeTruthy();
   });
 
+  it("with only the Chrome listing: Add to Chrome opens the store in a new tab, and every other button stays as it was", () => {
+    let view = render(<Downloads agent={CHROME} testers />);
+    const before = [...view.container.querySelectorAll(".vpn-platforms a, .vpn-platforms button")].map((x) => x.outerHTML);
+    view.unmount();
+    Object.assign(STORE_LINKS, { chrome: FAKE_CHROME });
+    try {
+      view = render(<Downloads agent={CHROME} testers />);
+      const add = screen.getByRole("link", { name: "Add to Chrome" });
+      expect(add.getAttribute("href")).toBe(FAKE_CHROME);
+      expect(add.getAttribute("target")).toBe("_blank");
+      expect(add.getAttribute("rel")!.split(" ")).toEqual(expect.arrayContaining(["noopener", "noreferrer"]));
+      expect(add.hasAttribute("download")).toBe(false);
+      expect(screen.queryByRole("link", { name: "Get for Edge" })).toBeNull();
+      expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Available");
+      expect([...view.container.querySelectorAll(".vpn-platforms a, .vpn-platforms button")].map((x) => x.outerHTML)).toEqual(before);
+      expect(screen.getByText("Manual install, for testers (Chrome and Edge)")).toBeTruthy(); // Edge testers still need it
+    } finally {
+      Object.assign(STORE_LINKS, { chrome: "" });
+    }
+  });
+
+  it("never links a store address that isn't the official listing form with an id", () => {
+    expect(storeLink("chrome", FAKE_CHROME)).toBe(FAKE_CHROME);
+    expect(storeLink("edge", FAKE_EDGE)).toBe(FAKE_EDGE);
+    for (const bad of ["", "https://chromewebstore.google.com/detail/test", "https://chromewebstore.google.com/detail/kiwi-vpn", "http://chromewebstore.google.com/detail/kiwi-vpn/" + "a".repeat(32),
+      "https://chromewebstore.google.com/search/Kiwi%20VPN", "https://chromewebstore.google.com/detail/kiwi-vpn/" + "z".repeat(32), "https://chromewebstore.google.com/detail/kiwi-vpn/" + "a".repeat(31),
+      "https://chromewebstore.google.com/detail/kiwi-vpn/" + "a".repeat(32) + "?hl=en", "https://chromewebstore.google.com.evil.example/detail/kiwi-vpn/" + "a".repeat(32),
+      "https://chrome.google.com/webstore/detail/kiwi-vpn/" + "a".repeat(32), "javascript:alert(1)", FAKE_EDGE]) expect(storeLink("chrome", bad)).toBeNull();
+    expect(storeLink("edge", FAKE_CHROME)).toBeNull();
+    Object.assign(STORE_LINKS, { chrome: "https://chromewebstore.google.com/detail/test" });
+    try {
+      const { container } = render(<Downloads agent={CHROME} testers />);
+      expect(screen.queryByRole("link", { name: "Add to Chrome" })).toBeNull();
+      expect(card(container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+    } finally {
+      Object.assign(STORE_LINKS, { chrome: "" });
+    }
+  });
+
   it("marks the extension Available only with a real store address, and drops the manual install", () => {
-    Object.assign(STORE_LINKS, { chrome: "https://chromewebstore.google.com/detail/test", edge: "https://microsoftedge.microsoft.com/addons/detail/test" });
+    Object.assign(STORE_LINKS, { chrome: FAKE_CHROME, edge: FAKE_EDGE });
     try {
       const { container } = render(<Downloads agent={EDGE} testers />);
       expect(screen.getByRole("link", { name: "Get for Edge" }).getAttribute("href")).toBe(STORE_LINKS.edge);

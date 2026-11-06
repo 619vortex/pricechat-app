@@ -4,7 +4,7 @@ import { SitePage } from "./community";
 import { reducedMotion } from "./motion";
 import { pageHead } from "./seo";
 import { site } from "./websiteData";
-import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, hostedDownload, saveConfig, visitorBrowser, visitorOs } from "./vpnConfig";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, hostedDownload, saveConfig, storeLink, visitorBrowser, visitorOs } from "./vpnConfig";
 import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
@@ -489,9 +489,9 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
   const os = visitorOs(agent, touch);
   const [zip, setZip] = useState(false);
   const stores = [
-    { key: "chrome", href: STORE_LINKS.chrome, action: "Add to Chrome" },
-    { key: "edge", href: STORE_LINKS.edge, action: "Get for Edge" },
-  ].filter((x) => x.href);
+    { key: "chrome", href: storeLink("chrome", STORE_LINKS.chrome), action: "Add to Chrome" },
+    { key: "edge", href: storeLink("edge", STORE_LINKS.edge), action: "Get for Edge" },
+  ].filter((x): x is { key: string; href: string; action: string } => !!x.href);
   const manual = (name: string) => manualOpen && <a className="vpn-textlink" aria-label={`Manual setup for ${name}`} href="/vpn/devices#manual">Manual setup</a>;
   const windows = hostedDownload(WINDOWS_BETA.href);
   const android = hostedDownload(ANDROID_BETA.href);
@@ -563,7 +563,7 @@ export function Downloads({ agent = navigator.userAgent, touch = navigator.maxTo
       </ul>
       <PlatformCompare />
       {browser === "phone" && <p className="vpn-note">Browser extensions need a computer.</p>}
-      {testers && (!STORE_LINKS.chrome || !STORE_LINKS.edge) && browser !== "phone" && (
+      {testers && stores.length < 2 && browser !== "phone" && (
         <details className="vpn-fold is-small">
           <summary>Manual install, for testers (Chrome and Edge)</summary>
           <div className="vpn-fold-body">
