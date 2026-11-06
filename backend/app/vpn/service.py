@@ -28,6 +28,8 @@ from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnSer
 from app.security.secrets import protect, unprotect
 from app.vpn import billing, keys, node, reviewer
 
+OFFLINE_AFTER = 2  # checks in a row that couldn't reach a server's agent before it's marked offline (one could be a blip)
+
 logger = logging.getLogger(__name__)
 
 ENTITLEMENT = "kiwi_vpn"
@@ -760,6 +762,15 @@ def delete_server(db: Session, server_id: int) -> None:
     db.commit()
 
 
+def _unreachable(server: VpnServer, e: Exception) -> None:
+    """A check that couldn't reach the agent. One failure is kept as the error but leaves the server online (a network
+    blip shouldn't send new devices elsewhere or hide it); OFFLINE_AFTER in a row mark it offline. A success resets it."""
+    server.fail_streak = (server.fail_streak or 0) + 1
+    server.last_error = str(e)[:500]
+    if server.fail_streak >= OFFLINE_AFTER:
+        server.online = False
+
+
 def test_server(db: Session, server_id: int) -> dict[str, Any]:
     server = db.get(VpnServer, server_id)
     if server is None:
@@ -769,7 +780,7 @@ def test_server(db: Session, server_id: int) -> dict[str, Any]:
             st = agent.status()
         _check_pool(st["address"])
     except node.NodeError as e:
-        server.online, server.last_error = False, str(e)[:500]
+        _unreachable(server, e)
         db.commit()
         return {"ok": False, "error": str(e), "peers": 0}
     _apply_status(server, st, utcnow())
@@ -1017,8 +1028,7 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             if server.proxy_host:
                 _sync_browsers(db, agent, browsers, accounts, r, st["proxy_users"], states, out, now)
     except node.NodeError as e:
-        server.online, server.last_error = False, str(e)[:500]
-        server.fail_streak = (server.fail_streak or 0) + 1
+        _unreachable(server, e)
         out["error"] = str(e)
     db.commit()
     return out
