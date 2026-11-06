@@ -199,7 +199,7 @@ describe("Free while payments are off", () => {
   });
 
   it("ships the verified public Chrome listing (never the /preview address) and nothing for stores that haven't approved it", () => {
-    expect(STORE_LINKS.chrome).toBe("https://chromewebstore.google.com/detail/kiwi-vpn/jeadaadhacdikcbahliklcaaeaddeloa");
+    expect(STORE_LINKS.chrome).toBe("https://chromewebstore.google.com/detail/jeadaadhacdikcbahliklcaaeaddeloa");
     expect(storeLink("chrome", STORE_LINKS.chrome)).toBe(STORE_LINKS.chrome);
     expect(storeLink("chrome", STORE_LINKS.chrome + "/preview")).toBeNull();
     expect([STORE_LINKS.edge, STORE_LINKS.brave, STORE_LINKS.firefox]).toEqual(["", "", ""]);

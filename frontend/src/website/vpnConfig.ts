@@ -1,13 +1,13 @@
 /** Official listing addresses, filled in only once a store has approved the extension: an empty one shows Coming Soon, never a link.
  *  brave: the Chrome listing, once the extension has actually been tested in Brave. firefox: needs its own Firefox extension first. */
-export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox: string } = { chrome: "https://chromewebstore.google.com/detail/kiwi-vpn/jeadaadhacdikcbahliklcaaeaddeloa", edge: "", brave: "", firefox: "" };
+export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox: string } = { chrome: "https://chromewebstore.google.com/detail/jeadaadhacdikcbahliklcaaeaddeloa", edge: "", brave: "", firefox: "" };
 
 /** A store button only ever gets the store's own listing address, in its official form with the extension id: Chrome
- *  https://chromewebstore.google.com/detail/<slug>/<id>, Edge https://microsoftedge.microsoft.com/addons/detail/<slug>/<id>.
+ *  https://chromewebstore.google.com/detail/[<slug>/]<id>, Edge https://microsoftedge.microsoft.com/addons/detail/<slug>/<id>.
  *  Anything else (another site, a search page, a missing or malformed id) leaves the extension on Coming Soon. */
 export function storeLink(store: "chrome" | "edge", href: string): string | null {
   const form = store === "chrome"
-    ? /^https:\/\/chromewebstore\.google\.com\/detail\/[a-z0-9][a-z0-9-]*\/[a-p]{32}$/
+    ? /^https:\/\/chromewebstore\.google\.com\/detail\/(?:[a-z0-9][a-z0-9-]*\/)?[a-p]{32}$/
     : /^https:\/\/microsoftedge\.microsoft\.com\/addons\/detail\/[a-z0-9][a-z0-9-]*\/[a-z]{32}$/;
   return form.test(href) ? href : null;
 }
