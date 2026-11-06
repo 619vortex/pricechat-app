@@ -37,28 +37,50 @@ def _money(item: dict[str, Any], price: float) -> str:
 WINDOW_WORDS = {"5m": "in 5 minutes", "1h": "in an hour", "24h": "in 24 hours"}
 
 
-def move_post(item: dict[str, Any], window: str, change: float, price: float, as_of: str, *, big: bool, volume: bool = False) -> str:
-    name, up = item["name"], change > 0
-    lead = "🚀 BIG MOVE" if big and up else "📉 MARKET ALERT" if big else f"{item.get('emoji', '📊')} {name.upper()}"
-    verb = "up" if up else "down"
-    body = f"{name} {verb} {pct(change)} {WINDOW_WORDS[window]}, now {_money(item, price)}." if big else f"{verb.capitalize()} {pct(change)} {WINDOW_WORDS[window]}, now {_money(item, price)}."
-    extra = "\nVolume is running well above normal." if volume else ""
-    return f"{lead}\n\n{body}{extra}\n\nAs of {as_of} UTC. Data: Yahoo Finance"
+def _lead(label: str, emoji: str) -> str:
+    return f"{label}: " if label else f"{emoji} "
 
 
-def extreme_post(item: dict[str, Any], high: bool, price: float, as_of: str) -> str:
-    what = "a new 52-week high" if high else "a new 52-week low"
-    return f"{item.get('emoji', '📊')} {item['name'].upper()}\n\n{what.capitalize()}: {_money(item, price)}.\n\nAs of {as_of} UTC. Data: Yahoo Finance"
+def _foot(as_of: str) -> str:
+    return f"🥝 PRICE ALERT · Data: Yahoo Finance, {as_of} UTC"
 
 
-def milestone_post(item: dict[str, Any], level: float, up: bool, price: float, as_of: str) -> str:
-    verb = "back above" if up else "below"
-    return f"{item.get('emoji', '📊')} {item['name'].upper()}\n\nNow {verb} {_money(item, level)}, at {_money(item, price)}.\n\nAs of {as_of} UTC. Data: Yahoo Finance"
+def move_headline(item: dict[str, Any], window: str, change: float, price: float, ratio: float) -> str:
+    """The same words on X and Telegram. The verb is earned by how far past its alert line the move went; the figures are the verified ones."""
+    from app.newsdesk.brief import move_verb
+
+    return f"{item['name'].upper()} {move_verb(change, ratio)} {pct(change)} {WINDOW_WORDS[window].upper()} TO {_money(item, price)}"
 
 
-def selloff_post(rows: list[tuple[str, float]], as_of: str) -> str:
-    moves = " · ".join(f"{name} -{pct(c)}" for name, c in rows)
-    return f"📉 MARKET ALERT\n\nBroad US selloff: {moves} in 24 hours.\n\nAs of {as_of} UTC. Data: Yahoo Finance"
+def move_post(item: dict[str, Any], window: str, change: float, price: float, as_of: str, *, big: bool, volume: bool = False, ratio: float | None = None, label: str = "") -> str:
+    ratio = ratio if ratio is not None else (1.5 if big else 1.0)
+    extra = "\n\nVolume is running well above normal." if volume else ""
+    emoji = "📈" if change > 0 else "📉"
+    return f"{_lead(label, emoji)}{move_headline(item, window, change, price, ratio)}{extra}\n\n{_foot(as_of)}"
+
+
+def extreme_headline(item: dict[str, Any], high: bool, price: float) -> str:
+    return f"{item['name'].upper()} HITS A NEW 52-WEEK {'HIGH' if high else 'LOW'} AT {_money(item, price)}"
+
+
+def extreme_post(item: dict[str, Any], high: bool, price: float, as_of: str, label: str = "") -> str:
+    return f"{_lead(label, item.get('emoji', '📊'))}{extreme_headline(item, high, price)}\n\n{_foot(as_of)}"
+
+
+def milestone_headline(item: dict[str, Any], level: float, up: bool, price: float) -> str:
+    return f"{item['name'].upper()} {'BACK ABOVE' if up else 'FALLS BELOW'} {_money(item, level)}, NOW {_money(item, price)}"
+
+
+def milestone_post(item: dict[str, Any], level: float, up: bool, price: float, as_of: str, label: str = "") -> str:
+    return f"{_lead(label, item.get('emoji', '📊'))}{milestone_headline(item, level, up, price)}\n\n{_foot(as_of)}"
+
+
+def selloff_headline(rows: list[tuple[str, float]]) -> str:
+    return "US STOCKS SELL OFF: " + " · ".join(f"{name.upper()} -{pct(c)}" for name, c in rows) + " IN 24 HOURS"
+
+
+def selloff_post(rows: list[tuple[str, float]], as_of: str, label: str = "") -> str:
+    return f"{_lead(label, '📉')}{selloff_headline(rows)}\n\n{_foot(as_of)}"
 
 
 def snapshot_post(rows: list[tuple[str, float]], as_of: str) -> str:

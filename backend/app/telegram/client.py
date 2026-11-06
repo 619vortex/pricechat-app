@@ -105,8 +105,8 @@ class TelegramBotClient:
         return _sent(await self._call("sendMessage", params))
 
     async def send_photo(self, chat_id: int | str, png: bytes, caption: str, buttons: list[list[dict[str, str]]] | None = None,
-                         reply_to: int | None = None, html: bool = False) -> dict[str, Any]:
-        """A chart image with a caption (multipart upload: the PNG is generated here, never fetched from a URL)."""
+                         reply_to: int | None = None, html: bool = False, silent: bool = False) -> dict[str, Any]:
+        """A chart image or a news card with a caption (multipart upload: the PNG is generated here, never fetched from a URL)."""
         import json as _json
 
         data: dict[str, Any] = {"chat_id": str(chat_id), "caption": caption[:1024]}
@@ -116,6 +116,8 @@ class TelegramBotClient:
             data["reply_markup"] = _json.dumps({"inline_keyboard": buttons})
         if reply_to:
             data["reply_parameters"] = _json.dumps({"message_id": reply_to, "allow_sending_without_reply": True})
+        if silent:
+            data["disable_notification"] = "true"
         return _sent(await self._call("sendPhoto", data, files={"photo": ("chart.png", png, "image/png")}))
 
     async def send_document(self, chat_id: int | str, content: bytes, filename: str, caption: str = "", html: bool = False,

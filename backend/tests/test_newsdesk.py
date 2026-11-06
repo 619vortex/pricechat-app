@@ -161,7 +161,8 @@ async def test_a_real_move_needs_the_second_source_to_agree(db: Session) -> None
     assert posts(db) == []
     await run(db, web, Market(60100), now=now + timedelta(minutes=5))
     made = posts(db)
-    assert len(made) == 1 and "MARKET ALERT" in made[0].text and "60,000" in made[0].text and "14.3%" in made[0].text
+    assert len(made) == 1 and "BITCOIN PLUNGES 14.3% IN AN HOUR TO $60,000" in made[0].text and made[0].text.startswith("🚨 BREAKING")
+    assert made[0].facts["headline"] == "BITCOIN PLUNGES 14.3% IN AN HOUR TO $60,000" and made[0].facts["label"] == "🚨 BREAKING"  # what Telegram will carry
     assert "Hyperliquid" in made[0].facts["verified"] and "Yahoo Finance" in made[0].text
 
 
@@ -191,7 +192,7 @@ async def test_a_round_number_milestone(db: Session) -> None:
     setup(db, [], [GOLD], state={"last_prices": {"GC=F": 2895}})
     await run(db, web)
     made = posts(db)
-    assert len(made) == 1 and "above $2,900" in made[0].text
+    assert len(made) == 1 and "GOLD BACK ABOVE $2,900" in made[0].text
 
 
 async def test_a_rumour_or_a_story_with_no_market_angle_is_ignored(db: Session) -> None:
@@ -216,11 +217,11 @@ async def test_different_headlines_about_one_story_go_out_once(db: Session) -> N
     now = utcnow()
     web = Web()
     web.feeds[MAJOR["url"]] = rss([("Binance says fake job interviews used in crypto hack", "https://b.test/1", now - timedelta(minutes=30))])
-    web.feeds[OTHER["url"]] = rss([("North Korea denies being behind the Binance hack", "https://c.test/1", now - timedelta(minutes=20)), ("Nvidia earnings beat as shares climb on Wall Street", "https://c.test/2", now - timedelta(minutes=10))])
+    web.feeds[OTHER["url"]] = rss([("North Korea denies being behind the Binance hack", "https://c.test/1", now - timedelta(minutes=20)), ("Nvidia shares plunge after earnings miss on Wall Street", "https://c.test/2", now - timedelta(minutes=10))])
     setup(db, [MAJOR, OTHER], [])
     await run(db, web)
-    made = [p.text for p in posts(db)]
-    assert sum("Binance" in t for t in made) == 1 and sum("Nvidia" in t for t in made) == 1
+    made = [p.text.upper() for p in posts(db)]
+    assert sum("BINANCE" in t for t in made) == 1 and sum("NVIDIA" in t for t in made) == 1
 
 
 def test_bitcoin_gets_its_symbol_and_other_crypto_doesnt() -> None:

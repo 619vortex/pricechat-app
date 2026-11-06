@@ -18,7 +18,7 @@ from app.connectors.x import XRuntime
 from app.connectors.x.errors import XAuthError, XCreditsError, XError, XForbiddenError, XRateLimitError, XUnavailableError
 from app.db.base import utcnow
 from app.models.newsdesk import NdPost, NdSettings, NdStory
-from app.newsdesk import checks, sources, writer
+from app.newsdesk import brief, chaos, checks, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -202,12 +202,16 @@ async def detect_markets(db: Session, s: NdSettings, quotes: dict[str, sources.Q
             if not on_cooldown(db, key, COOLDOWN["move"], now):
                 big = ratio >= 1.5
                 spike = q.volume_spike() >= 5
-                candidate = {"key": key, "text": writer.move_post(item, window, change, q.price, as_of, big=big, volume=spike), "score": 5.0 + min(ratio, 4.0), "breaking": big,
-                             "facts": {**facts, "window": window, "change_pct": round(change, 2), "volume_spike": spike}}
+                b = brief.market_brief(item, change, ratio)  # the label and the words are shared with Telegram, through the facts
+                candidate = {"key": key, "text": writer.move_post(item, window, change, q.price, as_of, big=big, volume=spike, ratio=ratio, label=b.label), "score": 5.0 + min(ratio, 4.0), "breaking": big,
+                             "facts": {**facts, "window": window, "change_pct": round(change, 2), "volume_spike": spike, "ratio": round(ratio, 2),
+                                       "headline": writer.move_headline(item, window, change, q.price, ratio), "label": b.label, "shock": b.shock}}
         if candidate is None and q.high_52w and q.price >= q.high_52w * 0.9995 and not on_cooldown(db, f"high:{item['symbol']}", COOLDOWN["extreme"], now):
-            candidate = {"key": f"high:{item['symbol']}", "text": writer.extreme_post(item, True, q.price, as_of), "score": 6.0, "breaking": False, "facts": {**facts, "high_52w": q.high_52w}}
+            candidate = {"key": f"high:{item['symbol']}", "text": writer.extreme_post(item, True, q.price, as_of), "score": 6.0, "breaking": False,
+                         "facts": {**facts, "high_52w": q.high_52w, "headline": writer.extreme_headline(item, True, q.price), "label": "", "shock": 50}}
         if candidate is None and q.low_52w and q.price <= q.low_52w * 1.0005 and not on_cooldown(db, f"low:{item['symbol']}", COOLDOWN["extreme"], now):
-            candidate = {"key": f"low:{item['symbol']}", "text": writer.extreme_post(item, False, q.price, as_of), "score": 6.0, "breaking": False, "facts": {**facts, "low_52w": q.low_52w}}
+            candidate = {"key": f"low:{item['symbol']}", "text": writer.extreme_post(item, False, q.price, as_of), "score": 6.0, "breaking": False,
+                         "facts": {**facts, "low_52w": q.low_52w, "headline": writer.extreme_headline(item, False, q.price), "label": "", "shock": 50}}
         step = item.get("step")
         if candidate is None and step and previous:
             below, above = int(previous // step), int(q.price // step)
@@ -216,7 +220,8 @@ async def detect_markets(db: Session, s: NdSettings, quotes: dict[str, sources.Q
                 level = float(max(above, below) * step)
                 key = f"mile:{item['symbol']}:{level:g}"
                 if not on_cooldown(db, key, COOLDOWN["milestone"], now):
-                    candidate = {"key": key, "text": writer.milestone_post(item, level, up, q.price, as_of), "score": 5.5, "breaking": False, "facts": {**facts, "level": level, "previous": previous}}
+                    candidate = {"key": key, "text": writer.milestone_post(item, level, up, q.price, as_of), "score": 5.5, "breaking": False,
+                                 "facts": {**facts, "level": level, "previous": previous, "headline": writer.milestone_headline(item, level, up, q.price), "label": "", "shock": 40}}
         if candidate is None:
             continue
         ok, detail = await sources.second_opinion(item, q.price, market)
@@ -231,8 +236,9 @@ async def detect_markets(db: Session, s: NdSettings, quotes: dict[str, sources.Q
     falling = [(n, c) for n, c in indices if c is not None and c <= -sources.THRESHOLDS["index"]["24h"] * factor]
     if enabled.get("stocks", True) and len(falling) >= 2 and not key_prefix_cooling(db, "selloff:", COOLDOWN["selloff"], now):
         latest = max((quotes[i["symbol"]].as_of for i in s.watchlist or [] if i.get("group") == "index" and i["symbol"] in quotes))
-        text = writer.selloff_post(falling, latest.strftime("%d %b %H:%M"))
-        made += enqueue(db, posts, kind="market", category="stocks", priority="breaking", text=text, key=f"selloff:{now:%Y%m%d}", score=8.0, facts={"indices": dict(falling), "as_of": latest.isoformat()},
+        text = writer.selloff_post(falling, latest.strftime("%d %b %H:%M"), label=brief.JUST_IN)
+        made += enqueue(db, posts, kind="market", category="stocks", priority="breaking", text=text, key=f"selloff:{now:%Y%m%d}", score=8.0,
+                        facts={"indices": dict(falling), "as_of": latest.isoformat(), "headline": writer.selloff_headline(falling), "label": brief.JUST_IN, "shock": 70},
                         src=[{"name": "Yahoo Finance", "url": "https://finance.yahoo.com", "at": latest.isoformat()}], source_text=text, names=["Yahoo Finance"], expires=now + timedelta(minutes=45), now=now) is not None
     state["last_prices"] = last_prices
     s.state = state
@@ -284,52 +290,43 @@ def snapshot(db: Session, s: NdSettings, quotes: dict[str, sources.Quote], posts
 # --- news ------------------------------------------------------------------------------------------------------
 
 
-async def plan_news(db: Session, s: NdSettings, settings: Settings, posts: list[NdPost], now: datetime, transport: Any = None) -> int:
-    enabled = s.categories or {}
-    threshold = SENSITIVITY.get(s.sensitivity, SENSITIVITY["medium"])["breaking"]
+async def plan_news(db: Session, s: NdSettings, settings: Settings, posts: list[NdPost], now: datetime, transport: Any = None, quotes: dict[str, sources.Quote] | None = None) -> int:
+    """The same stories as the Telegram lane, from the shared engine (app/newsdesk/chaos), written for X. X keeps its own queue, limits and dedupe."""
     rows = list(db.scalars(select(NdStory).where(NdStory.created_at >= now - timedelta(hours=36))))
-    scored: list[tuple[float, NdStory, list[NdStory]]] = []
-    for story in rows:
-        if story.used or not enabled.get(story.category or "", False) or story.published_at is None:
-            continue
-        at = story.published_at if story.published_at.tzinfo else story.published_at.replace(tzinfo=now.tzinfo)
-        others = corroboration(story, rows)
-        scored.append((score_story(story.tier, story.score, len({o.source for o in others}), (now - at).total_seconds() / 3600), story, others))
-    scored.sort(key=lambda r: -r[0])
+    ready, _ = chaos.candidates([r for r in rows], quotes or {}, now, max_age=timedelta(hours=12), categories=s.categories or {})
     wanted = max(1, s.target_per_day // 3)
-    made, writes = 0, 0
+    made = 0
     queued = sum(1 for p in posts if p.status == "queued" and p.priority == "scheduled")
-    for score, story, others in scored:
+    since = now - timedelta(hours=6)
+    moved = [str((p.facts or {}).get("title") or (p.facts or {}).get("headline") or "") for p in posts
+             if (p.created_at if p.created_at is None or p.created_at.tzinfo else p.created_at.replace(tzinfo=now.tzinfo)) is None or (p.created_at if p.created_at.tzinfo else p.created_at.replace(tzinfo=now.tzinfo)) >= since]
+    for v in ready:
+        story, b = v.story, v.brief
+        if story.used:
+            continue
+        breaking = b.label == brief.BREAKING
+        if not breaking and queued >= wanted:
+            continue
+        if same_story(story.title, posts, now) is not None or chaos.moved_lately(story.title, moved):
+            story.used = True  # one story, one post; and one move per asset in six hours, as Telegram does
+            continue
+        srcs = [{"name": x.source, "url": x.link, "at": x.published_at.isoformat() if x.published_at else None} for x in [story, *v.others] if x.link.startswith("https://")]
+        named = list(dict.fromkeys(x["name"] for x in srcs))[:3]
+        shown = [next(x for x in srcs if x["name"] == n) for n in named]
+        text = brief.x_text(brief.clean_headline(story.title), shown, b, story.link)
+        source_text = " ".join(f"{x.title} {x.summary or ''}" for x in [story, *v.others]) + " " + " ".join(b.tickers)
         at = story.published_at if story.published_at.tzinfo else story.published_at.replace(tzinfo=now.tzinfo)
-        age = (now - at).total_seconds() / 3600
-        verified = story.tier == 0 or len({o.source for o in others}) >= 1  # official, or a second outlet carries it
-        breaking = score >= threshold and age <= 1.5 and verified
-        if not breaking and (queued >= wanted or score < 3.5 or story.tier > 1 and score < 4.0):
-            continue
-        if writes >= 4:
-            break
-        if same_story(story.title, posts, now) is not None:
-            story.used = True
-            continue
-        source_text = " ".join([story.title, story.summary or ""])
-        text = None
-        if not breaking:
-            writes += 1
-            text = await writer.rewrite(settings, story.title, story.summary or "", story.source, transport=transport)
-            if text is not None and not checks.check_post(text, source_text=source_text, source_names=[story.source]).ok:
-                logger.info("newsdesk: the model's text failed the checks; using the headline")
-                text = None
-        text = text or writer.headline_post(story.title, story.source, story.category or "viral", breaking)
-        post = enqueue(db, posts, kind="news", category=story.category or "viral", priority="breaking" if breaking else "scheduled", text=text, key=f"story:{story.id}", score=score,
-                       facts={"title": story.title, "corroborated_by": sorted({o.source for o in others}), "published_at": at.isoformat(), "official": story.tier == 0},
-                       src=[{"name": x.source, "url": x.link, "at": x.published_at.isoformat() if x.published_at else None} for x in [story, *others][:5]],
-                       source_text=source_text, names=[story.source], expires=now + timedelta(hours=12), now=now)
+        post = enqueue(db, posts, kind="news", category=story.category or "viral", priority="breaking" if breaking else "scheduled", text=text, key=f"story:{story.id}", score=round(b.rank / 10, 2),
+                       facts={"title": story.title, "corroborated_by": sorted({o.source for o in v.others}), "published_at": at.isoformat(), "official": story.tier == 0,
+                              "evidence": v.evidence, "price_check": v.price_check, "label": b.label, "shock": b.shock},
+                       src=srcs[:5], source_text=source_text, names=named, expires=now + timedelta(hours=12), now=now)
         story.used = True
-        for o in others:
+        for o in v.others:
             o.used = True
         if post is not None:
             made += 1
             queued += 0 if breaking else 1
+            moved.append(story.title)
     db.commit()
     return made
 
@@ -482,7 +479,7 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
         logger.info("newsdesk: liquidations: %s", type(e).__name__)
         db.rollback()
         made_liq = 0
-    made_news = await plan_news(db, s, settings, posts, now, writer_transport)
+    made_news = await plan_news(db, s, settings, posts, now, writer_transport, quotes)
     made_snap = snapshot(db, s, quotes, posts, now)
     db.commit()
     result = None
