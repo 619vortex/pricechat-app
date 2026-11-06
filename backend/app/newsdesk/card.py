@@ -11,13 +11,14 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from app.newsdesk.brief import ALERT, BREAKING, JUST_IN, Brief
+from app.newsdesk.brief import ALERT, BREAKING, JUST_IN, UPDATE, Brief
 
 W, H = 1200, 675
 ASSETS = Path(__file__).with_name("assets")
 BG, TEXT, MUTED, KIWI_GREEN = (10, 12, 11), (246, 247, 246), (150, 160, 155), (132, 204, 22)
-ACCENT = {BREAKING: (230, 36, 36), ALERT: (230, 36, 36), JUST_IN: (250, 190, 20)}
-WORD = {BREAKING: "BREAKING", ALERT: "ALERT", JUST_IN: "JUST IN"}
+ACCENT = {BREAKING: (230, 36, 36), ALERT: (230, 36, 36), JUST_IN: (250, 190, 20), UPDATE: (56, 152, 236)}
+WORD = {BREAKING: "BREAKING", ALERT: "ALERT", JUST_IN: "JUST IN", UPDATE: "UPDATE"}
+UP, DOWN = (132, 204, 22), (240, 68, 56)
 
 
 @lru_cache(maxsize=16)
@@ -42,7 +43,8 @@ def _wrap(d: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width
     return lines
 
 
-def render(headline: str, brief: Brief, sources: list[str], at: datetime) -> bytes:
+def render(headline: str, brief: Brief, sources: list[str], at: datetime, *, stat: str = "", spark: list[float] | None = None) -> bytes:
+    """stat: the one figure the story gives (a dollar amount, the measured move), shown large. spark: our own prices over the last day."""
     accent = ACCENT.get(brief.label, KIWI_GREEN)
     img = Image.new("RGB", (W, H), BG)
     # a soft glow of the label's colour from the top left, so a red card reads as red at a glance
@@ -71,11 +73,32 @@ def render(headline: str, brief: Brief, sources: list[str], at: datetime) -> byt
     img.paste(kiwi, (kx, ky + (kiwi.width - kiwi.height) // 2 + 2), kiwi)
     d.text((bx, 64), "PRICE ALERT", font=brand, fill=TEXT, anchor="lm")
     d.text((bx, 96), "by Price Chat", font=_inter(20, "Medium"), fill=MUTED, anchor="lm")
+    # the right-hand column: the figure, and the day's prices under it
+    spark = [p for p in (spark or []) if p > 0]
+    side = bool(stat) or len(spark) >= 4
+    col_x = W - 64 - 300
+    if side:
+        mid = 140 + (H - 140 - 110) // 2
+        if stat:
+            colour = DOWN if stat.startswith("-") else UP if stat.startswith("+") else TEXT
+            fsize = 110
+            while fsize > 50 and d.textlength(stat, font=_anton(fsize)) > 300:
+                fsize -= 8
+            d.text((col_x + 300, mid - (40 if len(spark) >= 4 else 0)), stat, font=_anton(fsize), fill=colour, anchor="rm")
+        if len(spark) >= 4:
+            lo, hi = min(spark), max(spark)
+            top, height = mid + 40 if stat else mid - 60, 110
+            pts = [(col_x + i * 300 / (len(spark) - 1), top + height - (v - lo) / ((hi - lo) or 1) * height) for i, v in enumerate(spark)]
+            colour = UP if spark[-1] >= spark[0] else DOWN
+            d.line(pts, fill=colour, width=5, joint="curve")
+            d.ellipse([pts[-1][0] - 8, pts[-1][1] - 8, pts[-1][0] + 8, pts[-1][1] + 8], fill=colour)
+            d.text((col_x, top + height + 22), "24H · OUR PRICE DATA", font=_inter(18, "Bold"), fill=MUTED, anchor="lm")
     # the headline, as large as fits in four lines
     text = headline.upper()
+    width = (col_x - 40 - x0) if side else (W - x0 - 64)
     size, lines = 96, []
-    for size in (96, 88, 80, 72, 64, 58, 52):
-        lines = _wrap(d, text, _anton(size), W - x0 - 64)
+    for size in (96, 88, 80, 72, 64, 58, 52, 46):
+        lines = _wrap(d, text, _anton(size), width)
         if len(lines) <= 4:
             break
     lines = lines[:4]

@@ -103,7 +103,7 @@ from app.models.workers import WkAssignment, WkAudit, WkCredit, WkJoin, WkLink, 
 from app.models.rewards import ArenaRun, BeginnerContent, RankReward, RewardAudit, RewardClaim, RewardSettings  # noqa: E402,F401
 from app.models.alerts import OwnerAlert, OwnerAlertSettings  # noqa: E402,F401
 from app.models.desktop import MemberDesktopCode
-from app.models.newsdesk import NdPost, NdSettings, NdStory, NdTelegramPost, NdTelegramSettings
+from app.models.newsdesk import NdEvent, NdPost, NdSettings, NdStory, NdTelegramPost, NdTelegramSettings
 from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings  # noqa: E402,F401
 from app.models.perf_indexes import PERF_INDEXES  # noqa: E402,F401  (hot-query indexes, migration 0090)
 from app.models.committee import CmBacktest, CmLlmJob, CmOutcome, CmPaperTrade, CmRun, CmUsage  # noqa: E402,F401

@@ -112,3 +112,41 @@ class NdTelegramPost(IdMixin, TimestampMixin, Base):
     @property
     def url(self) -> str | None:
         return f"https://t.me/{self.chat[1:]}/{self.message_id}" if self.message_id and self.chat and self.chat.startswith("@") else None
+
+
+class NdEvent(IdMixin, TimestampMixin, Base):
+    """One editorial decision, shared by X and Telegram: a story (or a measured market move) the engine chose, released once, then delivered
+    by each platform on its own. Each platform keeps its own status, so one failing never stops or rewrites the other."""
+
+    __tablename__ = "nd_events"
+    __table_args__ = (Index("ix_nd_events_status", "status", "released_at"),)
+
+    key: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)  # story:<link> | move:<symbol>:<window>:<dir>:<hour> | liq:<coin>:<hour>
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)  # news | market | update
+    parent_id: Mapped[int | None] = mapped_column(Integer)  # an update: the event it follows up
+    title: Mapped[str] = mapped_column(String(300), nullable=False)  # the outlet's own headline, or the market headline
+    headline: Mapped[str] = mapped_column(String(300), nullable=False)  # as posted on both platforms
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    topic: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    label: Mapped[str] = mapped_column(String(24), default="", nullable=False)
+    evidence: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    category: Mapped[str] = mapped_column(String(16), default="viral", nullable=False)
+    virality: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    parts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # how the score was made
+    sources: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)  # [{name, url, at}]
+    facts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # tickers, flag, figures, what the checks compare against
+    # candidate: waiting for a slot | released: both platforms deliver it | missed: never got a slot | superseded: folded into another event
+    status: Mapped[str] = mapped_column(String(12), default="candidate", nullable=False)
+    slot: Mapped[str] = mapped_column(String(10), default="", nullable=False)  # regular | extra (an extraordinary story outside the daily plan)
+    first_seen: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    released_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    why: Mapped[str] = mapped_column(Text, default="", nullable=False)  # why it was released, or why not yet
+    # each platform's own delivery: pending | queued | dry_run | published | delivered | uncertain | failed | skipped | missed
+    x_status: Mapped[str] = mapped_column(String(12), default="pending", nullable=False)
+    x_post_id: Mapped[int | None] = mapped_column(Integer)
+    x_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    tg_status: Mapped[str] = mapped_column(String(12), default="pending", nullable=False)
+    tg_post_id: Mapped[int | None] = mapped_column(Integer)
+    tg_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    tg_note: Mapped[str] = mapped_column(Text, default="", nullable=False)

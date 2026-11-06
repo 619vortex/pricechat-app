@@ -25,7 +25,7 @@ from typing import Any
 from app.newsdesk import checks
 
 BRAND = "🥝 PRICE ALERT"
-BREAKING, ALERT, JUST_IN = "🚨 BREAKING", "🔴 ALERT", "⚡ JUST IN"
+BREAKING, ALERT, JUST_IN, UPDATE = "🚨 BREAKING", "🔴 ALERT", "⚡ JUST IN", "🔄 UPDATE"
 X_LEN = 280
 ALLEGED = "⚖️ Allegations, not proven"
 

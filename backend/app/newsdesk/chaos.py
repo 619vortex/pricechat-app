@@ -45,6 +45,9 @@ ASSETS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("SOL", "SOL-USD", re.compile(r"\b(Solana|SOL)\b")), ("XRP", "XRP-USD", re.compile(r"\bxrp\b", re.I)),
     ("SPX", "^GSPC", re.compile(r"s&p(?:\s?500)?", re.I)), ("IXIC", "^IXIC", re.compile(r"\bnasdaq\b(?![- ]listed)", re.I)), ("DJI", "^DJI", re.compile(r"\b(dow jones|the dow)\b", re.I)),
     ("NVDA", "NVDA", re.compile(r"\bnvidia\b", re.I)), ("TSLA", "TSLA", re.compile(r"\btesla\b", re.I)), ("AAPL", "AAPL", re.compile(r"\bApple\b")),
+    ("COIN", "COIN", re.compile(r"\bcoinbase(?:'s)? (?:shares|stock)\b", re.I)), ("MSTR", "MSTR", re.compile(r"\b(microstrategy|strategy(?:'s)? (?:shares|stock)|mstr)\b", re.I)),
+    ("META", "META", re.compile(r"\bMeta\b")), ("AMZN", "AMZN", re.compile(r"\bamazon\b", re.I)), ("MSFT", "MSFT", re.compile(r"\bmicrosoft\b", re.I)),
+    ("GOOGL", "GOOGL", re.compile(r"\b(alphabet|google)\b", re.I)),
     ("GOLD", "GC=F", re.compile(r"\bgold\b", re.I)), ("SILVER", "SI=F", re.compile(r"\bsilver\b", re.I)), ("OIL", "CL=F", re.compile(r"\b(oil|crude|wti)\b", re.I)),
     # the market as a whole, checked against its index
     ("IXIC", "^IXIC", re.compile(r"\b(tech|ai) stocks\b", re.I)), ("SPX", "^GSPC", re.compile(r"\b(us stocks|wall street|stock market|stocks)\b", re.I)),
@@ -93,7 +96,7 @@ def rejected(story: Any) -> str | None:
     title, summary = story.title or "", story.summary or ""
     if not (story.link or "").startswith("https://"):
         return "no secure source link"
-    if checks.NOT_NEWS.search(title) or checks.is_explainer(title) or RUMOUR.search(summary):
+    if checks.NOT_NEWS.search(title) or checks.is_explainer(title) or "?" in title or RUMOUR.search(summary):  # "Worried about hacks? Buy ..." is advice
         return "rumour, opinion or explainer"
     if OPINION.search(title):
         return "a forecast or an opinion, not news"

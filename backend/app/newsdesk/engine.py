@@ -17,8 +17,8 @@ from app.config.settings import Settings
 from app.connectors.x import XRuntime
 from app.connectors.x.errors import XAuthError, XCreditsError, XError, XForbiddenError, XRateLimitError, XUnavailableError
 from app.db.base import utcnow
-from app.models.newsdesk import NdPost, NdSettings, NdStory
-from app.newsdesk import brief, chaos, checks, sources, writer
+from app.models.newsdesk import NdEvent, NdPost, NdSettings, NdStory
+from app.newsdesk import brief, chaos, checks, events, moves, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -143,10 +143,11 @@ def key_prefix_cooling(db: Session, prefix: str, wait: timedelta, now: datetime)
 
 
 def enqueue(db: Session, posts: list[NdPost], *, kind: str, category: str, priority: str, text: str, key: str, score: float, facts: dict[str, Any], src: list[dict[str, Any]],
-            source_text: str, names: list[str], expires: datetime | None, now: datetime) -> NdPost | None:
-    """Deduplicate and check; only a post that passes everything enters the queue. The checks stay with it."""
+            source_text: str, names: list[str], expires: datetime | None, now: datetime, dedupe: bool = True) -> NdPost | None:
+    """Deduplicate and check; only a post that passes everything enters the queue. The checks stay with it. dedupe=False: the shared desk
+    already decided this is a new event (a later, bigger move of the same asset reads much like the first)."""
     fp = checks.fingerprint(text)
-    if duplicate(fp, posts) is not None:
+    if dedupe and duplicate(fp, posts) is not None:
         return None
     result = checks.check_post(text, source_text=source_text, source_names=names, breaking=priority == "breaking")
     if not result.ok:
@@ -331,6 +332,69 @@ async def plan_news(db: Session, s: NdSettings, settings: Settings, posts: list[
     return made
 
 
+# --- the shared desk's events, delivered to X -----------------------------------------------------------------------
+
+
+X_STATUS = {"dry_run": "dry_run", "published": "published", "uncertain": "uncertain", "failed": "failed", "queued": "queued", "publishing": "queued", "expired": "missed", "rejected": "skipped"}
+
+
+def _sync(ev: NdEvent, post: NdPost) -> None:
+    events.mark(ev, "x", X_STATUS.get(post.status, post.status), post.error or "", post_id=post.id)
+
+
+async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime) -> str | None:
+    """The next released event X still owes: written for X, checked, queued and sent (or recorded, in dry run). X's own failures stay X's:
+    Telegram's delivery of the same event is untouched. Returns the publish result, or None if there was nothing to send."""
+    posts = _recent_posts(db, now)
+    for ev in events.pending(db, "x", now):
+        if ev.x_status == "queued" and ev.x_post_id:
+            post = db.get(NdPost, ev.x_post_id)
+            if post is None or post.status != "queued":
+                if post is not None:
+                    _sync(ev, post)
+                continue
+            nb = post.not_before if post.not_before is None or post.not_before.tzinfo else post.not_before.replace(tzinfo=now.tzinfo)
+            if nb is not None and nb > now:
+                continue
+            result = await publish(db, s, post, settings, runtime, agent_id, now)
+            db.refresh(post)
+            _sync(ev, post)
+            db.commit()
+            return result
+        if not (s.categories or {}).get(ev.category, True):
+            events.mark(ev, "x", "skipped", f"the {ev.category} category is off on X")
+            continue
+        cap = s.target_per_day + s.max_breaking_per_day
+        sent = int(db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.x_status.in_(("dry_run", "published", "uncertain")), NdEvent.released_at >= now - timedelta(days=1))) or 0)
+        if sent >= cap:
+            events.mark(ev, "x", "skipped", f"X's own daily limit ({cap})")
+            continue
+        b = events.brief_of(ev, now)
+        f = ev.facts or {}
+        named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
+        shown = [next(x for x in ev.sources if x["name"] == n) for n in named]
+        text = brief.x_text(ev.headline, shown, b, ev.key)
+        source_text = f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
+        urgent = ev.label == brief.BREAKING or ev.slot == "extra"
+        market_kind = ev.kind == "market" or bool(f.get("symbol"))
+        post = enqueue(db, posts, kind="market" if market_kind else "news", category=ev.category or "viral", priority="breaking" if urgent else "scheduled", text=text, key=f"event:{ev.id}",
+                       score=round(ev.virality / 10, 2), facts={"event_id": ev.id, "title": ev.title, "headline": ev.headline, "topic": ev.topic, "label": ev.label, "virality": ev.virality,
+                                                                 "evidence": ev.evidence, "slot": ev.slot, "price_check": f.get("price_check", ""), "symbol": f.get("symbol"),
+                                                                 "verified": f.get("verified"), "parent_event": ev.parent_id,
+                                                                 "corroborated_by": [n for n in (f.get("outlets") or []) if n != (ev.sources or [{}])[0].get("name")]},
+                       src=ev.sources or [], source_text=source_text, names=named, expires=now + timedelta(hours=2), now=now, dedupe=False)
+        if post is None:
+            events.mark(ev, "x", "skipped", "the X text failed the checks")
+            db.commit()
+            continue
+        result = await publish(db, s, post, settings, runtime, agent_id, now)
+        db.refresh(post)
+        _sync(ev, post)
+        db.commit()
+        return result
+    return None
+
+
 # --- publish ------------------------------------------------------------------------------------------------------
 
 
@@ -348,7 +412,7 @@ def _last_sent(db: Session, s: NdSettings, priority: str) -> datetime | None:
 
 def choose(db: Session, s: NdSettings, now: datetime) -> NdPost | None:
     """Breaking first, within its limits. Otherwise the next slot, spaced through the day, from whichever enabled category has had least lately."""
-    queued = list(db.scalars(select(NdPost).where(NdPost.status == "queued").order_by(NdPost.score.desc(), NdPost.id)))
+    queued = list(db.scalars(select(NdPost).where(NdPost.status == "queued", NdPost.key.notlike("event:%")).order_by(NdPost.score.desc(), NdPost.id)))  # events go through deliver_x
     ready = [p for p in queued if p.not_before is None or (p.not_before if p.not_before.tzinfo else p.not_before.replace(tzinfo=now.tzinfo)) <= now]
     day_ago = now - timedelta(days=1)
     breaking = [p for p in ready if p.priority == "breaking"]
@@ -469,27 +533,23 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
         return out
     async with httpx.AsyncClient(transport=transport) as client:
         collected = await collect(db, s, client, now)
-        quotes = await sources.fetch_quotes(client, s.watchlist or [])
+        quotes = await sources.fetch_quotes(client, moves.watch_items(s.watchlist or []))
     posts = _recent_posts(db, now)
-    made_markets = await detect_markets(db, s, quotes, posts, now, market)
-    db.refresh(s)
-    try:
-        made_liq = detect_liquidations(db, s, posts, now)
-    except Exception as e:  # noqa: BLE001 - the optional source never stops the rest
-        logger.info("newsdesk: liquidations: %s", type(e).__name__)
-        db.rollback()
-        made_liq = 0
-    made_news = await plan_news(db, s, settings, posts, now, writer_transport, quotes)
-    made_snap = snapshot(db, s, quotes, posts, now)
+    # the shared desk decides for X and Telegram alike; the daily market table is X-only and off unless Admin turns it on (state.snapshot)
+    decided = await events.decide(db, now, quotes=quotes, watchlist=s.watchlist or [], categories=s.categories or {}, market=market, second_opinion=sources.second_opinion,
+                                  desk_state=s.state or {})
+    made_snap = snapshot(db, s, quotes, posts, now) if (s.state or {}).get("snapshot") else 0
     db.commit()
     result = None
     if why is None:
-        post = choose(db, s, now)
-        if post is not None:
-            result = await publish(db, s, post, settings, runtime, agent_id, now)
+        result = await deliver_x(db, s, settings, runtime, agent_id, now)
+        if result is None:
+            post = choose(db, s, now)  # a person's own posts, and anything queued before the shared desk
+            if post is not None:
+                result = await publish(db, s, post, settings, runtime, agent_id, now)
     db.refresh(s)
     state = dict(s.state or {})
-    out.update({"quotes": len(quotes), "of": len(s.watchlist or []), **collected, "queued_markets": made_markets + made_liq + made_snap, "queued_news": made_news, "published": result, "paused": why})
+    out.update({"quotes": len(quotes), "of": len(s.watchlist or []), **collected, "events": decided, "queued_markets": made_snap, "queued_news": decided.get("stories", 0), "published": result, "paused": why})
     state["last_run"] = {"at": now.isoformat(), **out}
     state["feed_problems"] = collected["feed_problems"]
     s.state = state
@@ -557,7 +617,7 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
             "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "headlines",
             "today": {"published": _sent(db, s, day_ago), "breaking": _sent(db, s, day_ago, "breaking"), "target": s.target_per_day},
             "cost": {"per_post_usd": plain, "posted_30d": sent_30, "estimate_30d_usd": round(sent_30 * plain, 2), "budget": budget.limits(), "x_spend_today_usd": budget.today()["cost"], "x_spend_month_usd": budget.month()["cost"]},
-            "queue": rows("queued", limit=30), "published": rows("published", "dry_run", limit=50), "problems": rows("failed", "uncertain", limit=20)}
+            "queue": rows("queued", limit=30), "published": rows("published", "dry_run", limit=50), "problems": rows("failed", "uncertain", limit=20), "desk": events.overview(db, now)}
 
 
 def edit_post(db: Session, post: NdPost, text: str) -> checks.Result:

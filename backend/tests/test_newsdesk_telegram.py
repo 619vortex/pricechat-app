@@ -15,9 +15,9 @@ from app.db.base import utcnow
 from app.members import telegram_missions as tm
 from app.members.referrals import program
 from app.models.members import Mission
-from app.models.newsdesk import NdPost, NdStory, NdTelegramPost
+from app.models.newsdesk import NdEvent, NdPost, NdStory, NdTelegramPost
 from app.models.telegram import TelegramMessage, TelegramSource
-from app.newsdesk import chaos, checks, engine, sources, telegram as lane, writer
+from app.newsdesk import chaos, checks, engine, events, sources, telegram as lane, writer
 from app.telegram.errors import TelegramRateLimitError, TelegramRequestError, TelegramUnavailableError
 
 CHANNEL_ID = -100123
@@ -79,17 +79,35 @@ def verified(db: Session, title: str = HACK, **kw: Any) -> tuple[NdStory, NdStor
     return a, b
 
 
-def desk_running(db: Session, now: Any) -> None:
+# These tests are about evidence and delivery, so the daily plan is opened up (no windows, gaps or bar); the plan has its own tests in
+# test_newsdesk_events.py.
+OPEN = {"regular_bar": 0, "opening_bar": 0, "regular_per_day": 50, "ceiling": 50, "window_hours": 0, "regular_gap_minutes": 0, "min_gap_minutes": 0, "topic_max": 50,
+        "asset_cooldown_minutes": 360}
+
+
+def desk_running(db: Session, now: Any, plan: dict[str, Any] | None = None) -> None:
     """The desk read the feeds moments ago, so the lane makes no web request of its own."""
     desk = engine.settings_row(db)
-    desk.state = {"last_run": {"at": now.isoformat()}}
+    desk.state = {"last_run": {"at": now.isoformat()}, "policy": OPEN if plan is None else plan}
     db.commit()
+
+
+async def agrees(item: dict[str, Any], price: float, market: Any = None) -> tuple[bool, str]:
+    return True, f"Hyperliquid {price * 1.0005:,.2f} vs Yahoo {price:,.2f}: 0.05% apart"
+
+
+async def decide(db: Session, now: Any, quotes: dict[str, Any] | None = None, second: Any = agrees) -> dict[str, Any]:
+    """What the desk's own run does: the shared decision, for X and Telegram alike."""
+    desk = engine.settings_row(db)
+    return await events.decide(db, now, quotes=quotes or {}, watchlist=desk.watchlist or [], categories=desk.categories or {}, desk_state=desk.state, liquidations=False,
+                               second_opinion=second)
 
 
 async def run(db: Session, tg: Tg, now: Any = None, **kw: Any) -> dict[str, Any]:
     now = now or utcnow()
-    desk_running(db, now)
+    desk_running(db, now, kw.pop("plan", None))
     kw.setdefault("quotes", {})
+    await decide(db, now, kw["quotes"], kw.pop("second", agrees))
     return await lane.tick(db, get_settings(), tg, now, **kw)
 
 
@@ -135,22 +153,20 @@ async def test_the_lane_leaves_the_x_queue_alone(db: Session) -> None:
     assert engine.settings_row(db).mode == desk_before
 
 
-async def test_x_and_telegram_choose_the_same_story(db: Session) -> None:
+async def test_x_and_telegram_carry_the_same_event_with_the_same_headline(db: Session) -> None:
     now = utcnow()
     verified(db, now=now)
     verified(db, "Zorbex founder arrested after $9 million rug pull", hours=3, now=now)
-    s = engine.settings_row(db)
-    s.categories = {**(s.categories or {}), "crypto": True}
-    db.commit()
-    await engine.plan_news(db, s, get_settings(), [], now, quotes={})
-    queued = list(db.scalars(select(NdPost).where(NdPost.kind == "news").order_by(NdPost.score.desc())))  # X sends its best-scored first
     tg = Tg()
     await run(db, tg, now)
-    first = db.get(NdStory, int(queued[0].key.split(":")[1]))
-    assert len(queued) == 2 and rows(db)[0].story_link == first.link  # X's first is Telegram's first
-    assert "ZORBEX" in queued[0].text and "BYBAZ" in queued[1].text  # a rug pull and an arrest outrank a mid-size hack three hours fresher
-    assert "🥝 PRICE ALERT" in queued[0].text and "http" not in queued[0].text and len(queued[0].text) <= 280
-    assert queued[0].facts["evidence"] == queued[1].facts["evidence"] == "two outlets"
+    desk = engine.settings_row(db)
+    await engine.deliver_x(db, desk, get_settings(), None, 0, now)
+    ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
+    x = db.get(NdPost, ev.x_post_id)
+    assert ev.tg_status == "delivered" and ev.x_status == "dry_run" and ev.tg_message_id == 144
+    assert ev.headline in tg.sent[0]["text"] and ev.headline in x.text  # one decision, one headline, two deliveries
+    assert "BYBAZ" in ev.headline  # a fresh $40m exchange hack, two outlets, outranks a three-hour-old rug pull
+    assert "🥝 PRICE ALERT" in x.text and "http" not in x.text and len(x.text) <= 280 and x.facts["event_id"] == ev.id
 
 
 async def test_a_second_run_never_sends_the_same_story_or_its_other_outlet(db: Session) -> None:
@@ -162,26 +178,38 @@ async def test_a_second_run_never_sends_the_same_story_or_its_other_outlet(db: S
     assert len(tg.sent) == 1
 
 
-async def test_a_new_headline_on_a_story_already_carried_is_a_duplicate(db: Session) -> None:
+async def test_a_new_headline_on_a_story_already_carried_is_a_duplicate_but_a_development_is_an_update(db: Session) -> None:
     now = utcnow()
     verified(db, now=now)
     tg = Tg()
     await run(db, tg, now)
-    story(db, "Bybaz confirms hot wallet exploit, pauses withdrawals", "Cointelegraph", now=now)
-    story(db, "Bybaz hot wallet exploit confirmed as withdrawals pause", "BBC", tier=1, now=now)
-    await run(db, tg, now + timedelta(hours=2))
-    assert len(tg.sent) == 1
+    story(db, "Bybaz hot wallet drained of $40 million, exchange says", "Cointelegraph", now=now)
+    story(db, "Hackers drained $40 million from Bybaz hot wallet", "BBC", tier=1, now=now)
+    await run(db, tg, now + timedelta(hours=1))
+    assert len(tg.sent) == 1  # the same news, reworded
+    story(db, "Bybaz suspends withdrawals and confirms losses rose to $90 million", "Cointelegraph", summary="Bybaz said losses rose to $90 million.", now=now + timedelta(hours=1.5), hours=0)
+    story(db, "Bybaz losses rise to $90 million as withdrawals are suspended", "The Block", summary="Losses rose to $90 million, Bybaz said.", now=now + timedelta(hours=1.5), hours=0)
+    await run(db, tg, now + timedelta(hours=1.6))
+    assert len(tg.sent) == 2 and "🔄 UPDATE" in tg.sent[1]["text"] and tg.sent[1]["reply_to"] == 144  # a reply to the first message
+    await run(db, tg, now + timedelta(hours=2.5))
+    assert len(tg.sent) == 2
 
 
-async def test_a_story_that_failed_the_checks_is_only_tried_once(db: Session) -> None:
-    story(db, "SEC charges Acme exchange over $40 million fraud", "SEC", summary="Details are at sec.gov/news today. The agency charged Acme with fraud.", tier=0)
+async def test_a_story_whose_headline_fails_the_checks_never_goes_out_on_either_platform(db: Session) -> None:
+    story(db, "SEC charges Acme exchange over $40 million fraud, details at sec.gov", "SEC", summary="The agency charged Acme with fraud.", tier=0)
     now = utcnow()
     tg = Tg()
     await run(db, tg, now)
     await run(db, tg, now + timedelta(minutes=5))
-    assert [p.status for p in rows(db)] == ["refused"] and tg.sent == []
-    good, seen = lane.candidates(db, now + timedelta(minutes=5))
-    assert good == [] and seen["duplicate"] == 1
+    ev = db.scalars(select(NdEvent)).one()
+    assert tg.sent == [] and ev.status == "rejected" and "link" in ev.why and ev.x_post_id is None
+
+
+async def test_a_summary_that_fails_the_checks_is_dropped_and_the_headline_stands_alone(db: Session) -> None:
+    story(db, "SEC charges Acme exchange over $40 million fraud", "SEC", summary="Details are at sec.gov/news today. The agency charged Acme with fraud.", tier=0)
+    tg = Tg()
+    await run(db, tg)
+    assert len(tg.sent) == 1 and "sec.gov" not in tg.sent[0]["text"] and "ACME EXCHANGE OVER $40 MILLION FRAUD" in tg.sent[0]["text"]
 
 
 async def test_a_story_with_no_summary_goes_out_as_its_headline_and_nothing_is_added(db: Session) -> None:
@@ -275,7 +303,7 @@ async def test_a_market_claim_our_prices_contradict_never_goes_out(db: Session) 
     story(db, "Bitcoin crashes 9% to $60,000 as longs are liquidated today", "Decrypt", hours=0.5, now=now)
     tg = Tg()
     out = await run(db, tg, now, quotes={"BTC-USD": quote("BTC-USD", 60000, 66000, now - timedelta(minutes=30), hours=24)})
-    assert tg.sent == [] and out["stories"]["rejected"] == 2
+    assert tg.sent == [] and db.scalars(select(NdEvent)).first() is None
     v = chaos.evaluate(db.scalars(select(NdStory)).first(), [], {"BTC-USD": quote("BTC-USD", 60000, 66000, now - timedelta(minutes=30), hours=24)}, now)
     assert v.status == "rejected" and "contradict" in v.why
 
@@ -293,54 +321,57 @@ async def test_a_market_figure_we_cant_check_needs_a_second_outlet(db: Session) 
 # --- price posts, cards, cooldowns ------------------------------------------------------------------------------------
 
 
-def desk_move(db: Session, now: datetime, *, minutes: int = 5) -> NdPost:
-    btc = next(w for w in sources.DEFAULT_WATCHLIST if w["symbol"] == "BTC-USD")
-    head = writer.move_headline(btc, "1h", -14.3, 60000, 4.8)
-    p = NdPost(kind="market", category="crypto", priority="breaking", status="dry_run", text=writer.move_post(btc, "1h", -14.3, 60000, "05 Nov 10:00", big=True, ratio=4.8, label="🚨 BREAKING"),
-               key="move:BTC-USD:1h:down", fingerprint=checks.fingerprint(head), score=8.0, sources=[], checks=[], metrics={},
-               facts={"symbol": "BTC-USD", "price": 60000, "as_of": now.isoformat(), "window": "1h", "change_pct": -14.3, "ratio": 4.8, "headline": head, "label": "🚨 BREAKING", "shock": 100,
-                      "verified": "Hyperliquid 60,050.00 vs Yahoo 60,000.00: 0.08% apart"}, created_at=now - timedelta(minutes=minutes))
-    db.add(p)
-    db.commit()
-    return p
+def crash(now: datetime, *, minutes_ago: int = 0) -> dict[str, sources.Quote]:
+    """Bitcoin falls from $70,000 to $60,000 in the hour to `minutes_ago` before now."""
+    return {"BTC-USD": quote("BTC-USD", 70000, 60000, now - timedelta(minutes=minutes_ago), hours=1)}
 
 
-async def test_the_desks_verified_price_post_goes_out_with_the_same_headline_as_a_card(db: Session) -> None:
+async def test_a_live_crash_goes_out_with_the_same_headline_on_both_platforms_as_a_card(db: Session) -> None:
     now = utcnow()
-    p = desk_move(db, now)
     tg = Tg()
-    await run(db, tg, now)
+    await run(db, tg, now, quotes=crash(now))
     sent = tg.sent[0]
-    assert sent["card"] is True and "🚨 BREAKING: BITCOIN PLUNGES 14.3% IN AN HOUR TO $60,000" in sent["text"] and "matched against Hyperliquid" in sent["text"]
-    assert rows(db)[0].story_link == f"desk:market:{p.id}" and rows(db)[0].writer == "market"
+    assert sent["card"] is True and "🚨 BREAKING: BITCOIN CRASHES 14.3% IN AN HOUR TO $60,000" in sent["text"] and "matched against Hyperliquid" in sent["text"]
+    ev = db.scalars(select(NdEvent)).one()
+    assert rows(db)[0].story_link == f"event:{ev.id}" and rows(db)[0].writer == "market"
+    await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, now)
+    assert "BITCOIN CRASHES 14.3% IN AN HOUR TO $60,000" in db.get(NdPost, ev.x_post_id).text
 
 
-async def test_a_stale_price_post_stays_on_x(db: Session) -> None:
-    now = utcnow()
-    desk_move(db, now, minutes=50)
+async def test_a_crash_crypto_can_t_confirm_on_a_second_source_never_goes_out(db: Session) -> None:
+    async def disagrees(item: dict[str, Any], price: float, market: Any = None) -> tuple[bool, str]:
+        return False, "Hyperliquid 66,000.00 vs Yahoo 60,000.00: 10% apart"
+
     tg = Tg()
-    await run(db, tg, now)
-    assert tg.sent == []
+    now = utcnow()
+    await run(db, tg, now, quotes=crash(now), second=disagrees)
+    assert tg.sent == [] and db.scalars(select(NdEvent)).first() is None
+
+
+async def test_a_stale_price_claims_no_move(db: Session) -> None:
+    now = utcnow()
+    tg = Tg()
+    await run(db, tg, now, quotes=crash(now, minutes_ago=50))
+    assert tg.sent == [] and db.scalars(select(NdEvent)).first() is None
 
 
 async def test_one_move_per_asset_whether_it_comes_as_news_or_as_prices(db: Session) -> None:
     now = utcnow()
-    desk_move(db, now)
     tg = Tg()
-    await run(db, tg, now)
-    verified(db, "Bitcoin plunges as liquidations sweep crypto markets", now=now, hours=0.2)
+    await run(db, tg, now, quotes=crash(now))
+    verified(db, "Bitcoin plunges as liquidations sweep crypto markets", now=now + timedelta(minutes=50), hours=0.2)
     await run(db, tg, now + timedelta(minutes=50), quotes={"BTC-USD": quote("BTC-USD", 70000, 60000, now, hours=24)})
     assert len(tg.sent) == 1
 
 
-async def test_a_price_post_after_news_of_the_same_move_stays_on_x(db: Session) -> None:
+async def test_a_price_move_after_news_of_the_same_move_doesnt_go_out_again(db: Session) -> None:
     now = utcnow()
     verified(db, "Bitcoin plunges as liquidations sweep crypto markets", now=now, hours=0.2)
     tg = Tg()
     await run(db, tg, now, quotes={"BTC-USD": quote("BTC-USD", 70000, 60000, now, hours=24)})
     assert len(tg.sent) == 1
-    desk_move(db, now + timedelta(minutes=50))
-    await run(db, tg, now + timedelta(minutes=50))
+    later = now + timedelta(minutes=50)
+    await run(db, tg, later, quotes={"BTC-USD": quote("BTC-USD", 70000, 60000, later, hours=24)})
     assert len(tg.sent) == 1
 
 
@@ -355,9 +386,8 @@ async def test_routine_pr_stays_out_even_when_it_mentions_a_chaos_word(db: Sessi
 
 async def test_a_refused_card_still_goes_out_as_text_once(db: Session) -> None:
     now = utcnow()
-    desk_move(db, now)
     tg = Tg(photo_fail=TelegramRequestError("Telegram rejected sendPhoto: bad image"))
-    await run(db, tg, now)
+    await run(db, tg, now, quotes=crash(now))
     assert len(tg.sent) == 1 and tg.sent[0]["card"] is False and rows(db)[0].status == "delivered"
 
 
@@ -400,11 +430,13 @@ async def test_a_refused_send_isnt_delivered_and_tries_again_later(db: Session) 
     now = utcnow()
     await run(db, tg, now)
     assert rows(db) == []
+    tried = len(tg.sent)  # the card, then the text alone
     await run(db, tg, now + timedelta(minutes=5))
-    assert len(tg.sent) == 1  # still paused
+    assert len(tg.sent) == tried  # still paused
     tg.fail = None
     out = await run(db, tg, now + timedelta(minutes=31))
     assert out["sent"] == 144 and rows(db)[0].status == "delivered"
+    assert db.scalars(select(NdEvent)).one().tg_status == "delivered"
 
 
 async def test_a_rate_limit_waits_as_long_as_telegram_says(db: Session) -> None:
@@ -431,11 +463,16 @@ async def test_an_answer_that_doesnt_confirm_the_message_is_not_delivered(db: Se
 async def test_a_run_that_died_mid_send_is_never_resent(db: Session) -> None:
     a, _ = verified(db)
     now = utcnow()
-    db.add(NdTelegramPost(story_link=a.link, title=a.title, headline=a.title, text="x", source=a.source, sources=[], fingerprint=a.fingerprint, status="publishing", updated_at=now - timedelta(minutes=20), created_at=now - timedelta(hours=2)))
+    desk_running(db, now)
+    await decide(db, now)
+    ev = db.scalars(select(NdEvent)).one()
+    db.add(NdTelegramPost(story_link=f"event:{ev.id}", title=a.title, headline=a.title, text="x", source=a.source, sources=[], fingerprint=a.fingerprint, status="publishing",
+                          updated_at=now - timedelta(minutes=20), created_at=now - timedelta(hours=2)))
     db.commit()
     tg = Tg()
     await run(db, tg, now)
-    assert tg.sent == [] and rows(db)[0].status == "uncertain"
+    db.refresh(ev)
+    assert tg.sent == [] and rows(db)[0].status == "uncertain" and ev.tg_status == "uncertain"
 
 
 async def test_it_keeps_its_gap_and_its_daily_limit(db: Session) -> None:
@@ -487,7 +524,7 @@ async def test_the_x_emergency_stop_doesnt_stop_telegram_and_the_lane_reads_the_
 
     tg = Tg()
     out = await lane.tick(db, get_settings(), tg, utcnow(), transport=httpx.MockTransport(web))
-    assert asked == ["https://decrypt.test/feed"]  # no headline claims a price, so no price is fetched
+    assert asked[0] == "https://decrypt.test/feed" and all(u.startswith("https://query1.finance.yahoo.com/v8/finance/chart/") for u in asked[1:])  # the feed, then prices for live moves
     assert out["sent"] == 144
     assert engine.settings_row(db).kill_switch is True
 
@@ -515,11 +552,13 @@ def with_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(credentials, "resolve", lambda name, settings=None: "key" if name == "anthropic_api_key" else None)
 
 
-async def test_the_models_words_are_used_when_they_pass(db: Session, with_key: None) -> None:
+async def test_the_models_summary_is_used_when_it_passes_and_the_headline_stays_the_desks(db: Session, with_key: None) -> None:
     verified(db)
     tg = Tg()
-    await run(db, tg, writer_transport=model_answer("Bybaz loses $40 million in hot wallet hack", "Attackers drained $40 million from the Bybaz hot wallet. Withdrawals are paused."))
-    assert "BYBAZ LOSES $40 MILLION IN HOT WALLET HACK" in tg.sent[0]["text"] and rows(db)[0].writer == "model"
+    await run(db, tg, writer_transport=model_answer("Bybaz loses $40 million in hot wallet hack", "Attackers took $40 million from the Bybaz hot wallet. Withdrawals are paused."))
+    text = tg.sent[0]["text"]
+    assert "Attackers took $40 million from the Bybaz hot wallet." in text and rows(db)[0].writer == "model"
+    assert "BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION" in text  # the same headline X carries
 
 
 @pytest.mark.parametrize("headline,summary", [
@@ -548,7 +587,7 @@ async def test_feed_text_cant_break_the_message_or_add_a_link(db: Session) -> No
     story(db, "Zorb protocol drained in exploit, team says", "The Block", summary="Visit evil.com to claim now. It was drained overnight.")
     story(db, "Zorb protocol drained in exploit, team says today", "Decrypt", summary="Visit evil.com to claim now. It was drained overnight.")
     await run(db, tg, utcnow() + timedelta(hours=2))
-    assert len(tg.sent) == 1
+    assert len(tg.sent) == 2 and "evil.com" not in tg.sent[1]["text"] and "ZORB PROTOCOL DRAINED" in tg.sent[1]["text"]  # the bad summary is dropped
 
 
 @pytest.mark.parametrize("text,count", [
@@ -668,7 +707,10 @@ async def test_x_carries_one_move_per_asset_too(db: Session) -> None:
     btc = {"BTC-USD": quote("BTC-USD", 70000, 60000, now, hours=24)}
     verified(db, "Bitcoin plunges as liquidations sweep crypto markets", now=now, hours=0.3)
     verified(db, "Bitcoin crashes 14% to seven-week low as longs are wiped out", now=now, hours=0.2)
-    s = engine.settings_row(db)
-    db.commit()
-    await engine.plan_news(db, s, get_settings(), [], now, quotes=btc)
-    assert len(list(db.scalars(select(NdPost).where(NdPost.kind == "news")))) == 1
+    desk_running(db, now)
+    for minutes in (0, 30, 60):
+        await decide(db, now + timedelta(minutes=minutes), btc)
+        await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, now + timedelta(minutes=minutes))
+    assert len(list(db.scalars(select(NdPost)))) == 1
+
+
