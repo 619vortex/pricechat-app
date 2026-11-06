@@ -30,7 +30,7 @@ COOLDOWN = timedelta(hours=6)
 FAIL_AFTER = 3  # failed runs in a row before the owner hears about a job
 FAIL_AFTER_JOB = {"system.backup": 1}  # the nightly backup runs once a day: its first failure already matters
 TIKTOK_BAD = ("expired", "revoked", "disconnected")
-VPN_OFFLINE_AFTER = 2  # syncs in a row that couldn't reach a VPN server's agent
+from app.vpn.service import OFFLINE_AFTER as VPN_OFFLINE_AFTER  # noqa: E402  (same count as the server going offline)
 VPN_FULL_AT, VPN_FULL_CLEAR = 0.9, 0.8  # "nearly full" once past 90% of capacity, re-armed only below 80%
 VPN_TRAFFIC_WARN, VPN_TRAFFIC_OVER = 0.8, 1.0  # of a server's monthly allowance; both re-arm when a new month starts
 
