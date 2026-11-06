@@ -9,6 +9,7 @@ import { Flag, drawMap, place, placeLine } from "./vpnMap";
 
 // Well-formed but made up: never a real listing.
 const FAKE_CHROME = "https://chromewebstore.google.com/detail/kiwi-vpn/" + "abcdefghijklmnop".repeat(2);
+const SHIPPED = { ...STORE_LINKS }; // what the site ships with; tests that swap links put these back
 const FAKE_EDGE = "https://microsoftedge.microsoft.com/addons/detail/kiwi-vpn/" + "qrstuvwxyzabcdef".repeat(2);
 
 /** TEST FIXTURES only: a fake Kiwi VPN API. No real config, keys or servers. */
@@ -182,14 +183,31 @@ describe("Free while payments are off", () => {
     }
   });
 
-  it("claims nothing that isn't released: no download anywhere, and each status says so", () => {
-    const { container } = render(<Downloads agent={CHROME} testers />);
-    expect([...container.querySelectorAll(".vpn-app .vpn-status")].map((x) => x.textContent)).toEqual(["In development", "Public beta", "Coming soon", "Coming soon"]);
-    for (const b of container.querySelectorAll<HTMLButtonElement>(".vpn-platform-action button")) expect(b.disabled).toBe(true);
-    expect(screen.queryByText("Available")).toBeNull();
-    expect([...container.querySelectorAll(".vpn-app a")].every((a) => a.getAttribute("href") === "/vpn/devices#manual")).toBe(true);
-    expect([...container.querySelectorAll("a")].filter((a) => /chromewebstore|microsoftedge|\.exe|\.msi|apps\.apple|play\.google/.test(a.href))).toHaveLength(0);
-    expect(screen.getByText("Manual install, for testers (Chrome and Edge)")).toBeTruthy();
+  it("with no store listing, claims nothing that isn't released: no download anywhere, and each status says so", () => {
+    Object.assign(STORE_LINKS, { chrome: "", edge: "", brave: "", firefox: "" });
+    try {
+      const { container } = render(<Downloads agent={CHROME} testers />);
+      expect([...container.querySelectorAll(".vpn-app .vpn-status")].map((x) => x.textContent)).toEqual(["In development", "Public beta", "Coming soon", "Coming soon"]);
+      for (const b of container.querySelectorAll<HTMLButtonElement>(".vpn-platform-action button")) expect(b.disabled).toBe(true);
+      expect(screen.queryByText("Available")).toBeNull();
+      expect([...container.querySelectorAll(".vpn-app a")].every((a) => a.getAttribute("href") === "/vpn/devices#manual")).toBe(true);
+      expect([...container.querySelectorAll("a")].filter((a) => /chromewebstore|microsoftedge|\.exe|\.msi|apps\.apple|play\.google/.test(a.href))).toHaveLength(0);
+      expect(screen.getByText("Manual install, for testers (Chrome and Edge)")).toBeTruthy();
+    } finally {
+      Object.assign(STORE_LINKS, SHIPPED);
+    }
+  });
+
+  it("ships the verified public Chrome listing (never the /preview address) and nothing for stores that haven't approved it", () => {
+    expect(STORE_LINKS.chrome).toBe("https://chromewebstore.google.com/detail/kiwi-vpn/jeadaadhacdikcbahliklcaaeaddeloa");
+    expect(storeLink("chrome", STORE_LINKS.chrome)).toBe(STORE_LINKS.chrome);
+    expect(storeLink("chrome", STORE_LINKS.chrome + "/preview")).toBeNull();
+    expect([STORE_LINKS.edge, STORE_LINKS.brave, STORE_LINKS.firefox]).toEqual(["", "", ""]);
+    const { container } = render(<Downloads agent={CHROME} />);
+    const add = screen.getByRole("link", { name: "Add to Chrome" });
+    expect(add.getAttribute("href")).toBe(STORE_LINKS.chrome);
+    expect(add.getAttribute("target")).toBe("_blank");
+    expect(card(container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Available");
   });
 
   it("with only the Chrome listing: Add to Chrome opens the store in a new tab, and every other button stays as it was", () => {
@@ -209,7 +227,7 @@ describe("Free while payments are off", () => {
       expect([...view.container.querySelectorAll(".vpn-platforms a, .vpn-platforms button")].map((x) => x.outerHTML)).toEqual(before);
       expect(screen.getByText("Manual install, for testers (Chrome and Edge)")).toBeTruthy(); // Edge testers still need it
     } finally {
-      Object.assign(STORE_LINKS, { chrome: "" });
+      Object.assign(STORE_LINKS, SHIPPED);
     }
   });
 
@@ -227,7 +245,7 @@ describe("Free while payments are off", () => {
       expect(screen.queryByRole("link", { name: "Add to Chrome" })).toBeNull();
       expect(card(container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
     } finally {
-      Object.assign(STORE_LINKS, { chrome: "" });
+      Object.assign(STORE_LINKS, SHIPPED);
     }
   });
 
@@ -241,7 +259,7 @@ describe("Free while payments are off", () => {
       expect((screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.queryByText(/Manual install/)).toBeNull();
     } finally {
-      Object.assign(STORE_LINKS, { chrome: "", edge: "" });
+      Object.assign(STORE_LINKS, SHIPPED);
     }
   });
 
@@ -264,7 +282,7 @@ describe("Free while payments are off", () => {
       expect(windows.textContent).toMatch(/Public beta 0\.1\.0/);
       expect(windows.textContent).toContain("ABC123");
       expect(windows.textContent).not.toMatch(/WireGuard|\.conf|config file/i);
-      expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe("Coming soon");
+      expect(card(view.container, "Browser extension").querySelector(".vpn-status")!.textContent).toBe(STORE_LINKS.chrome ? "Available" : "Coming soon"); // the extension card follows its own store link, not the Windows one
       expect((screen.getByRole("button", { name: "Download APK" }) as HTMLButtonElement).disabled).toBe(true);
     } finally {
       Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" });

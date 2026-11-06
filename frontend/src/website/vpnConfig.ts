@@ -1,6 +1,6 @@
 /** Official listing addresses, filled in only once a store has approved the extension: an empty one shows Coming Soon, never a link.
  *  brave: the Chrome listing, once the extension has actually been tested in Brave. firefox: needs its own Firefox extension first. */
-export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox: string } = { chrome: "", edge: "", brave: "", firefox: "" };
+export const STORE_LINKS: { chrome: string; edge: string; brave: string; firefox: string } = { chrome: "https://chromewebstore.google.com/detail/kiwi-vpn/jeadaadhacdikcbahliklcaaeaddeloa", edge: "", brave: "", firefox: "" };
 
 /** A store button only ever gets the store's own listing address, in its official form with the extension id: Chrome
  *  https://chromewebstore.google.com/detail/<slug>/<id>, Edge https://microsoftedge.microsoft.com/addons/detail/<slug>/<id>.
