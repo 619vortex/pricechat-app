@@ -59,6 +59,9 @@ printf '%s' "$PROXY_HOST" | grep -Eq '^[a-z0-9.-]+$' || die "PROXY_HOST doesn't 
 [ -f "$AGENT_ENV" ] || die "no agent here: run install-shared.sh or install.sh first"
 PUBLIC_IP="${PUBLIC_IP:-$(ip -4 -o addr show "$WAN_IF" scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)}"
 [ -n "$PUBLIC_IP" ] || die "couldn't find the public IP: set PUBLIC_IP"
+# This server's own IPv6 networks (Hetzner gives each server a /64): the proxy's users must not reach them either.
+OWN_NETS="${OWN_NETS-$(ip -6 -o addr show "$WAN_IF" scope global | awk '{print $4}' | python3 -c 'import ipaddress,sys; print(",".join(sorted({str(ipaddress.ip_interface(l.strip()).network) for l in sys.stdin if l.strip()})))')}"
+command -v ufw >/dev/null && ufw status | grep -q "^Status: active" || die "ufw isn't active on this server: its firewall is set up another way, so opening 80 and 443 needs a different step (stop and check)"
 RESOLVED="$(getent ahostsv4 "$PROXY_HOST" | awk '{print $1; exit}' || true)"
 [ "$RESOLVED" = "$PUBLIC_IP" ] || die "$PROXY_HOST points at '${RESOLVED:-nothing}', not $PUBLIC_IP: fix DNS first"
 if ss -ltn "sport = :$PROXY_PORT" | grep -q LISTEN && ! systemctl is-active --quiet kiwi-vpn-proxy; then die "something else is using port $PROXY_PORT"; fi
@@ -122,6 +125,9 @@ case "\$1" in
     ip6tables -N KIWI-PROXY
     ip6tables -A KIWI-PROXY -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
     ip6tables -A KIWI-PROXY -o lo -j REJECT
+    for net in $(echo "$OWN_NETS" | tr ',' ' '); do
+      ip6tables -A KIWI-PROXY -d "\$net" -j REJECT
+    done
     for net in fc00::/7 fe80::/10 ff00::/8; do
       ip6tables -A KIWI-PROXY -d "\$net" -j REJECT
     done
@@ -142,6 +148,7 @@ TLS_KEY=$ETC/tls/privkey.pem
 USERS_FILE=$LIB/users.json
 USAGE_FILE=$LIB/usage.json
 PUBLIC_IPS=$PUBLIC_IP
+OWN_NETS=$OWN_NETS
 EOF
 )
 chown root:"$USER_NAME" "$ETC/proxy.env"

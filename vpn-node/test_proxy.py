@@ -294,3 +294,29 @@ def test_it_prints_nothing_about_connections(tmp_path, certs, capfd):
 def test_it_needs_only_the_standard_library():
     out = subprocess.run([sys.executable, "-I", "-c", f"import runpy; runpy.run_path({P.__file__!r}, run_name='not_main'); print('ok')"], capture_output=True, text=True)
     assert out.stdout.strip() == "ok", out.stderr
+
+
+# The server's own IPv6 (Hetzner gives each server a /64) is as off-limits as its IPv4: a browser user must not reach
+# services that listen on it (SSH, DNS, the agent) from inside the server, where the provider's firewall doesn't apply.
+@pytest.mark.parametrize("ip", ["2a01:4f9:c015:4b9c::1", "2a01:4f9:c015:4b9c::2", "2a01:4f9:c015:4b9c:ffff:ffff:ffff:ffff", "203.0.113.10", "198.51.100.7"])
+def test_public_only_refuses_the_servers_own_networks(ip):
+    nets = P.parse_nets("2a01:4f9:c015:4b9c::/64, 198.51.100.0/24")
+    assert P.public_only(ip, frozenset({"203.0.113.10"}), nets) is False
+
+
+@pytest.mark.parametrize("ip", ["2a01:4f9:c015:4b9d::1", "2606:4700:4700::1111", "1.1.1.1", "198.51.101.1"])
+def test_public_only_still_allows_the_rest_of_the_internet(ip):
+    assert P.public_only(ip, frozenset({"203.0.113.10"}), P.parse_nets("2a01:4f9:c015:4b9c::/64, 198.51.100.0/24")) is True
+
+
+def test_bad_own_networks_are_a_startup_error_not_a_silent_gap():
+    with pytest.raises(ValueError):
+        P.parse_nets("2a01:4f9:c015:4b9c::/64, not-a-network")
+    assert P.parse_nets("") == ()
+
+
+def test_the_proxy_refuses_its_own_ipv6_but_shows_only_its_ipv4(tmp_path):
+    px = P.Proxy({"USERS_FILE": str(tmp_path / "u.json"), "USAGE_FILE": str(tmp_path / "s.json"), "PUBLIC_IPS": "203.0.113.10", "OWN_NETS": "2a01:4f9:c015:4b9c::/64"})
+    assert px.dest_ok("2a01:4f9:c015:4b9c::1") is False and px.dest_ok("203.0.113.10") is False
+    assert px.dest_ok("2606:4700:4700::1111") is True
+    assert sorted(px.own) == ["203.0.113.10"]  # the check page still reports the IPv4 exit

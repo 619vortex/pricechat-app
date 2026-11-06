@@ -40,6 +40,8 @@ DEFAULTS = {
     "USERS_FILE": "/var/lib/kiwi-vpn-proxy/users.json",
     "USAGE_FILE": "/var/lib/kiwi-vpn-proxy/usage.json",
     "PUBLIC_IPS": "",
+    # This server's own networks, refused like PUBLIC_IPS but never shown (comma-separated CIDRs, e.g. the provider's IPv6 /64).
+    "OWN_NETS": "",
 }
 CHECK_HOST = "check.kiwi-vpn.invalid"  # the extension's "am I really going through the tunnel?" request; answered here, never resolved
 BLOCKED_PORTS = frozenset({25, 465, 587})  # no mail
@@ -73,8 +75,13 @@ def load_config(path: str = CONFIG_FILE) -> dict:
     return cfg
 
 
-def public_only(ip: str, own: frozenset[str] = frozenset()) -> bool:
-    """A public internet address that isn't this host. Anything unparseable is refused."""
+def parse_nets(raw: str) -> tuple:
+    """'2a01:db8::/64, 198.51.100.0/24' -> networks. A bad entry raises: a typo must stop the proxy, not leave a hole."""
+    return tuple(ipaddress.ip_network(x.strip(), strict=False) for x in raw.split(",") if x.strip())
+
+
+def public_only(ip: str, own: frozenset[str] = frozenset(), nets: tuple = ()) -> bool:
+    """A public internet address that isn't this host (its addresses in `own`, its networks in `nets`). Anything unparseable is refused."""
     try:
         a = ipaddress.ip_address(ip.split("%", 1)[0])
     except ValueError:
@@ -82,7 +89,7 @@ def public_only(ip: str, own: frozenset[str] = frozenset()) -> bool:
     mapped = getattr(a, "ipv4_mapped", None)
     if mapped is not None:
         a = mapped
-    return a.is_global and not a.is_multicast and str(a) not in own
+    return a.is_global and not a.is_multicast and str(a) not in own and not any(a.version == n.version and a in n for n in nets)
 
 
 def parse_target(raw: str) -> Optional[tuple[str, int]]:
@@ -107,7 +114,8 @@ class Proxy:
                  resolve: Optional[Callable[[str, int], "asyncio.Future"]] = None) -> None:
         self.cfg = {**DEFAULTS, **cfg}
         self.own = frozenset(x.strip() for x in self.cfg["PUBLIC_IPS"].split(",") if x.strip())
-        self.dest_ok = dest_ok or (lambda ip: public_only(ip, self.own))
+        self.own_nets = parse_nets(self.cfg["OWN_NETS"])
+        self.dest_ok = dest_ok or (lambda ip: public_only(ip, self.own, self.own_nets))
         self.resolve = resolve or self._resolve
         self.users: dict[str, str] = {}
         self.counts: dict[str, list[int]] = {}  # username -> [from the client, to the client]; only ever grow while running
