@@ -554,5 +554,5 @@ def test_no_pipeline_that_fails_a_fresh_install():
     import re
     for name in ("install.sh", "install-proxy.sh"):
         for n, line in enumerate(open(os.path.join(HERE, name), encoding="utf-8"), 1):
-            if re.search(r"\$\([^()]*2>/dev/null\s*\|", line):
+            if re.search(r"\$\([^()]*2>/dev/null\s*\|(?!\|)", line):
                 assert "|| true" in line, f"{name}:{n}: {line.strip()}"
