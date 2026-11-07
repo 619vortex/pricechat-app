@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useExit } from "./exit";
-import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
+import { DEFAULT_FAILOVER, type FailoverState, freshFailover, nextFailoverStep, rankServers } from "./smart";
+import { ConnectionSettings, Tools } from "./tools";
+import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, probeServers, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
 
 const POLL_MS = 1000;
 const ACCOUNT_MS = 60_000;
 /** How long before saying the server hasn't answered. The tunnel keeps trying; the person decides. */
 const SLOW_CONNECT_MS = 30_000;
+/** The picker's "fastest server" choice: Smart Connect times every online server and connects to the best. */
+const SMART = -1;
 
 const SEEDS = Array.from({ length: 26 }, (_, i) => (i * 360) / 26);
 const RAYS = Array.from({ length: 52 }, (_, i) => (i * 360) / 52);
@@ -89,6 +93,12 @@ export function App() {
   const [testConfig, setTestConfig] = useState(false);
   const [prefs, setPrefs] = useState<Settings | null>(null);
   const [diag, setDiag] = useState<Diagnostics | null>(null);
+  const [tools, setTools] = useState(false);
+  const [timings, setTimings] = useState<Record<number, number | null>>({});
+  const [switchedTo, setSwitchedTo] = useState<string | null>(null);
+  /** The person asked to be connected (and hasn't asked to stop): failover only acts then. */
+  const want = useRef(false);
+  const fo = useRef<FailoverState>(freshFailover(null));
   const autoChecked = useRef(false);
   const wasOn = useRef(false);
   const meantToStop = useRef(false);
@@ -150,11 +160,27 @@ export function App() {
     catch (e) { setProblem(String(e)); }
     finally { setAction(null); }
   };
-  const connect = (serverId: number) => run("connect", async () => { take(await vpnConnect(serverId)); await loadAccount(); });
-  const disconnect = () => run("disconnect", async () => { meantToStop.current = true; take(await vpnDisconnect()); await loadAccount(); });
+  const connectTo = async (serverId: number) => {
+    want.current = true;
+    if (fo.current.serverId !== serverId) fo.current = freshFailover(serverId);
+    take(await vpnConnect(serverId));
+    await loadAccount();
+  };
+  const connect = (serverId: number) => run("connect", async () => {
+    setSwitchedTo(null);
+    if (serverId !== SMART) { fo.current = freshFailover(serverId); await connectTo(serverId); return; }
+    // Smart Connect: timed while still disconnected, so the tunnel doesn't skew it. If timing fails, the usual order is used.
+    const t = await probeServers().catch(() => ({} as Record<number, number | null>));
+    setTimings(t);
+    const best = rankServers(view?.account?.servers ?? [], t)[0];
+    if (!best) throw "No server is online right now. Please try again soon.";
+    fo.current = freshFailover(best.id);
+    await connectTo(best.id);
+  });
+  const disconnect = () => run("disconnect", async () => { want.current = false; meantToStop.current = true; take(await vpnDisconnect()); await loadAccount(); });
   const login = () => run("sign-in", async () => { await signIn(); await loadAccount(); });
   const trial = () => run("trial", async () => { await startTrial(); await loadAccount(); });
-  const logout = () => run("disconnect", async () => { meantToStop.current = true; await signOut(); setChosen(null); setSettings(false); await loadAccount(); });
+  const logout = () => run("disconnect", async () => { want.current = false; meantToStop.current = true; await signOut(); setChosen(null); setSettings(false); await loadAccount(); });
   const change = (patch: Partial<Settings>) => {
     if (!prefs) return;
     setProblem(null);
@@ -164,8 +190,27 @@ export function App() {
 
   const account = view?.account ?? null;
   const servers: Server[] = account?.servers ?? [];
-  const picked = chosen ?? view?.suggested ?? null;
-  const shown = servers.find((s) => s.id === (phase === "on" || phase === "connecting" ? view?.last_server ?? picked : picked)) ?? null;
+  const smartOn = prefs?.smart_connect === true;
+  const picked = chosen ?? (smartOn ? SMART : view?.suggested ?? null);
+  const shown = servers.find((s) => s.id === (phase === "on" || phase === "connecting" ? view?.last_server ?? fo.current.serverId ?? picked : picked)) ?? null;
+
+  // Failover: while the person wants to be connected and the service says the tunnel isn't healthy, wait, retry once,
+  // then move to the next best server. It never runs after Disconnect, and gives up rather than looping.
+  useEffect(() => {
+    if (!want.current || prefs?.failover !== true || action !== null || !account) return;
+    if (reported === "loading" || reported === "no-service" || reported === "stopping") return;
+    const r = nextFailoverStep(DEFAULT_FAILOVER, fo.current, reported === "on", Date.now(), rankServers(servers, timings));
+    fo.current = r.state;
+    if (r.step.kind === "retry" || r.step.kind === "switch") {
+      const id = r.step.serverId;
+      const to = servers.find((x) => x.id === id);
+      if (r.step.kind === "switch" && to) setSwitchedTo(serverPlace(to));
+      void run("connect", () => connectTo(id));
+    } else if (r.step.kind === "give-up") {
+      want.current = false;
+      setProblem(r.step.reason);
+    }
+  }, [answer, now]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tell the person when the state changes, and only then. A drop they didn't ask for is worth a notification; their own Disconnect isn't.
   useEffect(() => {
@@ -215,6 +260,19 @@ export function App() {
     : locked && !account?.trial?.available ? account?.reason ?? "Your account doesn't include Kiwi VPN right now."
     : view?.error ?? (account && !locked && !picked ? "No servers are available right now. Please try again soon." : null);
 
+  if (tools) {
+    return (
+      <main className="app is-settings">
+        <header className="bar">
+          <img src="/kiwi.webp" alt="" />
+          <span className="brand">Tools</span>
+          <button type="button" className="link" onClick={() => setTools(false)}>Back</button>
+        </header>
+        <Tools connected={reported === "on"} normalIp={phase === "off" ? ip ?? null : null} />
+      </main>
+    );
+  }
+
   if (settings) {
     return (
       <main className="app is-settings">
@@ -230,9 +288,9 @@ export function App() {
               <Toggle label="Connect when Windows starts" hint="Uses your last country." on={prefs.auto_connect} off={!prefs.launch_at_startup} onChange={(v) => change({ auto_connect: v })} />
               <Toggle label="Keep running in the system tray" hint="Closing the window leaves Kiwi VPN in the tray." on={prefs.minimize_to_tray} onChange={(v) => change({ minimize_to_tray: v })} />
               <Toggle label="Notifications" hint="When you connect, or the connection drops." on={prefs.notifications} onChange={(v) => change({ notifications: v })} />
-              <div className="toggle is-off"><span><b>Kill switch</b><small>Not available yet. Your traffic isn't blocked if the tunnel drops.</small></span></div>
             </div>
           )}
+          {prefs && <ConnectionSettings prefs={prefs} change={change} connected={tunnelUp} killSwitchReady={!!diag?.features?.includes("kill_switch")} />}
           {view?.signed_in && <button type="button" className="row" onClick={() => void logout()}>Sign out of Kiwi VPN</button>}
           <button type="button" className="row" onClick={() => void openSite("devices")}>My Devices on pricechat.live</button>
           <details className="advanced" onToggle={(e) => { if (e.currentTarget.open) void diagnostics().then(setDiag).catch(() => setDiag(null)); }}>
@@ -264,7 +322,8 @@ export function App() {
         <img src="/kiwi.webp" alt="" />
         <span className="brand">Kiwi VPN</span>
         <span className="tag">Public beta</span>
-        <button type="button" className="link" onClick={() => setSettings(true)}>Settings</button>
+        <button type="button" className="link" onClick={() => setTools(true)}>Tools</button>
+        <button type="button" className="link" onClick={() => { setSettings(true); void diagnostics().then(setDiag).catch(() => setDiag(null)); }}>Settings</button>
       </header>
 
       <section className={`stage${unchanged ? " is-warned" : ""}`}>
@@ -272,6 +331,7 @@ export function App() {
         <h1 aria-live="polite">{HEADLINE[phase]}</h1>
         <p className="detail" role={phase === "failed" || phase === "no-service" ? "alert" : "status"}>{note && !tunnelUp && !offline ? note : detail(phase, answer, slow)}</p>
         {problem && <p className="problem" role="alert">{problem}</p>}
+        {switchedTo && tunnelUp && <p className="detail" role="status">The server stopped answering, so Kiwi VPN moved you to {switchedTo}.</p>}
         {unchanged && <p className="problem" role="alert">Your public IP is the same as before connecting, so traffic may not be leaving through the server.</p>}
         {locked && !closed && !account?.trial?.available && <button type="button" className="link" onClick={() => void openSite("plans")}>See plans</button>}
         {problem?.includes("My Devices") && <button type="button" className="link" onClick={() => void openSite("devices")}>Open My Devices</button>}
@@ -282,6 +342,13 @@ export function App() {
       )}
       {view?.signed_in && servers.length > 0 && !locked && (
         <div className="picker" role="radiogroup" aria-label="Country">
+          {smartOn && (
+            <button type="button" role="radio" aria-checked={picked === SMART} className={`is-smart${picked === SMART ? " is-picked" : ""}`}
+                    disabled={action !== null || phase === "stopping" || offline || tunnelUp} onClick={() => setChosen(SMART)}>
+              <span className="flag is-code" aria-hidden>⚡</span>
+              <span>Fastest server{tunnelUp && picked === SMART && shown ? `: ${serverPlace(shown)}` : ""}</span>
+            </button>
+          )}
           {servers.map((s) => (
             <button key={s.id} type="button" role="radio" aria-checked={picked === s.id} className={picked === s.id ? "is-picked" : ""}
                     disabled={!s.online || action !== null || phase === "stopping" || offline} onClick={() => {
@@ -291,6 +358,8 @@ export function App() {
             }}>
               <Flag code={s.country_code} />
               <span>{serverPlace(s)}{s.online ? "" : " (offline)"}</span>
+              {s.online && timings[s.id] != null && <small className="ms">{Math.round(timings[s.id]!)} ms</small>}
+              {s.online && s.live_load != null && s.live_load >= 0.8 && <small className="busy">busy</small>}
             </button>
           ))}
         </div>

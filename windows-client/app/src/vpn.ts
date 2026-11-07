@@ -11,7 +11,9 @@ export interface Status { state: TunnelState; handshake_age_seconds: number | nu
 export interface Answer { service: boolean; status: Status | null; message: string | null }
 export type Phase = "loading" | "no-service" | "off" | "connecting" | "on" | "stopping" | "failed";
 
-export interface Server { id: number; name: string; region: string; country_code: string; online: boolean; recommended: boolean }
+export interface Server { id: number; name: string; region: string; country_code: string; online: boolean; recommended: boolean;
+  /** 0..1: devices on it / capacity, and in use right now (newer backends) */ load?: number; live_load?: number;
+  /** its resolver blocks ads and trackers */ adblock?: boolean; /** its HTTPS proxy's name, used to time it */ proxy_host?: string | null }
 export interface Account { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number; servers: Server[]; devices: { id: number; name: string; server_id: number }[];
   plan: { kind: string; days_left: number | null } | null; trial: { available: boolean; days: number } | null }
 export interface AccountView { signed_in: boolean; account: Account | null; suggested: number | null; last_server: number | null; error: string | null }
@@ -33,10 +35,20 @@ export function phaseOf(answer: Answer | null): Phase {
 export const vpnStatus = () => invoke<Answer>("vpn_status");
 export const vpnDisconnect = () => invoke<Answer>("vpn_disconnect");
 export const vpnConnect = (serverId: number) => invoke<Answer>("vpn_connect", { serverId });
+/** Median time in ms to reach each server (3 HTTPS requests to its proxy name), null where it didn't answer. Only run while disconnected. */
+export const probeServers = () => invoke<Record<number, number | null>>("probe_servers");
+export interface SpeedReport { ping_ms: number | null; down_bytes: number; down_ms: number; up_bytes: number; up_ms: number; via: string }
+/** Through whatever connection is active: with the VPN on, it measures the tunnel. */
+export const speedTest = () => invoke<SpeedReport>("speed_test");
+export interface LeakReport { ipv4: string | null; ipv6: string | null; dns: string[]; tunnel_ip: string | null; expected_dns: string[] }
+export const leakCheck = () => invoke<LeakReport>("leak_check");
 export const vpnConnectTestFile = () => invoke<Answer | null>("vpn_connect_test_file");
 export const hasTestConfig = () => invoke<boolean>("has_test_config");
-export interface Settings { launch_at_startup: boolean; auto_connect: boolean; minimize_to_tray: boolean; notifications: boolean }
-export interface Diagnostics { version: string; service: string; tunnel: string; handshake_age_seconds: number | null; settings_file: string }
+export interface Settings { launch_at_startup: boolean; auto_connect: boolean; minimize_to_tray: boolean; notifications: boolean;
+  /** 2.0, all optional so a 0.1 settings file still loads */
+  smart_connect?: boolean; failover?: boolean; kill_switch?: boolean; allow_lan?: boolean; block_malware?: boolean; split_exclude?: string[] }
+export interface Diagnostics { version: string; service: string; tunnel: string; handshake_age_seconds: number | null; settings_file: string;
+  /** what this build's service can really do, e.g. "kill_switch" once its rules are in place and verified */ features?: string[] }
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (next: Settings) => invoke<Settings>("set_settings", { new: next });
 export const shouldAutoConnect = () => invoke<boolean>("should_auto_connect");

@@ -105,3 +105,18 @@ describe("split tunneling", () => {
     expect(size).toBe(2 ** 32 - 2 ** 16);
   });
 });
+
+import { leakVerdict } from "./smart";
+
+describe("leak verdict", () => {
+  const base = { ipv4: "178.156.252.184", ipv6: null, dns: ["178.156.252.184"], tunnel_ip: "178.156.252.184", expected_dns: ["178.156.252.184"] };
+  it("passes only when IPv4 is the server's, no IPv6 shows and DNS is the VPN's", () => {
+    expect(leakVerdict(base, "5.30.213.225").ok).toBe(true);
+    expect(leakVerdict({ ...base, ipv4: "5.30.213.225" }, "5.30.213.225").ok).toBe(false);
+    expect(leakVerdict({ ...base, ipv6: "2a00:f2a::1" }, "5.30.213.225").lines[1].text).toMatch(/leaving outside/);
+    const dnsLeak = leakVerdict({ ...base, dns: ["178.156.252.184", "94.200.200.200"] }, "5.30.213.225");
+    expect(dnsLeak.ok).toBe(false);
+    expect(dnsLeak.lines[2].text).toContain("94.200.200.200");
+    expect(leakVerdict({ ...base, dns: ["2620:fe::9"], expected_dns: ["2620:fe::*"] }, null).lines[2].ok).toBe(true);
+  });
+});

@@ -146,3 +146,30 @@ function subtract(block: Cidr, ex: Cidr): Cidr[] {
   const hi: Cidr = { ip: (block.ip + 2 ** (32 - half)) >>> 0, bits: half };
   return [...subtract(lo, ex), ...subtract(hi, ex)];
 }
+
+// ----- leak check verdict -----
+
+export interface LeakInput { ipv4: string | null; ipv6: string | null; dns: string[]; tunnel_ip: string | null; expected_dns: string[] }
+export interface LeakLine { ok: boolean; text: string }
+
+/**
+ * What the leak check found, in plain words. Passing means: the public IPv4 is the server's, not the person's normal one;
+ * no IPv6 address is visible (Kiwi refuses IPv6 in the tunnel); and every DNS server that answered is one the VPN chose.
+ */
+export function leakVerdict(r: LeakInput, normalIp: string | null): { ok: boolean; lines: LeakLine[] } {
+  const lines: LeakLine[] = [];
+  const v4ok = !!r.ipv4 && r.ipv4 !== normalIp && (!r.tunnel_ip || r.ipv4 === r.tunnel_ip);
+  lines.push({ ok: v4ok, text: !r.ipv4 ? "IPv4: no answer (are you online?)" : v4ok ? `IPv4: ${r.ipv4}, the VPN server's address` : `IPv4: ${r.ipv4}, not the VPN server's address: traffic may be leaving outside the VPN` });
+  lines.push({ ok: !r.ipv6, text: r.ipv6 ? `IPv6: ${r.ipv6} is visible: IPv6 traffic is leaving outside the VPN` : "IPv6: none visible (blocked, so it can't leak)" });
+  const unexpected = r.dns.filter((d) => !r.expected_dns.some((e) => sameResolver(d, e)));
+  const dnsOk = r.dns.length > 0 && unexpected.length === 0;
+  lines.push({ ok: dnsOk, text: !r.dns.length ? "DNS: couldn't tell which servers answered" : dnsOk ? `DNS: ${r.dns.join(", ")}, chosen by the VPN` : `DNS: ${unexpected.join(", ")} answered too: lookups may be leaking` });
+  return { ok: lines.every((l) => l.ok), lines };
+}
+
+/** A resolver matches if it's the same address, or the same provider's network (anycast resolvers answer from many addresses). */
+function sameResolver(seen: string, expected: string): boolean {
+  if (seen === expected) return true;
+  if (expected.endsWith("*")) return seen.startsWith(expected.slice(0, -1));
+  return false;
+}
