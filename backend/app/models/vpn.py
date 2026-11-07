@@ -42,6 +42,9 @@ class VpnServer(IdMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
     # A new server being tried out: only the owner and testers see it or can use it; synced and monitored like any other.
     testers_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    # The provider's monthly traffic allowance (Hetzner: 20 TB in the EU, 1 TB in the US, 0.5 TB in Singapore): the owner hears
+    # at 80% and 100%, since traffic over it is billed. 0 = no alert.
+    traffic_included_gb: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     public_key: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     endpoint_host: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     listen_port: Mapped[int] = mapped_column(Integer, default=51820, server_default="51820", nullable=False)
