@@ -39,7 +39,7 @@ code. It's also a change to Windows networking, which needs the owner's approval
 
 ## How it can be built and tested without the VM
 
-- **Compile and unit tests: GitHub Actions** (`ci/windows-installer.yml`, draft). Microsoft's Windows runners have no
+- **Compile and unit tests: GitHub Actions** (`ci/kiwi-windows.yml`, live in `619vortex/KIWIVPN`, pushed with `sync-ci-repo.ps1`). Microsoft's Windows runners have no
   Smart App Control; `cargo test` for the client and service, the Tauri build and the installer run there. Needs the
   code in a GitHub repository the owner controls, and no secrets.
 - **Running it on this PC with Smart App Control on: sign it.** Smart App Control accepts RSA signatures from a CA in

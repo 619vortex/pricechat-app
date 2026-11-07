@@ -1,0 +1,166 @@
+# Kiwi VPN for Windows: compiles, runs every test, and builds the installer as a private build artifact.
+# Lives at .github/workflows/kiwi-windows.yml in the private repo 619vortex/KIWIVPN, whose windows-client/ folder is
+# this folder (copied by windows-client/sync-ci-repo.ps1). The iPhone project at that repo's root, and its Codemagic
+# workflows, are separate and untouched by this file.
+#
+# It publishes nothing: no release, no upload anywhere, no website change. It needs no secrets. The installer is NOT
+# code signed, so Smart App Control blocks it; it's for testing on a machine without it, until signing is added.
+name: Kiwi VPN Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "windows-client/**"
+      - ".github/workflows/kiwi-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kiwi-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # WireGuard's tunnel library is built from this exact commit, and wireguard.dll comes from WireGuard LLC's signed release.
+  WG_COMMIT: 6ece77bc487c8aa697e3c092197621c4f3e5ccb8
+  WG_NT_SHA256: DCEB30A9BC4BE48CCE0F74160FC88A585A2C2627366E8F846FC6658F9038DACE
+  WIREGUARD_DLL_SHA256: B1B85E072C45D81358BE29D94C599DC76652F912BE8C0F0A41E2D5D89A6461D3
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+        working-directory: windows-client
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\target
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows-client/app/package-lock.json
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable-x86_64-pc-windows-msvc
+          rustc --version; cargo --version
+
+      - name: Rust cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('windows-client/**/Cargo.lock', 'windows-client/**/Cargo.toml') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: WireGuard DLL cache
+        id: wgcache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: windows-client/dist
+          key: wireguard-${{ env.WG_COMMIT }}-${{ env.WG_NT_SHA256 }}
+
+      - name: WireGuard's DLLs, from the pinned commit and the signed release
+        if: steps.wgcache.outputs.cache-hit != 'true'
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          git clone --quiet https://git.zx2c4.com/wireguard-windows "$env:RUNNER_TEMP\wg"
+          git -C "$env:RUNNER_TEMP\wg" checkout --quiet $env:WG_COMMIT
+          if ((git -C "$env:RUNNER_TEMP\wg" rev-parse HEAD) -ne $env:WG_COMMIT) { throw "Not the pinned WireGuard commit" }
+          cmd /c "$env:RUNNER_TEMP\wg\embeddable-dll-service\build.bat"
+          if ($LASTEXITCODE -ne 0) { throw "tunnel.dll didn't build" }
+          Copy-Item "$env:RUNNER_TEMP\wg\embeddable-dll-service\amd64\tunnel.dll" dist\
+          Invoke-WebRequest -UseBasicParsing https://download.wireguard.com/wireguard-nt/wireguard-nt-1.1.zip -OutFile "$env:RUNNER_TEMP\wgnt.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP\wgnt.zip" -Algorithm SHA256).Hash -ne $env:WG_NT_SHA256) { throw "wireguard-nt's download isn't the expected file" }
+          Expand-Archive "$env:RUNNER_TEMP\wgnt.zip" "$env:RUNNER_TEMP\wgnt"
+          Copy-Item "$env:RUNNER_TEMP\wgnt\wireguard-nt\bin\amd64\wireguard.dll" dist\
+
+      - name: Check WireGuard's DLLs
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ((Get-AuthenticodeSignature dist\wireguard.dll).Status -ne "Valid") { throw "wireguard.dll's signature isn't valid" }
+          if ((Get-FileHash dist\wireguard.dll -Algorithm SHA256).Hash -ne $env:WIREGUARD_DLL_SHA256) { throw "wireguard.dll isn't the expected file" }
+          Get-FileHash dist\*.dll -Algorithm SHA256 | Format-Table Hash, Path -AutoSize
+
+      - name: Window tests (React) and type check
+        working-directory: windows-client/app
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "The window's tests failed" }
+          npx tsc -b
+          if ($LASTEXITCODE -ne 0) { throw "The type check failed" }
+
+      - name: Rust tests, service
+        working-directory: windows-client/service
+        run: |
+          cargo test -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) { throw "The service's tests failed" }
+
+      - name: Rust tests, client (sign-in, keys, 2.0 options and measurements)
+        working-directory: windows-client/client
+        run: |
+          cargo test
+          if ($LASTEXITCODE -ne 0) { throw "The client's tests failed" }
+
+      - name: Rust tests, app
+        working-directory: windows-client/app/src-tauri
+        run: |
+          New-Item -ItemType Directory -Force ..\dist | Out-Null
+          if (-not (Test-Path ..\dist\index.html)) { Set-Content ..\dist\index.html "<!doctype html>" }
+          cargo test --no-default-features
+          if ($LASTEXITCODE -ne 0) { throw "The app's tests failed" }
+
+      - name: Service, release build
+        working-directory: windows-client/service
+        run: |
+          cargo build --release --bins
+          if ($LASTEXITCODE -ne 0) { throw "The service didn't build" }
+
+      - name: Installer
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Bundle = "app\src-tauri\bundle-files"
+          New-Item -ItemType Directory -Force $Bundle | Out-Null
+          Copy-Item "$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe", dist\tunnel.dll, dist\wireguard.dll $Bundle -Force
+          Push-Location app
+          # A public-style build: --no-default-features removes the "use a config file" testing option.
+          npm run tauri -- build -- --no-default-features
+          if ($LASTEXITCODE -ne 0) { throw "The installer didn't build" }
+          Pop-Location
+          $Built = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*-setup.exe" | Sort-Object LastWriteTime | Select-Object -Last 1
+          if (-not $Built) { throw "No installer was produced" }
+          $Version = (Get-Content app\src-tauri\tauri.conf.json -Raw | ConvertFrom-Json).version
+          $Short = "$env:GITHUB_SHA".Substring(0, 7)
+          $Name = "KiwiVPN-$Version-$Short-unsigned-Setup.exe"
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\out" | Out-Null
+          Copy-Item $Built.FullName "$env:GITHUB_WORKSPACE\out\$Name"
+          $Sha = (Get-FileHash "$env:GITHUB_WORKSPACE\out\$Name" -Algorithm SHA256).Hash
+          "$Sha  $Name" | Set-Content "$env:GITHUB_WORKSPACE\out\$Name.sha256" -Encoding ascii
+          $Source = if (Test-Path BUILD-INFO.txt) { (Get-Content BUILD-INFO.txt -Raw).Trim() } else { "unknown" }
+          @("ci-commit $env:GITHUB_SHA", "source $Source", "version $Version", "run $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", "signed no") | Set-Content "$env:GITHUB_WORKSPACE\out\BUILD-INFO.txt" -Encoding ascii
+          "### Kiwi VPN $Version for Windows (unsigned test build)`n`nSHA-256 ``$Sha```n`nNot published anywhere. Smart App Control blocks it until it's code signed." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: KiwiVPN-Windows-${{ github.sha }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
