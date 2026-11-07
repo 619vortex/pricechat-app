@@ -496,3 +496,54 @@ def test_ipv6_for_rule(ip4, ip6):
 def test_ipv6_for_rejects_outside_pool():
     with pytest.raises(ValueError):
         A.ipv6_for("10.67.0.5/32", "10.66.0.1/16", "fd66:66::1/64")
+
+
+def _render_env(env_add, *flags) -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in ("POOL", "POOL6", "DNS", "PUBLIC_IP", "WAN_IF", "AGENT_ALLOW", "WITH_PROXY")}
+    env.update(env_add)
+    res = subprocess.run([BASH, "install.sh", "--print-config", *flags], cwd=HERE, capture_output=True, text=True, timeout=60, env=env)
+    assert res.returncode == 0, res.stderr
+    return res.stdout
+
+
+@needs_bash
+def test_new_nodes_keep_the_agent_port_for_the_backend_and_open_the_proxy():
+    out = _render_env({"AGENT_ALLOW": "152.55.180.240,162.220.234.242/32", "WITH_PROXY": "1"})
+    nft = out[out.index("##### /etc/nftables.conf"):out.index("##### /etc/kiwi-vpn/agent.env")]
+    assert 'ip saddr { 152.55.180.240, 162.220.234.242/32 } tcp dport 8443 accept' in nft
+    assert "\n    tcp dport 8443 accept" not in nft  # never open to everyone as well
+    assert 'tcp dport { 80, 443 } accept' in nft
+    # the browser proxy's own table is loaded with the ruleset, so a reload (which flushes everything) keeps it
+    assert nft.rstrip().endswith('include "/etc/kiwi-vpn/nft.d/*.nft"')
+    assert nft.index("flush ruleset") < nft.index("include")
+
+
+@needs_bash
+def test_existing_behaviour_without_the_new_options():
+    nft = _render_env({})
+    assert "\n    tcp dport 8443 accept" in nft
+    assert "dport { 80, 443 }" not in nft
+
+
+@needs_bash
+def test_a_bad_agent_allowlist_is_refused():
+    env = {k: v for k, v in os.environ.items()}
+    env["AGENT_ALLOW"] = "1.2.3.4; rm -rf /"
+    res = subprocess.run([BASH, "install.sh", "--print-config"], cwd=HERE, capture_output=True, text=True, timeout=60, env=env)
+    assert res.returncode != 0 and "AGENT_ALLOW" in res.stderr
+
+
+def test_unattended_installs_never_print_the_agent_token():
+    src = open(os.path.join(HERE, "install.sh"), encoding="utf-8").read()
+    assert "agent_token:  $SHOW_TOKEN" in src and "agent_token:  $TOKEN" not in src
+    assert '(umask 077; printf' in src and "/root/kiwi-node.txt" in src
+
+
+def test_proxy_on_an_nftables_node_has_the_same_limits_as_on_a_shared_node():
+    src = open(os.path.join(HERE, "install-proxy.sh"), encoding="utf-8").read()
+    nft = src[src.index('cat > "$NFT_FILE" <<EOF'):src.index('nft -c -f "$NFT_FILE"')]
+    assert 'meta skuid "$USER_NAME" jump guard' in nft
+    for must in ("169.254.0.0/16", "10.0.0.0/8", "127.0.0.0/8", "ip daddr $PUBLIC_IP reject", "{ 25, 465, 587 }", "oif lo reject", "ip6 daddr { $V6_DENY } reject"):
+        assert must in nft, must
+    assert 'V6_DENY="$(echo "$OWN_NETS"' in src  # the server's own IPv6 networks are refused here too
+    assert "delete table inet kiwi_proxy" in nft  # loading it twice never doubles the rules
