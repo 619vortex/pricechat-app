@@ -30,6 +30,15 @@ pub struct Server {
     pub online: bool,
     #[serde(default)]
     pub recommended: bool,
+    // 2.0, sent by newer backends; absent means unknown
+    #[serde(default)]
+    pub load: Option<f64>,
+    #[serde(default)]
+    pub live_load: Option<f64>,
+    #[serde(default)]
+    pub adblock: bool,
+    #[serde(default)]
+    pub proxy_host: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

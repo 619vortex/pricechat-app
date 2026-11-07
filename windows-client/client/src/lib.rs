@@ -6,8 +6,10 @@ pub mod applog;
 pub mod auth;
 pub mod flow;
 pub mod keys;
+pub mod measure;
 #[cfg(windows)]
 pub mod opener;
 pub mod settings;
+pub mod tune;
 #[cfg(windows)]
 pub mod store;

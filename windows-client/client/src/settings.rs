@@ -10,11 +10,35 @@ pub struct Settings {
     pub auto_connect: bool,
     pub minimize_to_tray: bool,
     pub notifications: bool,
+    // 2.0. `#[serde(default)]` on the struct: a 0.1 file without these loads with the defaults below.
+    /// Connect picks the fastest server that isn't busy.
+    pub smart_connect: bool,
+    /// Retry, then move to the next best server, when the tunnel stops answering.
+    pub failover: bool,
+    /// Ask the service to block traffic outside the tunnel while connected (only if the service supports it).
+    pub kill_switch: bool,
+    /// With the kill switch on, still allow the local network (printers, the router).
+    pub allow_lan: bool,
+    /// Quad9's malware-blocking DNS instead of the server's resolver.
+    pub block_malware: bool,
+    /// IPv4 ranges that skip the tunnel (split tunneling), checked again when connecting.
+    pub split_exclude: Vec<String>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { launch_at_startup: false, auto_connect: false, minimize_to_tray: false, notifications: true }
+        Settings {
+            launch_at_startup: false,
+            auto_connect: false,
+            minimize_to_tray: false,
+            notifications: true,
+            smart_connect: true,
+            failover: true,
+            kill_switch: false,
+            allow_lan: true,
+            block_malware: false,
+            split_exclude: Vec::new(),
+        }
     }
 }
 

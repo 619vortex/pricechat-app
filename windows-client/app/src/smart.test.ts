@@ -118,5 +118,9 @@ describe("leak verdict", () => {
     expect(dnsLeak.ok).toBe(false);
     expect(dnsLeak.lines[2].text).toContain("94.200.200.200");
     expect(leakVerdict({ ...base, dns: ["2620:fe::9"], expected_dns: ["2620:fe::*"] }, null).lines[2].ok).toBe(true);
+    // shared servers use Cloudflare's DNS through the tunnel; the check reports "address (country - provider)"
+    expect(leakVerdict({ ...base, dns: ["172.71.1.2 (Finland - Cloudflare)"], expected_dns: ["cloudflare"] }, null).ok).toBe(true);
+    expect(leakVerdict({ ...base, dns: ["94.200.1.1 (United Arab Emirates - du)"], expected_dns: ["cloudflare"] }, null).ok).toBe(false);
+    expect(leakVerdict({ ...base, dns: ["178.156.252.184 (United States - Hetzner)"] }, null).ok).toBe(true);
   });
 });

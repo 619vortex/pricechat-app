@@ -171,5 +171,7 @@ export function leakVerdict(r: LeakInput, normalIp: string | null): { ok: boolea
 function sameResolver(seen: string, expected: string): boolean {
   if (seen === expected) return true;
   if (expected.endsWith("*")) return seen.startsWith(expected.slice(0, -1));
-  return false;
+  // the leak check reports "address (country - provider)"; a provider name ("cloudflare", "quad9") matches by name
+  if (!/[0-9:]/.test(expected)) return seen.toLowerCase().includes(expected.toLowerCase());
+  return seen.split(" ")[0] === expected;
 }
