@@ -107,3 +107,32 @@ test("lists follow every page", async () => {
   });
   assert.deepEqual((await h.list("/servers", "servers")).map((s) => s.id), [1, 2, 3]);
 });
+
+test("narrowing Helsinki's agent port sends back every other rule exactly", () => {
+  const any = ["0.0.0.0/0", "::/0"];
+  const helsinki = [
+    { direction: "in", protocol: "tcp", port: "22", source_ips: any, destination_ips: [], description: null },
+    { direction: "in", protocol: "udp", port: "51820", source_ips: any, destination_ips: [], description: null },
+    { direction: "in", protocol: "udp", port: "51821", source_ips: any, destination_ips: [], description: null },
+    { direction: "in", protocol: "tcp", port: "8443", source_ips: any, destination_ips: [], description: null },
+    { direction: "in", protocol: "tcp", port: "80", source_ips: any, destination_ips: [], description: "j" },
+    { direction: "in", protocol: "tcp", port: "443", source_ips: any, destination_ips: [], description: "h" },
+    { direction: "out", protocol: "tcp", port: "any", source_ips: [], destination_ips: any, description: null },
+    { direction: "out", protocol: "udp", port: "any", source_ips: [], destination_ips: any, description: null },
+    { direction: "out", protocol: "icmp", port: null, source_ips: [], destination_ips: any, description: null },
+  ];
+  const sent = L.cleanRules(L.restrictAgentRules(helsinki, CAT.agentAllow));
+  assert.equal(sent.length, helsinki.length);
+  for (let i = 0; i < helsinki.length; i++) {
+    const was = helsinki[i], now = sent[i];
+    assert.equal(now.direction, was.direction);
+    assert.equal(now.protocol, was.protocol);
+    assert.equal(now.port, was.port ?? undefined);
+    if (was.port === "8443") assert.deepEqual(now.source_ips, ["152.55.180.240/32", "162.220.234.242/32", "152.55.180.242/32"]);
+    else if (was.direction === "in") assert.deepEqual(now.source_ips, any);
+    else { assert.deepEqual(now.destination_ips, any); assert.equal(now.source_ips, undefined); }
+  }
+  // the restore path sends the saved rules back in the same shape
+  assert.deepEqual(L.cleanRules(helsinki).map((r) => r.port), helsinki.map((r) => r.port ?? undefined));
+  assert.throws(() => L.restrictAgentRules(helsinki.filter((r) => r.port !== "8443"), CAT.agentAllow), /exactly one/);
+});

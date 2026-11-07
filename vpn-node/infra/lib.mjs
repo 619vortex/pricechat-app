@@ -176,4 +176,26 @@ export function audit({ servers, firewalls, primaryIps, pricing, volumes = [], s
   return { rows, warnings, monthlyList: round2(total), currency: pricing.currency, volumes: volumes.length, snapshots: snapshots.length };
 }
 
+/** The same firewall with only the agent port narrowed to the backend's addresses. Every other rule is kept exactly. */
+export function restrictAgentRules(rules, allow, port = "8443") {
+  const src = allow.map((ip) => (ip.includes("/") ? ip : `${ip}/32`));
+  let changed = 0;
+  const out = rules.map((r) => {
+    if (r.direction === "in" && r.port === port && r.protocol === "tcp") {
+      changed++;
+      return { ...r, source_ips: src, description: r.description || "agent, backend only" };
+    }
+    return r;
+  });
+  if (changed !== 1) throw new Error(`expected exactly one inbound tcp ${port} rule, found ${changed}`);
+  return out;
+}
+
+/** Hetzner's set_rules wants only these fields. */
+export function cleanRules(rules) {
+  return rules.map((r) => Object.fromEntries(Object.entries({ direction: r.direction, protocol: r.protocol, port: r.port ?? undefined,
+    source_ips: r.direction === "in" ? r.source_ips : undefined, destination_ips: r.direction === "out" ? r.destination_ips : undefined,
+    description: r.description ?? undefined }).filter(([, v]) => v !== undefined && v !== null)));
+}
+
 export function sha256(buf) { return createHash("sha256").update(buf).digest("hex"); }

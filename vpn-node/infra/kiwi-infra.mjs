@@ -10,6 +10,8 @@
 //   node vpn-node/infra/kiwi-infra.mjs health [node]         outside checks of every node: DNS, TLS, proxy 407, cert expiry
 //   node vpn-node/infra/kiwi-infra.mjs register <node>       prints Admin > VPN fields; the token goes to the clipboard only
 //   node vpn-node/infra/kiwi-infra.mjs reboot <node>         owner: Hetzner reboot of a managed node that's stuck
+//   node vpn-node/infra/kiwi-infra.mjs agent-firewall <node> [--apply | --rollback <file>]
+//                                                            narrow the agent port to the backend's IPs in the Hetzner firewall
 //
 // It never deletes anything. Secrets: the Hetzner token stays in memory; the agent token is copied to the clipboard, not shown.
 import { execFileSync, spawnSync } from "node:child_process";
@@ -123,12 +125,18 @@ const COMMANDS = {
     say(p.problems.length ? `\nCan't create yet:\n${p.problems.map((x) => `  - ${x}`).join("\n")}` : `\nTo create it (owner, at a terminal): ! node vpn-node/infra/kiwi-infra.mjs create ${key}`);
   },
 
-  async create(key) {
+  async create(key, flag, value) {
+    const opts = flag === "--approved" ? { approved: value ?? "" } : {};
     const h = api();
     const p = L.planFor(key, CAT, await h.snapshot());
     if (p.problems.length) throw new Error(`can't create ${key}:\n  - ${p.problems.join("\n  - ")}`);
     await COMMANDS.plan(key);
-    await approve(L.approvalPhrase("create", key, p.costs["0TB"], p.hash));
+    const phrase = L.approvalPhrase("create", key, p.costs["0TB"], p.hash);
+    // written approval given in advance (e.g. in chat) counts only if it names this exact cost and request, checked now
+    if (opts.approved !== undefined) {
+      if (opts.approved.trim() !== phrase) throw new Error(`the approval given (${opts.approved}) doesn't match this plan now (${phrase}): nothing was created`);
+      say(`approved in advance: ${phrase}`);
+    } else await approve(phrase);
     let fwId = (await h.snapshot()).firewalls.find((f) => f.name === p.firewallName)?.id;
     if (!fwId) {
       fwId = (await h.call("POST", "/firewalls", { name: p.firewallName, labels: { kiwi: "node", node: key }, rules: p.firewallRules })).firewall.id;
@@ -216,6 +224,44 @@ const COMMANDS = {
     say("The backend checks the agent before saving. The server shows in every app and the extension once it's online and has a proxy.");
   },
 
+  async ["agent-firewall"](key, mode, file) {
+    const h = api();
+    const n = managedNode(key);
+    const snap = await h.snapshot();
+    const s = snap.servers.find((x) => x.labels?.node === key || x.name === n.server);
+    if (!s) throw new Error(`no server for ${key}`);
+    const fwRefs = s.public_net.firewalls.map((f) => snap.firewalls.find((x) => x.id === f.id)).filter(Boolean);
+    if (fwRefs.length !== 1) throw new Error(`${s.name} has ${fwRefs.length} firewalls; expected one`);
+    const fw = fwRefs[0];
+    const backupDir = join(STATE_DIR, "firewall-backups");
+    if (mode === "--rollback") {
+      const saved = JSON.parse(readFileSync(file, "utf8"));
+      if (saved.firewall.id !== fw.id) throw new Error(`${file} is for firewall ${saved.firewall.id}, not ${fw.id}`);
+      say(`Restores firewall ${fw.name} (${fw.id}) to the rules saved ${saved.savedAt}:`);
+      for (const r of saved.firewall.rules) say(`  ${r.direction} ${r.protocol} ${r.port ?? ""} ${((r.direction === "in" ? r.source_ips : r.destination_ips) || []).join(",")}`);
+      await approve(L.approvalPhrase("restore", key, 0, L.sha256(JSON.stringify(saved.firewall.rules))));
+      await h.call("POST", `/firewalls/${fw.id}/actions/set_rules`, { rules: L.cleanRules(saved.firewall.rules) });
+      return say("restored");
+    }
+    const next = L.restrictAgentRules(fw.rules, CAT.agentAllow);
+    say(`Firewall ${fw.name} (${fw.id}) on ${s.name}: only the 8443 rule changes; every other rule is sent back unchanged.`);
+    for (const [a, b] of fw.rules.map((r, i) => [r, next[i]])) {
+      const ips = (r) => ((r.direction === "in" ? r.source_ips : r.destination_ips) || []).join(",");
+      const was = ips(a), now = ips(b);
+      say(`  ${a.direction} ${a.protocol} ${(a.port ?? "").padEnd(5)} ${was}${was === now ? "" : `  ->  ${now}`}`);
+    }
+    // the backend must already be reaching the agent from these addresses: Railway's static IPs (checked by the caller)
+    if (mode !== "--apply") return say("\nNothing changed. Run again with --apply (a backup of today's rules is saved first).");
+    mkdirSync(backupDir, { recursive: true });
+    const backup = join(backupDir, `${fw.name}-${fw.id}-${new Date().toISOString().replace(/[:.]/g, "")}.json`);
+    writeFileSync(backup, JSON.stringify({ savedAt: new Date().toISOString(), server: s.name, firewall: { id: fw.id, name: fw.name, rules: fw.rules } }, null, 1));
+    say(`backup: ${backup}`);
+    await approve(L.approvalPhrase("agent-firewall", key, 0, L.sha256(JSON.stringify(next))));
+    const res = await h.call("POST", `/firewalls/${fw.id}/actions/set_rules`, { rules: L.cleanRules(next) });
+    for (const a of res.actions || []) await h.waitAction(a);
+    say(`applied. Rollback: node vpn-node/infra/kiwi-infra.mjs agent-firewall ${key} --rollback "${backup}"`);
+  },
+
   async reboot(key) {
     const h = api();
     const s = await findServer(h, key);
@@ -228,8 +274,8 @@ const COMMANDS = {
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === (await import("node:path")).resolve(process.argv[1]);
 if (isMain) {
-  const [cmd, arg] = process.argv.slice(2);
+  const [cmd, arg, ...rest] = process.argv.slice(2);
   if (!COMMANDS[cmd]) { say(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 14).map((l) => l.replace(/^\/\/ ?/, "")).join("\n")); process.exit(2); }
-  if (["plan", "create", "dns", "install", "register", "reboot"].includes(cmd) && !L.NODE_KEY.test(arg || "")) { console.error("say which node, e.g. ash1"); process.exit(2); }
-  COMMANDS[cmd](arg).catch((e) => { console.error(`error: ${e.message}`); process.exit(1); });
+  if (["plan", "create", "dns", "install", "register", "reboot", "agent-firewall"].includes(cmd) && !L.NODE_KEY.test(arg || "")) { console.error("say which node, e.g. ash1"); process.exit(2); }
+  COMMANDS[cmd](arg, ...rest).catch((e) => { console.error(`error: ${e.message}`); process.exit(1); });
 }
