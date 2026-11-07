@@ -143,7 +143,7 @@ pub fn dns_of(config: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    const CFG: &str = "[Interface]\nPrivateKey = K\nAddress = 10.66.0.5/32\nDNS = 10.66.0.1\n\n[Peer]\nPublicKey = S\nEndpoint = 178.156.252.184:51820\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = 25\n";
+    const CFG: &str = "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.66.0.5/32\nDNS = 10.66.0.1\n\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nEndpoint = 178.156.252.184:51820\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = 25\n";
 
     #[test]
     fn nothing_chosen_changes_nothing() {
