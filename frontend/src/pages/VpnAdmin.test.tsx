@@ -261,7 +261,7 @@ describe("VPN admin", () => {
     const post = calls.find((c) => c.startsWith("POST /api/vpn/admin/servers"))!;
     expect(JSON.parse(post.slice(post.indexOf("{")))).toEqual({
       name: "Frankfurt 1", region: "Germany", country_code: "DE", agent_url: "https://198.51.100.7:8443",
-      agent_token: "test-token-not-real", cert_sha256: "abcdef", capacity: 200,
+      agent_token: "test-token-not-real", cert_sha256: "abcdef", capacity: 200, testers_only: true,  // a new server starts hidden from members
     });
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "Add server" }));

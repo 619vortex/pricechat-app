@@ -173,7 +173,7 @@ def server_body(agent: RunningAgent, fp: str, name: str = "Frankfurt") -> dict[s
 
 
 def add_server(client: TestClient, agent: RunningAgent, fp: str | None = None) -> int:
-    r = client.post("/api/vpn/admin/servers", json=server_body(agent, fp or agent.fp))
+    r = client.post("/api/vpn/admin/servers", json={**server_body(agent, fp or agent.fp), "testers_only": False})  # open to everyone
     assert r.status_code == 200, r.text
     return r.json()["id"]
 

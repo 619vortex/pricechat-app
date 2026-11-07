@@ -387,6 +387,7 @@ class ServerInput(StrictInput):
     agent_token: str = Field(min_length=32, max_length=512)
     cert_sha256: str = Field(min_length=64, max_length=128)
     capacity: int | None = Field(None, ge=1, le=100000)
+    testers_only: bool = True  # a new server starts visible to the owner and testers only, until it's switched to everyone
 
 
 class ServerUpdate(StrictInput):
@@ -395,6 +396,7 @@ class ServerUpdate(StrictInput):
     country_code: str | None = Field(None, min_length=2, max_length=2)
     capacity: int | None = Field(None, ge=1, le=100000)
     enabled: bool | None = None
+    testers_only: bool | None = None
     agent_token: str | None = Field(None, min_length=32, max_length=512)
     cert_sha256: str | None = Field(None, min_length=64, max_length=128)
 

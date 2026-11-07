@@ -228,7 +228,7 @@ def public_stats(db: Session, now: datetime | None = None) -> dict[str, Any]:
     """Only what the server really knows. There's no uptime monitoring, so uptime is None."""
     now = now or utcnow()
     counts = _device_counts(db)
-    servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
+    servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True), VpnServer.testers_only.is_(False)).order_by(VpnServer.name, VpnServer.id)))
     best = recommended_id(servers, counts)
     online = [v for v in servers if v.online]
     since = now - LIVE_WINDOW
@@ -243,6 +243,11 @@ def qualifies(db: Session, who: Who, r: Rules | None = None) -> tuple[bool, str 
     if state == "active":
         return True, None
     return False, "Your account can't use Kiwi VPN." if state == "blocked" else no_access_reason(db, account_of(db, who))
+
+
+def sees(acct: VpnAccount | None, server: VpnServer) -> bool:
+    """A testers-only server is shown to, and usable by, the owner and current testers only."""
+    return not server.testers_only or (acct is not None and (acct.is_owner or is_tester(acct)))
 
 
 def is_tester(acct: VpnAccount, now: datetime | None = None) -> bool:
@@ -405,7 +410,7 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     acct = account_of(db, who)
     ok, reason = eligibility(db, acct, preview)
     counts = _device_counts(db)
-    servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
+    servers = [v for v in db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)) if sees(acct, v)]
     review = _reviewing(db, acct)
     if review:
         servers = [v for v in servers if v.name == reviewer.SERVER]
@@ -462,7 +467,7 @@ def _checked_server(db: Session, acct_id: int, server_id: int, max_devices: int)
     if db.scalar(select(func.count()).select_from(VpnDevice).where(VpnDevice.account_id == acct_id)) >= max_devices:
         raise VpnError(f"You can have up to {max_devices} devices. Delete one first.", 409)
     server = db.get(VpnServer, server_id)
-    if server is None or not server.enabled:
+    if server is None or not server.enabled or not sees(db.get(VpnAccount, acct_id), server):
         raise VpnError("Server not found.", 404)
     if not server.online or not server.public_key or not server.endpoint_host:
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503)
@@ -599,7 +604,7 @@ def create_browser(db: Session, who: Who, server_id: int, replace: str | None = 
             raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
     server = db.get(VpnServer, server_id)
     review = _reviewing(db, acct)
-    if server is None or not server.enabled or not server.proxy_host or (review and server.name != reviewer.SERVER):
+    if server is None or not server.enabled or not server.proxy_host or not sees(acct, server) or (review and server.name != reviewer.SERVER):
         raise VpnError("That server isn't available for the browser extension.", 404)
     if not server.online:
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503)
@@ -718,7 +723,8 @@ def add_server(db: Session, data: dict[str, Any]) -> VpnServer:
     except node.NodeError as e:
         raise VpnError(f"Couldn't verify the VPN agent: {e}", 400) from None
     server = VpnServer(name=d["name"], region=d.get("region") or "", country_code=d.get("country_code") or "", agent_url=d["agent_url"],
-                       agent_token_enc=enc(token), cert_sha256=d["cert_sha256"], capacity=int(d.get("capacity") or 250), enabled=True)
+                       agent_token_enc=enc(token), cert_sha256=d["cert_sha256"], capacity=int(d.get("capacity") or 250), enabled=True,
+                       testers_only=bool(d.get("testers_only", False)))
     _apply_status(server, st, utcnow())
     db.add(server)
     db.commit()
@@ -730,7 +736,7 @@ def update_server(db: Session, server_id: int, data: dict[str, Any]) -> VpnServe
     if server is None:
         raise VpnError("Server not found.", 404)
     d = _clean_server_fields(data)
-    for k in ("name", "region", "country_code", "capacity", "enabled", "cert_sha256"):
+    for k in ("name", "region", "country_code", "capacity", "enabled", "cert_sha256", "testers_only"):
         if d.get(k) is not None:
             setattr(server, k, d[k])
     if d.get("agent_token"):
@@ -785,7 +791,7 @@ def admin_overview(db: Session) -> dict[str, Any]:
                              .group_by(VpnDevice.server_id)).all())  # type: ignore[arg-type]
     servers = [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "endpoint_host": v.endpoint_host,
                 "listen_port": v.listen_port, "agent_url": v.agent_url, "capacity": v.capacity, "enabled": v.enabled, "online": v.online,
-                "adblock": v.adblock,
+                "adblock": v.adblock, "testers_only": v.testers_only,
                 "last_seen": _iso(v.last_seen), "last_error": v.last_error, "devices": counts.get(v.id, 0), "active_24h": active.get(v.id, 0),
                 "proxy_host": v.proxy_host}
                for v in db.scalars(select(VpnServer).order_by(VpnServer.name, VpnServer.id))]

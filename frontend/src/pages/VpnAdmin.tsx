@@ -11,7 +11,8 @@ import "./VpnAdmin.css";
 export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
-  adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string };
+  adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string;
+  /** only the owner and testers see it (a new server being tried out) */ testers_only?: boolean };
 export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number };
   billing?: { paying: number; anonymous: number; revenue_30d_usd: number; usdt: boolean; card: boolean } };
 
@@ -118,6 +119,10 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
     try { await f(); } catch (e) { setNote({ ok: false, text: errText(e) }); } finally { setBusy(false); }
   }
   const toggle = (enabled: boolean) => run(async () => { await request(`/vpn/admin/servers/${x.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) }); await reload(); });
+  const audience = (testers_only: boolean) => {
+    if (!testers_only && !window.confirm(`Show "${x.name}" to everyone? Every member can then pick it in the apps and the extension.`)) return;
+    void run(async () => { await request(`/vpn/admin/servers/${x.id}`, { method: "PATCH", body: JSON.stringify({ testers_only }) }); await reload(); });
+  };
   const test = () => run(async () => {
     const r = await request<{ ok: boolean; error: string | null; peers: number }>(`/vpn/admin/servers/${x.id}/test`, { method: "POST" });
     setNote(r.ok ? { ok: true, text: `OK · ${r.peers} peers` } : { ok: false, text: r.error || "Failed" });
@@ -130,7 +135,7 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
   return (
     <>
     <tr>
-      <td><b>{x.name}</b>{x.adblock && <> <Badge tone="good">ad blocking</Badge></>}{x.proxy_host && <> <Badge tone="good" title={x.proxy_host}>browser extension</Badge></>}<br /><span className="muted small">{x.country_code.toUpperCase()} · {x.region}</span>
+      <td><b>{x.name}</b>{x.adblock && <> <Badge tone="good">ad blocking</Badge></>}{x.proxy_host && <> <Badge tone="good" title={x.proxy_host}>browser extension</Badge></>}{x.testers_only && <> <Badge tone="warn" title="Only you and testers see it">testers only</Badge></>}<br /><span className="muted small">{x.country_code.toUpperCase()} · {x.region}</span>
         <br /><span className="muted small mono">{x.endpoint_host ? `${x.endpoint_host}:${x.listen_port ?? ""}` : x.agent_url}</span></td>
       <td><Badge tone={x.online ? "good" : "bad"}>{x.online ? "online" : "offline"}</Badge><br /><span className="muted small">seen {relativeTime(x.last_seen)}</span>
         {x.last_error && <><br /><span className="small" style={{ color: "var(--bad)" }}>{x.last_error}</span></>}</td>
@@ -144,6 +149,7 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
       <td>
         <div className="btn-group">
           <button className="btn btn-sm" disabled={busy} onClick={() => void test()}>Test</button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => audience(!x.testers_only)}>{x.testers_only ? "Show to everyone" : "Testers only"}</button>
           <button className="btn btn-sm" disabled={busy} aria-expanded={editing} onClick={() => setEditing(!editing)}>Edit</button>
           <button className="btn btn-sm btn-kill-sm" disabled={busy} onClick={remove}>Delete</button>
         </div>
@@ -259,8 +265,10 @@ function ConfigOnce({ made, onDone }: { made: Made; onDone: () => void }) {
 
 const EMPTY = { name: "", region: "", country_code: "", agent_url: "", agent_token: "", cert_sha256: "", capacity: "" };
 
+
 function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
   const [f, setF] = useState(EMPTY);
+  const [testersOnly, setTestersOnly] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -270,9 +278,9 @@ function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
     e.preventDefault();
     if (!ready || busy) return;
     setBusy(true); setErr(null); setOk(null);
-    const body: Record<string, string | number> = {
+    const body: Record<string, string | number | boolean> = {
       name: f.name.trim(), region: f.region.trim(), country_code: f.country_code.trim().toUpperCase(), agent_url: f.agent_url.trim(),
-      agent_token: f.agent_token.trim(), cert_sha256: f.cert_sha256.trim().replace(/:/g, "").toLowerCase(),
+      agent_token: f.agent_token.trim(), cert_sha256: f.cert_sha256.trim().replace(/:/g, "").toLowerCase(), testers_only: testersOnly,
     };
     if (f.capacity.trim()) body.capacity = Number(f.capacity);
     try {
@@ -299,6 +307,7 @@ function AddServer({ onAdded }: { onAdded: () => Promise<void> }) {
           <Field label="Agent token"><input className="input mono" aria-label="Agent token" type="password" autoComplete="off" value={f.agent_token} onChange={set("agent_token")} /></Field>
           <Field label="Cert SHA-256"><input className="input mono" aria-label="Cert SHA-256" value={f.cert_sha256} onChange={set("cert_sha256")} placeholder="64 hex characters" /></Field>
         </div>
+        <label className="small"><input type="checkbox" aria-label="Testers only" checked={testersOnly} onChange={(e) => setTestersOnly(e.target.checked)} /> Testers only: only you and testers see it until you choose Show to everyone</label>
         <div className="btn-group">
           <button className="btn btn-primary" type="submit" disabled={busy || !ready}>{busy ? "Checking the agent…" : "Add server"}</button>
           {ok && <Badge tone="good">{ok}</Badge>}

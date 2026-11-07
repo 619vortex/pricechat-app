@@ -40,6 +40,8 @@ class VpnServer(IdMixin, TimestampMixin, Base):
     cert_sha256: Mapped[str] = mapped_column(String(64), nullable=False)  # pinned agent certificate (hex, lower-case)
     capacity: Mapped[int] = mapped_column(Integer, default=250, server_default="250", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)
+    # A new server being tried out: only the owner and testers see it or can use it; synced and monitored like any other.
+    testers_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     public_key: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     endpoint_host: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     listen_port: Mapped[int] = mapped_column(Integer, default=51820, server_default="51820", nullable=False)
