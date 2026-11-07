@@ -160,6 +160,19 @@ class TelegramBotClient:
         params["reply_markup"] = {"inline_keyboard": buttons or []}
         await self._call("editMessageCaption", params)
 
+    async def edit_photo(self, chat_id: int | str, message_id: int, png: bytes, caption: str,
+                         buttons: list[list[dict[str, str]]] | None = None, html: bool = False) -> None:
+        """Replace one of the bot's own chart photos in place (an "fc" chart's timeframe buttons): new image, caption and
+        buttons. Multipart: the PNG is generated here, never fetched from a URL."""
+        import json as _json
+
+        media: dict[str, Any] = {"type": "photo", "media": "attach://chart", "caption": caption[:1024]}
+        if html:
+            media["parse_mode"] = "HTML"
+        data: dict[str, Any] = {"chat_id": str(chat_id), "message_id": str(message_id), "media": _json.dumps(media),
+                                "reply_markup": _json.dumps({"inline_keyboard": buttons or []})}
+        await self._call("editMessageMedia", data, files={"chart": ("chart.png", png, "image/png")})
+
     async def set_commands(self, commands: list[tuple[str, str]], scope: str = "default") -> None:
         """The "/" menu Telegram shows (scope: default = private chats, all_group_chats = groups)."""
         await self._call("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in commands], "scope": {"type": scope}})

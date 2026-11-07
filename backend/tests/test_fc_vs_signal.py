@@ -55,15 +55,19 @@ def no_signal_engine(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
 
 @pytest.mark.parametrize("typed", ["FC BTC", "fc eth", "Fc $SOL", "fc bitcoin", "FC SOL 1h", "fc btc rsi macd"])
 def test_fc_is_the_chart_only_with_both_links(db: Session, md: StudyMD, links: None, no_signal_engine: list[Any], typed: str) -> None:
+    """Owner's rule, 2026-11-07: "FC BTC" is the chart, the timeframe buttons, the referral link and the Price Chat bot link.
+    Nothing else: no readout, no notes, no signal."""
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, bot.fc_command(typed) or "", group=True, reply_to=1))
-    assert tg.sent and tg.sent[0][0] == "photo", tg.sent  # the chart image first
+    assert len(tg.sent) == 1 and tg.sent[0][0] == "photo", tg.sent  # one message: the chart
     text = _sent_text(tg, 0)
-    for word in ("Price:", "Trend:", "RSI", "MACD", "EMA", "Support:", "Resistance:", "Kiwi Take:"):
-        assert word in text, word
+    for word in ("Price:", "Trend:", "RSI", "MACD", "EMA", "Support:", "Resistance:", "Kiwi Take:", "/signal", "Signals"):
+        assert word not in text, word
     for pat in FORBIDDEN:
         assert not re.search(pat, text, re.I), f"FC sent {pat!r}:\n{text}"
-    assert _has_links(text) and "/signal " in text  # both links, and where the trade analysis lives
+    assert _has_links(text) and text.startswith("📊 <b>$")  # the title: market | timeframe | exchange
+    btns = tg.sent[0][3]
+    assert [b["callback_data"].split(":")[1] for row in btns for b in row] == ["1m", "5m", "15m", "1h", "4h", "1d", "1w"]
     assert no_signal_engine and all(p is None for p in no_signal_engine)  # nothing drawn as a plan on the image
 
 
@@ -119,3 +123,73 @@ def test_signal_without_a_setup_says_why_with_both_links(db: Session, md: StudyM
     for pat in (r"\bEntry\b", r"\bStop\b", r"\bTarget\b", r"R/R", r"WATCH", "🎯", "🛑", "✅"):  # no invented prices on NO TRADE
         assert not re.search(pat, text), f"NO TRADE sent {pat!r}:\n{text}"
     assert not [x for x in tg.sent if x[0] == "photo"]  # no plan drawn either
+
+
+class EditTG(FakeTG):
+    """FakeTG that also records a chart replaced in place (editMessageMedia)."""
+
+    async def edit_photo(self, chat_id: Any, message_id: int, png: bytes, caption: str, buttons: Any = None, html: bool = False) -> None:
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        self.sent.append(("edit_photo", message_id, caption, buttons))
+
+
+def _marked(buttons: Any) -> list[str]:
+    return [b["callback_data"].split(":")[1] for row in buttons for b in row if b["text"].startswith("•")]
+
+
+@pytest.mark.parametrize("typed,tf", [("FC BTC", "4h"), ("FC BTC 1m", "1m"), ("FC BTC 5m", "5m"), ("FC BTC 15m", "15m"), ("FC BTC 15MIN", "15m"),
+                                      ("fc btc 15min", "15m"), ("FC BTC 1h", "1h"), ("FC BTC 1HR", "1h"), ("FC BTC 4h", "4h"), ("FC BTC 4H", "4h"),
+                                      ("FC BTC 1d", "1d"), ("FC BTC 1DAY", "1d"), ("FC BTC daily", "1d"), ("FC BTC 1w", "1w"), ("FC BTC 1W", "1w"),
+                                      ("FC BTC weekly", "1w"), ("FC BTC 5MINS", "5m"), ("FC BTC 1MIN", "1m")])
+def test_fc_every_timeframe(db: Session, md: StudyMD, links: None, no_signal_engine: list[Any], typed: str, tf: str) -> None:
+    cmd = bot.fc_command(typed)
+    assert cmd is not None, typed
+    tg = FakeTG()
+    asyncio.run(bot.handle_command(db, tg, -5, 9, cmd, group=True, reply_to=1))
+    assert len(tg.sent) == 1 and tg.sent[0][0] == "photo", tg.sent
+    caption = tg.sent[0][2]
+    from app.tradingos.readout import tf_label
+    assert f" | {tf_label(tf)} | " in caption and _has_links(caption)
+    assert _marked(tg.sent[0][3]) == [tf]
+    assert not any(re.search(p, caption, re.I) for p in FORBIDDEN)
+
+
+@pytest.mark.parametrize("coin", ["BTC", "ETH", "SOL"])
+def test_fc_timeframe_buttons_redraw_the_chart_without_signals(db: Session, md: StudyMD, links: None, no_signal_engine: list[Any], coin: str) -> None:
+    tg = EditTG()
+    asyncio.run(bot.handle_command(db, tg, -5, 9, f"/fc {coin}", group=True, reply_to=1))
+    btns = tg.sent[0][3]
+    message = {"chat": {"id": -5}, "message_id": 101, "reply_markup": {"inline_keyboard": btns}}
+    for tf in ("1m", "5m", "15m", "1h", "1d", "1w"):
+        data = next(b["callback_data"] for row in message["reply_markup"]["inline_keyboard"] for b in row if b["callback_data"].split(":")[1] == tf)
+        n = len(tg.sent)
+        asyncio.run(bot.handle_callback(db, tg, {"id": "q", "from": {"id": 9}, "data": data, "message": message}))
+        edits = [x for x in tg.sent[n:] if x[0] == "edit_photo"]
+        assert len(edits) == 1, tg.sent[n:]
+        caption, new_btns = edits[0][2], edits[0][3]
+        from app.tradingos.readout import tf_label
+        assert caption.startswith(f"📊 <b>${coin}") and f" | {tf_label(tf)} | " in caption and _has_links(caption)
+        for word in ("Price:", "Trend:", "RSI", "Kiwi Take:", "/signal"):
+            assert word not in caption
+        assert not any(re.search(p, caption, re.I) for p in FORBIDDEN)
+        assert _marked(new_btns) == [tf]
+        message = {**message, "reply_markup": {"inline_keyboard": new_btns}}
+    n = len(tg.sent)  # the timeframe on show: nothing redrawn
+    asyncio.run(bot.handle_callback(db, tg, {"id": "q", "from": {"id": 9}, "data": f"fc:1w:{coin}", "message": message}))
+    assert not [x for x in tg.sent[n:] if x[0] == "edit_photo"] and "Already" in tg.sent[-1][2]
+    assert all(p is None for p in no_signal_engine)
+
+
+def test_fc_bad_button_data_is_refused(db: Session, md: StudyMD) -> None:
+    tg = EditTG()
+    msg = {"chat": {"id": -5}, "message_id": 101}
+    for data in ("fc:2h:BTC", "fc:1h:", "fc:1h"):
+        asyncio.run(bot.handle_callback(db, tg, {"id": "q", "from": {"id": 9}, "data": data, "message": msg}))
+    assert not [x for x in tg.sent if x[0] == "edit_photo"] and all(x[0] == "answer" for x in tg.sent)
+
+
+def test_signal_still_has_the_signal_and_its_usual_footer(db: Session, md: StudyMD, links: None) -> None:
+    tg = FakeTG()
+    asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal BTC 15MIN", group=True, reply_to=1))
+    text = _sent_text(tg, 0)
+    assert re.search(r"\b(LONG|SHORT)\b|WAIT|NO TRADE", text) and "Signals: @botpricechat" in text

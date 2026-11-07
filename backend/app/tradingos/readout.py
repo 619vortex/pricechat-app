@@ -155,7 +155,7 @@ def read(listing: Any, candles: list[Candle], tf: str, md: MarketData | None = N
 
 
 def tf_label(tf: str) -> str:
-    return tf.upper() if tf[-1] in "hd" else tf  # 4H, 1D, 15m (TradingView style: minutes stay lowercase)
+    return tf.upper() if tf[-1] in "hdw" else tf  # 4H, 1D, 15m (TradingView style: minutes stay lowercase)
 
 
 def caption(listing: Any, tf: str, r: Readout, brief: bool = False) -> str:

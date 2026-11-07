@@ -39,7 +39,7 @@ SUI indicator · RSI, MACD, EMA 20/50
 
 📊 <b>Charts</b>
 /chart BTC 1h · candles, EMAs and a readout
-fc btc · quick 4h chart
+fc btc · chart only (4h), with buttons for 1m 5m 15m 1h 4h 1d 1w · fc btc 15min
 Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap walls twap wide
 
 🔎 <b>Technical analysis</b>
@@ -278,6 +278,76 @@ def footer(db: Session) -> str:
     """The bot channel, then the Hyperliquid referral link below it."""
     ref = referral_line(db)
     return CHANNEL_FOOTER + (f"\n{ref}" if ref else "")
+
+
+FC_BOT_LINK = "\n\n🤖 Price Chat bot: @botpricechat"  # "fc" charts: the bot link without the word "signals" (fc never shows them)
+
+
+def fc_footer(db: Session) -> str:
+    """Under an "fc" chart: the Price Chat bot link, then the Hyperliquid referral link."""
+    ref = referral_line(db)
+    return FC_BOT_LINK + (f"\n{ref}" if ref else "")
+
+
+FC_PICKED = "• {} •"  # the timeframe on show
+
+
+def fc_buttons(words: list[str], tf: str) -> list[list[dict[str, str]]] | None:
+    """The timeframe buttons under an "fc" chart: two rows, the one on show marked. Each press redraws the same chart on
+    that timeframe (handle_callback, "fc:<tf>:<words>"). None when the words don't fit Telegram's 64-byte callback data."""
+    from app.tradingos.chartcmd import FC_TIMEFRAMES
+
+    words_s = " ".join(words)
+    if not words_s or len(f"fc:15m:{words_s}".encode()) > 64:
+        return None
+    row = [{"text": FC_PICKED.format(t) if t == tf else t, "callback_data": f"fc:{t}:{words_s}"} for t in FC_TIMEFRAMES]
+    return [row[:4], row[4:]]
+
+
+def _fc_showing(message: dict[str, Any]) -> str | None:
+    """The timeframe marked on a chart's buttons (what it shows now)."""
+    for row in ((message.get("reply_markup") or {}).get("inline_keyboard") or []):
+        for b in row:
+            if str(b.get("text", "")).startswith("•"):
+                return str(b.get("callback_data", "")).split(":")[1] if str(b.get("callback_data", "")).startswith("fc:") else None
+    return None
+
+
+_FC_BUSY: set[tuple[Any, Any]] = set()  # charts being redrawn: a second press waits for the first
+
+
+async def _fc_callback(db: Session, client: Any, cq: dict[str, Any], uid: int, data: str) -> None:
+    """A timeframe button under an "fc" chart: the same message gets the chart on that timeframe (photo, caption and
+    buttons replaced in place). Chart only: no readout and no signal, as "fc"."""
+    from app.tradingos import chartcmd
+
+    msg = cq.get("message") or {}
+    chat_id, mid = (msg.get("chat") or {}).get("id"), msg.get("message_id")
+    parts = data.split(":", 2)
+    if len(parts) != 3 or parts[1] not in chartcmd.FC_TIMEFRAMES or not parts[2].strip() or chat_id is None or mid is None:
+        await _answer(client, cq, uid, "This chart can't be changed. Type fc BTC 15m for a new one.", dm=False)
+        return
+    tf, words = parts[1], parts[2].split()
+    if _fc_showing(msg) == tf:
+        await _answer(client, cq, uid, f"Already showing {tf}.", dm=False)
+        return
+    key = (chat_id, mid)
+    if key in _FC_BUSY:
+        await _answer(client, cq, uid, "Drawing the chart…", dm=False)
+        return
+    _FC_BUSY.add(key)
+    try:
+        md = market.data()
+        try:
+            req = chartcmd.parse([*words, tf], set((await _md(md.markets))[1]))
+            png, caption, _ = await asyncio.to_thread(chartcmd.build_chart_response, db, md, req, venues.client(), signals.settings(db))
+        except (chartcmd.ChartUsageError, market.MarketError, venues.NotFound, venues.Ambiguous) as e:
+            await _answer(client, cq, uid, f"No {tf} chart right now: {str(e)[:150]}", alert=True, dm=False)
+            return
+        await client.edit_photo(chat_id, mid, png, caption + fc_footer(db), fc_buttons(words, tf), html=True)
+        await _answer(client, cq, uid, f"{tf} chart", dm=False)
+    finally:
+        _FC_BUSY.discard(key)
 
 
 def with_referral(db: Session, text: str, placement: str = "footer") -> str:
@@ -821,7 +891,12 @@ async def _chart(db: Session, client: Any, chat_id: int | str, md: Any, args: li
         req = chartcmd.parse(args, set((await _md(md.markets))[1]))
     except chartcmd.ChartUsageError as e:
         return esc(str(e))
-    build = chartcmd.build_chart_response if brief else chartcmd.build_full  # fc: chart only; /chart: chart + signal line
+    if brief:  # "fc btc": the chart, the timeframe buttons and the two links, nothing else (no readout, no signal, no notes)
+        png, caption, _ = await asyncio.to_thread(chartcmd.build_chart_response, db, md, req, venues.client(), signals.settings(db))
+        raw = getattr(client, "_c", client)  # not the usual footer: fc has its own (no "Signals" line)
+        await raw.send_photo(chat_id, png, caption + fc_footer(db), fc_buttons(chartcmd.fc_words(args), req.tf), reply_to=reply_to, html=True)
+        return None
+    build = chartcmd.build_full  # /chart: chart + readout
     png, caption, details = await asyncio.to_thread(build, db, md, req, venues.client(), signals.settings(db))
     if note:  # on top of the caption when it fits, else first in the details message
         line = f"ℹ️ {esc(note)}\n"
@@ -976,6 +1051,9 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     uid = int((cq.get("from") or {}).get("id") or 0)
     if data[:3] in ("cf:", "cx:", "cl:") and uid:
         await _trade_callback(db, client, cq, uid, data)
+        return
+    if data.startswith("fc:") and uid:  # a timeframe button under an "fc" chart
+        await _fc_callback(db, client, cq, uid, data)
         return
     if data.startswith("cm:") and uid:  # the committee's views (committeecmd.py)
         from app.tradingos import committeecmd

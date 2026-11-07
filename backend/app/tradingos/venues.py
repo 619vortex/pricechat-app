@@ -32,8 +32,8 @@ NAME = {"binance": "Binance", "bybit": "Bybit", "okx": "OKX", "hyperliquid": "Hy
 KIND = {"spot": "Spot", "perp": "Perpetual"}
 NETWORK = {"eth": "Ethereum", "base": "Base", "bsc": "BNB Chain", "solana": "Solana", "arbitrum": "Arbitrum", "polygon_pos": "Polygon",
            "avax": "Avalanche", "ton": "TON", "optimism": "Optimism", "sui-network": "Sui", "tron": "Tron", "hyperevm": "HyperEVM"}
-BYBIT_TF = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "D"}
-OKX_TF = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1Dutc"}
+BYBIT_TF = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "D", "1w": "W"}
+OKX_TF = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1Dutc", "1w": "1Wutc"}
 GECKO_TF = {"1m": ("minute", 1), "5m": ("minute", 5), "15m": ("minute", 15), "1h": ("hour", 1), "4h": ("hour", 4), "1d": ("day", 1)}
 DEX_MIN_LIQUIDITY = 10_000  # USD: pools below this are dust (and often copycat tokens); never offered
 DEXSCREENER = "https://api.dexscreener.com/latest/dex"  # second DEX source (public, no key)
@@ -371,18 +371,38 @@ def candles(listing: Listing, tf: str, n: int, md: MarketData, vs: Venues) -> li
             rows = vs.get(f"{base}/klines", {"symbol": listing.symbol, "interval": tf, "limit": min(n, 1000)}, 30)
             out = [Candle(int(r[0]), _f(r[1]), _f(r[2]), _f(r[3]), _f(r[4]), _f(r[5])) for r in rows]
         else:
-            if tf not in GECKO_TF:
-                raise MarketError(f"DEX candles come in 1m 5m 15m 1h 4h 1d (no {tf}).")
-            unit, agg = GECKO_TF[tf]
-            body = vs.get(f"{GECKO}/networks/{listing.network}/pools/{listing.symbol}/ohlcv/{unit}", {"aggregate": agg, "limit": min(n, 1000), "currency": "usd"}, 60)
+            weekly = tf == "1w"  # GeckoTerminal has no weekly candles: built here from its daily ones (UTC weeks from Monday)
+            if tf not in GECKO_TF and not weekly:
+                raise MarketError(f"DEX candles come in 1m 5m 15m 1h 4h 1d 1w (no {tf}).")
+            unit, agg = GECKO_TF["1d" if weekly else tf]
+            body = vs.get(f"{GECKO}/networks/{listing.network}/pools/{listing.symbol}/ohlcv/{unit}", {"aggregate": agg, "limit": min(n * 7 if weekly else n, 1000), "currency": "usd"}, 60)
             rows = ((body.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
             out = [Candle(int(r[0]) * 1000, _f(r[1]), _f(r[2]), _f(r[3]), _f(r[4]), _f(r[5])) for r in rows]
+            if weekly:
+                out = weeks(out)
     except StructureError as e:
         raise MarketError(f"{listing.label} {e}.") from e
     out.sort(key=lambda c: c.t)
     if tf not in INTERVALS:
         raise MarketError(f"Unknown timeframe {tf}.")
     return out[-n:]
+
+
+WEEK_MS = 604_800_000
+MONDAY_MS = 345_600_000  # 1970-01-05, the first Monday: weeks start there (as on the exchanges)
+
+
+def weeks(days: list[Candle]) -> list[Candle]:
+    """Daily candles -> weekly ones (UTC, Monday to Sunday). The last week may still be forming."""
+    out: list[Candle] = []
+    for c in sorted(days, key=lambda c: c.t):
+        start = (c.t - MONDAY_MS) // WEEK_MS * WEEK_MS + MONDAY_MS
+        if out and out[-1].t == start:
+            w = out[-1]
+            out[-1] = Candle(w.t, w.o, max(w.h, c.h), min(w.l, c.l), c.c, w.v + c.v)
+        else:
+            out.append(Candle(start, c.o, c.h, c.l, c.c, c.v))
+    return out
 
 
 def ambiguity_text(e: Ambiguous) -> str:

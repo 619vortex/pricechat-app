@@ -7,6 +7,7 @@ Market-structure options (cvd, aggoi, liq, zones, heatmap, walls, twap) come fro
 observed, aggregated, model estimate or inferred.
 When a panel's data isn't available, the caption says why instead of drawing something made up."""
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -31,9 +32,15 @@ OPTIONS = {  # what members type -> the panel
 STRUCTURE = {"cvd", "aggoi", "liq", "walls"}  # what "structure" turns on
 INDICATORS = {"rsi", "macd", "ma"}  # what "indicators" turns on: the three main ones (RSI, MACD, EMA 20/50 on price)
 NUMERIC_TF = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "240": "4h", "1440": "1d"}
-WORD_TF = {"h": "1h", "1h": "1h", "60m": "1h", "4h": "4h", "d": "1d", "1d": "1d", "daily": "1d", "day": "1d"}
+WORD_TF = {"h": "1h", "1h": "1h", "60m": "1h", "4h": "4h", "d": "1d", "1d": "1d", "daily": "1d", "day": "1d",
+           "hourly": "1h", "weekly": "1w", "week": "1w"}  # never a bare "w" or "m": W and M are coins
+# "15min", "15MIN", "15 mins", "1hr", "4hours", "1day", "1wk", "60m", "24h", "7d": a number and a unit, accepted whenever the
+# length is a timeframe we chart (so "2h" or "3d" stay unknown words instead of becoming a different chart)
+_TF_WORD = re.compile(r"(\d{1,4})(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks)")
+_UNIT_S = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+FC_TIMEFRAMES = ("1m", "5m", "15m", "1h", "4h", "1d", "1w")  # the buttons under an "fc" chart
 USAGE = ("Usage: /chart BTC 15m [options]\n"
-         "Timeframes: 1m 5m 15m 30m 1h 4h 1d\n"
+         "Timeframes: 1m 5m 15m 30m 1h 4h 1d 1w\n"
          "Options: indicators (RSI + MACD + EMAs) · rsi · bb · macd · ma · volume · oi · funding · depth · wide\n"
          "Market structure: cvd · aggoi · liq · zones · heatmap · walls · twap · structure (= cvd aggoi liq walls)\n"
          "e.g. fc BTC indicators · /chart BTC 15m bb oi funding · /chart ETH 1h macd volume · /chart BTC 15m cvd liq heatmap")
@@ -61,10 +68,18 @@ class ChartRequest:
 
 
 def _timeframe(word: str) -> str | None:
-    w = word.lower()
+    w = word.lower().strip()
     if w in INTERVALS:
         return w
-    return NUMERIC_TF.get(w) or WORD_TF.get(w)
+    hit = NUMERIC_TF.get(w) or WORD_TF.get(w)
+    if hit:
+        return hit
+    m = _TF_WORD.fullmatch(w)
+    if m:
+        unit = "m" if m.group(2).startswith("min") else m.group(2)[0]
+        seconds = int(m.group(1)) * _UNIT_S[unit]
+        return next((k for k, v in INTERVALS.items() if v == seconds), None)
+    return None
 
 
 def parse(args: list[str], markets: set[str] | None = None) -> ChartRequest:
@@ -124,7 +139,7 @@ def build(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None)
 
 
 def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None, settings: Any = None,
-               brief: bool = False) -> tuple[bytes, str, str | None]:
+               brief: bool = False, meta: dict[str, Any] | None = None) -> tuple[bytes, str, str | None]:
     """(PNG, caption, details). The caption is the compact readout (Telegram HTML); the layer list, data-basis lines and
     notes go under it when everything fits a photo caption, otherwise into `details` for a message right after the chart
     (nothing is cut off). `brief` ("fc sui"): no signal or plan on the chart or in the caption (/signal gives those).
@@ -133,6 +148,8 @@ def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = 
 
     vs = vs or venues.client()
     listing = venues.resolve(req.symbol, md, vs)
+    if meta is not None:  # the market charted (fc's title line)
+        meta["listing"] = listing
     hl = listing.venue == "hyperliquid"
     m = md.market(listing.symbol) if hl else None
     show = 200 if req.wide else 120
@@ -225,10 +242,20 @@ def build_full(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = 
 
 
 def build_chart_response(db: Session | None, md: MarketData, req: ChartRequest, vs: Any = None, settings: Any = None) -> tuple[bytes, str, str | None]:
-    """"fc btc": the chart and its read (price, trend, RSI / MACD / EMAs, support / resistance, Kiwi Take). Never a trade
-    recommendation: the signal rules don't run and no plan is drawn or written. /signal builds the trade analysis
-    (bot._send_signal). The bot channel and referral links are added by the bot's footer on every reply."""
-    return build_full(db, md, req, vs, settings, brief=True)
+    """"fc btc": the chart only (owner's rule, 2026-11-07). The caption is one title line: no readout, no details, never a
+    signal (the signal rules don't run and no plan is drawn). /signal BTC is the trade analysis (bot._send_signal). The bot
+    adds the timeframe buttons, the Price Chat bot link and the referral link (bot.fc_footer, bot.fc_buttons)."""
+    from app.tradingos.bot import esc
+
+    meta: dict[str, Any] = {}
+    png, _caption, _details = build_full(db, md, req, vs, settings, brief=True, meta=meta)
+    listing = meta["listing"]
+    return png, f"📊 <b>{esc(listing.tag)}</b> | {readout.tf_label(req.tf)} | {esc(listing.label)}", None
+
+
+def fc_words(args: list[str]) -> list[str]:
+    """What redraws an "fc" chart on another timeframe: every word typed except the timeframe."""
+    return [a for a in args if not _timeframe(a.lower())]
 
 
 def _hl_coin(md: MarketData, base: str) -> str | None:

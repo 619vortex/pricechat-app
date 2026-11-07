@@ -284,3 +284,28 @@ def test_signal_without_a_coin_answers_with_the_most_promising_market(db: Sessio
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal", group=True, reply_to=3))
     assert tg.sent[-1][0] == "photo" and "Most promising now" in tg.sent[-1][2] and "Entry" in tg.sent[-1][2]
     assert db.scalar(select(TsSignal)) is None  # analysis only: nothing is published or traded
+
+
+def test_timeframe_words() -> None:
+    from app.tradingos.chartcmd import _timeframe
+
+    want = {"15MIN": "15m", "15min": "15m", "15mins": "15m", "1minute": "1m", "5m": "5m", "60m": "1h", "1hr": "1h", "1HOUR": "1h",
+            "4hours": "4h", "240": "4h", "24h": "1d", "1day": "1d", "D": "1d", "7d": "1w", "1w": "1w", "1W": "1w", "1wk": "1w",
+            "1week": "1w", "weekly": "1w", "30m": "30m"}
+    for word, tf in want.items():
+        assert _timeframe(word) == tf, word
+    for word in ("2h", "3d", "2w", "w", "m", "btc", "1inch", "15minx"):
+        assert _timeframe(word) is None, word
+    assert chartcmd.parse(["W", "1W"]).coin == "W" and chartcmd.parse(["W", "1W"]).tf == "1w"
+
+
+def test_dex_weeks_from_days() -> None:
+    from app.tradingos.market import Candle
+    from app.tradingos.venues import weeks
+
+    mon = 1_793_577_600_000  # 2026-11-02, a Monday 00:00 UTC
+    days = [Candle(mon + i * 86_400_000, 10 + i, 20 + i, 5 - i * 0.1, 11 + i, 1.0) for i in range(10)]
+    w = weeks(days)
+    assert [c.t for c in w] == [mon, mon + 7 * 86_400_000]
+    assert (w[0].o, w[0].h, w[0].l, w[0].c, w[0].v) == (10, 26, 5 - 0.6, 17, 7.0)
+    assert (w[1].o, w[1].c, w[1].v) == (17, 20, 3.0)

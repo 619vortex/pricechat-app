@@ -41,11 +41,11 @@ NAME = {"binance": "Binance", "bybit": "Bybit", "okx": "OKX", "hyperliquid": "Hy
 BASIS = {"observed": "Observed", "aggregated": "Aggregated", "estimate": "Model estimate", "inferred": "Inferred pattern"}
 
 # exchange-published history intervals for each chart timeframe (the nearest one the venue has, never finer than asked)
-OI_PERIOD = {"binance": {"1m": "5m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"},
-             "bybit": {"1m": "5min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1d"},
-             "okx": {"1m": "5m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1D"}}
+OI_PERIOD = {"binance": {"1m": "5m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1d"},
+             "bybit": {"1m": "5min", "5m": "5min", "15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1d"},
+             "okx": {"1m": "5m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1D", "1w": "1D"}}
 PERIOD_MS = {"5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
-OKX_TAKER = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1D"}  # no 1m
+OKX_TAKER = {"5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "4h": "4H", "1d": "1D", "1w": "1D"}  # no 1m
 
 # estimated liquidation zones: the model's assumptions, printed on every chart that shows them
 LEVERAGE_MIX = ((5, 0.20), (10, 0.30), (25, 0.25), (50, 0.15), (100, 0.10))
