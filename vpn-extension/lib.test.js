@@ -93,3 +93,26 @@ test("servers without a browser proxy are listed apart, never offered for the br
   assert.deepEqual(browserServers(account).map((s) => s.id), [1]);
   assert.deepEqual(appOnlyServers({}), []);
 });
+
+test("Smart Connect: the fastest online server, with a penalty for how busy it is now", async () => {
+  const { median, smartScore, smartPick, BUSY_PENALTY_MS } = await import("./lib.js");
+  assert.equal(median([30, 10, 20]), 20);
+  assert.equal(median([10, 20, 30, 40]), 25);
+  assert.equal(median([]), null);
+  assert.equal(median([NaN, 50]), 50);
+  const hel = { id: 1, online: true, live_load: 0 }, ash = { id: 3, online: true, live_load: 0 }, fsn = { id: 2, online: false };
+  assert.equal(smartPick([hel, ash, fsn], { 1: 40, 3: 120, 2: 5 }), 1); // fastest wins; an offline server never does, however fast
+  assert.equal(smartPick([{ ...hel, live_load: 1 }, ash], { 1: 40, 3: 120 }), 3); // 40 + 300 (full) loses to 120
+  assert.equal(smartScore({ online: true, live_load: 0.5 }, 100), 100 + BUSY_PENALTY_MS / 2);
+  assert.equal(smartScore({ online: true, load: 2 }, 10), 10 + BUSY_PENALTY_MS); // load capped at 1; older lists only have load
+  assert.equal(smartScore({ online: true }, null), Infinity); // couldn't be measured
+  assert.equal(smartPick([hel, ash], { 1: 50, 3: 50 }), 1); // a tie goes to the lower id: stable
+});
+
+test("Smart Connect never does worse than before when nothing can be measured", async () => {
+  const { smartPick, pickServer } = await import("./lib.js");
+  const servers = [{ id: 1, online: true }, { id: 3, online: true, recommended: true }];
+  assert.equal(smartPick(servers, {}, null), pickServer(servers, null)); // the recommended one
+  assert.equal(smartPick(servers, { 1: null, 3: null }, 1), 1); // the last one used
+  assert.equal(smartPick([], {}, null), null);
+});

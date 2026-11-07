@@ -1,5 +1,5 @@
 // The popup only shows state and asks the service worker to act. It never sees the proxy password.
-import { PRIVACY_URL, SIGN_IN_URL, VPN_URL, appOnlyServers, browserServers, bytes, flag, pickServer, planLabel, refusal } from "./lib.js";
+import { PRIVACY_URL, SIGN_IN_URL, SMART, VPN_URL, appOnlyServers, browserServers, bytes, flag, pickServer, planLabel, refusal } from "./lib.js";
 
 const app = document.getElementById("app");
 const POWER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/></svg>`;
@@ -49,15 +49,21 @@ function view(s) {
   if (no && !s.on) return gate("Not available", no, el("a", { class: "button", href: VPN_URL, target: "_blank", rel: "noopener" }, "Open Kiwi VPN page"));
 
   const servers = browserServers(s.account);
-  const chosen = s.on ? s.loginServer : pickServer(servers, s.lastServer);
+  const hand = s.choice !== SMART && servers.some((x) => x.id === s.choice && x.online) ? s.choice : null;
+  const smartOn = s.on ? s.choice === SMART : hand == null;
+  const chosen = s.on ? s.loginServer : hand ?? pickServer(servers, s.lastServer);
   const picker = el("select", { "aria-label": "Server", disabled: s.on || busy || undefined },
-    ...servers.map((x) => el("option", { value: String(x.id), selected: x.id === chosen || undefined, disabled: !x.online || undefined },
+    el("option", { value: SMART, selected: smartOn || undefined }, "⚡ Smart Connect · the fastest server now"),
+    ...servers.map((x) => el("option", { value: String(x.id), selected: (!smartOn && x.id === chosen) || undefined, disabled: !x.online || undefined },
       `${flag(x.country_code)} ${x.name} · ${x.region}${x.online ? "" : " (offline)"}`)));
+  const smartNote = s.on && s.choice === SMART && s.smart?.serverId === s.loginServer
+    ? el("p", { class: "note" }, `Smart Connect picked ${servers.find((x) => x.id === s.loginServer)?.name ?? "a server"}${s.smart.ms != null ? ` (${s.smart.ms} ms)` : ""}.`) : null;
   const used = s.account.usage;
   return [
-    statusBlock(s, () => Number(picker.value)),
+    statusBlock(s, () => (picker.value === SMART ? SMART : Number(picker.value))),
     flash ? el("p", { class: "error", role: "alert" }, flash) : null,
     el("label", { class: "field" }, "Server", picker),
+    smartNote,
     appOnly(s.account),
     el("div", { class: "stats" },
       el("span", {}, el("b", {}, bytes(used?.used_bytes ?? 0)), used?.cap_bytes ? ` of ${bytes(used.cap_bytes)} this month` : " this month"),

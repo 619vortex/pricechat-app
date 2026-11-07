@@ -61,6 +61,34 @@ export function pickServer(servers, lastId) {
   return (online.find((s) => s.id === lastId) ?? online.find((s) => s.recommended) ?? online[0] ?? servers[0])?.id ?? null;
 }
 
+export const SMART = "smart";
+export const BUSY_PENALTY_MS = 300; // a server in full use counts as this much slower
+
+export function median(xs) {
+  const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/** Lower is better: measured time to the server plus a penalty for how busy it is now. Unmeasured = never chosen. */
+export function smartScore(server, ms) {
+  if (ms == null || !server.online) return Infinity;
+  const busy = Math.min(1, Math.max(0, server.live_load ?? server.load ?? 0));
+  return ms + busy * BUSY_PENALTY_MS;
+}
+
+/** Smart Connect's choice: the best score among measured online servers; when nothing could be measured (an older
+ *  server list without proxy names, or every check failed) the usual preselection, so connecting never gets worse. */
+export function smartPick(servers, timings, lastId) {
+  let best = null, bestScore = Infinity;
+  for (const s of servers) {
+    const score = smartScore(s, timings[s.id]);
+    if (score < bestScore || (score === bestScore && best && s.id < best.id)) { best = s; bestScore = score; }
+  }
+  return best ? best.id : pickServer(servers, lastId);
+}
+
 export function bytes(n) {
   if (!n || n < 0) return "0 MB";
   const u = ["B", "KB", "MB", "GB", "TB"];
