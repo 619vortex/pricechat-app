@@ -186,7 +186,7 @@ const COMMANDS = {
     ssh(ip, "cd /opt/kiwi-src/new && sha256sum -c --quiet -", { input: sums });
     say("files verified on the server");
     const env = `QUIET_SECRETS=1 WITH_PROXY=1 AGENT_ALLOW=${CAT.agentAllow.join(",")}`;
-    ssh(ip, `set -e; cd /opt/kiwi-src/new; echo installing > ../status; ${env} bash install.sh 2>&1 | tee -a /var/log/kiwi-install.log; ` +
+    ssh(ip, `set -eo pipefail; cd /opt/kiwi-src/new; echo installing > ../status; ${env} bash install.sh 2>&1 | tee -a /var/log/kiwi-install.log; ` +
             `PROXY_HOST=${n.host} bash install-proxy.sh 2>&1 | tee -a /var/log/kiwi-install.log; kiwi-vpn-doctor; echo "installed ${b.rev}" > ../status`, { inherit: true });
     const pr = await probeProxy(n.host);
     say(pr.ok ? `proxy answers 407 (TLS ${pr.tlsMs} ms, certificate ${pr.certDays} days)` : `proxy check failed: ${pr.error ?? pr.status}`);

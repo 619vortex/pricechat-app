@@ -707,7 +707,7 @@ fi
 chown root:"$SVC_USER" "$ETC/tls.key" "$ETC/tls.crt"
 chmod 0640 "$ETC/tls.key"; chmod 0644 "$ETC/tls.crt"
 
-TOKEN="$(sed -n 's/^TOKEN=//p' "$ETC/agent.env" 2>/dev/null | head -n1)"
+TOKEN="$( (sed -n 's/^TOKEN=//p' "$ETC/agent.env" 2>/dev/null || true) | head -n1)"
 [ "${#TOKEN}" -ge 32 ] || TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 (umask 027; render_agent_env > "$ETC/agent.env")
 printf 'AGENT_ALLOW=%s

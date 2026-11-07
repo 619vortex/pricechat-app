@@ -547,3 +547,12 @@ def test_proxy_on_an_nftables_node_has_the_same_limits_as_on_a_shared_node():
         assert must in nft, must
     assert 'V6_DENY="$(echo "$OWN_NETS"' in src  # the server's own IPv6 networks are refused here too
     assert "delete table inet kiwi_proxy" in nft  # loading it twice never doubles the rules
+
+
+def test_no_pipeline_that_fails_a_fresh_install():
+    # install.sh runs with pipefail: a `$(cmd file 2>/dev/null | ...)` whose file doesn't exist yet stops a fresh install silently
+    import re
+    for name in ("install.sh", "install-proxy.sh"):
+        for n, line in enumerate(open(os.path.join(HERE, name), encoding="utf-8"), 1):
+            if re.search(r"\$\([^()]*2>/dev/null\s*\|", line):
+                assert "|| true" in line, f"{name}:{n}: {line.strip()}"
