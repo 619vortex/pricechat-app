@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { type LeakReport, type Settings, type SpeedReport, leakCheck, speedTest } from "./vpn";
-import { leakVerdict, mbps, speedSummary, validateExclusions } from "./smart";
+import { allowedIpsExcluding, leakVerdict, mbps, speedSummary, validateExclusions } from "./smart";
+
+/** The service accepts at most this many routes in a config (service/src/config.rs MAX_ALLOWED). */
+const MAX_ROUTES = 64;
 
 export function Switch({ label, hint, on, off, onChange }: { label: string; hint?: string; on: boolean; off?: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -14,7 +17,9 @@ export function Switch({ label, hint, on, off, onChange }: { label: string; hint
 /** Kiwi VPN 2.0's connection settings. Each one says plainly what it does and what it can't do. */
 export function ConnectionSettings({ prefs, change, connected, killSwitchReady }: { prefs: Settings; change: (p: Partial<Settings>) => void; connected: boolean; killSwitchReady: boolean }) {
   const [split, setSplit] = useState((prefs.split_exclude ?? []).join("\n"));
-  const checked = validateExclusions(split.split(/\r?\n/), ["10.66.0.1/32"]);
+  const checked = validateExclusions(split.split(/\r?\n/), ["10.66.0.1/32", "9.9.9.9/32", "149.112.112.112/32"]);
+  const pieces = allowedIpsExcluding(checked.ok).length;
+  if (pieces > MAX_ROUTES) checked.errors.push(`These ranges split the connection into ${pieces} pieces; Kiwi VPN allows ${MAX_ROUTES}. Use fewer or wider ranges.`);
   const saved = (prefs.split_exclude ?? []).join("\n");
   return (
     <div className="toggles" aria-label="Connection">

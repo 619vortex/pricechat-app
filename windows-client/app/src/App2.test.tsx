@@ -156,3 +156,15 @@ describe("Kiwi VPN 2.0", () => {
     expect(document.body.textContent).toContain("IPv6: none visible");
   });
 });
+
+describe("split tunneling limits", () => {
+  it("refuses a list the service couldn't take", async () => {
+    render(<App />);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await settle();
+    fireEvent.change(screen.getByLabelText("Addresses that skip the VPN"), { target: { value: "20.1.2.3\n60.1.2.3\n100.1.2.3\n140.1.2.3" } });
+    expect(screen.getByRole("alert").textContent).toMatch(/pieces; Kiwi VPN allows 64/);
+    expect((screen.getByRole("button", { name: /^Save/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
