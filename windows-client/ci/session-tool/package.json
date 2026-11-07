@@ -1,0 +1,1 @@
+{ "name": "kiwi-ci-session", "private": true, "type": "module", "dependencies": { "libsodium-wrappers": "0.7.15" } }

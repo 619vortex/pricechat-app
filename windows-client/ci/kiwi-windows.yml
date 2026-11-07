@@ -120,6 +120,14 @@ jobs:
           cargo test
           if ($LASTEXITCODE -ne 0) { throw "The client's tests failed" }
 
+      - name: End-to-end test tool (e2e.exe, not part of the installer)
+        working-directory: windows-client/client
+        run: |
+          cargo build --release --example e2e
+          if ($LASTEXITCODE -ne 0) { throw "The test tool didn't build" }
+          New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\tools" | Out-Null
+          Copy-Item "$env:CARGO_TARGET_DIR\release\examples\e2e.exe" "$env:GITHUB_WORKSPACE\tools\"
+
       - name: Service, release build
         working-directory: windows-client/service
         run: |
@@ -171,3 +179,116 @@ jobs:
           path: out/
           retention-days: 14
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: KiwiVPN-test-tools-${{ github.sha }}
+          path: tools/
+          retention-days: 3
+          if-no-files-found: error
+
+  # Real VPN tests on a fresh GitHub Windows machine: install the build silently, connect to the real Kiwi servers,
+  # then drive the real window. Uses the Actions secret KIWI_CI_SESSION (a Kiwi VPN app session: VPN API only, made by
+  # windows-client/ci/session-tool/ci-session.mjs). Without it the job says so and does nothing. Its devices are deleted
+  # at the end. Nothing is published; the firewall rule used for the failover test exists only on this runner.
+  e2e:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: powershell
+    env:
+      KIWI_CI_SESSION: ${{ secrets.KIWI_CI_SESSION }}
+    steps:
+      - name: Session available?
+        id: gate
+        run: |
+          if ($env:KIWI_CI_SESSION) { "run=yes" | Out-File $env:GITHUB_OUTPUT -Append -Encoding ascii }
+          else { "### VPN tests skipped`n`nNo KIWI_CI_SESSION secret yet: run windows-client/ci/session-tool/ci-session.mjs on the main PC." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.run == 'yes'
+        with:
+          persist-credentials: false
+          sparse-checkout: windows-client/ci
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.gate.outputs.run == 'yes'
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.gate.outputs.run == 'yes'
+        with:
+          name: KiwiVPN-Windows-${{ github.sha }}
+          path: build
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.gate.outputs.run == 'yes'
+        with:
+          name: KiwiVPN-test-tools-${{ github.sha }}
+          path: tools
+
+      - name: Install the build silently, as an administrator would
+        if: steps.gate.outputs.run == 'yes'
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Get-ChildItem build\*-Setup.exe | Select-Object -First 1
+          $want = ((Get-Content "$($exe.FullName).sha256" -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash $exe.FullName -Algorithm SHA256).Hash -ne $want) { throw "The installer isn't the one the build made" }
+          $p = Start-Process $exe.FullName -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The installer exited with $($p.ExitCode)" }
+          Start-Sleep 5
+          Get-Service KiwiVPN | Format-List Name, Status, StartType
+          if ((Get-Service KiwiVPN).Status -ne "Running") { throw "The Kiwi VPN service isn't running after install" }
+          if (-not (Test-Path "C:\Program Files\KiwiVPN\KiwiVPN.exe")) { throw "KiwiVPN.exe isn't installed" }
+
+      - name: VPN tests (real tunnels, every country, DNS and IPv6 leaks, split tunneling, reconnects, speed)
+        id: core
+        if: steps.gate.outputs.run == 'yes'
+        continue-on-error: true
+        run: |
+          tools\e2e.exe run e2e-report.json
+          if ($LASTEXITCODE -ne 0) { throw "VPN tests failed" }
+
+      - name: Window tests (Smart Connect, automatic failover, Tools, disconnect and reconnect)
+        id: ui
+        if: steps.gate.outputs.run == 'yes'
+        continue-on-error: true
+        run: |
+          node windows-client\ci\e2e-ui.mjs e2e-ui-report.json
+          if ($LASTEXITCODE -ne 0) { throw "Window tests failed" }
+
+      - name: Service log
+        if: always() && steps.gate.outputs.run == 'yes'
+        run: |
+          $log = "C:\Program Files\KiwiVPN\logs\service.log"
+          if (Test-Path $log) { Get-Content $log -Tail 80 }
+
+      - name: Clean up (disconnect, delete this runner's devices, uninstall)
+        if: always() && steps.gate.outputs.run == 'yes'
+        run: |
+          tools\e2e.exe cleanup
+          Remove-NetFirewallRule -DisplayName "KiwiCI-failover-block" -ErrorAction SilentlyContinue
+          if (Test-Path "C:\Program Files\KiwiVPN\uninstall.exe") { Start-Process "C:\Program Files\KiwiVPN\uninstall.exe" -ArgumentList "/S" -Wait }
+
+      - name: Report
+        if: always() && steps.gate.outputs.run == 'yes'
+        run: |
+          $rows = @()
+          foreach ($f in "e2e-report.json", "e2e-ui-report.json") { if (Test-Path $f) { $rows += Get-Content $f -Raw | ConvertFrom-Json } }
+          $md = "### Kiwi VPN 2.0 end-to-end tests`n`n| Result | Check | Detail |`n|---|---|---|`n"
+          foreach ($r in $rows) { $md += "| $($r.result) | $($r.name) | $(($r.detail -replace '\|', '/')) |`n" }
+          $md | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ("${{ steps.core.outcome }}" -ne "success" -or "${{ steps.ui.outcome }}" -ne "success") { throw "Some end-to-end checks failed (see the table)" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.gate.outputs.run == 'yes'
+        with:
+          name: KiwiVPN-e2e-reports-${{ github.sha }}
+          path: |
+            e2e-report.json
+            e2e-ui-report.json
+          retention-days: 14
+          if-no-files-found: ignore
