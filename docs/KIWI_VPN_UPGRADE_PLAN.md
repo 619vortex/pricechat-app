@@ -88,3 +88,20 @@ A matrix of IPv4 exit, IPv6 exit, DNS resolvers and WebRTC; on/off/reconnect/sle
 | 0.3 shared-node IPv6 | re-scoped (above) | – |
 | 0.4 flap guard | done, 124 VPN/alert tests pass, **not deployed** | `fix/kiwi-stage0` |
 | 0.5 Windows kill switch | needs the Hyper-V VM (not enabled on this PC) | – |
+
+## Kiwi VPN 2.0 (audit 2026-11-07)
+
+| Feature | Windows | Android | Chrome | Backend |
+|---|---|---|---|---|
+| Smart Connect | last used / recommended | same | **built, 1.0.4 (unpublished)**: median of 3 HTTPS timings + live load | `live_load` + `proxy_host` on `feat/kiwi-monitoring` (undeployed) |
+| Failover | reconnects after a reboot; no server change | reconnects the same server | retries the same server | – |
+| Kill switch | "Not available yet" (needs WFP rules) | OS Always-on + Block only | fails closed (proxy fixed) | – |
+| DNS / IPv6 leaks | server DNS in config, untested | DNS required, untested | tested (proxy resolves; IPv6 via proxy) | ash1: tunnel test 14/14 |
+| Ad/malware blocking | client doesn't read `adblock` | same | – | per server (unbound on install.sh nodes) |
+| Split tunneling | missing | **per-app, 3 modes, tested** | n/a (bypass list only) | – |
+| Auto-connect | once per launch when Windows started it | on app open; boot via Always-on | resumes after browser restart | – |
+| Speed test | live rates only | none | none | – |
+| Monitoring | – | – | – | **bandwidth alerts 80/100% + monthly traffic in Admin** (`feat/kiwi-monitoring`, migration 0106, undeployed) |
+| Device management | website only | list + remove | – | no rename |
+
+Next stages, smallest first: deploy monitoring (approval) → Chrome 1.0.4 → Chrome failover (switch only once the new server works) → Windows/Android Smart Connect using the same `live_load` and an HTTPS timing to `proxy_host` → device rename (backend + clients) → speed test (download from the node's proxy) → per-user ad blocking (two resolver views per node) → Windows kill switch (persistent WFP rules, VM-tested).
