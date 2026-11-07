@@ -7,7 +7,7 @@ param([long]$Run = 0, [switch]$NoDownload, [string]$Repo = "619vortex/KIWIVPN", 
 $ErrorActionPreference = "Stop"
 $Token = [Environment]::GetEnvironmentVariable("KIWI_GH_TOKEN", "User")
 if (-not $Token) { $Token = $env:KIWI_GH_TOKEN }
-if (-not $Token) { throw "Set the user env var KIWI_GH_TOKEN first (a fine-grained token for $Repo: Actions read, Contents read)." }
+if (-not $Token) { throw "Set the user env var KIWI_GH_TOKEN first (a fine-grained token for ${Repo}: Actions read, Contents read)." }
 $H = @{ Authorization = "Bearer $Token"; Accept = "application/vnd.github+json"; "X-GitHub-Api-Version" = "2022-11-28"; "User-Agent" = "kiwi-ci-fetch" }
 $Api = "https://api.github.com/repos/$Repo"
 function Get-Api($path) { Invoke-RestMethod -Headers $H -Uri "$Api$path" }
