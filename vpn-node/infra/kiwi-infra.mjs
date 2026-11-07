@@ -37,7 +37,13 @@ const say = (...a) => console.log(...a);
 const money = (x, cur) => `${cur === "USD" ? "$" : "€"}${x.toFixed(2)}`;
 const api = () => new HCloud(loadToken());
 
+// --approved "<phrase>": a written approval given in advance; it counts only if it is exactly the phrase for this change now
+const PRE = process.argv.indexOf("--approved") > 0 ? process.argv[process.argv.indexOf("--approved") + 1] ?? "" : undefined;
 async function approve(phrase) {
+  if (PRE !== undefined) {
+    if (PRE.trim() !== phrase) throw new Error(`the approval given (${PRE}) doesn't match this change now (${phrase}): nothing was changed`);
+    return say(`approved in advance: ${phrase}`);
+  }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try { return await L.confirmApproval(phrase, { isTTY: !!process.stdin.isTTY && !!process.stdout.isTTY, ask: (q) => rl.question(q) }); }
   finally { rl.close(); }
@@ -125,18 +131,12 @@ const COMMANDS = {
     say(p.problems.length ? `\nCan't create yet:\n${p.problems.map((x) => `  - ${x}`).join("\n")}` : `\nTo create it (owner, at a terminal): ! node vpn-node/infra/kiwi-infra.mjs create ${key}`);
   },
 
-  async create(key, flag, value) {
-    const opts = flag === "--approved" ? { approved: value ?? "" } : {};
+  async create(key) {
     const h = api();
     const p = L.planFor(key, CAT, await h.snapshot());
     if (p.problems.length) throw new Error(`can't create ${key}:\n  - ${p.problems.join("\n  - ")}`);
     await COMMANDS.plan(key);
-    const phrase = L.approvalPhrase("create", key, p.costs["0TB"], p.hash);
-    // written approval given in advance (e.g. in chat) counts only if it names this exact cost and request, checked now
-    if (opts.approved !== undefined) {
-      if (opts.approved.trim() !== phrase) throw new Error(`the approval given (${opts.approved}) doesn't match this plan now (${phrase}): nothing was created`);
-      say(`approved in advance: ${phrase}`);
-    } else await approve(phrase);
+    await approve(L.approvalPhrase("create", key, p.costs["0TB"], p.hash));
     let fwId = (await h.snapshot()).firewalls.find((f) => f.name === p.firewallName)?.id;
     if (!fwId) {
       fwId = (await h.call("POST", "/firewalls", { name: p.firewallName, labels: { kiwi: "node", node: key }, rules: p.firewallRules })).firewall.id;
