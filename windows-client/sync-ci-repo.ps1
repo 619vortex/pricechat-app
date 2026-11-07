@@ -32,7 +32,7 @@ New-Item -ItemType Directory -Force $Dest | Out-Null
 $Tar = Join-Path $env:TEMP "kiwi-win-$PID.tar"
 git -C "$Repo\windows-client" archive --format=tar -o $Tar HEAD -- app client service ci
 if ($LASTEXITCODE -ne 0) { throw "git archive failed" }
-tar -xf $Tar -C $Dest
+& "$env:SystemRoot\System32\tar.exe" -xf $Tar -C $Dest  # Windows' own tar: Git Bash's reads "C:" as a host
 if ($LASTEXITCODE -ne 0) { throw "unpacking failed" }
 Remove-Item $Tar -Force
 $Commit = git -C $Repo rev-parse HEAD
