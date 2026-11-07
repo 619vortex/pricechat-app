@@ -17,7 +17,18 @@ if (-not (Test-Path "$Cloud\.git")) {
     git -C $Cloud remote add origin $RepoUrl
 }
 git -C $Cloud remote set-url origin $RepoUrl
-Get-ChildItem $Cloud -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
+# The same repo also builds the Windows client (windows-client/, .github/workflows/kiwi-windows.yml, pushed by
+# windows-client/sync-ci-repo.ps1). Bring in its latest commits first, and never remove those here.
+if (-not $NoPush) {
+    $env:GIT_SSH_COMMAND = "ssh -i `"$($Key -replace '\\','/')`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    git -C $Cloud fetch -q origin
+    if ($LASTEXITCODE -eq 0 -and (git -C $Cloud rev-parse -q --verify origin/main)) {
+        git -C $Cloud merge -q --ff-only origin/main
+        if ($LASTEXITCODE -ne 0) { throw "The local copy has diverged from GitHub. Nothing was changed." }
+    }
+}
+$Keep = ".git", ".github", "windows-client"
+Get-ChildItem $Cloud -Force | Where-Object { $Keep -notcontains $_.Name } | Remove-Item -Recurse -Force
 
 $Tar = Join-Path $env:TEMP "kiwi-ios-$PID.tar"
 git -C "$Source\ios-client" archive --format=tar -o $Tar HEAD -- . ":(exclude)docs" ":(exclude)prepare-mac-package.ps1" ":(exclude)tools/sync-cloud-repo.ps1"
