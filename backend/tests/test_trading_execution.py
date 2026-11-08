@@ -22,6 +22,15 @@ from app.tradingos.market import Candle
 from tests.test_trading_os import FakeMD, FakeTG, kiwi, uptrend_pullback
 
 
+@pytest.fixture(autouse=True)
+def _banter_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: these tests are about the trading flow; the Banter referral gate on Telegram entries has its own tests
+    (test_tg_trading.py)."""
+    from app.tradingos import tgtrade
+
+    monkeypatch.setattr(tgtrade, "entry_gate", lambda db, m: None)
+
+
 @pytest.fixture
 def md(monkeypatch: pytest.MonkeyPatch) -> FakeMD:
     f = FakeMD({"BTC": uptrend_pullback(), "SOL": uptrend_pullback(), "ETH": uptrend_pullback()})

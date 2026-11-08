@@ -47,6 +47,8 @@ class ParsedMessage:
     # sent "as the group" or by an admin with "Remain anonymous" (Telegram shows @GroupAnonymousBot) or as the linked channel
     # (@Channel_Bot): `from` is one of Telegram's stand-in bots and `sender_chat` the group or channel; there is no person
     author_is_anonymous: bool = False
+    # the text of the message this one replies to (its caption for a photo): "/enter" reads the signal card being replied to
+    reply_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,4 +152,5 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         media_type=media_type,
         forward_from=forward_from,
         forward_date=forward_date,
+        reply_text=str(reply.get("text") or reply.get("caption") or "")[:2000],
     )
