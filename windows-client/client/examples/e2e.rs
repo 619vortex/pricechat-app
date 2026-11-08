@@ -445,6 +445,27 @@ fn remove_own_devices(http: &Http, v: &FileVault, token: &str) -> usize {
     removed
 }
 
+fn remove_named(list: &str) -> Result<(), String> {
+    let names: Vec<&str> = list.split(',').map(str::trim).filter(|n| !n.is_empty()).collect();
+    if names.is_empty() {
+        return Ok(());
+    }
+    let v = vault()?;
+    let http = Http::new(BASE)?;
+    let token = v.session().ok_or("no session")?;
+    let account = http.account(&token).map_err(|e| e.message)?;
+    for name in names {
+        match account.devices.iter().find(|d| d.name == name) {
+            Some(d) => match http.delete_device(&token, d.id) {
+                Ok(()) => println!("removed device \"{name}\""),
+                Err(e) => println!("couldn't remove \"{name}\": {}", e.message),
+            },
+            None => println!("no device named \"{name}\""),
+        }
+    }
+    Ok(())
+}
+
 fn cleanup() -> Result<(), String> {
     let _ = disconnect();
     let v = vault()?;
@@ -483,6 +504,14 @@ fn main() {
             }
             Err(e) => {
                 println!("FAIL seed: {e}");
+                1
+            }
+        },
+        // the owner's named devices, removed on request (workflow input remove_devices): exact names only, comma-separated
+        Some("remove") => match remove_named(args.get(2).map(String::as_str).unwrap_or("")) {
+            Ok(()) => 0,
+            Err(e) => {
+                println!("remove: {e}");
                 1
             }
         },

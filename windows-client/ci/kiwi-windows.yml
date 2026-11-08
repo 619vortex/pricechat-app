@@ -14,6 +14,11 @@ on:
       - "windows-client/**"
       - ".github/workflows/kiwi-windows.yml"
   workflow_dispatch:
+    inputs:
+      remove_devices:
+        description: "Devices to delete from the test account before the VPN tests, exact names, comma-separated (only with the owner's say-so)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -327,6 +332,12 @@ jobs:
           Get-Service KiwiVPN | Format-List Name, Status, StartType
           if ((Get-Service KiwiVPN).Status -ne "Running") { throw "The Kiwi VPN service isn't running after install" }
           if (-not (Test-Path "C:\Program Files\KiwiVPN\KiwiVPN.exe")) { throw "KiwiVPN.exe isn't installed" }
+
+      - name: Free device slots the owner named
+        if: steps.gate.outputs.run == 'yes' && github.event.inputs.remove_devices != ''
+        env:
+          REMOVE: ${{ github.event.inputs.remove_devices }}
+        run: tools\e2e.exe remove "$env:REMOVE"
 
       - name: VPN tests (real tunnels, every country, DNS and IPv6 leaks, split tunneling, reconnects, speed)
         id: core
