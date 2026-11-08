@@ -604,12 +604,33 @@ async def send_signal_preview(db: Session, client: Any, chat_id: int, member: Me
     return None
 
 
-def _sl_tp_args(nums: list[str], only: int | None) -> tuple[int | None, list[float]]:
-    """"/sl 12 61000" -> (12, [61000]); "/sl 61000" -> (the only open position, [61000]). Position numbers are whole numbers."""
+def _sl_tp_args(nums: list[str], only: int | None, open_ids: set[int] | None = None) -> tuple[int | None, list[float]]:
+    """"/sl 12 61000" -> (12, [61000]); "/sl 61000" -> (the only open position, [61000]). The first number is a position only
+    when it is one of the member's open positions (or written #12): "/tp 64000 66000" is two targets, not position 64000."""
     vals = [float(_num(x) or 0) for x in nums]
-    if len(nums) >= 2 and nums[0].lstrip("#").isdigit():
-        return int(nums[0].lstrip("#")), vals[1:]
+    first = nums[0].lstrip("#") if nums else ""
+    if len(nums) >= 2 and first.isdigit() and (nums[0].startswith("#") or int(first) in (open_ids or set())):
+        return int(first), vals[1:]
     return only, vals
+
+
+BUTTON_TTL_SECONDS = 300  # Confirm buttons that change positions work for 5 minutes, like previews
+
+
+def _stamp() -> str:
+    return format(int(utcnow().timestamp()), "x")
+
+
+def _fresh(stamp: str) -> bool:
+    try:
+        return 0 <= utcnow().timestamp() - int(stamp, 16) <= BUTTON_TTL_SECONDS
+    except ValueError:
+        return False
+
+
+def _px(v: float) -> str:
+    """A price for a button exactly as typed (no rounding to 6 digits: 104123.5 stays 104123.5)."""
+    return format(v, ".12g")
 
 
 async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: str, args: list[str]) -> str | None:
@@ -666,13 +687,14 @@ async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: s
         if not n:
             return "No open bot positions."
         await client.send_message(chat_id, f"Close all {n} bot position(s) at market ({acc.mode})? Reduce-only: nothing else on your account is touched.",
-                                  [[{"text": f"✅ Close all {n}", "callback_data": "ca:all"}, {"text": "Cancel", "callback_data": "ca:no"}]], html=True)
+                                  [[{"text": f"✅ Close all {n}", "callback_data": f"ca:all:{_stamp()}"}, {"text": "Cancel", "callback_data": "ca:no"}]], html=True)
         return None
     if cmd in ("/sl", "/tp"):
         nums = [a for a in args if _num(a) is not None]
         if not nums:
             return "Usage: /sl 12 61000 (position, new stop) · /tp 12 64000 [66000] (position, TP1 [TP2])"
-        pos_id, vals = _sl_tp_args(nums, _only_position(db, acc))
+        open_ids = set(db.scalars(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.status.in_(execution.CLOSABLE))))
+        pos_id, vals = _sl_tp_args(nums, _only_position(db, acc), open_ids)
         if pos_id is None or not vals:
             return "Which position? /sl 12 61000 (/positions shows the numbers)"
         kw: dict[str, float] = {"stop": vals[0]} if cmd == "/sl" else {"tp1": vals[0], **({"tp2": vals[1]} if len(vals) > 1 else {})}
@@ -682,7 +704,7 @@ async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: s
             return esc(str(e))
         except market.MarketError:
             return "Couldn't read the market right now. Nothing changed."
-        data = "pr:" + ":".join([str(pos_id), "s" if cmd == "/sl" else "t", *[f"{v:g}" for v in vals]])
+        data = "pr:" + ":".join([_stamp(), str(pos_id), "s" if cmd == "/sl" else "t", *[_px(v) for v in vals]])
         if len(data) > 64:
             return "Those prices are too long. Nothing changed."
         text = "\n".join([f"<b>Change #{pos_id} {esc(s['coin'])} {s['side']}</b> ({acc.mode})", *map(esc, s["changes"]),
@@ -717,8 +739,11 @@ async def callback(db: Session, client: Any, member: Member, uid: int, data: str
                     f"🛑 Stop {f(pos.stop)} · ✅ TP1 {f(pos.tp1)} (half) · TP2 {f(pos.tp2)}\n/positions · /sl · /tp · /close {pos.id}")
         return f"<b>{pos.mode} · {pos.status}</b> {esc(pos.error or '')}\nNew trades were stopped for safety. See /positions."
     if kind == "ca":
-        if arg != "all":
+        what, _, stamp = arg.partition(":")
+        if what != "all":
             return "Nothing was closed."
+        if not _fresh(stamp):
+            return "That button is out of date (over 5 minutes). Nothing was closed: send /closeall again."
         out = await asyncio.to_thread(execution.close_all, db, member)
         lines = [f"Closed {len(out['closed'])} of {out['requested']}."]
         lines += [f"#{x['id']} {esc(x['coin'])}: {esc(x['error'][:160])}" for x in out["failed"]]
@@ -728,8 +753,10 @@ async def callback(db: Session, client: Any, member: Member, uid: int, data: str
         if arg == "no":
             return "Nothing changed."
         bits = arg.split(":")
+        if not bits or not _fresh(bits[0]):
+            return "That button is out of date (over 5 minutes). Nothing changed: send the command again."
         try:
-            pos_id, which, vals = int(bits[0]), bits[1], [float(x) for x in bits[2:]]
+            pos_id, which, vals = int(bits[1]), bits[2], [float(x) for x in bits[3:]]
         except (ValueError, IndexError):
             return "That button is out of date. Nothing changed."
         if not vals:
