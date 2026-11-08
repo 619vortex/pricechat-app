@@ -197,24 +197,23 @@ fn service_state(service: &Sc) -> ServiceState {
 fn stop_and_delete(name: &str) -> Result<(), String> {
     let scm = manager()?;
     let Some(service) = open_service(&scm, name) else { return Ok(()) };
-    let mut s: SERVICE_STATUS = unsafe { zeroed() };
-    unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
-    let start = Instant::now();
-    while service_state(&service) != ServiceState::Stopped && service_state(&service) != ServiceState::Missing && start.elapsed() < Duration::from_secs(20) {
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    stop_and_wait(&service, Duration::from_secs(20));
     unsafe { DeleteService(service.0) };
     Ok(())
 }
 
-/// Asks the tunnel to stop, and waits. True once it has stopped, or there's nothing left to stop.
+/// Asks the tunnel to stop, and waits. True once it has stopped, or there's nothing left to stop. The stop is asked for again on every look:
+/// Windows refuses it while a service is still starting, and a tunnel asked only then would finish starting and keep the PC's routes.
 fn stop_and_wait(service: &Sc, limit: Duration) -> bool {
-    let mut s: SERVICE_STATUS = unsafe { zeroed() };
-    unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
     let start = Instant::now();
     loop {
-        if matches!(service_state(service), ServiceState::Stopped | ServiceState::Missing) {
-            return true;
+        match service_state(service) {
+            ServiceState::Stopped | ServiceState::Missing => return true,
+            ServiceState::Running | ServiceState::Starting => {
+                let mut s: SERVICE_STATUS = unsafe { zeroed() };
+                unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
+            }
+            ServiceState::Stopping => {}
         }
         if start.elapsed() >= limit {
             return false;
@@ -475,6 +474,15 @@ impl Tunnel {
                 log_event("pause: no connect followed");
             }
             *self.paused_at.lock().unwrap() = None;
+            // nothing is wanted, so nothing may hold the routes: a tunnel still running here (one that wouldn't stop in time) is stopped
+            if let Ok(scm) = manager() {
+                if let Some(service) = open_service(&scm, TUNNEL_SERVICE) {
+                    if matches!(service_state(&service), ServiceState::Running | ServiceState::Starting) {
+                        log_event("tunnel: running though none is wanted, stopping it");
+                        stop_and_wait(&service, Duration::from_secs(4));
+                    }
+                }
+            }
             self.release("no tunnel is wanted");
             return;
         }
