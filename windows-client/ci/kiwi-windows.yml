@@ -164,6 +164,36 @@ jobs:
           path: ~\AppData\Local\tauri
           key: tauri-tools-nsis-3.13
 
+      # The same two files Tauri would fetch (its own SHA-1s), through the API's asset route, which keeps working when GitHub
+      # Releases' download links answer 504. Skipped when the cache already has them.
+      - name: NSIS for the installer
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Tools = "$env:LOCALAPPDATA\tauri"
+          $Nsis = "$Tools\NSIS"
+          $Dll = "$Nsis\Plugins\x86-unicode\additional\nsis_tauri_utils.dll"
+          function Fetch($asset, $repo, $out, $sha1) {
+            foreach ($try in 1..5) {
+              try {
+                Invoke-WebRequest -UseBasicParsing -Headers @{ Accept = "application/octet-stream"; "User-Agent" = "kiwi-ci" } -Uri "https://api.github.com/repos/tauri-apps/$repo/releases/assets/$asset" -OutFile $out
+                if ((Get-FileHash $out -Algorithm SHA1).Hash -eq $sha1) { return }
+                throw "$out isn't the expected file"
+              } catch { if ($try -eq 5) { throw } ; Start-Sleep 20 }
+            }
+          }
+          if (-not (Test-Path "$Nsis\makensis.exe")) {
+            New-Item -ItemType Directory -Force $Tools | Out-Null
+            Fetch 623832696 "binary-releases" "$env:RUNNER_TEMP\nsis.zip" "DB14F8AF2EA346B786C6AE19343F61AAF5E09B8E"
+            Expand-Archive "$env:RUNNER_TEMP\nsis.zip" $Tools -Force
+            if (Test-Path $Nsis) { Remove-Item -Recurse -Force $Nsis }
+            Rename-Item "$Tools\nsis-3.13" "NSIS"
+          }
+          if (-not (Test-Path $Dll) -or (Get-FileHash $Dll -Algorithm SHA1).Hash -ne "75197FEE3C6A814FE035788D1C34EAD39349B860") {
+            New-Item -ItemType Directory -Force (Split-Path $Dll) | Out-Null
+            Fetch 345882097 "nsis-tauri-utils" $Dll "75197FEE3C6A814FE035788D1C34EAD39349B860"
+          }
+          Get-ChildItem $Nsis | Select-Object -First 5 Name
+
       - name: Installer
         run: |
           $ErrorActionPreference = "Stop"
