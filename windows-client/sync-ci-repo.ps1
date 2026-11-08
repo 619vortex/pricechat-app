@@ -49,7 +49,12 @@ $Bad = Get-ChildItem $Dest -Recurse -File -Include *.rs, *.ts, *.tsx, *.json, *.
     Select-String -Pattern 'PRIVATE KEY-----', 'ghp_[A-Za-z0-9]{30}', 'github_pat_', 'sk_live_', 'AKIA[0-9A-Z]{16}', 'xox[bp]-' -List
 if ($Bad) { throw "Something like a key is in: $($Bad.Path -join ', '). Nothing was pushed." }
 
-git -C $Cloud add -A -- windows-client .github/workflows/kiwi-windows.yml
+# Windows PowerShell turns any line git writes to stderr (such as a line-ending warning) into an error under "Stop": judge by the exit code instead
+$ErrorActionPreference = "Continue"
+git -C $Cloud add -A -- windows-client .github/workflows/kiwi-windows.yml 2>$null
+$Added = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($Added -ne 0) { throw "git add failed. Nothing was pushed." }
 $Other = git -C $Cloud status --short | Where-Object { $_ -notmatch ' (windows-client/|\.github/workflows/kiwi-windows\.yml)' }
 if ($Other) { throw "Something outside windows-client changed: $Other. Nothing was pushed." }
 if (git -C $Cloud diff --cached --name-only) { git -C $Cloud commit -q -m "Kiwi VPN Windows source from $($Commit.Substring(0, 12))" } else { Write-Host "No change since the last sync." }
