@@ -280,6 +280,65 @@ fn create_tunnel_service(scm: &Sc, command: &[u16]) -> Result<Sc, String> {
     Ok(Sc(h))
 }
 
+/// Makes the tunnel's adapter the one Windows prefers (interface metric 0, IPv4 and IPv6), so its DNS server is asked first. WireGuard
+/// only does this itself when AllowedIPs holds a default route, which Kiwi sends as two halves (see `guard::without_default_routes`):
+/// without it, Windows kept asking the regular network's DNS first, which the DNS guard blocks, and names took 13 s to resolve after
+/// every connect. True once the adapter exists and is set.
+fn prefer_tunnel() -> bool {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetIpInterfaceEntry, InitializeIpInterfaceEntry, SetIpInterfaceEntry, MIB_IPINTERFACE_ROW};
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+    type Open = unsafe extern "system" fn(*const u16) -> *mut c_void;
+    type Close = unsafe extern "system" fn(*mut c_void);
+    type GetLuid = unsafe extern "system" fn(*mut c_void, *mut u64);
+    let Ok(dir) = exe_dir() else { return false };
+    let dll = wide(&dir.join("wireguard.dll").display().to_string());
+    unsafe {
+        let lib = LoadLibraryW(dll.as_ptr());
+        if lib.is_null() {
+            return false;
+        }
+        let (Some(open), Some(close), Some(luid_of)) = (
+            GetProcAddress(lib, c"WireGuardOpenAdapter".as_ptr() as *const u8),
+            GetProcAddress(lib, c"WireGuardCloseAdapter".as_ptr() as *const u8),
+            GetProcAddress(lib, c"WireGuardGetAdapterLUID".as_ptr() as *const u8),
+        ) else {
+            return false;
+        };
+        let open: Open = std::mem::transmute(open);
+        let close: Close = std::mem::transmute(close);
+        let luid_of: GetLuid = std::mem::transmute(luid_of);
+        let adapter = open(wide(TUNNEL_NAME).as_ptr());
+        if adapter.is_null() {
+            return false;
+        }
+        let mut luid = 0u64;
+        luid_of(adapter, &mut luid);
+        close(adapter);
+        let mut set_any = false;
+        for family in [AF_INET, AF_INET6] {
+            let mut row: MIB_IPINTERFACE_ROW = zeroed();
+            InitializeIpInterfaceEntry(&mut row);
+            row.Family = family;
+            row.InterfaceLuid.Value = luid;
+            if GetIpInterfaceEntry(&mut row) != 0 {
+                continue; // that family isn't on the adapter (yet)
+            }
+            set_any = true;
+            if row.UseAutomaticMetric == 0 && row.Metric == 0 {
+                continue;
+            }
+            row.UseAutomaticMetric = 0;
+            row.Metric = 0;
+            if family == AF_INET {
+                row.SitePrefixLength = 0; // Windows requires it unset when changing an IPv4 interface
+            }
+            let done = SetIpInterfaceEntry(&mut row);
+            log_event(&format!("tunnel: interface metric set to 0 for {} ({})", if family == AF_INET { "IPv4" } else { "IPv6" }, if done == 0 { "done".to_string() } else { format!("Windows error {done}") }));
+        }
+        set_any
+    }
+}
+
 /// True while the tunnel's network adapter exists. It goes as the old tunnel exits, and a new one can't take its name until then.
 fn adapter_exists() -> bool {
     type Open = unsafe extern "system" fn(*const u16) -> *mut c_void;
@@ -490,6 +549,9 @@ impl Tunnel {
         let Some(service) = open_service(&scm, TUNNEL_SERVICE) else { return };
         let state = service_state(&service);
         let now = now_seconds();
+        if state == ServiceState::Running {
+            prefer_tunnel(); // a tunnel restarted here or brought back after a reboot gets the same preference
+        }
         if state == ServiceState::Running && matches!(peer_stats(), Some((Some(age), _, _)) if age <= protocol::HANDSHAKE_FRESH_SECONDS) {
             self.ever_connected.store(true, Ordering::SeqCst);
             *self.restarts.lock().unwrap() = (0, 0);
@@ -572,6 +634,11 @@ impl Tunnel {
         let service = tunnel_service(&scm, &path.display().to_string())?;
         if unsafe { StartServiceW(service.0, 0, null()) } == 0 {
             return Err(format!("Can't start the tunnel: {}", last_error()));
+        }
+        // the adapter appears as the tunnel's process starts; it's made Windows' first choice as soon as it's there
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(8) && !prefer_tunnel() {
+            std::thread::sleep(Duration::from_millis(150));
         }
         Ok(())
     }

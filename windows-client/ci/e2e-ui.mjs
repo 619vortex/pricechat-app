@@ -16,6 +16,11 @@ const check = (name, ok, detail) => { add(name, ok ? "PASS" : "FAIL", detail); r
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ps = (cmd) => execFileSync("powershell.exe", ["-NoProfile", "-Command", cmd], { encoding: "utf8" }).trim();
 
+/** The public address once traffic flows through the tunnel (the first seconds after a handshake can still be settling). */
+async function vpnIp(home) {
+  return (await waitFor(async () => { const ip = await publicIp(); return ip && ip !== home ? ip : null; }, 20_000, 1000)) ?? (await publicIp());
+}
+
 async function publicIp() {
   try { const r = await fetch("https://api.ipify.org", { signal: AbortSignal.timeout(8000) }); return (await r.text()).trim(); } catch { return null; }
 }
@@ -88,7 +93,7 @@ async function main() {
   const on = await waitFor(async () => (await headline()) === "Connected", 90_000);
   const picked = await js(`[...document.querySelectorAll('[role=radio]')].find(x => x.getAttribute('aria-checked') === 'true')?.textContent ?? ''`);
   const timings = await js(`[...document.querySelectorAll('[role=radio] .ms')].map(x => x.parentElement.textContent.trim()).join(' | ')`);
-  const first = await publicIp();
+  const first = await vpnIp(home);
   if (!check("Smart Connect connects", !!on && first && first !== home, `${picked}; public IPv4 ${first} (direct ${home}); timings: ${timings}; window: ${(await bodyText())?.slice(0, 300).replace(/\s+/g, " ")}`)) return;
 
   // Tools: speed test and leak check, from the window
@@ -110,7 +115,7 @@ async function main() {
     const dropped = await waitFor(async () => (await headline()) !== "Connected", 300_000, 2000);
     check("failover: the cut-off is noticed", !!dropped, dropped ? `after ${Math.round((Date.now() - t0) / 1000)} s (the tunnel counts as down once its handshake is 180 s old)` : "still Connected after 5 minutes");
     const moved = await waitFor(async () => /moved you to/.test(await bodyText()) && (await headline()) === "Connected", 300_000, 2000);
-    const now = await publicIp();
+    const now = await vpnIp(home);
     const msg = await js(`[...document.querySelectorAll('p[role=status]')].map(p => p.textContent).find(t => t.includes('moved you')) ?? ''`);
     check("failover: moved to another server", !!moved && now && now !== first && now !== home, `${msg || "no message"}; public IPv4 ${first} -> ${now} after ${Math.round((Date.now() - t0) / 1000)} s`);
   } finally {
@@ -124,7 +129,7 @@ async function main() {
   check("window: disconnect", !!off && back === home, `public IPv4 ${back} (direct ${home})`);
   await clickText("Connect", "button.go");
   const again = await waitFor(async () => (await headline()) === "Connected", 90_000);
-  const ip2 = await publicIp();
+  const ip2 = await vpnIp(home);
   check("window: reconnect", !!again && ip2 && ip2 !== home, `public IPv4 ${ip2}`);
   await clickText("Disconnect", "button.go");
   await waitFor(async () => (await headline()) === "Not connected", 60_000);

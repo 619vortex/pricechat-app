@@ -142,6 +142,19 @@ pub fn leak_check(server_ip: Option<String>, config_dns: &[String]) -> Result<Le
             }
         }
     }
+    // Some resolvers (the Kiwi servers' own) shorten the names they ask about, so bash.ws never sees its test names. Akamai's
+    // whoami.akamai.net answers with the address of the resolver that asked, whatever the resolver does with names.
+    if dns.is_empty() {
+        use std::net::ToSocketAddrs;
+        if let Ok(found) = "whoami.akamai.net:80".to_socket_addrs() {
+            for a in found.filter(|a| a.is_ipv4()) {
+                let seen = format!("{} (whoami.akamai.net)", a.ip());
+                if !dns.contains(&seen) {
+                    dns.push(seen);
+                }
+            }
+        }
+    }
     let expected_dns = expected_dns(config_dns, server_ip.as_deref());
     Ok(LeakReport { ipv4, ipv6, dns, tunnel_ip: server_ip, expected_dns })
 }
