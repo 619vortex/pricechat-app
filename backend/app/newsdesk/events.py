@@ -59,7 +59,7 @@ STRONG = ("official", "two outlets", "price data", "exchange data")
 RELEASED = "released"
 FAMILIES = ({"hack", "scam", "failure"}, {"controversy"})  # Bybaz hacked, then Bybaz halts withdrawals: one story
 ESCALATE = re.compile(r"\b(lazarus|north korea\w*|behind the|blamed?|attribut\w+|(?:reopen|resum)\w* withdrawals|outflows|refund\w*|arrest\w*|charged|indict\w*|bankrupt\w*|insolven\w*|(?:halt|paus|suspend|freez)\w* (?:all )?withdrawals|seiz\w+|frozen|confirms?|confirmed|"
-                      r"recover\w*|returns? (?:the )?funds|delist\w*|sentenc\w*|guilty|shut(?:s|ting)? down|collaps\w*|liquidat\w+|depeg\w*)\b", re.I)
+                      r"recover\w*|returns? (?:the )?funds|delist\w*|sentenc\w*|guilty|shut(?:s|ting)? down|collaps\w*|liquidat\w+|depeg\w*|steps? down|stepped down|resign\w*|ousted|fired|launder\w*)\b", re.I)
 
 
 NUMBERS = ("regular_per_day", "regular_bar", "opening_bar", "extra_bar", "extra_per_day", "ceiling", "window_hours", "topic_max", "updates_per_story")
@@ -285,11 +285,25 @@ def _offer_story(db: Session, v: chaos.Verdict, recent: list[NdEvent], quotes: d
         _fill(ev, v, score, facts, head, now)
         ev.facts = {**ev.facts, "development": what, "assets": []}
         ev.topic = match.topic or ev.topic
+        _inherit_magnitude(ev, match)
         return 1 if _insert(db, recent, ev) else 0
     published = _utc(story.published_at, now) or now
     ev = NdEvent(key=f"story:{story.link}"[:200], kind="news", first_seen=now, expires_at=published + p.news_ttl, status="candidate")
     _fill(ev, v, score, facts, head, now)
     return 1 if _insert(db, recent, ev) else 0
+
+
+def _inherit_magnitude(ev: NdEvent, parent: NdEvent) -> None:
+    """An update is as big as its story: "Binance CFO steps down after record hack" carries the $6.3B of the hack it follows, though its own
+    headline names no figure. Only the magnitude is inherited; severity, evidence and freshness stay the update's own."""
+    parts = dict(ev.parts or {})
+    own, theirs = float(parts.get("magnitude") or 0), float((parent.parts or {}).get("magnitude") or 0)
+    if theirs <= own:
+        return
+    fresh = float(parts.get("freshness") or 1.0)
+    parts["magnitude"] = theirs
+    ev.parts = parts
+    ev.virality = float(max(0, min(100, int(round(ev.virality + (theirs - own) * fresh)))))
 
 
 def _merge_sources(a: list[Any], b: list[Any]) -> list[Any]:

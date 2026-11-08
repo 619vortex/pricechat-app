@@ -240,6 +240,38 @@ async def test_a_story_s_developments_become_at_most_two_updates(db: Session) ->
     assert [e.kind for e in out] == ["news", "update", "update"] and all(e.parent_id == out[0].id for e in out[1:])
 
 
+async def test_an_executive_leaving_after_a_hack_is_an_update_as_big_as_the_hack(db: Session) -> None:
+    # 2026-11-07: "Binance CFO steps down nine days after record hack" scored 50 (no figure of its own) and never went out
+    hack(db, "Bybaz", T0, "$1.5 billion", hours=0)
+    await decide(db, T0)
+    later = T0 + timedelta(hours=10, minutes=30)  # late in the 12:00 window, the bar at its lowest
+    story(db, "Bybaz CFO steps down days after record hack; co-CEO says transition was planned", "The Block", summary="", now=later, hours=0.1)
+    await decide(db, later)
+    out = released(db)
+    assert [e.kind for e in out] == ["news", "update"]
+    upd = out[1]
+    assert upd.parent_id == out[0].id and upd.parts["magnitude"] == out[0].parts["magnitude"] and upd.virality >= events.POLICY.regular_bar
+    assert (upd.facts or {}).get("development", "").startswith("new: step")
+
+
+def test_regulators_cutting_off_an_exchange_and_index_corrections_are_market_chaos() -> None:
+    from app.newsdesk import chaos
+
+    def row(title: str, category: str) -> NdStory:
+        return NdStory(link="https://x.test/1", title=title, summary="", source="The Block", tier=2, category=category)
+
+    # 2026-11-06: three outlets carried this and every one was turned down as "not about a market" or "not market chaos"
+    assert chaos.rejected(row("US Treasury cuts off MEXC over alleged $16B in illicit transactions", "economics")) is None
+    assert chaos.rejected(row("Treasury Cuts Crypto Exchange MEXC Off From US Financial System", "economics")) is None
+    assert chaos.topic_of("Nasdaq drops into correction territory - here's what typically happens next")[1] == "move"
+    assert chaos.topic_of("AI stocks climb after trillions wiped from market values")[1] == "move"
+    # still not news: an exchange's routine business, and politics with no market in it
+    assert chaos.rejected(row("MEXC lists three new tokens for spot trading", "crypto")) is not None
+    assert chaos.rejected(row("Mayor steps down after council vote", "politics")) is not None
+    assert virality.news(title="US Treasury cuts off MEXC over alleged $16B in illicit transactions", summary="", evidence="two outlets", outlets=2, outlets_3h=1,
+                         age_minutes=10, alleged=True, tickers=[]).total >= events.POLICY.regular_bar
+
+
 # --- delivery ----------------------------------------------------------------------------------------------------------
 
 

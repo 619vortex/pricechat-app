@@ -24,7 +24,8 @@ SEVERITY = {"hack": 38, "failure": 38, "scam": 34, "liquidations": 30, "move": 2
 REACH = {"BTC": 12, "ETH": 12, "SOL": 8, "XRP": 8, "BNB": 8, "DOGE": 6, "SPX": 15, "IXIC": 15, "DJI": 13, "NVDA": 11, "TSLA": 11, "AAPL": 11, "MSFT": 11,
          "AMZN": 10, "META": 10, "GOOGL": 10, "AMD": 8, "COIN": 9, "MSTR": 9, "HOOD": 7, "GOLD": 11, "SILVER": 9, "OIL": 11, "BRENT": 10, "USDT": 9, "USDC": 8}
 GROUP_REACH = {"crypto_major": 12, "crypto_alt": 8, "index": 15, "stock": 11, "commodity": 10}
-FAMOUS = re.compile(r"\b(musk|elon|saylor|cz|changpeng zhao|sbf|bankman-fried|do kwon|justin sun|trump|buffett|dimon|powell|vitalik|binance|coinbase|tether|blackrock)\b", re.I)
+FAMOUS = re.compile(r"\b(musk|elon|saylor|cz|changpeng zhao|sbf|bankman-fried|do kwon|justin sun|trump|buffett|dimon|powell|vitalik|binance|coinbase|tether|blackrock|"
+                    r"bybit|okx|kraken|mexc|bitget|kucoin|htx|huobi|bitfinex|bitmex|gemini|upbit|bithumb|hyperliquid|ftx)\b", re.I)  # the big exchanges travel as names
 EVIDENCE = {"official": 15, "exchange data": 12, "price data": 12, "two outlets": 12, "attributed": 6}
 ALLEGATION_PENALTY = 6
 

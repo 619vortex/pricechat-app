@@ -41,10 +41,11 @@ TOPICS: tuple[tuple[str, re.Pattern[str], int, bool], ...] = (
     ("failure", _rx(r"\b(insolven\w*|bankrupt\w*|collaps\w*|outage|(?:halt|paus|suspend|freez)\w* (?:all )?(?:withdrawals|deposits|trading)|frozen|depeg(?:s|ged)?|liquidity crisis)\b"), 40, True),
     ("liquidations", _rx(r"\b(liquidat\w+|wiped out|margin call)\b"), 30, False),
     ("move", _rx(r"\b(crash(?:es|ed)?|plung\w+|tumbl\w+|nosediv\w+|sink(?:s)?|sank|slump\w*|sell-?off|bloodbath|flash crash|soar\w*|surg\w+|skyrocket\w*|rockets?|spik\w+|"
-                 r"rall(?:y|ies|ied)|all-time high|record high|record low|worst (?:day|week|month)|best (?:day|week|month))\b"), 28, False),
+                 r"rall(?:y|ies|ied)|all-time high|record high|record low|worst (?:day|week|month)|best (?:day|week|month)|"
+                 r"(?:correction|bear market) territory|trillions? (?:\w+ ){0,3}(?:wiped|erased))\b"), 28, False),
     ("whale", _rx(r"\b(whales?|dormant|satoshi-era|moves? \$|transfers? \$|dumps? \$|sold \$|buys? \$|bought \$)"), 22, False),
     ("controversy", _rx(r"\b(arrest\w*|sentenc\w*|jail\w*|prison|charged|charges|indict\w*|sues|sued|lawsuit|accus\w+|alleg\w+|probe|subpoena\w*|raid\w*|seiz\w+|"
-                        r"bans?|banned|fined|sanction\w*|fired|ousted|resign\w*|feud|slams?|blasts?|lashes out|clash\w*)\b"), 25, False),
+                        r"bans?|banned|fined|sanction\w*|cuts? (?:\w+ ){0,4}off from|cuts? off|fired|ousted|resign\w*|steps? down|stepped down|feud|slams?|blasts?|lashes out|clash\w*)\b"), 25, False),
     ("macro", _rx(r"\b(rate (?:cut|hike)s?|cuts? (?:interest )?rates?|raises? (?:interest )?rates?|emergency (?:cut|meeting)|tariffs?|trade war|recession|"
                   r"government shutdown|debt ceiling|default(?:s|ed)?|circuit breaker|bank run|bailout)\b"), 25, False),
     ("etf", _rx(r"\betfs?\b"), 12, False),

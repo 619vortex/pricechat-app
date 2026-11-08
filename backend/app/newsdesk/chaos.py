@@ -30,7 +30,7 @@ REASSURE = re.compile(r"\b(not affected|unaffected|wasn[’']?t affected|weren[�
                       r"out of (?:\w+[’']?\s){0,2}reach|reassur\w*|fully backed|proof of reserves|safu|remains? operational|business as usual|no funds? (?:were |was )?lost)\b", re.I)
 OPINION = re.compile(r"\b(?:may|might|could) (?:be|become|soon|face|see|hit|reach|lock|trigger|crash|soar|spark|end)\b|\b(predicts?|forecasts?|expects?|likely to)\b", re.I)
 CRYPTO_WORDS = re.compile(r"\b(crypto\w*|tokens?|coins?|blockchain|stablecoins?|defi|world liberty|binance|coinbase|tether|kraken|bybit|okx|justin sun|saylor|changpeng zhao|cz|sbf|"
-                          r"bankman-fried|do kwon|vitalik)\b", re.I)
+                          r"bankman-fried|do kwon|vitalik|mexc|bitget|kucoin|htx|huobi|gate\.io|bitfinex|bitmex|crypto\.com|gemini|upbit|bithumb|hyperliquid|ftx|celsius)\b", re.I)
 RUMOUR = re.compile(r"\b(reportedly|rumou?rs?|unconfirmed|sources? (?:say|said|familiar)|speculat\w+)\b", re.I)
 STRONG_TOPICS = {"scam"}  # plus any allegation
 DOWN = re.compile(r"\b(crash\w*|plung\w+|tumbl\w+|nosediv\w+|sinks?|sank|slump\w*|sell-?off|slid(?:e|es)?|drops?|dropped|falls?|fell|dump\w*|erase[sd]?|wipe[sd]?|"
