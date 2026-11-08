@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings
@@ -81,8 +82,12 @@ def score_story(tier: int, strength: float, others: int, age_hours: float) -> fl
 
 
 async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: datetime) -> dict[str, Any]:
+    """New stories from every feed. Each is stored on its own: a link already in the table (a feed recycling a URL, such as a
+    daily round-up, or a story stored a week ago) is skipped, never allowed to roll back everyone else's (2026-11-08 outage)."""
     fresh, problems = 0, {}
-    seen = set(db.scalars(select(NdStory.link).where(NdStory.created_at >= now - timedelta(days=4))))
+    db.query(NdStory).filter(NdStory.created_at < now - timedelta(days=7)).delete(synchronize_session=False)
+    db.commit()  # the purge on its own, before any insert
+    seen = set(db.scalars(select(NdStory.link)))  # every stored link (the table keeps a week), not just the last few days
     for feed in s.feeds or []:
         items, problem = await sources.fetch_feed(client, feed)
         if problem:
@@ -97,10 +102,14 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
             category, strength = classify(title, it.get("summary", ""), feed.get("category"))
             if category is None:
                 continue
-            db.add(NdStory(link=it["link"], title=title[:300], summary=(it.get("summary") or "")[:800], source=feed["name"], tier=int(feed.get("tier", 2)), category=category,
-                           published_at=it["at"], fingerprint=checks.fingerprint(title), score=strength))
-            fresh += 1
-    db.query(NdStory).filter(NdStory.created_at < now - timedelta(days=7)).delete(synchronize_session=False)
+            try:
+                with db.begin_nested():  # one story's conflict (e.g. the other lane stored it a moment ago) skips that story only
+                    db.add(NdStory(link=it["link"], title=title[:300], summary=(it.get("summary") or "")[:800], source=feed["name"],
+                                   tier=int(feed.get("tier", 2)), category=category, published_at=it["at"], fingerprint=checks.fingerprint(title),
+                                   score=strength))
+                fresh += 1
+            except IntegrityError:
+                logger.info("newsdesk: %s already stored, skipped", it["link"][:120])
     db.commit()
     return {"new_stories": fresh, "feed_problems": problems}
 
