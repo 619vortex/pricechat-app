@@ -137,6 +137,22 @@ mod check {
             }
         }
 
+        // switching servers: the new rules go in while the old ones still hold, and the block never lapses in between
+        match (Guard::engage(&plan(true), &[allowed.as_path()]), Guard::engage(&plan(true), &[allowed.as_path()])) {
+            (Ok(old), Ok(new)) => {
+                drop(old);
+                let still = !tcp(CF);
+                r.check("kill switch: replaced while on (switching servers), never lapses", still, format!("still blocked with only the new rules: {still}"));
+                drop(new);
+                let back = tcp(CF);
+                r.check("kill switch: the replacement turns off cleanly", back, format!("TCP {back}"));
+            }
+            (a, b) => {
+                let why = [a.err(), b.err()].into_iter().flatten().collect::<Vec<_>>().join("; ");
+                r.check("kill switch: replaced while on (switching servers), never lapses", false, why);
+            }
+        }
+
         // the safeguard: the block dies with the process that holds it, however it dies
         match Command::new(&me).args(["hold", "30"]).stdout(Stdio::piped()).spawn() {
             Ok(mut child) => {

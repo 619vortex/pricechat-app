@@ -10,8 +10,21 @@ use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::*;
 
-/// Kiwi's sublayer. Its filters are judged on their own, and a block here holds whatever any other sublayer permits.
-pub const SUBLAYER: GUID = GUID::from_u128(0x4b69_7769_5650_4e00_9a1c_6b69_7769_0001);
+/// A fresh sublayer for each set of rules, so a new set can go in while the one it replaces still holds (one fixed key made the
+/// second set fail with FWP_E_ALREADY_EXISTS). Its filters are judged on their own, and a block here holds whatever any other
+/// sublayer permits. Dynamic, like everything here: gone with the session.
+fn new_sublayer_key() -> GUID {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.write_u32(std::process::id());
+    let a = h.finish();
+    let mut h2 = std::collections::hash_map::RandomState::new().build_hasher();
+    h2.write_u64(a);
+    let b = h2.finish();
+    // "Kiwi" in the first four bytes, so the sublayer is recognisable in `netsh wfp show state`
+    GUID::from_u128((0x4b69_7769u128 << 96) | ((u128::from(a) << 32) & ((1u128 << 96) - 1)) | u128::from(b as u32))
+}
 const RPC_C_AUTHN_WINNT: u32 = 10;
 
 fn wide(s: &str) -> Vec<u16> {
@@ -29,6 +42,7 @@ fn check(what: &str, code: u32) -> Result<(), String> {
 /// The rules in force. Dropping it removes them.
 pub struct Guard {
     engine: HANDLE,
+    sublayer: GUID,
     kill_switch: bool,
     filters: usize,
 }
@@ -54,7 +68,7 @@ impl Guard {
             session.displayData.name = name.as_mut_ptr();
             let mut engine: HANDLE = null_mut();
             check("open", FwpmEngineOpen0(null(), RPC_C_AUTHN_WINNT, null(), &session, &mut engine))?;
-            let mut guard = Guard { engine, kill_switch: plan.kill_switch, filters: 0 };
+            let mut guard = Guard { engine, sublayer: new_sublayer_key(), kill_switch: plan.kill_switch, filters: 0 };
             let mut ids: Vec<*mut FWP_BYTE_BLOB> = Vec::new();
             for app in apps {
                 let mut blob: *mut FWP_BYTE_BLOB = null_mut();
@@ -82,7 +96,7 @@ impl Guard {
         check("begin", FwpmTransactionBegin0(self.engine, 0))?;
         let run = || -> Result<usize, String> {
             let mut sublayer: FWPM_SUBLAYER0 = zeroed();
-            sublayer.subLayerKey = SUBLAYER;
+            sublayer.subLayerKey = self.sublayer;
             sublayer.displayData.name = name;
             sublayer.displayData.description = what;
             sublayer.weight = 0xFFFF;
@@ -92,7 +106,7 @@ impl Guard {
                 if rule.conds.iter().any(|c| matches!(c, Cond::App(i) if apps.get(*i).is_none_or(|b| b.is_null()))) {
                     continue;
                 }
-                add_rule(self.engine, &rule, apps, name)?;
+                add_rule(self.engine, self.sublayer, &rule, apps, name)?;
                 count += 1;
             }
             Ok(count)
@@ -125,7 +139,7 @@ fn layer(rule: &Rule) -> GUID {
     }
 }
 
-unsafe fn add_rule(engine: HANDLE, rule: &Rule, apps: &[*mut FWP_BYTE_BLOB], name: *mut u16) -> Result<(), String> {
+unsafe fn add_rule(engine: HANDLE, sublayer: GUID, rule: &Rule, apps: &[*mut FWP_BYTE_BLOB], name: *mut u16) -> Result<(), String> {
     // the values the conditions point to live here until WFP has copied them
     let mut v4: Vec<Box<FWP_V4_ADDR_AND_MASK>> = Vec::new();
     let mut v6: Vec<Box<FWP_V6_ADDR_AND_MASK>> = Vec::new();
@@ -179,7 +193,7 @@ unsafe fn add_rule(engine: HANDLE, rule: &Rule, apps: &[*mut FWP_BYTE_BLOB], nam
     let mut filter: FWPM_FILTER0 = zeroed();
     filter.displayData.name = name;
     filter.layerKey = layer(rule);
-    filter.subLayerKey = SUBLAYER;
+    filter.subLayerKey = sublayer;
     filter.weight.r#type = FWP_UINT8;
     filter.weight.Anonymous.uint8 = rule.weight;
     filter.numFilterConditions = conds.len() as u32;

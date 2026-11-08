@@ -89,7 +89,7 @@ async function main() {
   const picked = await js(`[...document.querySelectorAll('[role=radio]')].find(x => x.getAttribute('aria-checked') === 'true')?.textContent ?? ''`);
   const timings = await js(`[...document.querySelectorAll('[role=radio] .ms')].map(x => x.parentElement.textContent.trim()).join(' | ')`);
   const first = await publicIp();
-  if (!check("Smart Connect connects", !!on && first && first !== home, `${picked}; public IPv4 ${first} (direct ${home}); timings: ${timings}`)) return;
+  if (!check("Smart Connect connects", !!on && first && first !== home, `${picked}; public IPv4 ${first} (direct ${home}); timings: ${timings}; window: ${(await bodyText())?.slice(0, 300).replace(/\s+/g, " ")}`)) return;
 
   // Tools: speed test and leak check, from the window
   await clickText("Tools", "button.link");

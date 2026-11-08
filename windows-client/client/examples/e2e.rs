@@ -86,6 +86,21 @@ fn public_v4() -> Option<String> {
     get_text("https://api.ipify.org")
 }
 
+/// The public IPv4 once traffic flows through the tunnel: the first requests after a handshake can still be finding their way
+/// (Windows settling its DNS on the new interface). Waits up to 20 s for an address that isn't `home`; returns it and how long it took.
+fn vpn_ip(home: &Option<String>) -> (Option<String>, u64) {
+    let t0 = Instant::now();
+    let mut last = None;
+    while t0.elapsed() < Duration::from_secs(20) {
+        last = public_v4();
+        if last.is_some() && last != *home {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1000));
+    }
+    (last, t0.elapsed().as_secs())
+}
+
 fn public_v6() -> Option<String> {
     get_text("https://api6.ipify.org")
 }
@@ -205,8 +220,9 @@ fn run(out: &str) -> Result<Report, String> {
         let server_ip = endpoint_ip(&cfg);
         match connect(&cfg) {
             Ok(_) => {
+                let (v4, first_after) = vpn_ip(&home4);
+                r.add(&format!("{name}: traffic flowing"), "INFO", format!("{first_after} s after the handshake"));
                 let leak = measure::leak_check(server_ip.clone(), &tune::dns_of(&cfg));
-                let v4 = public_v4();
                 let moved = v4.is_some() && v4 != home4;
                 r.check(&name, moved, format!("public IPv4 {} (server {}, direct {})", v4.clone().unwrap_or("none".into()), server_ip.clone().unwrap_or("?".into()), home4.clone().unwrap_or("?".into())));
                 if moved && v4 != server_ip {
@@ -258,7 +274,8 @@ fn run(out: &str) -> Result<Report, String> {
     // reconnect three times, then switch servers while connected
     let mut ok = 0;
     for _ in 0..3 {
-        if connect(&cfg).is_ok() && public_v4().map(|a| Some(a) != home4).unwrap_or(false) && disconnect().is_ok() {
+        let up = connect(&cfg).is_ok() && vpn_ip(&home4).0.map(|a| Some(a) != home4).unwrap_or(false);
+        if disconnect().is_ok() && up {
             ok += 1;
         }
     }
@@ -271,7 +288,7 @@ fn run(out: &str) -> Result<Report, String> {
             }
             Ok(other_cfg) => {
                 let switched = connect(&cfg).is_ok() && connect(&other_cfg).is_ok();
-                let v4 = public_v4();
+                let (v4, _) = vpn_ip(&home4);
                 let want = endpoint_ip(&other_cfg);
                 r.check("switch country while connected", switched && v4.is_some() && v4 != home4, format!("{} -> {}: public IPv4 {} (server {})", place(&srv), place(other), v4.unwrap_or("none".into()), want.unwrap_or("?".into())));
                 let _ = disconnect();
@@ -372,7 +389,7 @@ fn kill_switch(r: &mut Report, cfg: &str, home4: &Option<String>) {
             return;
         }
         Ok(s) => {
-            let v4 = public_v4();
+            let (v4, _) = vpn_ip(home4);
             r.check("kill switch: connects with it on", s.kill_switch && v4.is_some() && v4 != *home4, format!("service says blocking: {}, public IPv4 {}", s.kill_switch, v4.unwrap_or("none".into())));
             r.check("kill switch: no IPv6 while on", public_v6().is_none(), "IPv6 sites unreachable");
         }

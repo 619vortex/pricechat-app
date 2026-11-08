@@ -122,26 +122,23 @@ pub fn expected_dns(config_dns: &[String], server_ip: Option<&str>) -> Vec<Strin
     out
 }
 
-/// IPv4 and IPv6 as sites see them, and the DNS resolvers that answer this PC's lookups (ip-api's EDNS test: a random
-/// name is looked up, and their server reports which resolver asked for it). Plain HTTP for that one test only: it carries no data.
+/// IPv4 and IPv6 as sites see them, and the DNS resolvers that answer this PC's lookups. The resolvers come from bash.ws's open DNS
+/// leak test (the one dnsleaktest.sh uses): a few random names under a fresh test id are looked up the ordinary way, and bash.ws
+/// reports which resolvers asked its name servers for them. The lookups carry no data.
 pub fn leak_check(server_ip: Option<String>, config_dns: &[String]) -> Result<LeakReport, String> {
     let a = agent(Duration::from_secs(8))?;
     let text = |url: &str| a.get(url).call().ok().and_then(|r| r.into_string().ok()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s.len() < 64);
     let ipv4 = text("https://api.ipify.org");
     let ipv6 = text("https://api6.ipify.org"); // reachable only if IPv6 leaves the PC
     let mut dns = Vec::new();
-    for _ in 0..3 {
-        let mut r = [0u8; 8];
-        getrandom::getrandom(&mut r).map_err(|e| e.to_string())?;
-        let label: String = r.iter().map(|b| format!("{b:02x}")).collect();
-        if let Ok(reply) = a.get(&format!("http://{label}.edns.ip-api.com/json")).call() {
+    if let Some(id) = text("https://bash.ws/id").filter(|id| valid_test_id(id)) {
+        for n in 1..=5 {
+            use std::net::ToSocketAddrs;
+            let _ = format!("{n}.{id}.bash.ws:80").to_socket_addrs(); // the answer doesn't matter, only who asked
+        }
+        if let Ok(reply) = a.get(&format!("https://bash.ws/dnsleak/test/{id}?json")).call() {
             if let Ok(v) = reply.into_json::<serde_json::Value>() {
-                let ip = v["dns"]["ip"].as_str().unwrap_or("").to_string();
-                let geo = v["dns"]["geo"].as_str().unwrap_or("").to_string();
-                let seen = if geo.is_empty() { ip } else { format!("{ip} ({geo})") };
-                if !seen.is_empty() && !dns.contains(&seen) {
-                    dns.push(seen);
-                }
+                dns = resolvers_in(&v);
             }
         }
     }
@@ -149,9 +146,51 @@ pub fn leak_check(server_ip: Option<String>, config_dns: &[String]) -> Result<Le
     Ok(LeakReport { ipv4, ipv6, dns, tunnel_ip: server_ip, expected_dns })
 }
 
+/// bash.ws's test ids are short and alphanumeric; anything else isn't put into a host name.
+pub fn valid_test_id(id: &str) -> bool {
+    (8..=40).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The resolvers in a bash.ws report: "address (organisation, country)" for each entry of type "dns".
+pub fn resolvers_in(report: &serde_json::Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in report.as_array().into_iter().flatten().filter(|e| e["type"] == "dns") {
+        let ip = e["ip"].as_str().unwrap_or("");
+        if ip.is_empty() {
+            continue;
+        }
+        let org = e["org"].as_str().or(e["asn"].as_str()).unwrap_or("");
+        let cc = e["country"].as_str().unwrap_or("").to_uppercase();
+        let seen = match (org.is_empty(), cc.is_empty()) {
+            (true, true) => ip.to_string(),
+            (false, true) => format!("{ip} ({org})"),
+            (true, false) => format!("{ip} ({cc})"),
+            (false, false) => format!("{ip} ({org}, {cc})"),
+        };
+        if !out.contains(&seen) {
+            out.push(seen);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bash_ws_report_gives_the_resolvers_only() {
+        let v = serde_json::json!([
+            {"ip":"20.80.174.33","country":"us","asn":"AS8075 Microsoft","org":"Microsoft Corporation","type":"ip"},
+            {"ip":"162.158.1.2","country":"fi","asn":"AS13335 Cloudflare","org":"Cloudflare, Inc.","type":"dns"},
+            {"ip":"2.29.149.29","country":"","org":"","type":"dns"},
+            {"ip":"162.158.1.2","country":"fi","org":"Cloudflare, Inc.","type":"dns"},
+            {"type":"conclusion","ip":""}
+        ]);
+        assert_eq!(resolvers_in(&v), vec!["162.158.1.2 (Cloudflare, Inc., FI)".to_string(), "2.29.149.29".to_string()]);
+        assert!(resolvers_in(&serde_json::json!({"error":"x"})).is_empty());
+        assert!(valid_test_id("695956395b60d835") && !valid_test_id("a.b") && !valid_test_id("x"));
+    }
 
     #[test]
     fn only_plain_host_names_are_timed() {
