@@ -54,7 +54,7 @@ impl Guard {
             session.displayData.name = name.as_mut_ptr();
             let mut engine: HANDLE = null_mut();
             check("open", FwpmEngineOpen0(null(), RPC_C_AUTHN_WINNT, null(), &session, &mut engine))?;
-            let guard = Guard { engine, kill_switch: plan.kill_switch, filters: 0 };
+            let mut guard = Guard { engine, kill_switch: plan.kill_switch, filters: 0 };
             let mut ids: Vec<*mut FWP_BYTE_BLOB> = Vec::new();
             for app in apps {
                 let mut blob: *mut FWP_BYTE_BLOB = null_mut();
@@ -67,8 +67,12 @@ impl Guard {
                     FwpmFreeMemory0(&mut blob as *mut *mut FWP_BYTE_BLOB as *mut *mut c_void);
                 }
             }
+            // the one Guard is returned as it is: a copy of its handle would be closed when the original dropped, taking the filters with it
             match result {
-                Ok(count) => Ok(Guard { filters: count, ..guard }),
+                Ok(count) => {
+                    guard.filters = count;
+                    Ok(guard)
+                }
                 Err(e) => Err(e), // dropping `guard` closes the engine and anything half-added with it
             }
         }
