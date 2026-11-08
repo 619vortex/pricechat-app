@@ -207,9 +207,19 @@ fn run(out: &str) -> Result<Report, String> {
     }
 
     // every country: connect, the address and DNS sites see, IPv6, then disconnect
+    // Price Chat allows 5 device changes (new or deleted) per member in 10 minutes, so this run's devices are kept and reused:
+    // one per server while there are slots, the switch test between two kept ones, and only when slots run out is one given back.
     let mut first_cfg: Option<(Server, String)> = None;
+    let mut kept: Vec<(Server, String)> = Vec::new();
+    let mut switch_done = false;
     for s in &servers {
         let name = format!("connect {}", place(s));
+        if kept.len() as i64 >= free {
+            if let Some(i) = kept.iter().rposition(|(k, _)| first_cfg.as_ref().map(|(f, _)| f.id) != Some(k.id)) {
+                let (gone, _) = kept.remove(i);
+                give_back(&http, &v, &token, gone.id);
+            }
+        }
         let cfg = match flow::config_with_retry(&http, &v, &computer(), s.id, &|| std::thread::sleep(Duration::from_millis(1500))) {
             Ok(c) => c,
             Err(e) => {
@@ -258,6 +268,7 @@ fn run(out: &str) -> Result<Report, String> {
                 if first_cfg.is_none() {
                     first_cfg = Some((s.clone(), cfg.to_string()));
                 }
+                kept.push((s.clone(), cfg.to_string()));
             }
             Err(e) => {
                 r.check(&name, false, e);
@@ -266,11 +277,20 @@ fn run(out: &str) -> Result<Report, String> {
         let off = disconnect();
         let back = public_v4();
         r.check(&format!("disconnect {}", place(s)), off.is_ok() && back == home4, format!("{:?}, public IPv4 now {}", off.err(), back.unwrap_or("none".into())));
-        // the first server's device stays for the tests below and the window's; the others go, so the next country has a slot.
-        // Price Chat allows 5 new devices per member in 10 minutes, so devices are kept and reused rather than made again.
-        if first_cfg.as_ref().map(|(f, _)| f.id) != Some(s.id) {
-            give_back(&http, &v, &token, s.id);
+        // switching country while connected, between two servers whose devices this run already has
+        if !switch_done && kept.len() >= 2 {
+            let (a, a_cfg) = &kept[kept.len() - 2];
+            let (b, b_cfg) = &kept[kept.len() - 1];
+            let switched = connect(a_cfg).is_ok() && connect(b_cfg).is_ok();
+            let (v4, _) = vpn_ip(&home4);
+            let want = endpoint_ip(b_cfg);
+            r.check("switch country while connected", switched && v4.is_some() && v4 != home4 && v4 == want, format!("{} -> {}: public IPv4 {} (server {})", place(a), place(b), v4.unwrap_or("none".into()), want.unwrap_or("?".into())));
+            let _ = disconnect();
+            switch_done = true;
         }
+    }
+    if !switch_done {
+        r.add("switch country while connected", "WARN", "needs two servers connected in this run");
     }
 
     let Some((srv, cfg)) = first_cfg else {
@@ -286,21 +306,6 @@ fn run(out: &str) -> Result<Report, String> {
         }
     }
     r.check("reconnect 3 times", ok == 3, format!("{ok}/3 connect + disconnect cycles worked on {}", place(&srv)));
-    if let Some(other) = servers.iter().find(|s| s.id != srv.id) {
-        match flow::config_for(&http, &v, &computer(), other.id) {
-            Err(e) if e.contains("devices") => r.add("switch country while connected", "WARN", format!("needs a second free device slot: {e}")),
-            Err(e) => {
-                r.check("switch country while connected", false, format!("no config for {}: {e}", place(other)));
-            }
-            Ok(other_cfg) => {
-                let switched = connect(&cfg).is_ok() && connect(&other_cfg).is_ok();
-                let (v4, _) = vpn_ip(&home4);
-                let want = endpoint_ip(&other_cfg);
-                r.check("switch country while connected", switched && v4.is_some() && v4 != home4, format!("{} -> {}: public IPv4 {} (server {})", place(&srv), place(other), v4.unwrap_or("none".into()), want.unwrap_or("?".into())));
-                let _ = disconnect(); // its device stays: the window's failover test can use it
-            }
-        }
-    }
 
     // speed test through the tunnel (Cloudflare, about 25 MB down and 5 MB up)
     if connect(&cfg).is_ok() {
@@ -368,8 +373,10 @@ fn run(out: &str) -> Result<Report, String> {
     }
 
     kill_switch(&mut r, &cfg, &home4);
-    // the devices stay for the window tests, which share this store; the job's clean-up step removes them
+    // the window's tests (Smart Connect, then a failover) may need two servers this run didn't keep: every slot goes back to them
     let _ = disconnect();
+    let removed = remove_own_devices(&http, &v, &token);
+    r.add("test devices given back for the window tests", "INFO", format!("{removed}"));
 
     let _ = std::fs::write(out, serde_json::to_string_pretty(&r.checks).unwrap_or_default());
     Ok(r)
