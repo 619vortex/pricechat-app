@@ -28,7 +28,7 @@ fn raw(line: &str) -> String {
 fn the_pipe_answers_and_refuses_what_it_should() {
     start();
     // a hostile config is refused before anything else happens
-    let s = ask(&Request::Connect { config: "[Interface]\nPostUp = calc.exe\n".into() }).unwrap();
+    let s = ask(&Request::connect("[Interface]\nPostUp = calc.exe\n")).unwrap();
     assert_eq!(s.state, State::Failed);
     assert!(s.error.unwrap().contains("isn't allowed"));
     // commands that don't exist, or extra fields on ones that do

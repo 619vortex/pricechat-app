@@ -8,7 +8,7 @@ use kiwiclient::flow::{self, Vault};
 use kiwiclient::store::FileVault;
 use kiwiclient::settings::{self, Settings};
 use kiwiclient::{applog, auth, measure, opener, tune};
-use kiwivpn::protocol::{Request, State, Status};
+use kiwivpn::protocol::{Protect, Request, State, Status};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -106,18 +106,22 @@ struct Diagnostics {
     tunnel: String,
     handshake_age_seconds: Option<u64>,
     settings_file: String,
-    /// What this build can really do. "kill_switch" is only listed once the service enforces it (not in this build).
-    features: Vec<&'static str>,
+    /// What this build can really do. "kill_switch" is listed only when the installed service says it enforces it.
+    features: Vec<String>,
 }
 
 /// Nothing secret: no keys, tokens or configs.
 #[tauri::command(async)]
 fn diagnostics() -> Diagnostics {
+    let mut features: Vec<String> = ["smart_connect", "failover", "split_tunnel", "block_malware", "speed_test", "leak_check"].iter().map(|f| f.to_string()).collect();
     let (service, tunnel, handshake_age_seconds) = match ipc::ask(&Request::Status) {
-        Ok(s) => ("Running".to_string(), format!("{:?}", s.state), s.handshake_age_seconds),
+        Ok(s) => {
+            features.extend(s.features.iter().cloned());
+            ("Running".to_string(), format!("{:?}", s.state), s.handshake_age_seconds)
+        }
         Err(e) => (e, "Unknown".to_string(), None),
     };
-    Diagnostics { version: env!("CARGO_PKG_VERSION"), service, tunnel, handshake_age_seconds, settings_file: settings_path().map(|p| p.display().to_string()).unwrap_or_default(), features: vec!["smart_connect", "failover", "split_tunnel", "block_malware", "speed_test", "leak_check"] }
+    Diagnostics { version: env!("CARGO_PKG_VERSION"), service, tunnel, handshake_age_seconds, settings_file: settings_path().map(|p| p.display().to_string()).unwrap_or_default(), features }
 }
 
 /// A fixed set of messages, so the page can't use this to show anything else.
@@ -155,6 +159,12 @@ fn vpn_disconnect() -> Answer {
 fn vpn_connect(server_id: i64) -> Result<Answer, String> {
     let computer = std::env::var("COMPUTERNAME").unwrap_or_default();
     note(&format!("connect: pressed, server {server_id}"));
+    // a tunnel that's up but not answering still has this PC's routes, so Price Chat can't be reached through it: the service closes it
+    // first (keeping the kill switch on), and the next server's settings are fetched directly
+    if matches!(ipc::ask(&Request::Status), Ok(s) if s.state == State::Connecting) {
+        note("connect: the current tunnel isn't answering, pausing it to switch");
+        let _ = ipc::ask(&Request::Pause);
+    }
     let config = flow::config_with_retry(&backend()?, &FileVault::open()?, &computer, server_id, &|| {
         note("connect: Price Chat unreachable, trying again");
         std::thread::sleep(Duration::from_millis(1500));
@@ -175,7 +185,13 @@ fn vpn_connect(server_id: i64) -> Result<Answer, String> {
         *last = Some((server_ip, tune::dns_of(&config)));
     }
     note(&format!("connect: config ready (split ranges {}, malware DNS {}), asking the service", exclude.len(), prefs.block_malware));
-    let done = answer(ipc::ask(&Request::Connect { config: config.to_string() }));
+    // the kill switch and what it lets through: the service checks the ranges again and enforces it
+    let protect = Protect {
+        kill_switch: prefs.kill_switch,
+        allow_lan: prefs.allow_lan,
+        allow: exclude.iter().map(|c| format!("{}/{}", std::net::Ipv4Addr::from(c.ip), c.bits)).collect(),
+    };
+    let done = answer(ipc::ask(&Request::Connect { config: config.to_string(), protect }));
     note_answer("connect", &done);
     Ok(done)
 }
@@ -188,7 +204,7 @@ fn vpn_connect_test_file(app: tauri::AppHandle) -> Result<Option<Answer>, String
     let Some(picked) = app.dialog().file().add_filter("WireGuard config", &["conf"]).blocking_pick_file() else { return Ok(None) };
     let path = picked.into_path().map_err(|e| e.to_string())?;
     let config = std::fs::read_to_string(&path).map_err(|e| format!("Can't read that file: {e}"))?;
-    Ok(Some(answer(ipc::ask(&Request::Connect { config }))))
+    Ok(Some(answer(ipc::ask(&Request::connect(config)))))
 }
 
 /// True in a build that has the config file option, so Advanced Settings can show it.

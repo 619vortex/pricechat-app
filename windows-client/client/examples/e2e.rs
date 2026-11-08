@@ -13,7 +13,7 @@ use kiwiclient::api::{Backend, Http, Server, BASE};
 use kiwiclient::flow::{self, Vault};
 use kiwiclient::store::FileVault;
 use kiwiclient::{measure, tune};
-use kiwivpn::protocol::{Request, State, Status};
+use kiwivpn::protocol::{Protect, Request, State, Status};
 use serde::Serialize;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -98,7 +98,11 @@ fn trace_ip(addr: &str) -> Option<String> {
 
 /// Connects with this config through the service and waits for the first handshake.
 fn connect(config: &str) -> Result<Status, String> {
-    let first = ask(&Request::Connect { config: config.to_string() })?;
+    connect_with(config, Protect::default())
+}
+
+fn connect_with(config: &str, protect: Protect) -> Result<Status, String> {
+    let first = ask(&Request::Connect { config: config.to_string(), protect })?;
     if first.state == State::Failed {
         return Err(first.error.unwrap_or_else(|| "the service refused the config".into()));
     }
@@ -312,8 +316,78 @@ fn run(out: &str) -> Result<Report, String> {
         },
     }
 
+    kill_switch(&mut r, &cfg, &home4);
+
     let _ = std::fs::write(out, serde_json::to_string_pretty(&r.checks).unwrap_or_default());
     Ok(r)
+}
+
+/// The tunnel service's process, killed the hard way, as a crash would.
+fn kill_tunnel_process() -> bool {
+    let script = "$p = (Get-CimInstance Win32_Service -Filter \"Name='WireGuardTunnel`$kiwi'\").ProcessId; if ($p) { Stop-Process -Id $p -Force; 'killed' }";
+    std::process::Command::new("powershell.exe").args(["-NoProfile", "-Command", script]).output().map(|o| String::from_utf8_lossy(&o.stdout).contains("killed")).unwrap_or(false)
+}
+
+/// The kill switch on a real tunnel: on while connected, holding when the tunnel crashes and while it's brought back, released by
+/// Disconnect, and letting go by itself when a pause isn't followed by a connect.
+fn kill_switch(r: &mut Report, cfg: &str, home4: &Option<String>) {
+    let on = Protect { kill_switch: true, allow_lan: true, allow: Vec::new() };
+    let server = endpoint_ip(cfg);
+    match connect_with(cfg, on.clone()) {
+        Err(e) => {
+            r.check("kill switch: connects with it on", false, e);
+            return;
+        }
+        Ok(s) => {
+            let v4 = public_v4();
+            r.check("kill switch: connects with it on", s.kill_switch && v4.is_some() && v4 != *home4, format!("service says blocking: {}, public IPv4 {}", s.kill_switch, v4.unwrap_or("none".into())));
+            r.check("kill switch: no IPv6 while on", public_v6().is_none(), "IPv6 sites unreachable");
+        }
+    }
+    // the tunnel crashes: with the kill switch, nothing may leave directly while the service brings it back
+    let killed = kill_tunnel_process();
+    let t0 = Instant::now();
+    let (mut leaked, mut blocked_seen, mut back_after) = (None, false, None);
+    while t0.elapsed() < Duration::from_secs(90) {
+        match public_v4() {
+            Some(ip) if Some(&ip) == home4.as_ref() => {
+                leaked = Some(t0.elapsed().as_secs());
+                break;
+            }
+            Some(_) if t0.elapsed() > Duration::from_secs(3) => {
+                back_after = Some(t0.elapsed().as_secs());
+                break;
+            }
+            None => blocked_seen = true,
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(1500));
+    }
+    r.check("kill switch: tunnel process killed, nothing leaks", killed && leaked.is_none(), format!("killed: {killed}, blocked meanwhile: {blocked_seen}, direct address seen: {}", leaked.map(|s| format!("after {s} s")).unwrap_or("never".into())));
+    let state = ask(&Request::Status).map(|s| format!("{:?}, blocking {}", s.state, s.kill_switch)).unwrap_or_default();
+    r.check("kill switch: the service brings the tunnel back by itself", back_after.is_some() && leaked.is_none(), format!("back through the VPN after {} (service: {state})", back_after.map(|s| format!("{s} s")).unwrap_or("never in 90 s".into())));
+    // Disconnect gives the normal connection back at once
+    let off = disconnect();
+    let back = public_v4();
+    r.check("kill switch: Disconnect releases it", off.is_ok() && back == *home4, format!("public IPv4 {} (direct {})", back.unwrap_or("none".into()), home4.clone().unwrap_or("?".into())));
+    // a pause (switching servers) keeps blocking, and lets go by itself if no connect follows
+    if connect_with(cfg, on).is_ok() {
+        let paused = ask(&Request::Pause).map(|s| s.kill_switch).unwrap_or(false);
+        let during = public_v4();
+        r.check("kill switch: holds while switching servers", paused && during.is_none(), format!("blocking: {paused}, public IPv4 {}", during.unwrap_or("none (blocked)".into())));
+        let t1 = Instant::now();
+        let mut free = None;
+        while t1.elapsed() < Duration::from_secs(kiwivpn::protocol::PAUSE_LIMIT_SECONDS + 40) {
+            if public_v4() == *home4 {
+                free = Some(t1.elapsed().as_secs());
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        }
+        r.check("kill switch: a pause with no connect lets go by itself", free.is_some(), format!("internet back after {} (limit {} s)", free.map(|s| format!("{s} s")).unwrap_or("never".into()), kiwivpn::protocol::PAUSE_LIMIT_SECONDS));
+        let _ = disconnect();
+    }
+    let _ = server;
 }
 
 fn cleanup() -> Result<(), String> {

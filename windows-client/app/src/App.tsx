@@ -235,6 +235,7 @@ export function App() {
   const slow = phase === "connecting" && startedAt !== null && now - startedAt > SLOW_CONNECT_MS;
   const live = phase === "on";
   const status = answer?.status ?? null;
+  const guarding = status?.kill_switch === true;
   const up = live ? secondsUp(status?.connected_since, now) : null;
   const showsAddress = live || phase === "off";
   const pending = checking ? "Checking" : "Couldn't check";
@@ -331,6 +332,9 @@ export function App() {
         <h1 aria-live="polite">{HEADLINE[phase]}</h1>
         <p className="detail" role={phase === "failed" || phase === "no-service" ? "alert" : "status"}>{note && !tunnelUp && !offline ? note : detail(phase, answer, slow)}</p>
         {problem && <p className="problem" role="alert">{problem}</p>}
+        {guarding && live && <p className="guard is-on">Kill switch on: nothing leaves outside the VPN.</p>}
+        {guarding && !live && <p className="guard" role="status">The kill switch is blocking internet traffic until the VPN reconnects.</p>}
+        {guarding && !live && !tunnelUp && action === null && <button type="button" className="link" onClick={() => void disconnect()}>Disconnect and unblock</button>}
         {switchedTo && tunnelUp && <p className="detail" role="status">The server stopped answering, so Kiwi VPN moved you to {switchedTo}.</p>}
         {unchanged && <p className="problem" role="alert">Your public IP is the same as before connecting, so traffic may not be leaving through the server.</p>}
         {locked && !closed && !account?.trial?.available && <button type="button" className="link" onClick={() => void openSite("plans")}>See plans</button>}

@@ -37,12 +37,12 @@ fn a_fake_service_gets_nowhere() {
 fn a_fake_service_never_receives_the_key() {
     // the control: without the check, the fake really would catch it, so a pass below means the check did the work
     let fake_pipe = listen_once();
-    let _ = ask_unverified(&Request::Connect { config: CANARY.into() });
+    let _ = ask_unverified(&Request::connect(CANARY));
     let caught = fake_pipe.join().unwrap();
     assert!(String::from_utf8_lossy(&caught).contains("PrivateKey"), "the fake should have caught the unchecked request");
 
     let fake_pipe = listen_once();
-    let refused = ask_service(&Request::Connect { config: CANARY.into() });
+    let refused = ask_service(&Request::connect(CANARY));
     assert_eq!(refused.unwrap_err(), AskError::NotTheService);
     assert!(fake_pipe.join().unwrap().is_empty(), "the checked request must send nothing");
 

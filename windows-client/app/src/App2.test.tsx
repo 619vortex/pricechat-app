@@ -95,6 +95,25 @@ describe("Kiwi VPN 2.0", () => {
     expect(document.body.textContent).toMatch(/stopped answering, so Kiwi VPN moved you to/);
   });
 
+  it("says when the kill switch is on, and while it blocks offers a way out", async () => {
+    render(<App />);
+    await settle();
+    reply = { service: true, message: null, status: status({ state: "connected", handshake_age_seconds: 5, connected_since: 1, kill_switch: true }) };
+    fireEvent.click(go());
+    await tick();
+    expect(document.body.textContent).toMatch(/Kill switch on/);
+    // the tunnel dropped and the service is bringing it back: still blocking, and the person can get out
+    reply = { service: true, message: null, status: status({ state: "disconnected", kill_switch: true }) };
+    await tick(2000);
+    expect(document.body.textContent).toMatch(/kill switch is blocking internet traffic/);
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect and unblock" }));
+    await settle();
+    expect(calls.some((c) => c.cmd === "vpn_disconnect")).toBe(true);
+    reply = off();
+    await tick(2000);
+    expect(document.body.textContent).not.toMatch(/kill switch/i);
+  });
+
   it("never fails over after the person disconnects", async () => {
     render(<App />);
     await settle();

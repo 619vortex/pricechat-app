@@ -15,6 +15,8 @@ body { background: var(--ground); color: var(--text); font: 400 15px/1.45 var(--
 .bar { display: flex; align-items: center; gap: 10px; flex: none; }
 .bar img { width: 30px; height: 30px; padding: 3px; border-radius: 50%; background: var(--lime); }
 .brand { font-family: var(--display); font-weight: 800; font-stretch: 90%; letter-spacing: .08em; text-transform: uppercase; font-size: 14px; }
+.guard { margin: 6px 0 0; padding: 6px 10px; border-radius: 10px; background: rgba(255, 159, 90, .12); color: var(--warn); font-size: 13px; font-weight: 600; }
+.guard.is-on { background: rgba(120, 200, 120, .12); color: var(--lime); font-weight: 550; }
 .tag { padding: 2px 9px; border-radius: 999px; background: rgba(255, 159, 90, .12); color: var(--warn); font-size: 12px; font-weight: 650; }
 
 .stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; }

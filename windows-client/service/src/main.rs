@@ -89,16 +89,18 @@ mod app {
             ["install"] => done(win::install()),
             ["uninstall"] => done(win::uninstall()),
             ["connect", file] => match std::fs::read_to_string(file) {
-                Ok(config) => show(Request::Connect { config }),
+                Ok(config) => show(Request::connect(config)),
                 Err(e) => {
                     eprintln!("Can't read {file}: {e}");
                     1
                 }
             },
             ["disconnect"] => show(Request::Disconnect),
+            // for support: an administrator lifts the kill switch (and closes the tunnel) without the app
+            ["unblock"] => show(Request::Disconnect),
             ["status"] => show(Request::Status),
             _ => {
-                eprintln!("usage: kiwivpn-service install | uninstall | connect <config> | disconnect | status");
+                eprintln!("usage: kiwivpn-service install | uninstall | connect <config> | disconnect | unblock | status");
                 2
             }
         }

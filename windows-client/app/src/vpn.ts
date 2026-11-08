@@ -7,7 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
  */
 
 export type TunnelState = "disconnected" | "connecting" | "connected" | "stopping" | "failed";
-export interface Status { state: TunnelState; handshake_age_seconds: number | null; rx_bytes: number; tx_bytes: number; error: string | null; connected_since: number | null }
+export interface Status { state: TunnelState; handshake_age_seconds: number | null; rx_bytes: number; tx_bytes: number; error: string | null; connected_since: number | null;
+  /** the service's kill switch is blocking everything outside the VPN */ kill_switch?: boolean; /** what the service enforces */ features?: string[] }
 export interface Answer { service: boolean; status: Status | null; message: string | null }
 export type Phase = "loading" | "no-service" | "off" | "connecting" | "on" | "stopping" | "failed";
 
