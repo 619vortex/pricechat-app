@@ -89,7 +89,7 @@ def markets(db: DbSession) -> dict[str, Any]:
 
 @router.get("/tradingos/admin/signals")
 def list_signals(db: DbSession, status_: str | None = Query(None, alias="status")) -> dict[str, Any]:
-    q = select(TsSignal).order_by(TsSignal.number.desc()).limit(100)
+    q = select(TsSignal).where(TsSignal.status != "MANUAL").order_by(TsSignal.number.desc()).limit(100)  # members' own trades aren't signals
     if status_:
         q = q.where(TsSignal.status == status_)
     return {"items": [sig_out(db, s) for s in db.scalars(q)]}

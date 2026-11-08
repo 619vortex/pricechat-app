@@ -57,6 +57,8 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 🤖 <b>Trading bot</b> (DM me)
 /status · /connect · /positions · /pnl · /trades
 /risk · /auto · /pause · /resume · /close
+/market BTC · /open BTC long 100 5x · /enter (reply to a signal) · /balance · /orders
+/sl · /tp · /cancel · /closeall · /settings (Banter group, private chat)
 
 📜 /rules · the group rules (admins: reply /warn 1-5 to mute, /unmute, /strikes)
 
@@ -109,11 +111,12 @@ def _pct(x: float) -> str:
 
 # ---------------------------------------------------------------- commands (private chats and groups)
 PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/record", "/idea", "/ideas",
-          "/committee", "/debate", "/research", "/rules"}  # groups too ("/risk <coin>" as well: the committee's risk review)
+          "/committee", "/debate", "/research", "/rules", "/market"}  # groups too ("/risk <coin>" as well: the committee's risk review)
 MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator", "/committee", "/debate", "/research"}
 COMMITTEE = {"/committee", "/debate", "/research"}  # committeecmd.py (Kiwi AI Investment Committee)
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
-PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close", "/vpn"} | alerts.COMMANDS  # DMs only
+PRIVATE = ({"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close", "/vpn"} | alerts.COMMANDS
+           | {"/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings"})  # DMs only (tgtrade.py)
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
 HEADLINE = ("BTC", "ETH", "SOL", "HYPE")
 
@@ -435,6 +438,9 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         await client.send_message(chat_id, text_, btns, html=True)
         return
     committee = cmd in COMMITTEE or (cmd == "/risk" and len(parts) > 1)  # "/risk BTC": the committee; "/risk": your limits
+    if group and cmd == "/enter":  # replying to a signal in the group: the preview goes to the member privately, nothing private here
+        await _enter_from_group(db, client, chat_id, user_id, args, reply_to)
+        return
     if group and cmd in PRIVATE and not committee:
         from app.telegram.ingestion import get_bot_state
 
@@ -511,6 +517,10 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
         from app.telegram.moderation import RULES_TEXT
 
         return RULES_TEXT
+    if cmd == "/market":  # one perp's numbers, for anyone, groups too (tgtrade.py)
+        from app.tradingos import tgtrade
+
+        return await _md(tgtrade.market_text, args[0].lstrip("$")) if args else "Usage: /market BTC"
     if cmd == "/markets":
         if args and args[0] in ("WEEKLY", "WEEK", "7D"):
             from app.tradingos import weekly
@@ -593,25 +603,34 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
                           f"Trading mode: {_acc(db, m).mode}" + (" · NEW TRADES STOPPED" if _acc(db, m).paused else "")])
     if not has_access(db, m):
         return f"The trading service opens at Kiwi Rank {_min_rank(db)}. Level up on {SITE}/passport."
+    from app.tradingos import tgtrade
+
+    if cmd in tgtrade.COMMANDS:  # /open, /enter, /closeall, /sl, /tp, /orders, /cancel, /balance, /settings
+        return await tgtrade.command(db, client, chat_id, m, cmd, args)
     if cmd in ("/positions", "/pnl"):
         from app.tradingbot.service import wallet_of
 
         w = wallet_of(db, m)
-        if w is None:
-            return "Connect your Hyperliquid wallet first: /connect"
+        acc_ = _acc(db, m)
         if cmd == "/positions":
-            acc = await _md(md.positions, w.address)
-            if not acc["positions"]:
-                return f"No open positions. Equity ${acc['equity']:,.2f}."
-            rows = [f"<b>{esc(p['coin'])}</b> {p['side']} {abs(p['size'])} @ {market.fmt_price(p['entry'])} · uPnL ${p['pnl']:+,.2f}"
-                    + (f" · liq {market.fmt_price(p['liq'])}" if p["liq"] else "") for p in acc["positions"]]
-            return f"Equity ${acc['equity']:,.2f}\n\n" + "\n".join(rows)
-        from app.tradingbot.hyperliquid import InfoClient, pnl_summary
+            out = [await _md(tgtrade.bot_positions_text, db, acc_)]
+            if w is not None:  # and the member's own Hyperliquid account (mainnet), as before
+                acc = await _md(md.positions, w.address)
+                rows = [f"<b>{esc(p['coin'])}</b> {p['side']} {abs(p['size'])} @ {market.fmt_price(p['entry'])} · uPnL ${p['pnl']:+,.2f}"
+                        + (f" · liq {market.fmt_price(p['liq'])}" if p["liq"] else "") for p in acc["positions"]]
+                out.append(f"<b>Your Hyperliquid account</b> · equity ${acc['equity']:,.2f}\n" + ("\n".join(rows) if rows else "No open positions."))
+            return "\n\n".join(out)
+        from app.tradingos import execution
 
-        pn = pnl_summary(await _md(InfoClient().portfolio, w.address))
-        if not pn:
-            return "No P&L history on Hyperliquid yet."
-        return "<b>Your Hyperliquid P&amp;L</b>\n\n" + "\n".join(f"{k}: ${v['pnl']:+,.2f}" for k, v in pn.items())
+        res = execution.results(db, acc_)[acc_.mode]
+        out = [f"<b>Bot results · {acc_.mode}</b>: {res['trades']} closed · net ${res['net']:+,.2f} · fees ${res['fees']:,.2f}"
+               + (f" · win rate {res['win_rate']}%" if res["win_rate"] is not None else "")]
+        if w is not None:
+            from app.tradingbot.hyperliquid import InfoClient, pnl_summary
+
+            pn = pnl_summary(await _md(InfoClient().portfolio, w.address))
+            out.append("<b>Your Hyperliquid P&amp;L</b>\n" + ("\n".join(f"{k}: ${v['pnl']:+,.2f}" for k, v in pn.items()) if pn else "No history yet."))
+        return "\n\n".join(out)
     return await _trading_command(db, client, chat_id, m, cmd, args)
 
 
@@ -1052,9 +1071,39 @@ async def _answer(client: Any, cq: dict[str, Any], uid: int, text: str, alert: b
             logger.warning("Button result not delivered (%s: %s)", type(exc).__name__, str(exc)[:160])
 
 
+async def _enter_from_group(db: Session, client: Any, chat_id: int, user_id: int, args: list[str], reply_to: int | None) -> None:
+    """/enter replying to a signal card in a group: the preview goes to the member's private chat; the group hears only that."""
+    from app.telegram.ingestion import get_bot_state
+    from app.tradingos import tgtrade
+
+    name = get_bot_state(db).bot_username or "cryptopricechatbot"
+    m = member_for(db, user_id)
+    if m is None or not has_access(db, m):
+        await client.send_message(chat_id, f"Trading works privately for linked Kiwi Passports: t.me/{name}", reply_to=reply_to)
+        return
+    try:
+        reply = await tgtrade.command(db, client, user_id, m, "/enter", args)
+        if reply:
+            await client.send_message(user_id, reply, html=True)
+    except Exception:  # noqa: BLE001 - never pressed Start: private messages aren't possible yet
+        await client.send_message(chat_id, f"Open t.me/{name} and press Start first: trade previews are private.", reply_to=reply_to)
+        return
+    await client.send_message(chat_id, "Sent you a private preview.", reply_to=reply_to)
+
+
 async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     data = str(cq.get("data") or "")
     uid = int((cq.get("from") or {}).get("id") or 0)
+    if data[:3] in ("mo:", "mn:", "ca:", "pr:") and uid:  # Telegram trading's Confirm / Cancel (tgtrade.py)
+        from app.tradingos import tgtrade
+
+        m = member_for(db, uid)
+        if m is None:
+            await _answer(client, cq, uid, "Connect your Kiwi Passport first.", alert=True)
+            return
+        await _answer(client, cq, uid, "Working…", dm=False)
+        await client.send_message(uid, await tgtrade.callback(db, client, m, uid, data), html=True)
+        return
     if data[:3] in ("cf:", "cx:", "cl:") and uid:
         await _trade_callback(db, client, cq, uid, data)
         return
@@ -1088,6 +1137,12 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
         await _answer(client, cq, uid, f"Connect your Kiwi Passport (Rank {_min_rank(db)}) first: {SITE}/earn", alert=True)
         return
     if action == "enter":
+        from app.tradingos import tgtrade
+
+        why = await tgtrade.gate_for_entry(db, m)  # the Banter group's referral, from Hyperliquid's own record
+        if why:
+            await _answer(client, cq, uid, why[:195], alert=True)
+            return
         await _enter(db, client, cq, m, uid, sig)
         return
     db.add(TsSignalAction(signal_id=sig.id, who=f"tg:{uid}", member_id=m.id if m else None, telegram_user_id=uid, action=action, verified=True))
@@ -1286,7 +1341,8 @@ def position_open_text(pos: Any, sig: TsSignal | None) -> str:
     return (f"🥝 ORDER UP! {tickers.cashtag(pos.coin)} {pos.side} is served!\n{MODE_LABEL.get(pos.mode, pos.mode)}\n"
             f"Entry {market.fmt_price(pos.entry_px or 0)} · size {pos.size:g} · {pos.leverage}x\n"
             f"🛑 Stop {market.fmt_price(pos.stop)} · ✅ TP1 {market.fmt_price(pos.tp1)} · TP2 {market.fmt_price(pos.tp2)}\n"
-            f"Strategy: {_model_label(sig) if sig else '—'}" + (f" · signal #{sig.number:03d}" if sig else "")
+            + ("Your own trade (/open)" if sig is not None and sig.status == "MANUAL" else
+               f"Strategy: {_model_label(sig) if sig else '—'}" + (f" · signal #{sig.number:03d}" if sig else ""))
             + f"\nMax loss at the stop ${pos.max_loss_usd:,.2f}\n\n{SITE}/earn")
 
 
@@ -1295,7 +1351,8 @@ def position_close_text(pos: Any, sig: TsSignal | None) -> str:
     return (f"🍽️ KIWI FINISHED COOKING! {tickers.cashtag(pos.coin)} {pos.side} closed ({pos.close_reason or 'closed'})\n{MODE_LABEL.get(pos.mode, pos.mode)}\n"
             f"Entry {market.fmt_price(pos.entry_px or 0)} → exit {market.fmt_price(pos.exit_px or 0)}\n"
             f"Realized P&L after fees{sim}: ${pos.realized_pnl:+,.2f} (fees ${pos.fees:,.2f})\n"
-            f"Strategy: {_model_label(sig) if sig else '—'}\n\n{SITE}/earn")
+            + ("Your own trade (/open)" if sig is not None and sig.status == "MANUAL" else f"Strategy: {_model_label(sig) if sig else '—'}")
+            + f"\n\n{SITE}/earn")
 
 
 def due_position_announcements(db: Session, now: Any = None) -> list[tuple[Any, str, str]]:
@@ -1497,13 +1554,15 @@ async def announce(db: Session, client: Any, sig: TsSignal, before: str) -> bool
     return True
 
 
-MENU_PRIVATE = [("rules", "The group rules"), ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
+MENU_PRIVATE = [("rules", "The group rules"), ("market", "One perp: price, funding, OI, e.g. /market BTC"), ("open", "Trade: /open BTC long 100 5x (preview first)"),
+                ("balance", "Your balance"), ("orders", "Open orders"), ("settings", "Your trading limits and mode"),
+                ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
                 ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
                 ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
                 ("committee", "AI Investment Committee, e.g. /committee BTC 4h"), ("debate", "Bull vs bear, e.g. /debate ETH"),
                 ("research", "Full committee report, e.g. /research SOL"),
                 ("record", "How /signal ideas played out"), ("idea", "Share an idea: /idea BTC long tp 72000"), ("ideas", "Community ideas"), ("status", "Your account"),
-                ("positions", "Your Hyperliquid positions"), ("pnl", "Your Hyperliquid P&L"), ("trades", "Your bot trades and results"),
+                ("positions", "Your bot and Hyperliquid positions"), ("pnl", "Your Hyperliquid P&L"), ("trades", "Your bot trades and results"),
                 ("risk", "Your limits · /risk BTC: committee risk review"), ("pause", "STOP NEW TRADES"), ("close", "Close a bot position"), ("connect", "Connect Hyperliquid"),
                 ("vpn", "Kiwi VPN: your devices and configs"), ("help", "All commands")]
 MENU_GROUP = [("rules", "The group rules"), ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
