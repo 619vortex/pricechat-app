@@ -60,7 +60,17 @@ async function main() {
   const app = spawn(APP, [], { env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: "ignore", detached: true });
   app.unref();
   let url;
-  try { url = await attach(); } catch (e) { check("window opens with a debugging connection", false, String(e)); return; }
+  try { url = await attach(); } catch (e) {
+    // what's running, and with which switches: the WebView2 processes' command lines show whether the debugging switch arrived
+    let seen = "";
+    try {
+      seen = ps(`Get-CimInstance Win32_Process -Filter "Name='KiwiVPN.exe' or Name='msedgewebview2.exe'" | ForEach-Object { "$($_.ProcessId) $($_.Name) session $($_.SessionId): " + ([string]$_.CommandLine).Substring(0, [Math]::Min(400, ([string]$_.CommandLine).Length)) } | Select-Object -First 6 | Out-String -Width 600`);
+      seen += "\nlistening: " + ps(`Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -ge 9000 -and $_.LocalPort -lt 10000 } | ForEach-Object { "$($_.LocalAddress):$($_.LocalPort) pid $($_.OwningProcess)" } | Out-String`);
+      seen += "\nthis session: " + ps("[System.Diagnostics.Process]::GetCurrentProcess().SessionId") + ", interactive: " + ps("[Environment]::UserInteractive");
+    } catch (d) { seen = `diagnostics failed: ${d}`; }
+    check("window opens with a debugging connection", false, `${e}\n${seen}`);
+    return;
+  }
   check("window opens", true, url);
 
   const ready = await waitFor(async () => (await js(`document.querySelectorAll('[role=radiogroup] [role=radio]').length`)) > 1, 60_000);

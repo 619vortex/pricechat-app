@@ -166,18 +166,30 @@ fn run(out: &str) -> Result<Report, String> {
     r.check("direct IPv4 known", home4.is_some(), home4.clone().unwrap_or_default());
     r.add("direct IPv6", "SKIP", home6.clone().map(|a| format!("this machine has IPv6 ({a})")).unwrap_or_else(|| "this machine has no IPv6, so an IPv6 leak can't happen here; checked anyway".into()));
 
+    // devices left behind by an earlier run on a machine of the same name would hold slots
+    let _ = remove_own_devices(&http, &v, &token);
     let account = http.account(&token).map_err(|e| format!("account: {}", e.message))?;
     let servers: Vec<Server> = account.servers.iter().filter(|s| s.online).cloned().collect();
     r.check("account has VPN access", account.eligible, account.reason.clone().unwrap_or_else(|| format!("{} online servers, {} of {} devices used", servers.len(), account.devices.len(), account.max_devices)));
     if !account.eligible || servers.is_empty() {
         return Ok(r);
     }
+    // each server needs a device of its own: these tests use one slot at a time (two for the switch), and give every one back
+    let free = account.max_devices.saturating_sub(account.devices.len() as i64);
+    let names: Vec<String> = account.devices.iter().map(|d| format!("{} (server #{})", d.name, d.server_id)).collect();
+    if !r.check("a free device slot for the tests", free >= 1, format!("{free} free of {}; in use: {}", account.max_devices, if names.is_empty() { "none".into() } else { names.join(", ") })) {
+        return Ok(r);
+    }
 
     // Smart Connect's timings, as the app takes them (each server's proxy name)
     let hosts: Vec<(i64, String)> = servers.iter().filter_map(|s| s.proxy_host.clone().map(|h| (s.id, h))).collect();
-    let timed = measure::probe(&hosts);
-    let shown: Vec<String> = timed.iter().map(|(id, ms)| format!("#{id}: {}", ms.map(|m| format!("{m:.0} ms")).unwrap_or("no answer".into()))).collect();
-    r.check("Smart Connect timings", timed.iter().any(|(_, ms)| ms.is_some()), shown.join(", "));
+    if hosts.is_empty() {
+        r.add("Smart Connect timings", "WARN", "Price Chat doesn't send the servers' proxy names yet (they come with feat/kiwi-monitoring), so Smart Connect orders by load alone");
+    } else {
+        let timed = measure::probe(&hosts);
+        let shown: Vec<String> = timed.iter().map(|(id, ms)| format!("#{id}: {}", ms.map(|m| format!("{m:.0} ms")).unwrap_or("no answer".into()))).collect();
+        r.check("Smart Connect timings", timed.iter().any(|(_, ms)| ms.is_some()), shown.join(", "));
+    }
 
     // every country: connect, the address and DNS sites see, IPv6, then disconnect
     let mut first_cfg: Option<(Server, String)> = None;
@@ -228,10 +240,19 @@ fn run(out: &str) -> Result<Report, String> {
         let off = disconnect();
         let back = public_v4();
         r.check(&format!("disconnect {}", place(s)), off.is_ok() && back == home4, format!("{:?}, public IPv4 now {}", off.err(), back.unwrap_or("none".into())));
+        // its device goes, so the next country has a slot (the tests below make the first server's again)
+        give_back(&http, &v, &token, s.id);
     }
 
-    let Some((srv, cfg)) = first_cfg else {
+    let Some((srv, _)) = first_cfg else {
         return Ok(r);
+    };
+    let cfg = match flow::config_with_retry(&http, &v, &computer(), srv.id, &|| std::thread::sleep(Duration::from_millis(1500))) {
+        Ok(c) => c.to_string(),
+        Err(e) => {
+            r.check("config for the remaining tests", false, e);
+            return Ok(r);
+        }
     };
 
     // reconnect three times, then switch servers while connected
@@ -243,12 +264,20 @@ fn run(out: &str) -> Result<Report, String> {
     }
     r.check("reconnect 3 times", ok == 3, format!("{ok}/3 connect + disconnect cycles worked on {}", place(&srv)));
     if let Some(other) = servers.iter().find(|s| s.id != srv.id) {
-        let other_cfg = flow::config_for(&http, &v, &computer(), other.id);
-        let switched = connect(&cfg).is_ok() && other_cfg.as_ref().map(|c| connect(c).is_ok()).unwrap_or(false);
-        let v4 = public_v4();
-        let want = other_cfg.as_ref().ok().and_then(|c| endpoint_ip(c));
-        r.check("switch country while connected", switched && v4.is_some() && v4 != home4, format!("{} -> {}: public IPv4 {} (server {})", place(&srv), place(other), v4.unwrap_or("none".into()), want.unwrap_or("?".into())));
-        let _ = disconnect();
+        match flow::config_for(&http, &v, &computer(), other.id) {
+            Err(e) if e.contains("devices") => r.add("switch country while connected", "WARN", format!("needs a second free device slot: {e}")),
+            Err(e) => {
+                r.check("switch country while connected", false, format!("no config for {}: {e}", place(other)));
+            }
+            Ok(other_cfg) => {
+                let switched = connect(&cfg).is_ok() && connect(&other_cfg).is_ok();
+                let v4 = public_v4();
+                let want = endpoint_ip(&other_cfg);
+                r.check("switch country while connected", switched && v4.is_some() && v4 != home4, format!("{} -> {}: public IPv4 {} (server {})", place(&srv), place(other), v4.unwrap_or("none".into()), want.unwrap_or("?".into())));
+                let _ = disconnect();
+                give_back(&http, &v, &token, other.id);
+            }
+        }
     }
 
     // speed test through the tunnel (Cloudflare, about 25 MB down and 5 MB up)
@@ -317,6 +346,10 @@ fn run(out: &str) -> Result<Report, String> {
     }
 
     kill_switch(&mut r, &cfg, &home4);
+    // every slot back for the window tests that follow
+    let _ = disconnect();
+    let removed = remove_own_devices(&http, &v, &token);
+    r.add("test devices removed", "INFO", format!("{removed}"));
 
     let _ = std::fs::write(out, serde_json::to_string_pretty(&r.checks).unwrap_or_default());
     Ok(r)
@@ -388,6 +421,28 @@ fn kill_switch(r: &mut Report, cfg: &str, home4: &Option<String>) {
         let _ = disconnect();
     }
     let _ = server;
+}
+
+/// Deletes this machine's device for one server, and forgets its key.
+fn give_back(http: &Http, v: &FileVault, token: &str, server_id: i64) {
+    if let Some(saved) = v.device(server_id) {
+        let _ = http.delete_device(token, saved.device_id);
+        v.forget_device(server_id);
+    }
+}
+
+/// Deletes every device named after this machine. Returns how many.
+fn remove_own_devices(http: &Http, v: &FileVault, token: &str) -> usize {
+    let Ok(account) = http.account(token) else { return 0 };
+    let me = computer();
+    let mut removed = 0;
+    for d in account.devices.iter().filter(|d| !me.is_empty() && d.name.starts_with(&me)) {
+        if http.delete_device(token, d.id).is_ok() {
+            v.forget_device(d.server_id);
+            removed += 1;
+        }
+    }
+    removed
 }
 
 fn cleanup() -> Result<(), String> {
