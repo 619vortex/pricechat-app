@@ -220,8 +220,18 @@ fn run(out: &str) -> Result<Report, String> {
         let server_ip = endpoint_ip(&cfg);
         match connect(&cfg) {
             Ok(_) => {
+                // how long until traffic flows: by address alone (no DNS), then by name (DNS through the tunnel too)
+                let t0 = Instant::now();
+                let mut by_address = None;
+                while t0.elapsed() < Duration::from_secs(20) {
+                    if trace_ip("1.1.1.1").is_some_and(|ip| Some(&ip) != home4.as_ref()) {
+                        by_address = Some(t0.elapsed().as_secs_f32());
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
                 let (v4, first_after) = vpn_ip(&home4);
-                r.add(&format!("{name}: traffic flowing"), "INFO", format!("{first_after} s after the handshake"));
+                r.add(&format!("{name}: traffic flowing"), "INFO", format!("by address after {}, by name {first_after} s later", by_address.map(|t| format!("{t:.1} s")).unwrap_or("never (20 s)".into())));
                 let leak = measure::leak_check(server_ip.clone(), &tune::dns_of(&cfg));
                 let moved = v4.is_some() && v4 != home4;
                 r.check(&name, moved, format!("public IPv4 {} (server {}, direct {})", v4.clone().unwrap_or("none".into()), server_ip.clone().unwrap_or("?".into()), home4.clone().unwrap_or("?".into())));
@@ -256,19 +266,15 @@ fn run(out: &str) -> Result<Report, String> {
         let off = disconnect();
         let back = public_v4();
         r.check(&format!("disconnect {}", place(s)), off.is_ok() && back == home4, format!("{:?}, public IPv4 now {}", off.err(), back.unwrap_or("none".into())));
-        // its device goes, so the next country has a slot (the tests below make the first server's again)
-        give_back(&http, &v, &token, s.id);
+        // the first server's device stays for the tests below and the window's; the others go, so the next country has a slot.
+        // Price Chat allows 5 new devices per member in 10 minutes, so devices are kept and reused rather than made again.
+        if first_cfg.as_ref().map(|(f, _)| f.id) != Some(s.id) {
+            give_back(&http, &v, &token, s.id);
+        }
     }
 
-    let Some((srv, _)) = first_cfg else {
+    let Some((srv, cfg)) = first_cfg else {
         return Ok(r);
-    };
-    let cfg = match flow::config_with_retry(&http, &v, &computer(), srv.id, &|| std::thread::sleep(Duration::from_millis(1500))) {
-        Ok(c) => c.to_string(),
-        Err(e) => {
-            r.check("config for the remaining tests", false, e);
-            return Ok(r);
-        }
     };
 
     // reconnect three times, then switch servers while connected
@@ -291,8 +297,7 @@ fn run(out: &str) -> Result<Report, String> {
                 let (v4, _) = vpn_ip(&home4);
                 let want = endpoint_ip(&other_cfg);
                 r.check("switch country while connected", switched && v4.is_some() && v4 != home4, format!("{} -> {}: public IPv4 {} (server {})", place(&srv), place(other), v4.unwrap_or("none".into()), want.unwrap_or("?".into())));
-                let _ = disconnect();
-                give_back(&http, &v, &token, other.id);
+                let _ = disconnect(); // its device stays: the window's failover test can use it
             }
         }
     }
@@ -363,10 +368,8 @@ fn run(out: &str) -> Result<Report, String> {
     }
 
     kill_switch(&mut r, &cfg, &home4);
-    // every slot back for the window tests that follow
+    // the devices stay for the window tests, which share this store; the job's clean-up step removes them
     let _ = disconnect();
-    let removed = remove_own_devices(&http, &v, &token);
-    r.add("test devices removed", "INFO", format!("{removed}"));
 
     let _ = std::fs::write(out, serde_json::to_string_pretty(&r.checks).unwrap_or_default());
     Ok(r)
