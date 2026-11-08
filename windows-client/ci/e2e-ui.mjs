@@ -9,6 +9,7 @@ import { writeFileSync } from "node:fs";
 const APP = "C:\\Program Files\\KiwiVPN\\KiwiVPN.exe";
 const PORT = 9222;
 const RULE = "KiwiCI-failover-block";
+const POLICY = "HKCU:\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
 const checks = [];
 const add = (name, result, detail = "") => { console.log(`${result.padEnd(4)} ${name}: ${detail}`); checks.push({ name, result, detail }); };
 const check = (name, ok, detail) => { add(name, ok ? "PASS" : "FAIL", detail); return ok; };
@@ -57,6 +58,9 @@ async function waitFor(fn, ms, every = 1000) {
 
 async function main() {
   const home = await publicIp();
+  // The app sets WebView2's switches itself, which overrides the environment variable, so the debugging switch also goes in through
+  // WebView2's per-app policy key. This runner's own registry only; removed at the end.
+  ps(`Get-Process KiwiVPN -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -Force '${POLICY}' | Out-Null; Set-ItemProperty -Path '${POLICY}' -Name 'KiwiVPN.exe' -Value '--remote-debugging-port=${PORT}'`);
   const app = spawn(APP, [], { env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}` }, stdio: "ignore", detached: true });
   app.unref();
   let url;
@@ -129,6 +133,7 @@ async function main() {
 try { await main(); } catch (e) { add("window tests", "FAIL", String(e?.stack ?? e)); }
 try { ps(`Remove-NetFirewallRule -DisplayName '${RULE}' -ErrorAction SilentlyContinue`); } catch { /* none */ }
 try { ps("Get-Process KiwiVPN -ErrorAction SilentlyContinue | Stop-Process -Force"); } catch { /* closed */ }
+try { ps(`Remove-Item -Recurse -Force '${POLICY}' -ErrorAction SilentlyContinue`); } catch { /* gone */ }
 writeFileSync(process.argv[2] ?? "e2e-ui-report.json", JSON.stringify(checks, null, 2));
 const failed = checks.filter((c) => c.result === "FAIL").length;
 console.log(`\n${checks.length} window checks, ${failed} failed`);
