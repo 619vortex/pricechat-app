@@ -105,6 +105,11 @@ class FakeTelegram:
                 return httpx.Response(400, json={"ok": False, "error_code": 400, "description": "Bad Request: member list is inaccessible"})
             status = self.members.get((body["chat_id"], body["user_id"]), "left")
             return httpx.Response(200, json={"ok": True, "result": {"status": status, "user": {"id": body["user_id"]}}})
+        if method == "getChatAdministrators":  # group rules: who counts as an admin
+            admins = [{"status": st, "user": {"id": uid}} for (cid, uid), st in self.members.items() if cid == body["chat_id"] and st in ("administrator", "creator")]
+            return httpx.Response(200, json={"ok": True, "result": admins})
+        if method in ("restrictChatMember", "deleteMessage"):  # group rules: mute / delete (recorded in self.calls)
+            return httpx.Response(200, json={"ok": True, "result": True})
         if method == "getChat":
             chat = self.chats.get(body["chat_id"])
             if chat is None:

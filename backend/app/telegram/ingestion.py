@@ -88,6 +88,7 @@ class TelegramIngestor:
         self._wk_updates: list[dict] = []  # Worker System: community join updates seen in this batch
         self._wk_starts: list[tuple[int, int, str, str | None, bool]] = []  # Worker System: (chat, user, code, username, is_bot)
         self._welcome: dict[int, list[str]] = {}  # signal group chat id -> names of people who just joined it
+        self._moderation: list[tuple] = []  # group rules (app/telegram/moderation.py): admin commands and messages with links
         self._commands: list[tuple[int, int, str, bool, int | None]] = []  # Trading OS: (chat, user, "/cmd args", in a group?, message id)
         self._followups: list[tuple[int, int, str, int, int]] = []  # Vortex trade checks: (chat, user, text, message id, replied-to id)
         self.runtime = runtime
@@ -173,6 +174,7 @@ class TelegramIngestor:
             except SQLAlchemyError:
                 self.db.rollback()
                 raise
+            await self._moderate()
             await self._send_confirmations()
             await self._crew_starts()
             await self._workers()
@@ -231,6 +233,14 @@ class TelegramIngestor:
 
             group = parsed.chat.chat_type != "private"
             word = (fc or parsed.text.strip()).split()[0].split("@")[0].lower()
+            from app.telegram import moderation
+
+            if group and word in moderation.COMMANDS:  # /warn, /unmute, /strikes: only in the allow-listed groups, handled after the commit
+                if parsed.chat.chat_id in sources:
+                    self._moderation.append(("cmd", parsed.chat.chat_id, parsed.author_id, anonymous, word, parsed.text.split()[1:],
+                                             parsed.reply_author_id, parsed.reply_author_name, parsed.reply_to_message_id, parsed.message_id))
+                report.ignored_other += 1
+                return
             if (fc or not group or is_ours(parsed.text, get_bot_state(self.db).bot_username)) and (not anonymous or word in PUBLIC):
                 logger.info("Bot command received: %s in %s chat %s%s (update %s)", "fc" if fc else word, "a group" if group else "a private",
                             parsed.chat.chat_id if group else "-", " from an anonymous admin / the group" if anonymous else "", parsed.update_id)
@@ -258,6 +268,15 @@ class TelegramIngestor:
             self.runtime.note_unauthorised(parsed.chat)
             report.ignored_unauthorised += 1
             return
+        # rule 5, automatically: a link from a member (admins are checked after the commit) is never stored, and is deleted
+        if (source.enabled and isinstance(parsed, ParsedMessage) and parsed.chat.chat_type in ("group", "supergroup") and parsed.author_id
+                and not parsed.author_is_bot and not parsed.author_is_anonymous):
+            from app.telegram import moderation
+
+            if moderation.links_in(parsed.text, get_bot_state(self.db).bot_username):
+                self._moderation.append(("link", parsed.chat.chat_id, parsed.author_id, parsed.author_name, parsed.message_id, parsed.text))
+                report.ignored_other += 1
+                return
         if not (source.enabled and source.ingestion_enabled):
             report.ignored_disabled += 1
             return
@@ -288,6 +307,28 @@ class TelegramIngestor:
         if purpose:
             self._confirm.append((parsed.chat.chat_id, purpose))
         return True
+
+    async def _moderate(self) -> None:
+        """The group rules: admins' /warn, /unmute, /strikes, and messages with links (app/telegram/moderation.py)."""
+        from app.telegram import moderation
+
+        pending, self._moderation = self._moderation, []
+        if not pending:
+            return
+        state = get_bot_state(self.db)
+        for item in pending:
+            try:
+                if item[0] == "cmd":
+                    _, chat, uid, anon, cmd, words, r_uid, r_name, r_mid, mid = item
+                    reply = await moderation.command(self.db, self.client, chat, uid, anon, cmd, words, r_uid, r_name, r_mid, mid, state.bot_id)
+                else:
+                    _, chat, uid, name, mid, text = item
+                    reply = await moderation.check_links(self.db, self.client, chat, uid, name, mid, text, state.bot_username)
+                if reply:
+                    await self.client.send_message(chat, reply, html=True)
+            except Exception as exc:  # noqa: BLE001 - one failed action never stops the others or the sync
+                self.db.rollback()
+                logger.warning("Group rule action not done (%s)", type(exc).__name__)
 
     async def _send_confirmations(self) -> None:
         """'It worked' for each valid sign-in just seen. Best effort: a failure never affects the sign-in itself."""

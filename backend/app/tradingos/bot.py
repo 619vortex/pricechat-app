@@ -58,6 +58,8 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 /status · /connect · /positions · /pnl · /trades
 /risk · /auto · /pause · /resume · /close
 
+📜 /rules · the group rules (admins: reply /warn 1-5 to mute, /unmute, /strikes)
+
 🛡 <b>Kiwi VPN</b> (DM me)
 /vpn · your VPN devices · /vpn add phone
 
@@ -107,7 +109,7 @@ def _pct(x: float) -> str:
 
 # ---------------------------------------------------------------- commands (private chats and groups)
 PUBLIC = {"/start", "/help", "/markets", "/price", "/indicator", "/fc", "/chart", "/scan", "/signals", "/signal", "/record", "/idea", "/ideas",
-          "/committee", "/debate", "/research"}  # groups too ("/risk <coin>" as well: the committee's risk review)
+          "/committee", "/debate", "/research", "/rules"}  # groups too ("/risk <coin>" as well: the committee's risk review)
 MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator", "/committee", "/debate", "/research"}
 COMMITTEE = {"/committee", "/debate", "/research"}  # committeecmd.py (Kiwi AI Investment Committee)
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
@@ -196,7 +198,7 @@ def welcome_group(names: list[str], bot_username: str) -> tuple[str, list[list[d
     """The one short welcome posted in the signal group when people join (the bot can't message anyone privately first)."""
     who = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
     text = (f"👋 Welcome {esc(who)}!\nSignals land here with ENTER / REJECT / AUTO. Tap <b>Start</b> for your private assistant: "
-            "paper trading first, nothing trades without your OK.")
+            "paper trading first, nothing trades without your OK.\n\n📜 Please read the group rules: /rules")
     return text, [[{"text": "▶ Start the bot", "url": f"https://t.me/{bot_username}?start=welcome"}]]
 
 
@@ -505,6 +507,10 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
         if cmd == "/start" and m is None:
             return f"{signup_block(db, 'start')}Link your Kiwi Passport: {SITE}/passport → Connect Telegram.\n\n{HELP}"
         return signup_block(db, cmd.lstrip("/")) + HELP
+    if cmd == "/rules":  # the group rules (app/telegram/moderation.py), for anyone, groups too
+        from app.telegram.moderation import RULES_TEXT
+
+        return RULES_TEXT
     if cmd == "/markets":
         if args and args[0] in ("WEEKLY", "WEEK", "7D"):
             from app.tradingos import weekly
@@ -1407,7 +1413,7 @@ async def announce(db: Session, client: Any, sig: TsSignal, before: str) -> bool
     return True
 
 
-MENU_PRIVATE = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
+MENU_PRIVATE = [("rules", "The group rules"), ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
                 ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
                 ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
                 ("committee", "AI Investment Committee, e.g. /committee BTC 4h"), ("debate", "Bull vs bear, e.g. /debate ETH"),
@@ -1416,7 +1422,7 @@ MENU_PRIVATE = [("markets", "Market overview · /markets weekly"), ("price", "Pr
                 ("positions", "Your Hyperliquid positions"), ("pnl", "Your Hyperliquid P&L"), ("trades", "Your bot trades and results"),
                 ("risk", "Your limits · /risk BTC: committee risk review"), ("pause", "STOP NEW TRADES"), ("close", "Close a bot position"), ("connect", "Connect Hyperliquid"),
                 ("vpn", "Kiwi VPN: your devices and configs"), ("help", "All commands")]
-MENU_GROUP = [("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
+MENU_GROUP = [("rules", "The group rules"), ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
               ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),
               ("chart", "Chart, e.g. /chart BTC 15m rsi bb oi"), ("signals", "Latest signals"), ("signal", "Analyze a coin, e.g. /signal DOGE"),
               ("committee", "AI Investment Committee, e.g. /committee BTC 4h"), ("debate", "Bull vs bear, e.g. /debate ETH"),

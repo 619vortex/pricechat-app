@@ -114,3 +114,21 @@ class TelegramAccount(IdMixin, TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     last_error_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     requests_total: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+
+
+class TgStrike(IdMixin, TimestampMixin, Base):
+    """A broken group rule (app/telegram/moderation.py): who, which rule, by whom, and the mute it led to. Strikes count up the
+    mute ladder (12 h, 24 h, permanent); an admin's /unmute reset clears them."""
+
+    __tablename__ = "tg_strikes"
+    __table_args__ = (Index("ix_tg_strikes_chat_user", "chat_id", "user_id"),)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_name: Mapped[str | None] = mapped_column(String(128))
+    rule: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    by: Mapped[str] = mapped_column(String(32), nullable=False)  # "admin:<telegram id>", "admin:anonymous" or "auto"
+    muted_until: Mapped[datetime | None] = mapped_column(UTCDateTime())  # None with permanent=True: muted for good
+    permanent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cleared: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # reset by an admin: no longer counts

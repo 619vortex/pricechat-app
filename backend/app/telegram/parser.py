@@ -47,6 +47,9 @@ class ParsedMessage:
     # sent "as the group" or by an admin with "Remain anonymous" (Telegram shows @GroupAnonymousBot) or as the linked channel
     # (@Channel_Bot): `from` is one of Telegram's stand-in bots and `sender_chat` the group or channel; there is no person
     author_is_anonymous: bool = False
+    # who wrote the message this one replies to: an admin's /warn mutes that person (app/telegram/moderation.py)
+    reply_author_id: int | None = None
+    reply_author_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,4 +153,6 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         media_type=media_type,
         forward_from=forward_from,
         forward_date=forward_date,
+        reply_author_id=(reply.get("from") or {}).get("id") if isinstance((reply.get("from") or {}).get("id"), int) else None,
+        reply_author_name=_person_name(reply["from"]) if isinstance(reply.get("from"), dict) else None,
     )

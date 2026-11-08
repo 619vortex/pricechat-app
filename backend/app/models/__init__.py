@@ -35,9 +35,10 @@ from app.models.social_intel import (
     TopicMergeSuggestion, UsageCounter, WatchedAccount,
 )
 from app.models.task import Task
-from app.models.telegram import TelegramAccount, TelegramBotState, TelegramMessage, TelegramMessageVector, TelegramSource
+from app.models.telegram import TelegramAccount, TelegramBotState, TelegramMessage, TelegramMessageVector, TelegramSource, TgStrike
 
 __all__ = [
+    "TgStrike",
     "PokemonCard",
     "PokemonListing",
     "PokemonReferencePrice",

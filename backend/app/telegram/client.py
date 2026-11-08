@@ -85,6 +85,17 @@ class TelegramBotClient:
         """Only for a private chat whose user just pressed Start on a valid sign-in code (see ingestion)."""
         await self._call("sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True})
 
+    async def get_chat_administrators(self, chat_id: int | str) -> list[dict[str, Any]]:
+        return list(await self._call("getChatAdministrators", {"chat_id": chat_id}) or [])
+
+    async def restrict_member(self, chat_id: int | str, user_id: int, until: int, can_send: bool) -> None:
+        """Group rules (app/telegram/moderation.py): mute (can_send False) until a Unix time, 0 = for good; or lift a mute."""
+        perms = {k: can_send for k in ("can_send_messages", "can_send_audios", "can_send_documents", "can_send_photos", "can_send_videos",
+                                       "can_send_video_notes", "can_send_voice_notes", "can_send_polls", "can_send_other_messages",
+                                       "can_add_web_page_previews")}
+        await self._call("restrictChatMember", {"chat_id": chat_id, "user_id": user_id, "permissions": perms, "until_date": until,
+                                                "use_independent_chat_permissions": True})
+
     async def get_chat_member_count(self, chat_id: int) -> int:
         return int(await self._call("getChatMemberCount", {"chat_id": chat_id}))
 
