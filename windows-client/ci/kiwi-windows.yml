@@ -158,6 +158,12 @@ jobs:
           cargo test --no-default-features
           if ($LASTEXITCODE -ne 0) { throw "The app's tests failed" }
 
+      # Tauri downloads NSIS from GitHub Releases on every build; kept between runs so an outage there doesn't stop the build
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-tools-nsis-3.13
+
       - name: Installer
         run: |
           $ErrorActionPreference = "Stop"
@@ -166,8 +172,14 @@ jobs:
           Copy-Item "$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe", dist\tunnel.dll, dist\wireguard.dll $Bundle -Force
           Push-Location app
           # A public-style build: --no-default-features removes the "use a config file" testing option.
-          npm run tauri -- build -- --no-default-features
-          if ($LASTEXITCODE -ne 0) { throw "The installer didn't build" }
+          # Tried three times: the only network step here is Tauri fetching NSIS, which GitHub Releases sometimes answers with a 504.
+          foreach ($try in 1..3) {
+            npm run tauri -- build -- --no-default-features
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($try -eq 3) { throw "The installer didn't build" }
+            Write-Host "Installer build failed (try $try), trying again in 60 s"
+            Start-Sleep 60
+          }
           Pop-Location
           $Built = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*-setup.exe" | Sort-Object LastWriteTime | Select-Object -Last 1
           if (-not $Built) { throw "No installer was produced" }
