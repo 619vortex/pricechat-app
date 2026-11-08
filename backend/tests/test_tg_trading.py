@@ -318,7 +318,9 @@ def test_closeall_asks_first_then_closes_everything(db: Session, md: FakeMD) -> 
     assert "Close all 2" in say(db, tg, 911, "/closeall")
     assert db.scalar(select(TrPosition.id).where(TrPosition.status == "CLOSED")) is None  # not before Confirm
     assert "Nothing was closed" in press(db, tg, 911, "ca:no")
-    assert "Closed 2 of 2" in press(db, tg, 911, "ca:all")
+    assert "out of date" in press(db, tg, 911, "ca:all:1")  # an old button (a 1970 stamp) never closes anything
+    fresh = next(b[0][0]["callback_data"] for b in reversed(tg.buttons) if b and b[0][0]["callback_data"].startswith("ca:all:"))
+    assert "Closed 2 of 2" in press(db, tg, 911, fresh)
     assert "No open bot positions" in say(db, tg, 911, "/closeall")
 
 
@@ -357,3 +359,19 @@ def test_enter_reply_text_reaches_the_command(monkeypatch: pytest.MonkeyPatch) -
     parsed = parse_update(upd)
     assert parsed.reply_text.startswith("🟢 $SOL LONG · #012")
     assert tgtrade.signal_from([], parsed.reply_text) == 12
+
+
+def test_buttons_expire_and_prices_and_targets_read_as_typed(db: Session, md: FakeMD) -> None:
+    banter(db, "941")
+    tg = TG()
+    pos = open_paper(db, tg, 941)
+    t1, t2 = round(pos.tp1 * 1.0123, 1), round(pos.tp1 * 1.0456, 1)
+    say(db, tg, 941, f"/tp {t1} {t2}")  # two targets on the only position, not "position {t1}"
+    data = tg.buttons[-1][0][0]["callback_data"]
+    assert f":{pos.id}:t:" in data and data.endswith(f"{t1:.12g}:{t2:.12g}")
+    stale = data.split(":")
+    stale[1] = "1"  # the same button, issued long ago
+    assert "out of date" in press(db, tg, 941, ":".join(stale))
+    assert "Done" in press(db, tg, 941, data)
+    db.expire_all()
+    assert db.get(TrPosition, pos.id).tp1 == pytest.approx(t1, rel=1e-4)
