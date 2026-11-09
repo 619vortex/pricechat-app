@@ -236,8 +236,9 @@ class TelegramIngestor:
             from app.telegram import moderation
 
             if group and word in moderation.COMMANDS:  # /warn, /unmute, /strikes: only in the allow-listed groups, handled after the commit
-                if parsed.chat.chat_id in sources:
-                    self._moderation.append(("cmd", parsed.chat.chat_id, parsed.author_id, anonymous, word, parsed.text.split()[1:],
+                # only an anonymous admin (posting as the group itself) skips the admin check; posting as a channel never does
+                if parsed.chat.chat_id in sources and is_ours(parsed.text, get_bot_state(self.db).bot_username) and not parsed.edited:
+                    self._moderation.append(("cmd", parsed.chat.chat_id, parsed.author_id, parsed.as_group, word, parsed.text.split()[1:],
                                              parsed.reply_author_id, parsed.reply_author_name, parsed.reply_to_message_id, parsed.message_id))
                 report.ignored_other += 1
                 return
@@ -269,12 +270,17 @@ class TelegramIngestor:
             report.ignored_unauthorised += 1
             return
         # rule 5, automatically: a link from a member (admins are checked after the commit) is never stored, and is deleted
+        # never a channel's own post or its automatic copy (777000, linked discussion group), never the group itself (anonymous admins),
+        # never another bot. A member posting as their own channel can't be muted: the message is deleted (no strike).
         if (source.enabled and isinstance(parsed, ParsedMessage) and parsed.chat.chat_type in ("group", "supergroup") and parsed.author_id
-                and not parsed.author_is_bot and not parsed.author_is_anonymous):
+                and not parsed.automatic_forward and not parsed.channel_post and not parsed.as_group and (not parsed.author_is_bot or parsed.as_channel)):
             from app.telegram import moderation
 
             if moderation.links_in(parsed.text, get_bot_state(self.db).bot_username):
-                self._moderation.append(("link", parsed.chat.chat_id, parsed.author_id, parsed.author_name, parsed.message_id, parsed.text))
+                if parsed.as_channel:
+                    self._moderation.append(("delete", parsed.chat.chat_id, parsed.message_id))
+                else:
+                    self._moderation.append(("link", parsed.chat.chat_id, parsed.author_id, parsed.author_name, parsed.message_id, parsed.text))
                 report.ignored_other += 1
                 return
         if not (source.enabled and source.ingestion_enabled):
@@ -318,6 +324,9 @@ class TelegramIngestor:
         state = get_bot_state(self.db)
         for item in pending:
             try:
+                if item[0] == "delete":
+                    await moderation.delete_quietly(self.client, item[1], item[2])
+                    continue
                 if item[0] == "cmd":
                     _, chat, uid, anon, cmd, words, r_uid, r_name, r_mid, mid = item
                     reply = await moderation.command(self.db, self.client, chat, uid, anon, cmd, words, r_uid, r_name, r_mid, mid, state.bot_id)

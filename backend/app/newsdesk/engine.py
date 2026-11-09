@@ -386,7 +386,7 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             continue
         cap = s.target_per_day + s.max_breaking_per_day
         if ev.slot == "slot":  # the six scheduled slots are the plan: X's older 3-4 a day setting doesn't drop them
-            cap = max(cap, len(events.policy(s.state or {}).slot_hours))
+            cap = max(cap, len(events.policy(s.state or {}).slot_hours) + 1)  # +1: yesterday's same slot can still be inside a rolling 24 h
         sent = int(db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.x_status.in_(("dry_run", "published", "uncertain")), NdEvent.released_at >= now - timedelta(days=1))) or 0)
         if sent >= cap:
             events.mark(ev, "x", "skipped", f"X's own daily limit ({cap})")
@@ -642,7 +642,7 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
             "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "headlines",
             "today": {"published": _sent(db, s, day_ago), "breaking": _sent(db, s, day_ago, "breaking"), "target": s.target_per_day},
             "cost": {"per_post_usd": plain, "posted_30d": sent_30, "estimate_30d_usd": round(sent_30 * plain, 2), "budget": budget.limits(), "x_spend_today_usd": budget.today()["cost"], "x_spend_month_usd": budget.month()["cost"]},
-            "queue": rows("queued", limit=30), "published": rows("published", "dry_run", limit=50), "problems": rows("failed", "uncertain", limit=20), "desk": events.overview(db, now)}
+            "queue": rows("queued", limit=30), "published": rows("published", "dry_run", limit=50), "problems": rows("failed", "uncertain", limit=20), "desk": events.overview(db, now, s.state or {})}
 
 
 def edit_post(db: Session, post: NdPost, text: str) -> checks.Result:
