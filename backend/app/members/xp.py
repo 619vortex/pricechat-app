@@ -27,6 +27,10 @@ from app.models.members import Member, MemberAuditLog, ModerationFlag, Rank, Rep
 AUTOMATIC_SOURCES = {"website", "telegram", "x", "google", "youtube", "mission"}
 STAFF_SOURCES = {"moderator", "admin"}
 DAILY_XP_CAP = 60  # overall automatic XP per member per UTC day
+# Event types stored under an automatic source label (for the member's breakdown) whose rule is NOT under the overall cap:
+# they must not count towards it either. Pack Giveaway XP is shown as "website" but has its own 100/day cap ("packs" rule
+# source): counting it let packs use up the 60/day that Read & Earn, Watch, missions and the daily visit share (audit PP-3).
+OUTSIDE_OVERALL_CAP = frozenset({"pack.open"})
 # X's developer policy forbids rewards for actions on X (posts, replies, likes, reposts): refused here whatever the
 # rule settings say, and so are missions that are actions on X (see missions.X_ACTION_KINDS).
 X_ENGAGEMENT_EVENTS = frozenset({"x.mention_pricechat", "x.reply_pricechat", "x.like_pricechat", "x.repost_pricechat"})
@@ -72,7 +76,7 @@ class _DayTotals:
     def paid(self, day: str, event_type: str | None = None, sources: set[str] | None = None) -> int:
         """What _paid_today would return."""
         return sum(v for (d, t, s, plain), v in self.rows.items()
-                   if plain and d == day and (event_type is None or t == event_type) and (not sources or s in sources))
+                   if plain and d == day and (event_type is None or t == event_type) and (not sources or (s in sources and t not in OUTSIDE_OVERALL_CAP)))
 
     def telegram(self, day: str) -> int:
         """What telegram_paid_today would return."""
@@ -212,8 +216,8 @@ def _paid_today(db: Session, member_id: int, day: str, event_type: str | None = 
     )
     if event_type:
         stmt = stmt.where(ReputationEvent.event_type == event_type)
-    if sources:
-        stmt = stmt.where(ReputationEvent.source.in_(sources))
+    if sources:  # the overall cap's sum: automatic sources, minus the event types that aren't under that cap
+        stmt = stmt.where(ReputationEvent.source.in_(sources), ReputationEvent.event_type.not_in(OUTSIDE_OVERALL_CAP))
     return int(db.scalar(stmt) or 0)
 
 
@@ -223,6 +227,15 @@ def telegram_paid_today(db: Session, member_id: int, day: str) -> int:
         ReputationEvent.member_id == member_id, ReputationEvent.day == day, ReputationEvent.xp > 0,
         ReputationEvent.event_type.like("telegram.%"), ReputationEvent.event_type != "telegram.message",  # it has its own 50/day cap
         ReputationEvent.source == "telegram")) or 0)
+
+
+def _lock_member(db: Session, member: Member) -> None:
+    """A no-op UPDATE of the member's row: it takes the database write lock (SQLite) or the row lock (PostgreSQL) until the
+    caller's transaction ends, so awards to one member can't interleave their cap checks with their inserts."""
+    if member.id is None:
+        return
+    t = Member.__table__
+    db.execute(t.update().where(t.c.id == member.id).values(updated_at=t.c.updated_at))  # (updated_at kept: no onupdate)
 
 
 def _refuse(db: Session, member: Member, rule: XPRule, why: str, day: str, live: bool = True) -> AwardResult:
@@ -281,52 +294,69 @@ def award(
         return _refuse(db, member, rule, "duplicate", day, live)
     if claim_key and db.scalar(select(XPClaim.id).where(XPClaim.claim_hash == claim_hash(event_type, claim_key))):
         return AwardResult(False, 0, "already_claimed")
-    if rule.max_per_member is not None:
-        done = db.scalar(select(func.count()).select_from(ReputationEvent).where(
-            ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type, ReputationEvent.reversed_at.is_(None),
-            ReputationEvent.reverses_id.is_(None))) or 0
-        if done >= rule.max_per_member:
-            return AwardResult(False, 0, "max_reached")
-    b = _batch(db)
-    if rule.cooldown_seconds:
-        if b and (member.id, event_type) in b.last_at:
-            last = b.last_at[(member.id, event_type)]
-        else:
-            last = db.scalar(select(ReputationEvent.occurred_at).where(
-                ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type, ReputationEvent.reverses_id.is_(None),
-            ).order_by(ReputationEvent.occurred_at.desc()).limit(1))
-            if b:
-                b.last_at[(member.id, event_type)] = last
-        if last is not None and abs((when - last).total_seconds()) < rule.cooldown_seconds:
-            return _refuse(db, member, rule, "cooldown", day, live)
 
-    amount = xp if xp is not None else rule.xp
-    if amount == 0:
-        return AwardResult(False, 0, "zero")
-    capped = False
-    totals = b.day_totals(db, member.id, day) if b and amount > 0 else None
-    if amount > 0 and rule.daily_cap is not None:
-        room = rule.daily_cap - (totals.paid(day, event_type=event_type) if totals else _paid_today(db, member.id, day, event_type=event_type))
-        if room <= 0:
-            return _refuse(db, member, rule, "daily_cap", day, live)
-        if amount > room:
-            amount, capped = room, True
-    if amount > 0 and event_type.startswith("telegram.") and rule.verification_source == "telegram":
-        from app.members.reputation import settings as rep_settings
+    def limits() -> tuple[AwardResult | None, int, bool]:
+        """The per-member limit, cooldown and daily caps: (refusal or None, amount to pay, capped)."""
+        if rule.max_per_member is not None:
+            done = db.scalar(select(func.count()).select_from(ReputationEvent).where(
+                ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type, ReputationEvent.reversed_at.is_(None),
+                ReputationEvent.reverses_id.is_(None))) or 0
+            if done >= rule.max_per_member:
+                return AwardResult(False, 0, "max_reached"), 0, False
+        b = _batch(db)
+        if rule.cooldown_seconds:
+            if b and (member.id, event_type) in b.last_at:
+                last = b.last_at[(member.id, event_type)]
+            else:
+                last = db.scalar(select(ReputationEvent.occurred_at).where(
+                    ReputationEvent.member_id == member.id, ReputationEvent.event_type == event_type, ReputationEvent.reverses_id.is_(None),
+                ).order_by(ReputationEvent.occurred_at.desc()).limit(1))
+                if b:
+                    b.last_at[(member.id, event_type)] = last
+            if last is not None and abs((when - last).total_seconds()) < rule.cooldown_seconds:
+                return _refuse(db, member, rule, "cooldown", day, live), 0, False
 
-        room = (b.settings(db) if b else rep_settings(db)).telegram_daily_cap - (
-            totals.telegram(day) if totals else telegram_paid_today(db, member.id, day))
-        if room <= 0:
-            return _refuse(db, member, rule, "telegram_cap", day, live)
-        if amount > room:
-            amount, capped = room, True
-    if amount > 0 and rule.verification_source in AUTOMATIC_SOURCES:
-        room = DAILY_XP_CAP - (totals.paid(day, sources=AUTOMATIC_SOURCES) if totals else
-                               _paid_today(db, member.id, day, sources=AUTOMATIC_SOURCES))
-        if room <= 0:
-            return _refuse(db, member, rule, "overall_cap", day, live)
-        if amount > room:
-            amount, capped = room, True
+        amount = xp if xp is not None else rule.xp
+        if amount == 0:
+            return AwardResult(False, 0, "zero"), 0, False
+        capped = False
+        totals = b.day_totals(db, member.id, day) if b and amount > 0 else None
+        if amount > 0 and rule.daily_cap is not None:
+            room = rule.daily_cap - (totals.paid(day, event_type=event_type) if totals else _paid_today(db, member.id, day, event_type=event_type))
+            if room <= 0:
+                return _refuse(db, member, rule, "daily_cap", day, live), 0, False
+            if amount > room:
+                amount, capped = room, True
+        if amount > 0 and event_type.startswith("telegram.") and rule.verification_source == "telegram":
+            from app.members.reputation import settings as rep_settings
+
+            room = (b.settings(db) if b else rep_settings(db)).telegram_daily_cap - (
+                totals.telegram(day) if totals else telegram_paid_today(db, member.id, day))
+            if room <= 0:
+                return _refuse(db, member, rule, "telegram_cap", day, live), 0, False
+            if amount > room:
+                amount, capped = room, True
+        if amount > 0 and rule.verification_source in AUTOMATIC_SOURCES:
+            room = DAILY_XP_CAP - (totals.paid(day, sources=AUTOMATIC_SOURCES) if totals else
+                                   _paid_today(db, member.id, day, sources=AUTOMATIC_SOURCES))
+            if room <= 0:
+                return _refuse(db, member, rule, "overall_cap", day, live), 0, False
+            if amount > room:
+                amount, capped = room, True
+        return None, amount, capped
+
+    refused, amount, capped = limits()
+    if refused:
+        return refused
+    # The checks above are read-then-insert: parallel requests could all pass them before any of them inserts (audit PP-6:
+    # 30 parallel awards paid 30 XP against a daily cap of 10). So take the write lock now and check again: on SQLite a
+    # write is the only way to hold it until commit (BEGIN IMMEDIATE semantics; SELECT ... FOR UPDATE is a no-op there), on
+    # PostgreSQL it locks this member's row. Parallel awards for the member then run one at a time and the second pass sees
+    # what the others paid. Refusals above (the common case: repeats, caps already reached) never take the lock.
+    _lock_member(db, member)
+    refused, amount, capped = limits()
+    if refused:
+        return refused
 
     event = ReputationEvent(
         member_id=member.id, event_type=event_type, xp=amount, category=rule.category, source=(source or rule.verification_source)[:16],

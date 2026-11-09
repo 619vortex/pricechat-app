@@ -344,7 +344,7 @@ function EmailRow({ p }: { p: Passport }) {
   );
 }
 
-/** Ethereum wallet: proved by a free signature (never a key). The first one gives a free Kiwi level, and it's the wallet
+/** Ethereum wallet: proved by a free signature (never a key). The first one gives +100 XP, and it's the wallet
  *  the Earn funnel checks on Hyperliquid. */
 function WalletRow() {
   const [w, setW] = useState<{ wallet: { address: string } | null; free_level_claimed: boolean } | null>(null);
@@ -393,7 +393,7 @@ function WalletRow() {
       {addr ? <span className="pp-ok">Verified ✓</span>
         : <button type="button" className={`site-button pp-cta${busy ? " is-waiting" : ""}`} disabled={busy || !w} onClick={connect}>{busy ? "Check your wallet…" : "Connect"}</button>}
       {msg && <p className={`pp-account-extra ${msg.ok ? "pp-ok" : "pp-connect-error"}`} role={msg.ok ? "status" : "alert"}>{msg.text}</p>}
-      {!addr && <p className="pp-account-extra site-muted">MetaMask, OKX, Binance Wallet, Trust, Coinbase and more. A free signature proves the wallet is yours: no transaction, and we never ask for a seed phrase or key. First wallet: +100 XP (or a whole free level, if that's more).</p>}
+      {!addr && <p className="pp-account-extra site-muted">MetaMask, OKX, Binance Wallet, Trust, Coinbase and more. A free signature proves the wallet is yours: no transaction, and we never ask for a seed phrase or key. First wallet: +100 XP.</p>}
     </li>
   );
 }

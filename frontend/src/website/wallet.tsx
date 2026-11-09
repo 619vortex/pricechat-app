@@ -207,7 +207,7 @@ export function walletError(e: unknown): string | null {
   return m || "Couldn't connect the wallet.";
 }
 
-/** "Sign in with wallet" for the sign-in popup: one Kiwi Passport per wallet (new wallets get a new one, plus 100+ XP). */
+/** "Sign in with wallet" for the sign-in popup: one Kiwi Passport per wallet (new wallets get a new one, plus 100 XP). */
 export function WalletSignIn({ compact = false }: { compact?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

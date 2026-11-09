@@ -35,6 +35,13 @@ RANKS: list[dict[str, Any]] = [
      "art": {"treatment": "mythic", "overlay": None, "placeholder": None, "slot": None}},
 ]
 
+# The wallet reward is a flat 100 XP (audit PP-2). The old default text promised "100+ XP, or enough to reach your next rank";
+# ensure_catalog replaces that text on existing rows (only while it is still the untouched old default).
+WALLET_LABEL = "Connected a wallet: 100 XP"
+WALLET_DESCRIPTION = ("Once per Passport and once per wallet: signing a message with your own Ethereum wallet pays 100 XP. "
+                      "Signing is free and moves no funds.")
+OLD_WALLET_LABEL = "Connected a wallet: 100+ XP"
+
 X_POLICY_NOTE = ("X's developer policy doesn't allow rewards (points or XP) for actions on X: posts, replies, likes or "
                  "reposts. You can still reply and repost from Price Chat; it just doesn't earn XP.")
 X_ENGAGEMENT_RULES = ("x.mention_pricechat", "x.reply_pricechat", "x.like_pricechat", "x.repost_pricechat")
@@ -58,9 +65,7 @@ RULES: list[dict[str, Any]] = [
     dict(event_type="deposit.tier", label="Hyperliquid deposit tier reached", xp=0, verification_source="wallet",
          description="Once per tier: $10, $100, $1,000 and $10,000 deposited into your own Hyperliquid account (read from "
                      "Hyperliquid's deposit records, never your balance)."),
-    dict(event_type="wallet.verified", label="Connected a wallet: 100+ XP", xp=0, max_per_member=1, verification_source="wallet",
-         description="Once per Passport and once per wallet: signing a message with your own Ethereum wallet pays at least 100 XP, or enough "
-                     "to reach your next Kiwi rank if that's more. Signing is free and moves no funds."),
+    dict(event_type="wallet.verified", label=WALLET_LABEL, xp=0, max_per_member=1, verification_source="wallet", description=WALLET_DESCRIPTION),
     # --- Pokémon Portfolio: modest, once each (adding and deleting cards can never farm XP) -------------------------
     dict(event_type="portfolio.first_card", label="Started a Pokémon Portfolio", xp=15, max_per_member=1, verification_source="website",
          description="Once, when the first card is added to your Pokémon Portfolio."),
@@ -217,6 +222,10 @@ def ensure_catalog(db: Session) -> None:
         if rule.enabled or rule.availability != "unavailable" or rule.availability_note != X_POLICY_NOTE:
             rule.enabled, rule.availability, rule.availability_note = False, "unavailable", X_POLICY_NOTE
             changed = True
+    wallet = db.scalar(select(XPRule).where(XPRule.event_type == "wallet.verified", XPRule.label == OLD_WALLET_LABEL))
+    if wallet is not None:  # the old "or enough to reach your next rank" copy no longer describes the reward
+        wallet.label, wallet.description = WALLET_LABEL, WALLET_DESCRIPTION
+        changed = True
     have = set(db.scalars(select(Badge.key)))
     for b in BADGES:
         if b["key"] not in have:

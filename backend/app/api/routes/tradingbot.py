@@ -56,6 +56,14 @@ def _visitor(request: Request) -> str:
     return hashlib.sha256(f"{client_key(request)}|{request.headers.get('user-agent', '')}".encode()).hexdigest()
 
 
+def _login_key(request: Request) -> str:
+    """Wallet sign-in rate-limit key: the client's network address only (an IPv6 /64 is one key). Not the User-Agent or any
+    other header the caller chooses, which bought a fresh budget per request (audit SEC-6 / PP-4)."""
+    from app.security.client_ip import client_key
+
+    return client_key(request)
+
+
 def _open_or_admin(db: Any, request: Request) -> None:
     if not service.settings(db).public_enabled and not _is_admin(db, request):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "The VIP Trading Bot isn't open yet.")
@@ -448,7 +456,7 @@ def my_pnl(db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
 def wallet_login_nonce(payload: NonceIn, request: Request, db: DbSession, runtime: Runtime) -> dict[str, str]:
     host = urlparse(runtime.settings.members_public_url).netloc or "pricechat.live"
     try:
-        return service.login_nonce(db, payload.address, host, _visitor(request))
+        return service.login_nonce(db, payload.address, host, _login_key(request))
     except (service.AccessError, ValueError) as e:
         raise _fail(e) from e
 
@@ -460,7 +468,7 @@ def wallet_login_verify(payload: VerifyIn, request: Request, response: Response,
     from app.members import service as members
 
     try:
-        member, created = service.login_verify(db, payload.nonce, payload.signature, _visitor(request))
+        member, created = service.login_verify(db, payload.nonce, payload.signature, _login_key(request))
     except service.AccessError as e:
         raise _fail(e) from e
     _set_session(response, runtime.settings, members.new_session(db, member, runtime.settings.member_session_days))
