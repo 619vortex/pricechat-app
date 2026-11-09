@@ -316,7 +316,8 @@ mod check {
     }
 
     /// Cuts `ip` off completely (both directions, every protocol) until `seconds` pass or this process is killed: the VPN server
-    /// "goes dark" for the failover test. A block in its own sublayer beats the permits of any other, Kiwi's included.
+    /// "goes dark" for the failover test. A block in its own sublayer beats the permits of any other, Kiwi's included. At the IP
+    /// packet layers, so the tunnel's UDP flow, already open, is cut as well (the ALE layers judge a flow only when it opens).
     pub fn cut(ip: &str, seconds: u64) -> i32 {
         use kiwivpn::guard::{Cond, Dir, Rule};
         let Ok(net) = Net::parse(&format!("{ip}/{}", if ip.contains(':') { 128 } else { 32 })) else {
@@ -324,7 +325,7 @@ mod check {
             return 2;
         };
         let rules = [Dir::Out, Dir::In].into_iter().map(|dir| Rule { v6: net.v6(), dir, permit: false, weight: 15, conds: vec![Cond::RemoteNet(net)], name: "test: server cut off" }).collect();
-        match Guard::engage_rules(rules, "Kiwi CI: server cut off") {
+        match Guard::engage_rules(rules, "Kiwi CI: server cut off", true) {
             Ok(_g) => {
                 println!("held");
                 std::thread::sleep(Duration::from_secs(seconds.min(1200)));

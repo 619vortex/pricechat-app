@@ -45,6 +45,8 @@ pub struct Guard {
     sublayer: GUID,
     kill_switch: bool,
     filters: usize,
+    /// Filters at the IP packet layers (every packet judged) instead of the ALE layers (each flow judged once). Test tools only.
+    packet: bool,
 }
 
 // The handle is only used from behind the service's lock.
@@ -68,7 +70,7 @@ impl Guard {
             session.displayData.name = name.as_mut_ptr();
             let mut engine: HANDLE = null_mut();
             check("open", FwpmEngineOpen0(null(), RPC_C_AUTHN_WINNT, null(), &session, &mut engine))?;
-            let mut guard = Guard { engine, sublayer: new_sublayer_key(), kill_switch: plan.kill_switch, filters: 0 };
+            let mut guard = Guard { engine, sublayer: new_sublayer_key(), kill_switch: plan.kill_switch, filters: 0, packet: false };
             let mut ids: Vec<*mut FWP_BYTE_BLOB> = Vec::new();
             for app in apps {
                 let mut blob: *mut FWP_BYTE_BLOB = null_mut();
@@ -93,8 +95,9 @@ impl Guard {
     }
 
     /// Any rules, held the same way (dynamic session, own sublayer). For test tools: the end-to-end test cuts a VPN server off
-    /// with it, because a Windows Firewall rule may not apply where the tests run.
-    pub fn engage_rules(list: Vec<Rule>, label: &str) -> Result<Guard, String> {
+    /// with it, because a Windows Firewall rule may not apply where the tests run. `packet`: judge every packet (IP packet
+    /// layers), so a flow that is already open (the tunnel's own UDP) is cut too; the ALE layers only judge new flows.
+    pub fn engage_rules(list: Vec<Rule>, label: &str, packet: bool) -> Result<Guard, String> {
         let mut name = wide(label);
         let mut what = wide(label);
         unsafe {
@@ -103,7 +106,7 @@ impl Guard {
             session.displayData.name = name.as_mut_ptr();
             let mut engine: HANDLE = null_mut();
             check("open", FwpmEngineOpen0(null(), RPC_C_AUTHN_WINNT, null(), &session, &mut engine))?;
-            let mut guard = Guard { engine, sublayer: new_sublayer_key(), kill_switch: false, filters: 0 };
+            let mut guard = Guard { engine, sublayer: new_sublayer_key(), kill_switch: false, filters: 0, packet };
             guard.filters = guard.add_all(list, &[], name.as_mut_ptr(), what.as_mut_ptr())?;
             Ok(guard)
         }
@@ -123,7 +126,7 @@ impl Guard {
                 if rule.conds.iter().any(|c| matches!(c, Cond::App(i) if apps.get(*i).is_none_or(|b| b.is_null()))) {
                     continue;
                 }
-                add_rule(self.engine, self.sublayer, &rule, apps, name)?;
+                add_rule(self.engine, self.sublayer, &rule, apps, name, self.packet)?;
                 count += 1;
             }
             Ok(count)
@@ -156,7 +159,16 @@ fn layer(rule: &Rule) -> GUID {
     }
 }
 
-unsafe fn add_rule(engine: HANDLE, sublayer: GUID, rule: &Rule, apps: &[*mut FWP_BYTE_BLOB], name: *mut u16) -> Result<(), String> {
+fn packet_layer(rule: &Rule) -> GUID {
+    match (rule.dir, rule.v6) {
+        (Dir::Out, false) => FWPM_LAYER_OUTBOUND_IPPACKET_V4,
+        (Dir::Out, true) => FWPM_LAYER_OUTBOUND_IPPACKET_V6,
+        (Dir::In, false) => FWPM_LAYER_INBOUND_IPPACKET_V4,
+        (Dir::In, true) => FWPM_LAYER_INBOUND_IPPACKET_V6,
+    }
+}
+
+unsafe fn add_rule(engine: HANDLE, sublayer: GUID, rule: &Rule, apps: &[*mut FWP_BYTE_BLOB], name: *mut u16, packet: bool) -> Result<(), String> {
     // the values the conditions point to live here until WFP has copied them
     let mut v4: Vec<Box<FWP_V4_ADDR_AND_MASK>> = Vec::new();
     let mut v6: Vec<Box<FWP_V6_ADDR_AND_MASK>> = Vec::new();
@@ -209,7 +221,7 @@ unsafe fn add_rule(engine: HANDLE, sublayer: GUID, rule: &Rule, apps: &[*mut FWP
     }
     let mut filter: FWPM_FILTER0 = zeroed();
     filter.displayData.name = name;
-    filter.layerKey = layer(rule);
+    filter.layerKey = if packet { packet_layer(rule) } else { layer(rule) };
     filter.subLayerKey = sublayer;
     filter.weight.r#type = FWP_UINT8;
     filter.weight.Anonymous.uint8 = rule.weight;
