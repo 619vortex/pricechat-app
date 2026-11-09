@@ -72,6 +72,8 @@ class VpnAccount(IdMixin, TimestampMixin, Base):
     trial_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # set once, never cleared: one trial per account
     trial_ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     is_owner: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # the devices made in Admin: never charged, no key, no member
+    reminded_until: Mapped[datetime | None] = mapped_column(UTCDateTime())  # the end date the last expiry reminder was about: new time means new reminders
+    reminder_stage: Mapped[int | None] = mapped_column(Integer)  # 3, 1 or 0: days left when that reminder went
 
 
 class VpnPayment(IdMixin, TimestampMixin, Base):
@@ -87,10 +89,12 @@ class VpnPayment(IdMixin, TimestampMixin, Base):
     amount_usd: Mapped[float] = mapped_column(Float, nullable=False)  # asked for
     paid_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default="0", nullable=False)  # credited so far
     seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
-    status: Mapped[str] = mapped_column(String(12), default="pending", server_default="pending", nullable=False)  # pending | credited | failed | expired | refunded
+    status: Mapped[str] = mapped_column(String(12), default="pending", server_default="pending", nullable=False)  # pending | credited | failed | expired | refunded | review | unmatched
     pay_address: Mapped[str | None] = mapped_column(String(128))
     pay_amount: Mapped[float | None] = mapped_column(Float)
     credited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # the last time vpn.reconcile or a person asked the provider
+    note: Mapped[str | None] = mapped_column(String(200))  # for Admin: why it needs a person, or what a person did
 
 
 class VpnBrowser(IdMixin, TimestampMixin, Base):

@@ -61,7 +61,7 @@ function Controls({ s, canCharge, onSaved }: { s: VpnSettings; canCharge: boolea
               ? "Turn payments on? Anyone without paid time loses access within 5 minutes (their devices are kept for 30 days). Devices you made here stay free. Payments are real money."
               : "Turn payments off? Kiwi VPN becomes free and everyone's devices switch back on within 5 minutes. A payment already started still gets credited.")} /><span />
           </label>
-          <p>{free ? (canCharge ? "Nobody is asked to pay and no payment option is shown. Turn on when you're ready to charge." : "Nobody is asked to pay. Add the NOWPayments or Stripe keys on the server to allow turning this on.")
+          <p>{free ? (canCharge ? "Nobody is asked to pay and no payment option is shown. Turn on when you're ready to charge." : "Nobody is asked to pay. Add the NOWPayments keys on the server to allow turning this on.")
             : "Members need paid time to connect. Any amount buys its share of 30 days."}</p>
         </section>
       </div>
@@ -322,7 +322,7 @@ type AdminBrowser = { id: number; server: string; last_active: string | null; rx
 type AdminDevice = { id: number; name: string; server: string; ip: string; last_handshake: string | null; rx_bytes: number; tx_bytes: number };
 export type VpnCustomer = { tester_until?: string | null; id: number; owner?: boolean; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
   has_card: boolean; payments: number; paid_usd: number; devices: AdminDevice[]; browsers?: AdminBrowser[] };
-export type VpnPaymentRow = { id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
+export type VpnPaymentRow = { note?: string | null; can_check?: boolean; id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
   created_at: string | null; credited_at: string | null; account: string | null };
 const CONNECTED_MS = 10 * 60_000;  // the sync reads handshakes every 5 minutes
 const STATE_TONE = { active: "good", lapsed: "warn", blocked: "bad" } as const;
@@ -436,12 +436,36 @@ function BlockKey({ onDone }: { onDone: () => Promise<void> }) {
 
 function Payments({ on }: { on: boolean }) {
   const r = useApi(() => request<{ items: VpnPaymentRow[] }>("/vpn/admin/payments"), 60_000);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  async function act(path: string, body: unknown, done: string) {
+    setNote(null);
+    try {
+      await request(path, { method: "POST", body: JSON.stringify(body) });
+      setNote({ ok: true, text: done });
+      await r.reload();
+    } catch (e) { setNote({ ok: false, text: errText(e) }); }
+  }
+  function credit(p: VpnPaymentRow) {
+    const usd = window.prompt(`What's this payment worth in total, in USD? It has been credited $${p.paid_usd.toFixed(2)}.`, p.amount_usd.toFixed(2));
+    if (!usd) return;
+    const reason = window.prompt("Why? This is kept with the payment.");
+    if (!reason) return;
+    const owner = p.account ? null : window.prompt("This payment has lost its account. Enter the account number, or the customer's anonymous key.");
+    if (!p.account && !owner) return;
+    const who = owner ? (/^\d+$/.test(owner.trim()) ? { account_id: Number(owner.trim()) } : { key: owner.trim() }) : {};
+    void act(`/vpn/admin/payments/${p.id}/credit`, { usd: Number(usd), reason, ...who }, "Credited.");
+  }
+  function refund(p: VpnPaymentRow) {
+    const reason = window.prompt("Record a refund you've already made in NOWPayments? This takes the time back and moves no money. Why was it refunded?");
+    if (reason) void act(`/vpn/admin/payments/${p.id}/refund`, { reason }, "Recorded as refunded.");
+  }
   return (
     <Card title="Payments">
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
+      {note && <Badge tone={note.ok ? "good" : "bad"}>{note.text}</Badge>}
       {r.loading && !r.data ? <Loading /> : !r.data?.items?.length ? <Empty>{on ? "No payments yet." : "Payments are off, so nobody is charged. Turn them on above when you're ready."}</Empty> : (
         <div className="table-wrap"><table className="table">
-          <thead><tr><th>Started</th><th>Customer</th><th>Via</th><th>Asked</th><th>Received</th><th>Time</th><th>Status</th></tr></thead>
+          <thead><tr><th>Started</th><th>Customer</th><th>Via</th><th>Asked</th><th>Received</th><th>Time</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {r.data.items.map((p) => (
               <tr key={p.id}>
@@ -451,7 +475,12 @@ function Payments({ on }: { on: boolean }) {
                 <td>${p.amount_usd.toFixed(2)}</td>
                 <td>${p.paid_usd.toFixed(2)}</td>
                 <td>{p.days ? `${p.days} days` : "—"}</td>
-                <td><Badge tone={p.status === "credited" ? "good" : p.status === "pending" ? "warn" : "bad"}>{p.status}</Badge></td>
+                <td><Badge tone={p.status === "credited" ? "good" : p.status === "pending" ? "warn" : "bad"}>{p.status}</Badge>{p.note && <div className="muted small">{p.note}</div>}</td>
+                <td><div className="btn-group">
+                  {p.can_check && <button className="btn btn-sm" onClick={() => void act(`/vpn/admin/payments/${p.id}/check`, {}, "Checked with NOWPayments.")}>Check now</button>}
+                  {p.status !== "refunded" && p.provider !== "stripe" && <button className="btn btn-sm" onClick={() => credit(p)}>Credit by hand</button>}
+                  {p.status !== "refunded" && p.provider !== "stripe" && <button className="btn btn-sm" onClick={() => refund(p)}>Record refund</button>}
+                </div></td>
               </tr>
             ))}
           </tbody>

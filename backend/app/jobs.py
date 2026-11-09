@@ -959,7 +959,39 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         # the owner hears once when a server goes offline / comes back / passes 90% of its capacity
         return {**out, **await alerts.check_vpn_servers(ctx.db, settings=s, transport=runtime.telegram.transport, now=ctx.now)}
 
+    async def vpn_reconcile(ctx: JobContext) -> dict[str, Any]:
+        """Kiwi VPN: a lost webhook mustn't lose a payment (app/vpn/billing.py). Does nothing until there are keys and an unfinished payment."""
+        import asyncio
+
+        from app.vpn import service as vpn
+
+        return await asyncio.to_thread(vpn.reconcile_payments, ctx.db, ctx.now)
+
+    async def vpn_reminders(ctx: JobContext) -> dict[str, Any]:
+        """Kiwi VPN: expiry reminders, in notifications and by email where there's an address. An email that fails isn't retried: the notification and the page still say it."""
+        import asyncio
+        import html
+
+        import httpx
+
+        from app.services import mailer
+        from app.vpn import service as vpn
+
+        emails = await asyncio.to_thread(vpn.due_reminders, ctx.db, ctx.now)
+        sent = 0
+        for mail in emails:
+            try:
+                await mailer.send(s, mail["to"], mail["subject"], mail["text"], f"<p>{html.escape(mail['text'])}</p>")
+                sent += 1
+            except (mailer.MailError, httpx.HTTPError) as e:
+                logging.getLogger(__name__).info("vpn: an expiry reminder email wasn't sent: %s", type(e).__name__)
+        return {"reminders": len(emails), "emailed": sent}
+
     specs += [
+        JobSpec("vpn.reconcile", "Kiwi VPN: unfinished payments", "Every 5 min: asks NOWPayments about payments still waiting, so a lost webhook can't cost a customer their time. Often at first, then rarely, and it gives up after 14 days. Applying an answer twice adds nothing",
+                300, vpn_reconcile, initial_delay_seconds=160, timeout_seconds=240),
+        JobSpec("vpn.reminders", "Kiwi VPN: expiry reminders", "Hourly: tells members with paid time or a free trial when 3 days and 1 day are left, and when it has ended, each once. In notifications, and by email where there's an address",
+                3600, vpn_reminders, initial_delay_seconds=400, timeout_seconds=240),
         JobSpec("vpn.sync", "Kiwi VPN: server sync", "Every 5 min: reads each VPN server's agent (online, handshakes, this month's bytes), re-adds members' missing peers, removes peers nobody owns and revokes devices of members who no longer qualify (rank dropped, banned). No traffic logs",
                 300, vpn_sync, initial_delay_seconds=100, timeout_seconds=240),
         JobSpec("system.alerts", "Owner alerts", "Every 10 min: tells the owner on Telegram (Settings › Background jobs › Owner alerts) when a Brand Manager TikTok account is expired or disconnected while AUTO is on, or Brand Manager stops publishing by itself (AUTO blocked or failing, videos past their posting time, failed sends); failing jobs are reported as they happen",

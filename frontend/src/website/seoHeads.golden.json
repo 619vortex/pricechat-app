@@ -54,6 +54,14 @@
     "title": "Kiwi VPN Privacy · Price Chat",
     "description": "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions."
   },
+  "vpn/terms": {
+    "title": "Kiwi VPN Terms · Price Chat",
+    "description": "What you get with Kiwi VPN, what it costs, how renewal works and when access ends."
+  },
+  "vpn/refunds": {
+    "title": "Kiwi VPN Refund Policy · Price Chat",
+    "description": "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong."
+  },
   "privacy": {
    "title": "Privacy · Price Chat",
    "description": "How Price Chat handles member data, connected accounts and Kiwi XP."

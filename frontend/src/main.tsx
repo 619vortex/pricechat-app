@@ -68,6 +68,8 @@ function PublicSite() {
         <Route path="learn" element={page(<LearnPage />)} />
         <Route path="vpn" element={page(<VpnPage />)} />
         <Route path="vpn/privacy" element={page(<LegalPage kind="vpnprivacy" />)} />
+        <Route path="vpn/terms" element={page(<LegalPage kind="vpnterms" />)} />
+        <Route path="vpn/refunds" element={page(<LegalPage kind="vpnrefunds" />)} />
         <Route path="vpn/desktop" element={page(<VpnDesktopPage />)} />
         <Route path="vpn/devices" element={page(<VpnDevicesPage />)} />
         <Route path="vpn/reviewer" element={page(<VpnReviewerPage />)} />

@@ -312,6 +312,15 @@
 .vpn-keyonce, .vpn-invoice { display: grid; gap: 12px; align-items: start; }
 .vpn-check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
 .vpn-fine { font-size: 12.500px; line-height: 1.5; }
+.vpn-expiring { margin: 6px 0 0; color: #ffcf5a; font-weight: 600; }
+.vpn-payments { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.vpn-payments li { display: grid; gap: 8px; min-width: 0; padding: 12px 14px; border: 1px solid var(--site-line, rgba(255, 255, 255, .12)); border-radius: 12px; }
+.vpn-payments p { margin: 0; overflow-wrap: anywhere; }
+.vpn-payment-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.vpn-payment-status { font-size: 12.500px; font-weight: 600; }
+.vpn-payment-status.is-credited { color: #a3e635; }
+.vpn-payment-status.is-pending, .vpn-payment-status.is-review, .vpn-payment-status.is-unmatched { color: #ffcf5a; }
+.vpn-payments .site-button { justify-self: start; }
 
 @media (min-width: 620px) {
   .vpn-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }

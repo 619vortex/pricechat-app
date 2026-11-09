@@ -296,7 +296,7 @@ export function LeaderboardPage() {
 
 // --- legal (draft) ----------------------------------------------------------------------------------------------
 
-type LegalKind = "privacy" | "vpnprivacy" | "terms" | "disclaimer" | "contact";
+type LegalKind = "privacy" | "vpnprivacy" | "vpnterms" | "vpnrefunds" | "terms" | "disclaimer" | "contact";
 
 const LEGAL: Record<LegalKind, { title: string; description: string; sections: [string, string[]][] }> = {
   privacy: {
@@ -340,7 +340,8 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "For each browser using the extension: a random login for one server. We keep only a one-way fingerprint of its password, and the password itself stays in your browser's extension storage.",
         "For each WireGuard device: the name you gave it, its public key and the private address we assigned it. Its private key is created on our server, handed to you once in its config, and not stored.",
         "Usage: how many bytes each login or device used this month, and when it was last active. We use this to show you your usage, apply any monthly limit and keep the service fair.",
-        "If payments are switched on and you pay: the amount, date and status of each payment. Payment providers handle the payment itself.",
+        "If payments are switched on and you pay: the amount, date, network and status of each payment, and the address and provider reference it used. Payment providers handle the payment itself. For an anonymous key, the link between a payment and your key, and its address and reference, are removed 7 days after the payment is settled, and the amount and date stay for our accounts.",
+        "If your paid time or free trial is ending and you use a Kiwi Passport: a reminder in your notifications, and by email if your Passport has an email address. An anonymous key has no way to be reached, so only the Kiwi VPN page shows it.",
       ]],
       ["What we don't keep", [
         "We don't log the websites or addresses you visit, your DNS lookups or the content of your traffic, and we don't keep a per-connection history of your use.",
@@ -370,6 +371,54 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ["Changes and questions", ["We'll update this page if any of this changes. To ask about it, message us on Telegram or X (see Contact)."]],
     ],
   },
+  vpnterms: {
+    title: "Kiwi VPN terms",
+    description: "What you get with Kiwi VPN, what it costs, how renewal works and when access ends.",
+    sections: [
+      ["The plan", [
+        "Kiwi VPN costs $9.99 for 30 days, paid in USDT on Ethereum, Tron or Solana through NOWPayments. Any amount within the limits shown buys its share of that time, so $5 buys about 15 days. Each network has its own minimum, shown before you pay, and network fees are yours.",
+        "Royal Kiwis and above get Kiwi VPN free for as long as they hold that rank. A Kiwi Passport account can use one free 30-day trial. Opening extra accounts to get more trials isn't allowed, and we may remove access gained that way.",
+      ]],
+      ["Renewal: only when you choose", [
+        "Nothing renews or charges by itself. You add time by hand when you want more, and we hold no card or wallet access. If you use a Kiwi Passport, we'll remind you 3 days and 1 day before your time ends, and when it has ended.",
+      ]],
+      ["When your time starts and ends", [
+        "Paid time starts when your payment is confirmed, and it's added after any paid time or free trial you have left, so paying early doesn't cost you any days. The time we credit follows what actually arrives.",
+        "When your time runs out, your devices are switched off within a few minutes and kept for 30 days. Add time in those 30 days and they come back on by themselves. After that they're removed, and you can add new ones.",
+      ]],
+      ["Anonymous keys", ["If you pay with an anonymous key, the key is the only thing that identifies your account. We can't recover a lost key, and any time on it is lost with it. Keep it safe."]],
+      ["Paying correctly", ["Send the exact amount shown, on the network shown, to the address shown. Coins sent on another network or in another currency may be lost, and we may not be able to recover them."]],
+      ["Using the service", [
+        "Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk, and blocked accounts can't buy more time.",
+        "Kiwi VPN is provided as is. We don't promise it will always be available, and no VPN makes you fully anonymous or secure. Our privacy page lists what we keep. Our apps have their own limits, which their download pages explain.",
+      ]],
+      ["Refunds", ["See the refund policy at /vpn/refunds."]],
+      ["Changes", ["If the price or these terms change, we'll say so on the Kiwi VPN page before you pay. Time you've already paid for stays at the price you paid."]],
+      ["Questions", ["Message us on Telegram or X (see Contact)."]],
+    ],
+  },
+  vpnrefunds: {
+    title: "Kiwi VPN refund policy",
+    description: "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong.",
+    sections: [
+      ["The short version", ["USDT payments go straight over the blockchain and we can't reverse them, so we normally put things right by correcting your time. Use your free trial first: it's there so you can check Kiwi VPN works for you before you pay."]],
+      ["If a payment goes wrong", [
+        "Your time hasn't appeared: most payments are credited a few minutes after the network confirms them. Open Payment history on the Kiwi VPN page and press Check now. If it still doesn't appear, contact us with the receipt number (it starts with KV-) and we'll look into it.",
+        "You paid twice, or paid too much: everything that arrives counts as time, so you won't lose it. If you'd rather have an extra payment back, contact us.",
+        "You paid too little: you get time for what arrived, and you can send the rest or start a new payment.",
+      ]],
+      ["When we'll refund", [
+        "If you paid and we couldn't provide Kiwi VPN to you, because of a fault on our side that we couldn't fix, contact us within 14 days of the payment, and we'll refund the time you haven't used.",
+        "If we close the service, we'll refund the paid time left on your account where we can reach you, which means we may not be able to for an anonymous key.",
+        "A refund goes back in USDT to an address you give us, less the network and processing fees, at the amount of USDT that payment's unused time is worth. The time refunded comes off your account.",
+      ]],
+      ["When we won't", [
+        "Time you've already used, a change of mind after a trial you could have used first, coins sent on the wrong network or in the wrong currency that can't be recovered, lost anonymous keys, and accounts blocked for breaking our terms.",
+      ]],
+      ["Your legal rights", ["Nothing here takes away any rights the law gives you where you live."]],
+      ["Asking for help", ["Message us on Telegram or X (see Contact) with your receipt number. Never send us your anonymous key in a public message."]],
+    ],
+  },
   terms: {
     title: "Terms",
     description: "The rules of the Price Chat community and Kiwi XP.",
@@ -381,7 +430,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "Ranks can't be bought. Any future paid perks will be kept separate from community rank.",
       ]],
       ["Community conduct", ["Be respectful. No spam, scams, impersonation, harassment or automated activity. Accounts that break the rules may be suspended or closed."]],
-      ["Kiwi VPN", ["Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk. It's provided as is, without a promise that it will always be available."]],
+      ["Kiwi VPN", ["Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk. It's provided as is, without a promise that it will always be available. Payments, renewal and refunds are covered by the Kiwi VPN terms (/vpn/terms) and refund policy (/vpn/refunds)."]],
       ["Changes", ["We may update these terms as the community grows. Material changes will be announced."]],
     ],
   },
@@ -413,7 +462,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
   return (
-    <SitePage {...pageHead(kind === "vpnprivacy" ? "vpn/privacy" : kind)}>
+    <SitePage {...pageHead(kind === "vpnprivacy" ? "vpn/privacy" : kind === "vpnterms" ? "vpn/terms" : kind === "vpnrefunds" ? "vpn/refunds" : kind)}>
       <article className="site-legal site-reveal">
         <p className="site-draft" role="note">
           Draft: this page has not had final legal review yet.
