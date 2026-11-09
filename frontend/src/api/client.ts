@@ -36,6 +36,7 @@ import type {
   ContentChannel,
   DeletionReport,
   Job,
+  JobMonitor,
   JobRun,
   Opportunity,
   OpportunityStatus,
@@ -304,6 +305,7 @@ export const api = {
 
   // background jobs & model routing
   jobs: () => request<Job[]>("/jobs"),
+  jobMonitors: () => request<JobMonitor[]>("/jobs/monitors"),
   runJob: (name: string) => request<JobRun>(`/jobs/${encodeURIComponent(name)}/run`, { method: "POST" }, AI_TIMEOUT_MS * 3),
   setJobEnabled: (name: string, enabled: boolean) => request<JobRun>(`/jobs/${encodeURIComponent(name)}`, json("PATCH", { enabled })),
   routing: () => request<Routing>("/model/routes"),

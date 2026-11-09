@@ -1,5 +1,6 @@
 """Telegram → raw messages. Allow-list enforced here; nothing else reaches the database."""
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -13,13 +14,16 @@ from app.connectors.state import get_connector_state
 from app.models.enums import Platform
 from app.models.telegram import TelegramBotState, TelegramMessage, TelegramSource
 from app.telegram.client import TelegramBotClient
-from app.telegram.errors import MalformedUpdateError, TelegramError
+from app.telegram.errors import MalformedUpdateError, TelegramError, TelegramRateLimitError, TelegramUnavailableError
 from app.telegram.parser import MembershipChange, ParsedMessage, parse_update
 from app.telegram.state import TelegramRuntime
 
 logger = logging.getLogger(__name__)
 
 MAX_BATCHES_PER_SYNC = 10  # 10 × 100 updates; the next run continues from the saved offset
+# getUpdates failing for a moment (TG-4): a 429 is waited out (up to MAX_RETRY_AFTER s), a 5xx / network error retried after
+# 1, 2, 4, 8 s; only after TRANSIENT_RETRIES in a row does the job fail (and telegram.ingest backs off at most 60 s, jobs.py)
+TRANSIENT_RETRIES, TRANSIENT_BACKOFF, TRANSIENT_BACKOFF_MAX, MAX_RETRY_AFTER = 5, 1.0, 8.0, 30.0
 
 
 @dataclass(slots=True)
@@ -123,6 +127,7 @@ class TelegramIngestor:
             await self.verify()
             state = get_bot_state(self.db)
         until = time.monotonic() + listen_seconds
+        transient, retry_wait = 0, 0.0  # transient getUpdates failures in a row, and the seconds spent waiting them out
 
         for batch in range(MAX_BATCHES_PER_SYNC if not listen_seconds else 100_000):
             offset = state.last_update_id + 1 if state.last_update_id is not None else None
@@ -131,7 +136,21 @@ class TelegramIngestor:
             # the long poll waits up to `wait` seconds: whatever the last batch's handlers wrote is saved first, so no
             # write transaction (SQLite's single write lock) is held while Telegram has nothing to say
             self.db.commit()
-            updates = await self.client.get_updates(offset, timeout=wait)
+            try:
+                updates = await self.client.get_updates(offset, timeout=wait)
+                transient = 0
+            except (TelegramRateLimitError, TelegramUnavailableError) as exc:
+                # a short rate limit, a 5xx or a network blip: wait it out here and keep listening, instead of failing the job
+                # (which backs off and leaves the bot silent for minutes) (TG-4)
+                transient += 1
+                limited = isinstance(exc, TelegramRateLimitError)
+                pause = float(exc.retry_after) if limited else min(TRANSIENT_BACKOFF * 2 ** (transient - 1), TRANSIENT_BACKOFF_MAX)
+                if transient > TRANSIENT_RETRIES or pause > MAX_RETRY_AFTER or retry_wait + pause > 2 * MAX_RETRY_AFTER:
+                    raise  # a long outage: the job fails and the scheduler retries (it stays inside the job's time limit)
+                retry_wait += pause
+                logger.warning("Telegram getUpdates: %s; retrying in %.0fs (%d of %d)", exc, pause, transient, TRANSIENT_RETRIES)
+                await asyncio.sleep(pause)
+                continue
             if not updates:
                 if until - time.monotonic() >= 1:
                     continue  # nothing yet: keep listening until this pass's time is up
@@ -223,7 +242,9 @@ class TelegramIngestor:
         # an anonymous admin / a post as the group or channel comes "from" Telegram's stand-in bot: in a group it may use the
         # public market commands (never linked to a member; account and trading commands stay private, see bot.handle_command)
         anonymous = isinstance(parsed, ParsedMessage) and parsed.author_is_anonymous and parsed.chat.chat_type != "private"
-        person = isinstance(parsed, ParsedMessage) and (not parsed.author_is_bot or anonymous) and parsed.author_id
+        # a channel's own post or its automatic forward into the discussion group is nobody's command (TG-6)
+        person = (isinstance(parsed, ParsedMessage) and (not parsed.author_is_bot or anonymous) and parsed.author_id
+                  and not parsed.channel_post and not parsed.automatic_forward)
         if person:
             from app.tradingos.bot import fc_command
 
@@ -231,6 +252,9 @@ class TelegramIngestor:
         if person and (fc or parsed.text.strip().startswith("/")):
             from app.tradingos.bot import PUBLIC, is_ours
 
+            if parsed.edited:  # an edited command was answered (or refused) when it was sent: never run it again (TG-5)
+                report.ignored_other += 1
+                return
             group = parsed.chat.chat_type != "private"
             word = (fc or parsed.text.strip()).split()[0].split("@")[0].lower()
             from app.telegram import moderation
@@ -241,7 +265,10 @@ class TelegramIngestor:
                                              parsed.reply_author_id, parsed.reply_author_name, parsed.reply_to_message_id, parsed.message_id))
                 report.ignored_other += 1
                 return
-            if (fc or not group or is_ours(parsed.text, get_bot_state(self.db).bot_username)) and (not anonymous or word in PUBLIC):
+            # groups: only the allow-listed ones and the bot's own (signal group, VIP group); anywhere else the message is
+            # discarded below like any other from a chat that isn't on the allow-list (TG-6)
+            if ((fc or not group or is_ours(parsed.text, get_bot_state(self.db).bot_username)) and (not anonymous or word in PUBLIC)
+                    and (not group or self._answers_in(parsed.chat, sources))):
                 logger.info("Bot command received: %s in %s chat %s%s (update %s)", "fc" if fc else word, "a group" if group else "a private",
                             parsed.chat.chat_id if group else "-", " from an anonymous admin / the group" if anonymous else "", parsed.update_id)
                 self._commands.append((parsed.chat.chat_id, parsed.author_id, (fc or parsed.text.strip())[:400], group,
@@ -340,6 +367,19 @@ class TelegramIngestor:
                 await self.client.confirm_sign_in(chat_id, texts.get(purpose, texts["login"]))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Sign-in confirmation not sent (%s)", type(exc).__name__)
+
+    def _answers_in(self, chat: object, sources: dict[int, TelegramSource]) -> bool:
+        """A group the bot answers commands in: on the allow-list, or the signal group / VIP group set in Admin."""
+        chat_id, username = getattr(chat, "chat_id", None), (getattr(chat, "username", None) or "").lower()
+        if chat_id in sources or (username and username == self._signal_group()):
+            return True
+        try:
+            from app.tradingbot.service import _is_group, settings as tb_settings
+
+            gid = (tb_settings(self.db).telegram_group_id or "").strip()
+            return bool(gid) and _is_group({"id": chat_id, "username": username}, gid)
+        except Exception:  # noqa: BLE001 - unknown means no
+            return False
 
     def _signal_group(self) -> str:
         from app.tradingos.signals import settings as ts_settings

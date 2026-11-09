@@ -216,6 +216,136 @@ def _ago(now: datetime, then: datetime | None) -> str:
     return f"{s / 60:.0f} min ago" if s < 7200 else f"{s / 3600:.1f} h ago"
 
 
+# --- silence monitors (ND-2): things that stop without an error -------------------------------------------------------
+# Each answers ok | alert | off (not used / not running on this server) | hold (outside the hours it's judged: keep the
+# last state) | warn (couldn't be read). The watchdog sends one owner alert per incident and one "recovered"; the owner's
+# /api/health, the Admin "Background jobs" card (GET /api/jobs/monitors) and the startup log show the same states, so they
+# are useful even before the owner alert chat is set.
+STORIES_QUIET = timedelta(hours=3)  # the News Desk stored no new story
+TG_QUIET = timedelta(hours=12)  # the News Desk's Telegram lane delivered nothing to the channel
+TG_HOURS = range(9, 23)  # UTC hours the Telegram silence is judged in (stories are mostly written by day)
+BACKUP_MAX_AGE = timedelta(hours=26)  # the nightly backup runs every 24 h
+FAILING_RUNS = 3  # an enabled job failing this many runs in a row (its own alert comes from app/alerts.job_outcome)
+KEY_SILENCE = "ops:silence:"
+
+
+def _runs_here(db: Session, sched: Any, name: str) -> bool:
+    from app.models.routing import ScheduledJob
+
+    if sched is None or getattr(sched, "_loop_task", None) is None or name not in sched.specs or name in sched.disabled:
+        return False
+    row = db.get(ScheduledJob, name)
+    return row is None or bool(row.enabled)
+
+
+def _m(key: str, label: str, status: str, detail: str, alert: str | None = None, notify: bool = True) -> dict[str, Any]:
+    return {"key": key, "label": label, "status": status, "detail": detail, "alert": alert, "notify": notify}
+
+
+def silence_monitors(db: Session, sched: Any, now: datetime | None = None) -> list[dict[str, Any]]:
+    """The four silence monitors' states (read-only; never raises: a monitor that can't be read says so)."""
+    from sqlalchemy import func
+
+    from app.models.routing import ScheduledJob
+
+    now = now or utcnow()
+    up_since = _aware(getattr(sched, "started_at", None)) or now
+    out: list[dict[str, Any]] = []
+    try:  # 1) the News Desk reads its feeds every tick: no new story for 3 h means it has stopped (a crashed tick, ND-1)
+        from app.models.newsdesk import NdSettings, NdStory
+
+        s = db.get(NdSettings, 1)
+        if not _runs_here(db, sched, "newsdesk.tick"):
+            out.append(_m("newsdesk_stories", "News Desk: new stories", "off", "the News Desk job doesn't run on this server"))
+        elif s is not None and (s.kill_switch or not s.automation):
+            out.append(_m("newsdesk_stories", "News Desk: new stories", "off", "News Desk automation is off"))
+        else:
+            last = _aware(db.scalar(select(func.max(NdStory.created_at))))
+            quiet = now - (last or up_since) > STORIES_QUIET
+            out.append(_m("newsdesk_stories", "News Desk: new stories", "alert" if quiet else "ok", f"last new story {_ago(now, last)}",
+                          f"Price Chat alert: the News Desk has stored no new story for over {STORIES_QUIET.total_seconds() / 3600:.0f} h "
+                          f"(last: {_ago(now, last)}).\nCheck the News Desk job in Admin > Background jobs.\nTime: {_when(now)}"))
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out.append(_m("newsdesk_stories", "News Desk: new stories", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+    try:  # 2) the Telegram lane: nothing delivered to the channel for 12 h (judged by day only)
+        from app.members.telegram_missions import channel_handle
+        from app.models.newsdesk import NdTelegramPost, NdTelegramSettings
+
+        t = db.get(NdTelegramSettings, 1)
+        if not _runs_here(db, sched, "newsdesk.telegram"):
+            out.append(_m("newsdesk_telegram", "News Desk: Telegram posts", "off", "the Telegram lane doesn't run on this server"))
+        elif (t is not None and not t.enabled) or not channel_handle(db):
+            out.append(_m("newsdesk_telegram", "News Desk: Telegram posts", "off", "the Telegram lane is off or has no channel"))
+        else:
+            last = _aware(db.scalar(select(func.max(NdTelegramPost.delivered_at)).where(NdTelegramPost.status == "delivered")))
+            quiet = now - (last or up_since) > TG_QUIET
+            status = "hold" if now.hour not in TG_HOURS else "alert" if quiet else "ok"
+            out.append(_m("newsdesk_telegram", "News Desk: Telegram posts", status, f"last post delivered {_ago(now, last)}",
+                          f"Price Chat alert: the News Desk has posted nothing to the Telegram channel for over "
+                          f"{TG_QUIET.total_seconds() / 3600:.0f} h (last: {_ago(now, last)}).\nCheck Admin > X > News Desk > Telegram.\n"
+                          f"Time: {_when(now)}"))
+        db.rollback()  # channel_handle may have added a settings row: a monitor writes nothing
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out.append(_m("newsdesk_telegram", "News Desk: Telegram posts", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+    try:  # 3) the nightly backup: the last success (the job's row, else its activity line) older than 26 h
+        from app.models.activity import ActivityLog
+
+        if not _runs_here(db, sched, "system.backup"):
+            out.append(_m("backup", "Nightly database backup", "off", "the backup job doesn't run on this server"))
+        else:
+            row = db.get(ScheduledJob, "system.backup")
+            last = _aware(row.last_finished_at) if row is not None and row.last_status == "success" else None
+            if last is None:
+                last = _aware(db.scalar(select(func.max(ActivityLog.created_at)).where(ActivityLog.event == "database_backed_up")))
+            if last is None and (row is None or not row.run_count):
+                out.append(_m("backup", "Nightly database backup", "ok", "not run yet"))
+            else:
+                old = last is None or now - last > BACKUP_MAX_AGE
+                why = (f" Last run: {row.last_status}" + (f": {_first(row.last_error)}" if row.last_error else "") + ".") if row is not None else ""
+                out.append(_m("backup", "Nightly database backup", "alert" if old else "ok", f"last successful backup {_ago(now, last)}",
+                              f"Price Chat alert: no successful database backup for over {BACKUP_MAX_AGE.total_seconds() / 3600:.0f} h "
+                              f"(last: {_ago(now, last)}).{why}\nTime: {_when(now)}"))
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out.append(_m("backup", "Nightly database backup", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+    try:  # 4) jobs failing N runs in a row (each already alerts on its own, app/alerts.job_outcome: shown here, not sent twice)
+        if sched is None or getattr(sched, "_loop_task", None) is None:
+            out.append(_m("failing_jobs", "Background jobs failing", "off", "background jobs don't run on this server", notify=False))
+        else:
+            failing = failing_jobs(db, sched)
+            out.append(_m("failing_jobs", "Background jobs failing", "alert" if failing else "ok",
+                          ", ".join(failing[:8]) + (f" (+{len(failing) - 8} more)" if len(failing) > 8 else "") if failing
+                          else f"no job has failed {FAILING_RUNS} runs in a row", notify=False))
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out.append(_m("failing_jobs", "Background jobs failing", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+    return out
+
+
+def _first(text: str | None, limit: int = 200) -> str:
+    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    return line[:limit]
+
+
+def failing_jobs(db: Session, sched: Any) -> list[str]:
+    """Enabled jobs running on this server that failed FAILING_RUNS or more runs in a row: 'name (N in a row)'."""
+    from app.models.routing import ScheduledJob
+
+    names = [n for n in sched.specs if n not in sched.disabled]
+    return [f"{r.name} ({r.consecutive_failures} in a row)" for r in db.scalars(
+        select(ScheduledJob).where(ScheduledJob.enabled.is_(True), ScheduledJob.name.in_(names),
+                                   ScheduledJob.consecutive_failures >= FAILING_RUNS).order_by(ScheduledJob.name))]
+
+
+def log_monitors(monitors: list[dict[str, Any]]) -> None:
+    """One log line with every monitor's state (WARNING when one is alerting)."""
+    bad = [m for m in monitors if m["status"] == "alert"]
+    line = "; ".join(f"{m['label']}: {m['status']} ({m['detail']})" for m in monitors)
+    (logger.warning if bad else logger.info)("Silence monitors: %s", line)
+
+
 class Watchdog:
     """Checks every WATCH_EVERY seconds; each problem is one owner_alerts key (open until fixed)."""
 
@@ -290,6 +420,19 @@ class Watchdog:
             else:
                 out["recovered"] += await self._fixed(db, KEY_STALLED, f"Price Chat: recovered\nBackground jobs are running on "
                                                                         f"schedule again.\nTime: {_when(now)}")
+            # 4) silence monitors (ND-2): one alert per incident, one "recovered"; "hold" / "off" / "warn" change nothing
+            for m in silence_monitors(db, sched, now):
+                if not m["notify"]:
+                    continue
+                if m["status"] == "alert":
+                    out["alerts"] += await self._problem(db, KEY_SILENCE + m["key"], m["alert"])
+                elif m["status"] == "ok":
+                    out["recovered"] += await self._fixed(db, KEY_SILENCE + m["key"], f"Price Chat: recovered\n{m['label']}: "
+                                                                                     f"{m['detail']}.\nTime: {_when(now)}")
+                elif m["status"] == "off":
+                    from app import alerts
+
+                    alerts._close(db, KEY_SILENCE + m["key"])  # switched off: nothing is expected any more
         return out
 
     async def _loop(self) -> None:
@@ -376,6 +519,12 @@ def deep_checks(db: Session, runtime: Any, watchdog: Any = None, window: ErrorWi
         st = "off" if task is None else "ok" if n == 0 and not stalled else "warn" if n <= 3 and not stalled else "fail"
         out["job_backlog"] = _c(st, f"{n} job(s) overdue > 5 min, {waiting} waiting, {stalled} stalled",
                                 overdue=overdue[:10], waiting=waiting, stalled=stalled, slow=sorted(sched.slow_jobs()))
+    # the silence monitors (ND-2) and jobs failing in a row (AR-19): a failing job or an old backup is a failure, a quiet News
+    # Desk a warning; "hold" (outside the hours a monitor is judged) shows as ok
+    for m in silence_monitors(db, sched, now):
+        bad = "fail" if m["key"] in ("failing_jobs", "backup") else "warn"
+        status = {"alert": bad, "hold": "ok"}.get(m["status"], m["status"])
+        out[m["key"] if m["key"] == "failing_jobs" else f"monitor_{m['key']}"] = _c(status, m["detail"])
 
     try:
         from app.telegram.ingestion import get_bot_state

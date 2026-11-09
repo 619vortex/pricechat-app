@@ -12,8 +12,10 @@ The VIP Trading Bot private group is the one place the bot manages access (invit
 requests, approving/declining those requests, removing a revoked member): see the methods at the end.
 """
 
+import html as _html
 import logging
 import math
+import re
 import time
 from typing import Any
 
@@ -33,6 +35,61 @@ logger = logging.getLogger(__name__)
 # chat_join_request / chat_member: only acted on for the VIP Trading Bot private group (app/tradingbot/service.on_update).
 ALLOWED_UPDATES = ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member", "chat_join_request", "chat_member",
                    "callback_query"]  # callback_query: the ENTER / REJECT / AUTO buttons on Trading OS signal cards
+
+
+TEXT_LIMIT, CAPTION_LIMIT = 4096, 1024  # Telegram's limits, in UTF-16 units of the text it shows (after the HTML is parsed)
+_TOKEN = re.compile(r"<[^<>]*>|&#?\w+;|[^<&]+|[<&]")
+_TAG = re.compile(r"<\s*(/?)\s*([a-zA-Z][\w-]*)")
+
+
+def _u16(s: str) -> int:
+    return len(s.encode("utf-16-le")) // 2
+
+
+def fit_html(text: str, limit: int, ellipsis: str = "…") -> str:
+    """Telegram HTML cut to `limit` shown characters without breaking it: never inside a tag or an entity, at the last
+    space / line break where there is one, every tag still open closed again. Under the limit: unchanged."""
+    tokens = _TOKEN.findall(text)
+    if sum(0 if t.startswith("<") and t.endswith(">") and len(t) > 1 else 1 if t.startswith("&") and t.endswith(";") and len(t) > 1
+           else _u16(t) for t in tokens) <= limit:
+        return text
+    budget = limit - _u16(ellipsis)
+    out: list[str] = []
+    stack: list[str] = []
+    used = 0
+    for t in tokens:
+        if t.startswith("<") and t.endswith(">") and len(t) > 1:
+            m = _TAG.match(t)
+            if m and m.group(1):
+                if m.group(2).lower() in stack:
+                    while stack and stack.pop() != m.group(2).lower():
+                        pass
+            elif m and not t.endswith("/>"):
+                stack.append(m.group(2).lower())
+            out.append(t)
+            continue
+        n = 1 if t.startswith("&") and t.endswith(";") and len(t) > 1 else _u16(t)
+        if used + n <= budget:
+            out.append(t)
+            used += n
+            continue
+        if not t.startswith("&"):  # plain text: as much as fits, back to the last space / line break in it
+            part, size = "", used
+            for ch in t:
+                if size + _u16(ch) > budget:
+                    break
+                part, size = part + ch, size + _u16(ch)
+            space = max(part.rfind(" "), part.rfind("\n"))
+            out.append(part[:space] if space > 0 else part)
+        break
+    while out and not out[-1].strip() and not out[-1].startswith("<"):
+        out.pop()
+    return "".join(out).rstrip() + ellipsis + "".join(f"</{name}>" for name in reversed(stack))
+
+
+def fit_text(text: str, limit: int, html: bool) -> str:
+    """HTML: fit_html. Plain text can't break, so it is only cut (as before)."""
+    return fit_html(text, limit) if html else text[:limit]
 
 
 SENT_HOOKS: list[Any] = []  # called with each sent message (e.g. tradingos.autodelete notes the main chat's ones); never raise
@@ -104,7 +161,7 @@ class TelegramBotClient:
     # The News Desk's Telegram lane (app/newsdesk/telegram) also posts here, to the one announcement channel, after checking the bot's rights.
     async def send_message(self, chat_id: int | str, text: str, buttons: list[list[dict[str, str]]] | None = None, html: bool = False,
                            reply_to: int | None = None, silent: bool = False) -> dict[str, Any]:
-        params: dict[str, Any] = {"chat_id": chat_id, "text": text[:4096], "disable_web_page_preview": True}
+        params: dict[str, Any] = {"chat_id": chat_id, "text": fit_text(text, TEXT_LIMIT, html), "disable_web_page_preview": True}
         if buttons:
             params["reply_markup"] = {"inline_keyboard": buttons}
         if html:
@@ -120,7 +177,7 @@ class TelegramBotClient:
         """A chart image or a news card with a caption (multipart upload: the PNG is generated here, never fetched from a URL)."""
         import json as _json
 
-        data: dict[str, Any] = {"chat_id": str(chat_id), "caption": caption[:1024]}
+        data: dict[str, Any] = {"chat_id": str(chat_id), "caption": fit_text(caption, CAPTION_LIMIT, html)}
         if html:
             data["parse_mode"] = "HTML"
         if buttons:
@@ -134,7 +191,7 @@ class TelegramBotClient:
     async def send_document(self, chat_id: int | str, content: bytes, filename: str, caption: str = "", html: bool = False,
                             mime: str = "text/plain") -> dict[str, Any]:
         """A small generated file (Kiwi VPN: a member's WireGuard .conf, only ever in their private chat with the bot)."""
-        data: dict[str, Any] = {"chat_id": str(chat_id), "caption": caption[:1024]}
+        data: dict[str, Any] = {"chat_id": str(chat_id), "caption": fit_text(caption, CAPTION_LIMIT, html)}
         if html:
             data["parse_mode"] = "HTML"
         url = f"{self.api_base}/bot{self._token}/sendDocument"
@@ -158,7 +215,7 @@ class TelegramBotClient:
                                 buttons: list[list[dict[str, str]]] | None = None) -> dict[str, Any]:
         """Rewrite one of the bot's own text messages (Vortex trade checks: the placeholder becomes the answer; the committee:
         the placeholder becomes the summary, and its buttons switch views). `buttons` replaces the inline keyboard."""
-        params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text[:4096], "disable_web_page_preview": True}
+        params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": fit_text(text, TEXT_LIMIT, html), "disable_web_page_preview": True}
         if html:
             params["parse_mode"] = "HTML"
         if buttons is not None:
@@ -167,7 +224,7 @@ class TelegramBotClient:
         return _sent(result) if isinstance(result, dict) else {}
 
     async def edit_caption(self, chat_id: int | str, message_id: int, caption: str, buttons: list[list[dict[str, str]]] | None = None) -> None:
-        params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "caption": caption[:1024]}
+        params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "caption": fit_text(caption, CAPTION_LIMIT, False)}
         params["reply_markup"] = {"inline_keyboard": buttons or []}
         await self._call("editMessageCaption", params)
 
@@ -177,7 +234,7 @@ class TelegramBotClient:
         buttons. Multipart: the PNG is generated here, never fetched from a URL."""
         import json as _json
 
-        media: dict[str, Any] = {"type": "photo", "media": "attach://chart", "caption": caption[:1024]}
+        media: dict[str, Any] = {"type": "photo", "media": "attach://chart", "caption": fit_text(caption, CAPTION_LIMIT, html)}
         if html:
             media["parse_mode"] = "HTML"
         data: dict[str, Any] = {"chat_id": str(chat_id), "message_id": str(message_id), "media": _json.dumps(media),
