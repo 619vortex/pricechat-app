@@ -88,6 +88,7 @@ class TelegramIngestor:
         self.db = db
         self.client = client
         self._confirm: list[tuple[int, dict]] = []  # (private chat id, question) of valid website sign-ins this sync
+        self._secrets: list[tuple[int, int, int, bool]] = []  # (chat, message, author, in a group?) that looked like a key or seed phrase
         self._crew: list[tuple[int, int, str, bool]] = []  # (chat id, user id, code, is_bot): "Invite your crew" Start presses
         self._wk_updates: list[dict] = []  # Worker System: community join updates seen in this batch
         self._wk_starts: list[tuple[int, int, str, str | None, bool]] = []  # Worker System: (chat, user, code, username, is_bot)
@@ -159,6 +160,7 @@ class TelegramIngestor:
                 break
             # storing the batch is plain database work: done in a worker thread for the same reason as the commit above
             access_updates = await asyncio.to_thread(self._store_batch, updates, report, state, batch == 0)
+            await self._delete_secrets()
             await self._moderate()
             await self._send_confirmations()
             await self._crew_starts()
@@ -251,6 +253,15 @@ class TelegramIngestor:
             report.ignored_other += 1
             return
 
+        # a private key or recovery phrase is never stored, never answered as a command, and deleted from the chat at once
+        if isinstance(parsed, ParsedMessage) and parsed.author_id and not parsed.author_is_bot and parsed.text:
+            from app.tradingos.tgtrade import looks_secret
+
+            if looks_secret(parsed.text, private=parsed.chat.chat_type == "private"):
+                self._secrets.append((parsed.chat.chat_id, parsed.message_id, parsed.author_id, parsed.chat.chat_type != "private"))
+                report.ignored_other += 1
+                return
+
         if self._member_sign_in(parsed):
             report.ignored_other += 1  # a website sign-in; never stored as a message
             return
@@ -288,7 +299,14 @@ class TelegramIngestor:
                     and (not group or self._answers_in(parsed.chat, sources))):
                 logger.info("Bot command received: %s in %s chat %s%s (update %s)", "fc" if fc else word, "a group" if group else "a private",
                             parsed.chat.chat_id if group else "-", " from an anonymous admin / the group" if anonymous else "", parsed.update_id)
-                self._commands.append((parsed.chat.chat_id, parsed.author_id, (fc or parsed.text.strip())[:400], group,
+                said = (fc or parsed.text.strip())[:400]
+                if word == "/enter" and parsed.reply_text:  # replying to a signal card: its number is the signal to enter
+                    from app.tradingos.tgtrade import signal_from
+
+                    number = signal_from([], parsed.reply_text)
+                    if number is not None:
+                        said = f"/enter #{number}"
+                self._commands.append((parsed.chat.chat_id, parsed.author_id, said, group,
                                        getattr(parsed, "message_id", None), parsed.chat.username, parsed.author_name))  # answered after the commit
                 report.ignored_other += 1  # a command to the bot; never stored as a message
                 return
@@ -357,6 +375,28 @@ class TelegramIngestor:
         if question:
             self._confirm.append((parsed.chat.chat_id, question))
         return True
+
+    async def _delete_secrets(self) -> None:
+        """Deletes each message that looked like a private key or a recovery phrase, and tells its author privately why. In a
+        group the bot needs the right to delete messages; without it, the warning still goes out."""
+        from app.tradingos.tgtrade import SECRET_WARNING
+
+        pending, self._secrets = self._secrets, []
+        for chat_id, message_id, author_id, group in pending:
+            try:
+                await self.client.delete_message(chat_id, message_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("A message that looked like a key couldn't be deleted (%s)", type(exc).__name__)
+            try:
+                await self.client.send_message(author_id, SECRET_WARNING)
+            except Exception:  # noqa: BLE001 - never pressed Start: say it where it was posted
+                if group:
+                    try:
+                        await self.client.send_message(chat_id, "⚠️ A message that looked like a private key or recovery phrase was removed. "
+                                                                "Never post one anywhere: Price Chat will never ask for it.")
+                    except Exception:  # noqa: BLE001
+                        pass
+            logger.info("Deleted a message that looked like a key or recovery phrase (%s chat)", "a group" if group else "a private")
 
     async def _moderate(self) -> None:
         """The group rules: admins' /warn, /unmute, /strikes, and messages with links (app/telegram/moderation.py)."""

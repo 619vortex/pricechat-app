@@ -392,7 +392,7 @@ def test_signal(db: Session, md: MarketData, coin: str, actor: str) -> TsSignal:
 
 
 def next_number(db: Session) -> int:
-    return int(db.scalar(select(func.coalesce(func.max(TsSignal.number), 0))) or 0) + 1
+    return int(db.scalar(select(func.coalesce(func.max(TsSignal.number), 0)).where(TsSignal.number > 0)) or 0) + 1  # manual trades' anchors are negative (tgtrade.py)
 
 
 def scan(db: Session, md: MarketData, actor: str = "scanner") -> dict[str, Any]:

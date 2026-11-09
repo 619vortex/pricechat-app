@@ -240,6 +240,24 @@ def data() -> MarketData:
     return _shared
 
 
+TESTNET_API = "https://api.hyperliquid-testnet.xyz/info"
+_testnet: MarketData | None = None
+
+
+def testnet() -> MarketData:
+    """Hyperliquid testnet's own markets: its prices, szDecimals, max leverage and listings all differ from mainnet's."""
+    global _testnet
+    if _testnet is None:
+        _testnet = MarketData(TESTNET_API)
+    return _testnet
+
+
+def for_mode(mode: str | None) -> MarketData:
+    """The market an account's orders really trade on: testnet for TESTNET; mainnet for LIVE and PAPER (paper simulates on
+    real prices)."""
+    return testnet() if mode == "TESTNET" else data()
+
+
 def fmt_price(p: float) -> str:
     """Prices the way traders read them: more decimals for small prices."""
     if p >= 1000:

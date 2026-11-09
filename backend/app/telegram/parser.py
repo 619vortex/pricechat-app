@@ -59,6 +59,8 @@ class ParsedMessage:
     # NOT this, and carries no admin rights (2026-11-09 review: channel senders could /warn anyone)
     as_group: bool = False
     as_channel: bool = False
+    # the text of the message this one replies to (its caption for a photo): "/enter" reads the signal card being replied to
+    reply_text: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,4 +174,5 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         automatic_forward=auto,
         as_group=bool(sender_chat.get("id")) and sender_chat.get("id") == chat_id,
         as_channel=bool(sender_chat.get("id")) and sender_chat.get("id") != chat_id and not auto,
+        reply_text=str(reply.get("text") or reply.get("caption") or "")[:2000],
     )
