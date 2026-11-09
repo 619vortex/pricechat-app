@@ -130,7 +130,8 @@ class TelegramBotClient:
             data["reply_parameters"] = _json.dumps({"message_id": reply_to, "allow_sending_without_reply": True})
         if silent:
             data["disable_notification"] = "true"
-        return _sent(await self._call("sendPhoto", data, files={"photo": ("chart.png", png, "image/png")}))
+        kind = ("photo.jpg", "image/jpeg") if png[:3] == b"\xff\xd8\xff" else ("chart.png", "image/png")
+        return _sent(await self._call("sendPhoto", data, files={"photo": (kind[0], png, kind[1])}))
 
     async def send_document(self, chat_id: int | str, content: bytes, filename: str, caption: str = "", html: bool = False,
                             mime: str = "text/plain") -> dict[str, Any]:

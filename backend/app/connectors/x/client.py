@@ -159,8 +159,34 @@ class XClient:
 
     # --- writes (only with a SocialActionGuard permit) ---------------------------------------------
 
+    async def upload_image(self, data: bytes, *, permit: "ExecutionPermit") -> str:
+        """One image for a post (X API v2 media upload, simple upload). Returns the media id to attach."""
+        from app.models.enums import SocialAction
+        from app.social.guard import require_permit
+
+        require_permit(permit, SocialAction.POST, None)
+        c = self._creds
+        if not c.user_context:
+            raise XNotConfiguredError("X write actions need user-context credentials (Access Token and Access Token Secret).")
+        url = f"{self.api_base}/2/media/upload"
+        headers = {"User-Agent": "PriceChat/0.5",  # multipart bodies are not part of the OAuth 1.0a signature base string
+                   "Authorization": authorization_header("POST", url, {}, c.api_key, c.api_secret, c.access_token, c.access_token_secret)}  # type: ignore[arg-type]
+        mime = "image/jpeg" if data[:3] == b"\xff\xd8\xff" else "image/png"
+        try:
+            response = await self._client.post(url, headers=headers, files={"media": ("news.jpg", data, mime)}, data={"media_category": "tweet_image", "media_type": mime})
+        except httpx.TimeoutException:
+            raise XUnavailableError("X did not answer the media upload in time") from None
+        except httpx.TransportError as exc:
+            raise XUnavailableError(f"Cannot reach X ({type(exc).__name__})") from None
+        self._record_rate_limit("media/upload", response)
+        out = self._parse(response, "media/upload")
+        media_id = str((out.get("data") or {}).get("id") or out.get("media_id_string") or "")
+        if not media_id:
+            raise XUnavailableError("X accepted the upload but returned no media id")
+        return media_id
+
     async def create_post(self, text: str, *, permit: "ExecutionPermit", reply_to: str | None = None,
-                          quote_of: str | None = None) -> dict[str, Any]:
+                          quote_of: str | None = None, media_ids: list[str] | None = None) -> dict[str, Any]:
         """Post, reply (reply_to = post id) or quote (quote_of = post id). Returns {"id", "text"}."""
         from app.models.enums import SocialAction
         from app.social.guard import require_permit
@@ -172,6 +198,8 @@ class XClient:
             body["reply"] = {"in_reply_to_tweet_id": reply_to}
         if quote_of:
             body["quote_tweet_id"] = quote_of
+        if media_ids:
+            body["media"] = {"media_ids": media_ids}
         out = await self._post("/2/tweets", body, endpoint="posts/create")
         return out.get("data") or {}
 

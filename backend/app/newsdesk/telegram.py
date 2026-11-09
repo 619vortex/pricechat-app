@@ -31,6 +31,7 @@ from app.telegram.errors import TelegramError, TelegramRateLimitError, TelegramR
 
 logger = logging.getLogger(__name__)
 
+FORMAT = "visual"  # owner, 2026-11-09: a picture, one bold headline, a small source credit. "classic" = the older card and summary
 MAX_AGE = timedelta(hours=8)  # older than this isn't news on arrival
 MAX_LEN = 900
 SAME_TITLE = 0.34  # engine.corroboration's bar for two headlines being one story
@@ -152,6 +153,8 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
     """(the message, or None; why not). Whoever wrote the summary, the desk's checks decide, against what the sources actually said."""
     now = now or utcnow()
     f = ev.facts or {}
+    if FORMAT == "visual":
+        return await compose_visual(ev, s, now, transport)
     if ev.kind == "recap":  # the market check is written and checked when it's made (app/newsdesk/recap): text only, no card
         if not f.get("telegram_html"):
             return None, "the market check has no Telegram text"
@@ -185,6 +188,34 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
                     "label": b.label, "evidence": ev.evidence}, ""
         logger.info("tgnews: %s text refused: %s", origin, result.reason)
     return None, result.reason if result else "nothing to say"
+
+
+async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetime, transport: Any = None, market: Any = None) -> tuple[dict[str, Any] | None, str]:
+    """The owner's format: the picture (app/newsdesk/visual), the headline in bold beneath it, the source in small italics. Nothing else.
+    The headline is the event's own verified one; the desk's checks run on exactly what is posted."""
+    from app.newsdesk import visual
+
+    f = ev.facts or {}
+    head = visual.post_headline(ev)
+    src = visual.source_name(ev)
+    plain = f"{head}\n\nSource: {src}"
+    told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours"
+    result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)
+    if not result.ok:
+        return None, result.reason
+    used = {u for u, _ in ((s.state or {}).get("used_photos") or []) if u} if s is not None else set()
+    try:
+        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market)
+    except Exception as e:  # noqa: BLE001 - no picture, no post: the format is the picture
+        logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
+        return None, f"no picture could be made ({type(e).__name__})"
+    ev.facts = {**f, "visual": meta}
+    if s is not None and meta.get("kind") == "photo":
+        keep = [(u, at) for u, at in ((s.state or {}).get("used_photos") or []) if at >= (now - timedelta(days=visual.USED_DAYS)).isoformat()]
+        s.state = {**(s.state or {}), "used_photos": [*keep, (meta["url"], now.isoformat())][-200:]}
+    srcs = [{"name": x["name"], "url": x["url"]} for x in ev.sources or [] if str(x.get("url", "")).startswith("https://")][:3]
+    return {"headline": head, "summary": "", "html": visual.caption_html(head, src), "plain": plain, "sources": srcs, "writer": "visual", "card": image, "choice": {},
+            "link": f"event:{ev.id}", "title": ev.title, "source": src[:60], "fingerprint": checks.fingerprint(f"{head} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""
 
 
 # --- rights and delivery ------------------------------------------------------------------------------------------

@@ -167,3 +167,50 @@ async def build(db: Session, now: datetime, slot_at: datetime, slot_local: str, 
                    evidence="price data", category="crypto", virality=0.0, parts={}, sources=made["sources"], first_seen=now,
                    facts={"recap": True, "slot_at": slot_at.isoformat(), "telegram_html": made["telegram_html"], "telegram_plain": made["telegram_plain"], "x_text": made["x_text"],
                           "recap_assets": made["assets"], "stories": made["stories"], "told": made["told"], "as_of": now.isoformat()})
+
+
+# --- the visual format (owner, 2026-11-09): the slot without a story carries the day's biggest real move as a chart, or nothing ---------
+
+MOVE_MIN = {"Hyperliquid": 3.0, "Yahoo Finance": 1.5}  # crypto 3%, stocks and commodities 1.5% in 24 hours: smaller isn't news
+VISUAL = True  # tests of the older written brief set this False
+
+
+def biggest_move(lines: list[dict[str, Any]]) -> dict[str, Any] | None:
+    real = [r for r in lines if abs(r["pct"]) >= MOVE_MIN.get(r["source"], 3.0)]
+    return max(real, key=lambda r: abs(r["pct"]) / MOVE_MIN.get(r["source"], 3.0)) if real else None
+
+
+async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local: str, quotes: dict[str, sources.Quote], market: Any = None) -> NdEvent | None:
+    from app.newsdesk import visual
+
+    hl = await _hl_markets(market)
+    lines = rows(hl, quotes, now)
+    mover = biggest_move(lines)
+    if mover is None:
+        logger.warning("newsdesk recap: the %s slot has no story and no market move big enough (largest %s): nothing posted",
+                       slot_local, max((f"{r['name']} {_pct(r['pct'])}" for r in lines), key=lambda t: abs(float(t.split()[-1].rstrip('%'))), default="none"))
+        return None
+    points: list[tuple[int, float]] = []
+    coin = mover["tag"].lstrip("$") if mover["source"] == "Hyperliquid" else ""
+    if coin:
+        try:
+            points = await visual.candles_for(coin, market)
+        except Exception as e:  # noqa: BLE001
+            logger.info("newsdesk recap: candles for %s: %s", coin, type(e).__name__)
+    else:
+        sym = next((s for s, n, _ in MACRO if n == mover["name"]), "")
+        q = quotes.get(sym)
+        cut = now.timestamp() - 86400
+        points = [(t, c) for t, c, _ in (q.bars if q else []) if t >= cut]
+    if len(points) < 10:
+        logger.warning("newsdesk recap: no price history to draw for %s: nothing posted", mover["name"])
+        return None
+    head = visual.move_headline(mover["name"], mover["pct"])
+    told = f"{abs(mover['pct']):.1f}% {mover['name']} 24 hours"
+    return NdEvent(key=f"recap:{slot_at:%Y-%m-%dT%H:%M}", kind="recap", title=head, headline=head, summary="", topic="move", label="", evidence="price data",
+                   category="crypto" if coin else "commodities", virality=0.0, parts={}, sources=[{"name": mover["source"], "url": "https://app.hyperliquid.xyz" if coin else "https://finance.yahoo.com"}],
+                   first_seen=now, facts={"recap": True, "slot_at": slot_at.isoformat(), "visual_headline": head, "points": [list(p) for p in points], "pct": mover["pct"],
+                                          "name": mover["name"], "coin": coin or mover["name"].split()[0][:4].upper(), "data_source": mover["source"], "told": told,
+                                          "recap_assets": [mover["tag"]], "as_of": now.isoformat(),
+                                          "x_text": visual.x_text(head, mover["source"]), "telegram_html": visual.caption_html(head, mover["source"]),
+                                          "telegram_plain": f"{head}\n\nSource: {mover['source']}"})
