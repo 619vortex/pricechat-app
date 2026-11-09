@@ -582,3 +582,37 @@ def test_default_settings_keep_every_new_telegram_entry_off_mainnet(db: Session,
         press(db, tg, 1001, token)
     assert not db.scalars(select(TrIntent)).all() and not ex.orders and "LIVE" not in asked
     assert not db.scalars(select(TrPosition)).all()
+
+
+def test_no_telegram_path_reaches_mainnet_until_the_owner_switches_it_on(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner, 2026-11-09: every Telegram path that could execute on mainnet is off (the signal card's ENTER button, Confirm,
+    Close, /close, /closeall, /sl, /tp, order /cancel, and their buttons) until live trading is approved. TESTNET keeps working."""
+    sig = active_signal(db, md)
+    m = banter(db, "1002")
+    acc = execution.account(db, m)
+    acc.mode, acc.master_address = "LIVE", db.scalar(select(TbWallet.address).where(TbWallet.member_id == m.id))
+    acc.live_enabled_at = utcnow()
+    acc.mainnet_agent, acc.mainnet_agent_key, acc.mainnet_approved_at = "0x" + "3" * 40, "unused", utcnow()
+    db.commit()
+    ex = FakeExchange(mark=md.market("BTC").mark)
+    monkeypatch.setattr(execution, "executor", lambda *a, **k: ex)
+    monkeypatch.setattr(execution, "check_live_permission", lambda *a, **k: None)
+    monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
+    tg = TG()
+    off = "aren't switched on"
+    assert off in press(db, tg, 1002, f"sig:{sig.id}:enter")  # the existing ENTER button on a signal card
+    for data in ("cf:" + "1" * 16, "cl:77", "mo:" + "2" * 16, f"ca:all:{tgtrade._stamp()}", f"pr:{tgtrade._stamp()}:77:s:60000"):
+        assert off in press(db, tg, 1002, data), data
+    for text in ("/close 77", "/closeall", "/sl 77 60000", "/tp 77 70000", "/cancel 12345"):
+        assert off in say(db, tg, 1002, text), text
+    assert not ex.orders and not db.scalars(select(TrIntent)).all()
+    # the owner's switch turns it back on: ENTER then gets as far as a private preview
+    st = signals.settings(db)
+    st.strategies = {**(st.strategies or {}), "telegram_trading": {"live": True}}
+    db.commit()
+    assert off not in press(db, tg, 1002, f"sig:{sig.id}:enter")
+    # TESTNET is untouched
+    st.strategies = {**(st.strategies or {}), "telegram_trading": {}}
+    acc.mode = "TESTNET"
+    db.commit()
+    assert off not in press(db, tg, 1002, f"sig:{sig.id}:enter")

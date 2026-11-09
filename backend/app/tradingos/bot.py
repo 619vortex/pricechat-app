@@ -1079,6 +1079,11 @@ async def _trading_command(db: Session, client: Any, chat_id: int, m: Member, cm
         live = [p for p in rows if p.status in execution.CLOSABLE and p.size > 0]  # a position whose stop failed must be closable here too
         if cmd == "/close":
             if args:
+                from app.tradingos import tgtrade
+
+                why = tgtrade.live_off_position(db, m, int(args[0].lstrip("#"))) if args[0].lstrip("#").isdigit() else None
+                if why:
+                    return esc(why)
                 try:
                     pos = await asyncio.to_thread(execution.close_position, db, m, int(args[0].lstrip("#")))
                 except ValueError:
@@ -1183,7 +1188,9 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
         from app.tradingos import tgtrade
 
         # the Banter group's referral, from Hyperliquid's own record; owner setting telegram_trading.gate_signal_enter (default on)
-        why = await tgtrade.gate_for_entry(db, m) if tgtrade.gate_signal_enter(db) else None
+        from app.tradingos import execution as _ex
+
+        why = tgtrade.live_off(db, _ex.account(db, m).mode) or (await tgtrade.gate_for_entry(db, m) if tgtrade.gate_signal_enter(db) else None)
         if why:
             await _answer(client, cq, uid, why[:195], alert=True)
             return
@@ -1236,6 +1243,12 @@ async def _trade_callback(db: Session, client: Any, cq: dict[str, Any], uid: int
         await _answer(client, cq, uid, "Connect your Kiwi Passport first.", alert=True)
         return
     kind, arg = data[:2], data[3:]
+    from app.tradingos import tgtrade
+
+    why = (tgtrade.live_off_intent(db, m, arg) if kind == "cf" else tgtrade.live_off_position(db, m, int(arg)) if kind == "cl" and arg.isdigit() else None)
+    if why:
+        await _answer(client, cq, uid, why[:195], alert=True)
+        return
     try:
         if kind == "cx":
             execution.cancel_intent(db, m, arg)

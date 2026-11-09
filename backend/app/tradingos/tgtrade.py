@@ -120,6 +120,28 @@ def gate_signal_enter(db: Session) -> bool:
     return bool(cfg.get("gate_signal_enter", True)) if isinstance(cfg, dict) else True
 
 
+LIVE_OFF = ("Real-money (mainnet) orders from Telegram aren't switched on. Nothing was sent. Manage LIVE positions at "
+            "pricechat.live/earn, or switch Telegram to test funds with /settings mode testnet.")
+
+
+def live_off(db: Session, mode: str | None) -> str | None:
+    """The owner's rule (2026-11-09): NO mainnet execution from Telegram until they approve live trading (telegram_trading.live).
+    Every Telegram path that could reach the exchange on mainnet (open, enter, the ENTER button, confirm, close, close all,
+    stop/target changes, order cancels) asks this first. PAPER and TESTNET are untouched."""
+    return LIVE_OFF if mode == "LIVE" and not telegram_live(db) else None
+
+
+def live_off_position(db: Session, member: Member, pos_id: int) -> str | None:
+    pos = db.get(TrPosition, pos_id)
+    acc = execution.account(db, member)
+    return live_off(db, pos.mode if pos is not None and pos.account_id == acc.id else acc.mode)
+
+
+def live_off_intent(db: Session, member: Member, token: str) -> str | None:
+    it = db.scalar(select(TrIntent).where(TrIntent.token == token))
+    return live_off(db, it.mode if it is not None else execution.account(db, member).mode)
+
+
 def mode_gate(db: Session, acc: TrAccount) -> str | None:
     if acc.mode == "LIVE" and not telegram_live(db):
         return ("Manual orders from Telegram run on PAPER and TESTNET for now: real-money (mainnet) orders from Telegram aren't "
@@ -696,6 +718,10 @@ async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: s
 
     acc = execution.account(db, member)
     db.commit()
+    if cmd in ("/open", "/enter", "/closeall", "/sl", "/tp") or (cmd == "/cancel" and args):
+        why = live_off(db, acc.mode)
+        if why:
+            return esc(why)
     if cmd == "/market":
         if not args:
             return "Usage: /market BTC"
@@ -780,6 +806,14 @@ async def callback(db: Session, client: Any, member: Member, uid: int, data: str
     import asyncio
 
     kind, _, arg = data.partition(":")
+    if kind in ("mo", "ca", "pr") and arg != "no":
+        acc = execution.account(db, member)
+        why = live_off_intent(db, member, arg) if kind == "mo" else live_off(db, acc.mode)
+        if kind == "pr":
+            bits = arg.split(":")
+            why = live_off_position(db, member, int(bits[1])) if len(bits) > 1 and bits[1].isdigit() else why
+        if why:
+            return esc(why)
     if kind == "mn":
         execution.cancel_intent(db, member, arg)
         return "Cancelled. Nothing was traded."
