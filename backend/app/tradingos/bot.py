@@ -1378,6 +1378,90 @@ async def announce_positions(db: Session, client: Any) -> int:
     return sent
 
 
+UNPROTECTED_KEY = "trading:unprotected:"  # + position id: the owner alert's key (app.alerts: at most once per 6 h while it lasts)
+
+
+def unprotected_positions(db: Session) -> list[Any]:
+    """Testnet / live bot positions still held with no confirmed stop-loss: the stop was refused and the emergency close didn't
+    fill (PROTECTION_FAILED, size left, no resting stop)."""
+    from app.models.trading import TrOrder, TrPosition
+
+    rows = db.scalars(select(TrPosition).where(TrPosition.status == "PROTECTION_FAILED", TrPosition.mode != "PAPER", TrPosition.size > 0)).all()
+    return [p for p in rows if db.scalar(select(TrOrder.id).where(TrOrder.position_id == p.id, TrOrder.kind == "sl",
+                                                                  TrOrder.status == "RESTING").limit(1)) is None]
+
+
+def unprotected_text(pos: Any, closes: int, exhausted: bool) -> str:
+    from app.tradingos import execution
+
+    head = (f"🚨 NO STOP-LOSS: your bot position {tickers.cashtag(pos.coin)} {pos.side} ({MODE_LABEL.get(pos.mode, pos.mode)}) "
+            f"is open on Hyperliquid without a stop-loss.\nWhy: {(pos.error or 'the stop-loss was refused')[:300]}\n")
+    if exhausted:
+        body = (f"The bot tried to close it {closes} times and has stopped trying to close it. It keeps trying to place the stop-loss "
+                "every minute.\n")
+    else:
+        body = (f"The bot tries to place the stop-loss again every minute, and to close the position ({closes} of "
+                f"{execution.EMERGENCY_RETRIES} close attempts so far).\n")
+    return (head + body + "To be safe, close it yourself now: app.hyperliquid.xyz → Positions → Close.\n"
+            f"New bot trades are stopped on your account.\n\n{SITE}/earn")
+
+
+async def announce_unprotected(db: Session, client: Any) -> dict[str, int]:
+    """A position left without a stop-loss is never silent: the member gets a private message (once when it happens, once more
+    when the emergency closes are used up), and the owner an alert for LIVE money (again every 6 h while it lasts, and one
+    'recovered' message when it's protected or closed). Marked before sending, so a retry can never send a member twice."""
+    from app import alerts as owner_alerts
+    from app.models.alerts import OwnerAlert
+    from app.models.trading import TrAccount, TrPosition
+    from app.models.tradingos import TsAudit
+    from app.tradingos import execution
+
+    out = {"members_told": 0, "owner_alerts": 0, "owner_recovered": 0}
+    open_ids = set()
+    for pos in unprotected_positions(db):
+        open_ids.add(pos.id)
+        acc = db.get(TrAccount, pos.account_id)
+        if acc is None:
+            continue
+        closes = execution._closes(db, pos)
+        exhausted = closes >= execution.EMERGENCY_RETRIES
+        text = unprotected_text(pos, closes, exhausted)
+        action = "unprotected_told_final" if exhausted else "unprotected_told"
+        told = db.scalar(select(TsAudit.id).where(TsAudit.actor == f"account:{acc.id}", TsAudit.action == action,
+                                                 TsAudit.signal_id == pos.signal_id).limit(1))
+        if told is None:
+            db.add(TsAudit(actor=f"account:{acc.id}", action=action, signal_id=pos.signal_id, details={"position": pos.id, "mode": pos.mode}))
+            db.commit()
+            ident = db.scalar(select(LinkedIdentity).where(LinkedIdentity.member_id == acc.member_id, LinkedIdentity.platform == "telegram",
+                                                           LinkedIdentity.status == "active"))
+            if ident is not None and client is not None:
+                try:
+                    await client.send_message(int(ident.platform_user_id), esc(text), html=True)
+                    out["members_told"] += 1
+                except Exception as e:  # noqa: BLE001 - the member never pressed Start: logged (the owner alert still goes out)
+                    logger.info("unprotected position %s notice skipped: %s", pos.id, e)
+        if pos.mode == "LIVE":
+            member = db.get(Member, acc.member_id)
+            who = f"@{member.username}" if member is not None else f"member {acc.member_id}"
+            otext = (f"Price Chat alert: LIVE position without a stop-loss\nMember: {who} (account {acc.id}), position {pos.id}\n"
+                     f"{pos.coin} {pos.side} size {pos.size:g} · entry {pos.entry_px or 0:g} · stop {pos.stop:g}\n"
+                     f"Close attempts: {closes} of {execution.EMERGENCY_RETRIES}" + (" (used up; only the stop is retried)" if exhausted else "")
+                     + f"\nWhy: {(pos.error or '')[:300]}")
+            out["owner_alerts"] += await owner_alerts.notify_owner(db, f"{UNPROTECTED_KEY}{pos.id}", otext, open_=True)
+    for row in db.scalars(select(OwnerAlert).where(OwnerAlert.key.like(f"{UNPROTECTED_KEY}%"), OwnerAlert.open.is_(True))).all():
+        rest = row.key[len(UNPROTECTED_KEY):]
+        if not rest.isdigit() or int(rest) in open_ids:
+            continue
+        pos = db.get(TrPosition, int(rest))
+        state = "closed" if pos is None or pos.status == "CLOSED" or pos.size <= 0 else "protected by a stop-loss again"
+        coin = f"{pos.coin} {pos.side} " if pos is not None else ""
+        if await owner_alerts.notify_owner(db, f"{row.key}:recovered", f"Price Chat: recovered\nLIVE position {rest} {coin}is {state}.",
+                                           cooldown=False):
+            out["owner_recovered"] += 1
+            owner_alerts._close(db, row.key)
+    return out
+
+
 MAIN_CHAT_STATUSES = ("ACTIVE", "TARGET_HIT", "STOP_HIT", "CLOSED")  # opens and closes; "expired / burnt" stays in the signal group
 
 

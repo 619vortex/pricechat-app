@@ -218,6 +218,9 @@ class Settings(BaseSettings):
     tiktok_client_secret: SecretStr | None = None
     # Vortex trade checks (/help <trade>): the bearer Vortex (the owner's home AI) uses on /api/vortex/*. Set in Admin › Trading OS.
     vortex_assist_token: SecretStr | None = None
+    # Hyperliquid bot closes (manual close, /closeall, the emergency close of a position without a stop): the IOC limit's distance
+    # from the mark. Reduce-only, so a wide bound can't open or flip a position; too tight and a close in a fast market isn't filled.
+    trading_close_slippage: float = Field(0.03, ge=0.005, le=0.1)  # TRADING_CLOSE_SLIPPAGE
     # Earn › Arbitrage › Lunch Bot (paper only: reads pump.fun launches and Solana accounts, never signs anything)
     lunch_bot_enabled: bool = True
     solana_rpc_url: str = "https://api.mainnet-beta.solana.com"

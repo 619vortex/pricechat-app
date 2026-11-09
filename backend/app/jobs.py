@@ -334,6 +334,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         if s.telegram_configured:  # ORDER UP / KIWI FINISHED COOKING, privately, once per position change
             client = make_client(s, runtime.telegram.transport)
             try:
+                ex["unprotected"] = await bot.announce_unprotected(ctx.db, client)  # no stop-loss: the member and the owner are told
                 ex["announced"] = await bot.announce_positions(ctx.db, client)
                 ex["skips_told"] = await bot.announce_skips(ctx.db, client)  # AUTO didn't take a signal: the member hears why
             finally:
