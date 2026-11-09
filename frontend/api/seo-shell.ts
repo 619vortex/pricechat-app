@@ -6,7 +6,7 @@
  * edge for an hour). Either fetch failing never leaves a crawler with an error: no head -> the plain app; no index.html -> the
  * backend's page without its redirect. Read-only.
  */
-import { cleanPath, headOnly, injectHead } from "./_lib/seoShell";
+import { cleanPath, headOnly, injectHead } from "./_lib/seoShell.js";  // Vercel runs this as ESM: the extension is required
 
 const API = "https://api-production-b1be.up.railway.app";  // the same backend vercel.json's /api rewrite uses
 const WAIT_MS = 4000;

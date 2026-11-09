@@ -40,6 +40,7 @@ export function injectHead(index: string, og: string): string {
     .replace(/<!--\s*link previews[\s\S]*?-->\s*/i, "")
     .replace(/<title>[\s\S]*?<\/title>\s*/i, "")
     .replace(/<meta\s+name="description"[^>]*>\s*/gi, "")
+    .replace(/<link\s+rel="canonical"[^>]*>\s*/gi, "")  // one canonical only: the page's own
     .replace(/<meta\s+property="og:[^"]*"[^>]*>\s*/gi, "")
     .replace(/<meta\s+name="twitter:[^"]*"[^>]*>\s*/gi, "");
   return cleaned
