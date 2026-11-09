@@ -5,6 +5,7 @@
 //!   guard_check service <report.json>   (the installed service, with a test server that never answers)
 //!   guard_check probe <ip> <port>     (exit 0 if a TCP connection opens within 3 s)
 //!   guard_check hold <seconds>        (holds a kill switch, prints "held", then exits)
+//!   guard_check cut <ip> <seconds>    (cuts one address off, both ways, prints "held"; the failover test)
 
 #[cfg(windows)]
 mod check {
@@ -314,6 +315,28 @@ mod check {
         i32::from(!tcp(&addr))
     }
 
+    /// Cuts `ip` off completely (both directions, every protocol) until `seconds` pass or this process is killed: the VPN server
+    /// "goes dark" for the failover test. A block in its own sublayer beats the permits of any other, Kiwi's included.
+    pub fn cut(ip: &str, seconds: u64) -> i32 {
+        use kiwivpn::guard::{Cond, Dir, Rule};
+        let Ok(net) = Net::parse(&format!("{ip}/{}", if ip.contains(':') { 128 } else { 32 })) else {
+            eprintln!("not an address: {ip}");
+            return 2;
+        };
+        let rules = [Dir::Out, Dir::In].into_iter().map(|dir| Rule { v6: net.v6(), dir, permit: false, weight: 15, conds: vec![Cond::RemoteNet(net)], name: "test: server cut off" }).collect();
+        match Guard::engage_rules(rules, "Kiwi CI: server cut off") {
+            Ok(_g) => {
+                println!("held");
+                std::thread::sleep(Duration::from_secs(seconds.min(1200)));
+                0
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        }
+    }
+
     pub fn hold(seconds: u64) -> i32 {
         match Guard::engage(&plan(true), &[]) {
             Ok(_g) => {
@@ -337,8 +360,9 @@ fn main() {
         ["service", report] => check::service(report),
         ["probe", ip, port] => check::probe(ip, port),
         ["hold", s] => check::hold(s.parse().unwrap_or(20)),
+        ["cut", ip, s] => check::cut(ip, s.parse().unwrap_or(600)),
         _ => {
-            eprintln!("usage: guard_check run <report.json> | probe <ip> <port> | hold <seconds>");
+            eprintln!("usage: guard_check run <report.json> | probe <ip> <port> | hold <seconds> | cut <ip> <seconds>");
             2
         }
     };

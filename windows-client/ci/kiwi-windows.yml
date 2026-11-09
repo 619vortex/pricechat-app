@@ -3,8 +3,13 @@
 # this folder (copied by windows-client/sync-ci-repo.ps1). The iPhone project at that repo's root, and its Codemagic
 # workflows, are separate and untouched by this file.
 #
-# It publishes nothing: no release, no upload anywhere, no website change. It needs no secrets. The installer is NOT
-# code signed, so Smart App Control blocks it; it's for testing on a machine without it, until signing is added.
+# It publishes nothing: no release, no upload anywhere, no website change. Push builds need no secrets and are NOT code signed.
+#
+# Code signing (owner's SSL.com eSigner certificate) happens ONLY when the owner starts the workflow by hand with "sign" ticked.
+# The build job then runs in the GitHub environment "kiwi-signing", which holds the eSigner secrets and requires the owner's
+# approval on every run (Settings > Environments > kiwi-signing > Required reviewers). ci/sign.ps1 signs the service,
+# tunnel.dll, KiwiVPN.exe, the NSIS plugins, the uninstaller and the installer; wireguard.dll keeps WireGuard LLC's signature.
+# A signed build is still only a private artifact: nothing here publishes it.
 name: Kiwi VPN Windows
 
 on:
@@ -19,6 +24,11 @@ on:
         description: "Devices to delete from the test account before the VPN tests, exact names, comma-separated (only with the owner's say-so)"
         required: false
         default: ""
+      sign:
+        description: "Code sign with the eSigner certificate (needs the owner's approval in the kiwi-signing environment)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -38,13 +48,19 @@ env:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 120
+    # the signing secrets exist only in kiwi-signing, which waits for the owner's approval; every other run uses an empty environment
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign) && 'kiwi-signing' || 'kiwi-build' }}
     defaults:
       run:
         shell: powershell
         working-directory: windows-client
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\target
+      SIGN: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign) && 'yes' || 'no' }}
+      # SSL.com CodeSignTool, pinned (https://github.com/SSLcom/CodeSignTool/releases)
+      CODESIGNTOOL_URL: https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2-windows.zip
+      CODESIGNTOOL_SHA256: 4AFC32E8B7F79BBE1DE7E4E7049AAAD4E0F754357613B9BBEC0E3052F06FD36B
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,6 +159,40 @@ jobs:
           cargo build --release --bins
           if ($LASTEXITCODE -ne 0) { throw "The service didn't build" }
 
+      - name: Signing tool (SSL.com CodeSignTool, SHA-256 checked)
+        if: env.SIGN == 'yes'
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET") {
+            if (-not [Environment]::GetEnvironmentVariable($v)) { throw "The kiwi-signing environment has no $v secret" }
+          }
+          $Zip = "$env:RUNNER_TEMP\codesigntool.zip"
+          Invoke-WebRequest -UseBasicParsing -Uri $env:CODESIGNTOOL_URL -OutFile $Zip
+          if ((Get-FileHash $Zip -Algorithm SHA256).Hash -ne $env:CODESIGNTOOL_SHA256) { throw "CodeSignTool isn't the pinned file" }
+          $Dir = "$env:RUNNER_TEMP\codesigntool"
+          Expand-Archive $Zip $Dir -Force
+          "CODESIGNTOOL_DIR=$Dir" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "### Code signing (eSigner)`n" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        env:
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          KIWI_SIGNER_THUMBPRINT: ${{ vars.KIWI_SIGNER_THUMBPRINT }}
+
+      - name: Sign the service and tunnel.dll
+        if: env.SIGN == 'yes'
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($f in "$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe", "dist\tunnel.dll") { & "$env:GITHUB_WORKSPACE\windows-client\ci\sign.ps1" $f }
+          if ((Get-AuthenticodeSignature dist\wireguard.dll).Status -ne "Valid") { throw "wireguard.dll lost WireGuard LLC's signature" }
+        env:
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          KIWI_SIGNER_THUMBPRINT: ${{ vars.KIWI_SIGNER_THUMBPRINT }}
+
       - name: Files the installer bundles (the app's build script checks they exist)
         run: |
           $ErrorActionPreference = "Stop"
@@ -195,6 +245,12 @@ jobs:
           Get-ChildItem $Nsis | Select-Object -First 5 Name
 
       - name: Installer
+        env:
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          KIWI_SIGNER_THUMBPRINT: ${{ vars.KIWI_SIGNER_THUMBPRINT }}
         run: |
           $ErrorActionPreference = "Stop"
           $Bundle = "app\src-tauri\bundle-files"
@@ -203,8 +259,15 @@ jobs:
           Push-Location app
           # A public-style build: --no-default-features removes the "use a config file" testing option.
           # Tried three times: the only network step here is Tauri fetching NSIS, which GitHub Releases sometimes answers with a 504.
+          # Signed builds: Tauri runs ci\sign.ps1 on KiwiVPN.exe, the NSIS plugins, the uninstaller and the installer
+          $Extra = @()
+          if ($env:SIGN -eq "yes") {
+            $Cfg = "$env:RUNNER_TEMP\sign.conf.json"
+            @{ bundle = @{ windows = @{ signCommand = @{ cmd = "powershell.exe"; args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$env:GITHUB_WORKSPACE\windows-client\ci\sign.ps1", "%1") } } } } | ConvertTo-Json -Depth 6 | Set-Content $Cfg -Encoding ascii
+            $Extra = @("--config", $Cfg)
+          }
           foreach ($try in 1..3) {
-            npm run tauri -- build -- --no-default-features
+            npm run tauri -- build @Extra -- --no-default-features
             if ($LASTEXITCODE -eq 0) { break }
             if ($try -eq 3) { throw "The installer didn't build" }
             Write-Host "Installer build failed (try $try), trying again in 60 s"
@@ -215,14 +278,20 @@ jobs:
           if (-not $Built) { throw "No installer was produced" }
           $Version = (Get-Content app\src-tauri\tauri.conf.json -Raw | ConvertFrom-Json).version
           $Short = "$env:GITHUB_SHA".Substring(0, 7)
-          $Name = "KiwiVPN-$Version-$Short-unsigned-Setup.exe"
+          $Signed = $env:SIGN -eq "yes"
+          $Name = if ($Signed) { "KiwiVPN-$Version-$Short-signed-Setup.exe" } else { "KiwiVPN-$Version-$Short-unsigned-Setup.exe" }
+          if ($Signed) {
+            $sig = Get-AuthenticodeSignature $Built.FullName
+            if ($sig.Status -ne "Valid" -or -not $sig.TimeStamperCertificate) { throw "The installer isn't validly signed and timestamped ($($sig.Status))" }
+          }
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\out" | Out-Null
           Copy-Item $Built.FullName "$env:GITHUB_WORKSPACE\out\$Name"
           $Sha = (Get-FileHash "$env:GITHUB_WORKSPACE\out\$Name" -Algorithm SHA256).Hash
           "$Sha  $Name" | Set-Content "$env:GITHUB_WORKSPACE\out\$Name.sha256" -Encoding ascii
           $Source = if (Test-Path BUILD-INFO.txt) { (Get-Content BUILD-INFO.txt -Raw).Trim() } else { "unknown" }
-          @("ci-commit $env:GITHUB_SHA", "source $Source", "version $Version", "run $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", "signed no") | Set-Content "$env:GITHUB_WORKSPACE\out\BUILD-INFO.txt" -Encoding ascii
-          "### Kiwi VPN $Version for Windows (unsigned test build)`n`nSHA-256 ``$Sha```n`nNot published anywhere. Smart App Control blocks it until it's code signed." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          @("ci-commit $env:GITHUB_SHA", "source $Source", "version $Version", "run $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", $(if ($Signed) { "signed yes" } else { "signed no" })) | Set-Content "$env:GITHUB_WORKSPACE\out\BUILD-INFO.txt" -Encoding ascii
+          if ($Signed) { "### Kiwi VPN $Version for Windows (SIGNED test build)`n`nSHA-256 ``$Sha```n`nPrivate artifact, not published anywhere." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
+          else { "### Kiwi VPN $Version for Windows (unsigned test build)`n`nSHA-256 ``$Sha```n`nNot published anywhere. Smart App Control blocks it until it's code signed." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -241,6 +310,44 @@ jobs:
   # The kill switch and DNS guard on a fresh GitHub Windows machine, with no VPN account: the installed service against a
   # test server that never answers (crash recovery, give-up, pause limit, service restart), then the raw filters (what gets
   # through, what's blocked, and that the block dies with its process). Each block lasts seconds to two minutes.
+  upgrade:
+    # Installs the public 0.1.1 (checked against its published SHA-256), then this build over it, as a user upgrading would.
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: KiwiVPN-Windows-${{ github.sha }}
+          path: build
+
+      - name: Upgrade from the public 0.1.1
+        run: |
+          $ErrorActionPreference = "Stop"
+          $Old = "$env:RUNNER_TEMP\KiwiVPN-0.1.1-Setup.exe"
+          Invoke-WebRequest -UseBasicParsing -Uri https://pricechat.live/downloads/KiwiVPN-Setup.exe -OutFile $Old
+          if ((Get-FileHash $Old -Algorithm SHA256).Hash -ne "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598") { throw "The public download isn't 0.1.1 any more: update this check" }
+          $p = Start-Process $Old -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "0.1.1 didn't install ($($p.ExitCode))" }
+          Start-Sleep 5
+          $v1 = (Get-Item "C:\Program Files\KiwiVPN\KiwiVPN.exe").VersionInfo.ProductVersion
+          Write-Host "installed first: $v1, service $((Get-Service KiwiVPN).Status)"
+          $exe = Get-ChildItem build\*-Setup.exe | Select-Object -First 1
+          $p = Start-Process $exe.FullName -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "2.0 didn't install over 0.1.1 ($($p.ExitCode))" }
+          Start-Sleep 5
+          $v2 = (Get-Item "C:\Program Files\KiwiVPN\KiwiVPN.exe").VersionInfo.ProductVersion
+          $svc = Get-Service KiwiVPN
+          $entries = @(Get-ChildItem HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall, HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall, HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall -ErrorAction SilentlyContinue | Get-ItemProperty | Where-Object { $_.DisplayName -like "KiwiVPN*" -or $_.DisplayName -like "Kiwi VPN*" })
+          Write-Host "after upgrade: $v2, service $($svc.Status), Apps entries $($entries.Count): $(($entries | ForEach-Object { "$($_.DisplayName) $($_.DisplayVersion)" }) -join '; ')"
+          if (-not $v2.StartsWith("2.")) { throw "KiwiVPN.exe is still $v2 after the upgrade" }
+          if ($svc.Status -ne "Running") { throw "The service isn't running after the upgrade" }
+          if ($entries.Count -ne 1) { throw "Expected one Kiwi VPN entry in Apps, found $($entries.Count)" }
+          "### Upgrade from 0.1.1`n`n$v1 -> $v2, service $($svc.Status), one Apps entry" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
   kill-switch:
     needs: build
     runs-on: windows-2022
@@ -270,6 +377,21 @@ jobs:
           Start-Sleep 5
           if ((Get-Service KiwiVPN).Status -ne "Running") { throw "The Kiwi VPN service isn't running after install" }
           sc.exe qfailure KiwiVPN
+
+      - name: Signatures of the installed files
+        run: |
+          $ErrorActionPreference = "Stop"
+          $signed = (Get-Content build\BUILD-INFO.txt -Raw) -match "signed yes"
+          $bad = 0
+          $files = @(Get-ChildItem build\*-Setup.exe) + @(Get-ChildItem "C:\Program Files\KiwiVPN" -Recurse -Include *.exe, *.dll)
+          foreach ($f in $files) {
+            $s = Get-AuthenticodeSignature $f.FullName
+            $who = if ($s.SignerCertificate) { $s.SignerCertificate.Subject } else { "none" }
+            $ts = if ($s.TimeStamperCertificate) { "timestamped" } else { "no timestamp" }
+            Write-Host ("{0,-28} {1,-12} {2} | {3}" -f $f.Name, $s.Status, $ts, $who)
+            if ($signed -and ($s.Status -ne "Valid" -or -not $s.TimeStamperCertificate)) { $bad++ }
+          }
+          if ($bad) { throw "$bad file(s) aren't validly signed and timestamped" }
 
       - name: Kill switch through the installed service
         id: service

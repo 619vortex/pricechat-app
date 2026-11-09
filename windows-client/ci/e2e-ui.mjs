@@ -5,10 +5,12 @@
 //   node ci/e2e-ui.mjs <report.json>
 import { spawn, execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { get as httpsGet } from "node:https";
 
 const APP = "C:\\Program Files\\KiwiVPN\\KiwiVPN.exe";
 const PORT = 9222;
 const RULE = "KiwiCI-failover-block";
+const GUARD_CHECK = "tools/guard_check.exe"; // built with the installer; cuts a server off with a WFP block (Windows Firewall rules don't apply on the runner)
 const POLICY = "HKCU:\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
 const checks = [];
 const add = (name, result, detail = "") => { console.log(`${result.padEnd(4)} ${name}: ${detail}`); checks.push({ name, result, detail }); };
@@ -21,8 +23,31 @@ async function vpnIp(home) {
   return (await waitFor(async () => { const ip = await publicIp(); return ip && ip !== home ? ip : null; }, 20_000, 1000)) ?? (await publicIp());
 }
 
-async function publicIp() {
-  try { const r = await fetch("https://api.ipify.org", { signal: AbortSignal.timeout(8000) }); return (await r.text()).trim(); } catch { return null; }
+// A NEW connection (and DNS lookup) every time: fetch() keeps connections alive, and one opened before the tunnel came up still
+// leaves through the normal network afterwards, so it kept answering with the runner's own address after a reconnect.
+function publicIp() {
+  return new Promise((resolve) => {
+    const req = httpsGet("https://api.ipify.org", { agent: false, headers: { Connection: "close" }, timeout: 8000 }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve(res.statusCode === 200 ? body.trim() : null));
+      res.on("error", () => resolve(null));
+    });
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => resolve(null));
+  });
+}
+
+// Holds a WFP block on `ip` (both ways) until stopped. Resolves to the child once the block is in place.
+function cutOff(ip) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(GUARD_CHECK, ["cut", ip, "900"], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    child.stdout.on("data", (c) => { out += c; if (out.includes("held")) resolve(child); });
+    child.stderr.on("data", (c) => (err += c));
+    child.on("exit", (code) => reject(new Error(`guard_check cut ended (${code}): ${err.trim()}`)));
+    setTimeout(() => reject(new Error("guard_check cut didn't confirm in 15 s")), 15_000);
+  });
 }
 
 // ---- a minimal CDP client
@@ -109,8 +134,13 @@ async function main() {
   await sleep(500);
 
   // Failover: cut this server off on the runner, wait for the window to move
+  let cut = null;
   try {
-    ps(`Set-NetFirewallProfile -All -Enabled True -DefaultOutboundAction Allow -DefaultInboundAction Allow; New-NetFirewallRule -DisplayName '${RULE}' -Direction Outbound -Protocol UDP -RemoteAddress ${first} -Action Block | Out-Null`);
+    cut = await cutOff(first);
+    // the cut itself must work, or a failure below says nothing about the app: the tunnel carries nothing once its server is unreachable
+    await sleep(5000);
+    const through = await publicIp();
+    if (!check("failover: test cut-off takes effect", through !== first, `public IPv4 seen through the cut tunnel: ${through ?? "none (cut)"}`)) throw new Error("cut-off had no effect");
     const t0 = Date.now();
     const dropped = await waitFor(async () => (await headline()) !== "Connected", 300_000, 2000);
     check("failover: the cut-off is noticed", !!dropped, dropped ? `after ${Math.round((Date.now() - t0) / 1000)} s (the tunnel counts as down once its handshake is 180 s old)` : "still Connected after 5 minutes");
@@ -118,8 +148,10 @@ async function main() {
     const now = await vpnIp(home);
     const msg = await js(`[...document.querySelectorAll('p[role=status]')].map(p => p.textContent).find(t => t.includes('moved you')) ?? ''`);
     check("failover: moved to another server", !!moved && now && now !== first && now !== home, `${msg || "no message"}; public IPv4 ${first} -> ${now} after ${Math.round((Date.now() - t0) / 1000)} s`);
+  } catch (e) {
+    add("failover", "FAIL", String(e?.message ?? e));
   } finally {
-    try { ps(`Remove-NetFirewallRule -DisplayName '${RULE}' -ErrorAction SilentlyContinue`); } catch { /* gone */ }
+    try { cut?.kill(); } catch { /* gone */ }
   }
 
   // Disconnect, then reconnect from the window

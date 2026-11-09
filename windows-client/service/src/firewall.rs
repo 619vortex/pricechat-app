@@ -75,7 +75,7 @@ impl Guard {
                 let ok = app.exists() && FwpmGetAppIdFromFileName0(wide(&app.display().to_string()).as_ptr(), &mut blob) == 0;
                 ids.push(if ok { blob } else { null_mut() });
             }
-            let result = guard.add_all(plan, &ids, name.as_mut_ptr(), what.as_mut_ptr());
+            let result = guard.add_all(rules(plan), &ids, name.as_mut_ptr(), what.as_mut_ptr());
             for mut blob in ids {
                 if !blob.is_null() {
                     FwpmFreeMemory0(&mut blob as *mut *mut FWP_BYTE_BLOB as *mut *mut c_void);
@@ -92,7 +92,24 @@ impl Guard {
         }
     }
 
-    unsafe fn add_all(&self, plan: &Plan, apps: &[*mut FWP_BYTE_BLOB], name: *mut u16, what: *mut u16) -> Result<usize, String> {
+    /// Any rules, held the same way (dynamic session, own sublayer). For test tools: the end-to-end test cuts a VPN server off
+    /// with it, because a Windows Firewall rule may not apply where the tests run.
+    pub fn engage_rules(list: Vec<Rule>, label: &str) -> Result<Guard, String> {
+        let mut name = wide(label);
+        let mut what = wide(label);
+        unsafe {
+            let mut session: FWPM_SESSION0 = zeroed();
+            session.flags = FWPM_SESSION_FLAG_DYNAMIC;
+            session.displayData.name = name.as_mut_ptr();
+            let mut engine: HANDLE = null_mut();
+            check("open", FwpmEngineOpen0(null(), RPC_C_AUTHN_WINNT, null(), &session, &mut engine))?;
+            let mut guard = Guard { engine, sublayer: new_sublayer_key(), kill_switch: false, filters: 0 };
+            guard.filters = guard.add_all(list, &[], name.as_mut_ptr(), what.as_mut_ptr())?;
+            Ok(guard)
+        }
+    }
+
+    unsafe fn add_all(&self, list: Vec<Rule>, apps: &[*mut FWP_BYTE_BLOB], name: *mut u16, what: *mut u16) -> Result<usize, String> {
         check("begin", FwpmTransactionBegin0(self.engine, 0))?;
         let run = || -> Result<usize, String> {
             let mut sublayer: FWPM_SUBLAYER0 = zeroed();
@@ -102,7 +119,7 @@ impl Guard {
             sublayer.weight = 0xFFFF;
             check("sublayer", FwpmSubLayerAdd0(self.engine, &sublayer, null_mut()))?;
             let mut count = 0;
-            for rule in rules(plan) {
+            for rule in list {
                 if rule.conds.iter().any(|c| matches!(c, Cond::App(i) if apps.get(*i).is_none_or(|b| b.is_null()))) {
                     continue;
                 }
