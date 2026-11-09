@@ -505,7 +505,8 @@ def connect_api_key(db: Session, member: Member, address: str | None, secret: st
     if rec is None:
         raise AccountError("This API key has expired or was removed on Hyperliquid. Create a new one on app.hyperliquid.xyz/API and paste it.")
     acc = execution.account(db, member)
-    if acc.master_address and acc.master_address.lower() != master and acc.mode == "LIVE" and execution.open_count(db, acc):
+    # any network: testnet positions belong to the old account too (reconciling them against the new one would mark them CLOSED)
+    if acc.master_address and acc.master_address.lower() != master and (_open_on(db, acc, "LIVE") or _open_on(db, acc, "TESTNET")):
         raise AccountError("Close your open positions on the current account before connecting a different one.")
     # bind the proven account to this Passport (replacing an earlier wallet: its old results don't carry over)
     now = utcnow()

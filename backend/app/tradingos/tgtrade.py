@@ -4,7 +4,8 @@ with every one of its safety rules (one position per coin, deterministic order i
 an exchange-side stop on every position or an immediate close, STOP NEW TRADES).
 
 Rules added for Telegram:
-  · who: new exposure (/open, /enter, a signal's ENTER button) only for members whose verified wallet Hyperliquid records as
+  · who: new exposure (/open, and while `telegram_trading.gate_signal_enter` is on, its default, also /enter and a signal's
+    ENTER button) only for members whose verified wallet Hyperliquid records as
     referred with the Banter group's code (tradingbot.service.codes). Closing, moving a stop closer, cancelling a target,
     pausing and reading their own account always work, so nobody can be left unable to get out of a position;
   · where: account commands only in the member's private chat with the bot. In a group the bot says so and sends nothing
@@ -13,13 +14,18 @@ Rules added for Telegram:
     only after the member presses Confirm within 5 minutes; single use, and never larger than what was previewed;
   · which network: PAPER (simulated on real prices) and TESTNET (Hyperliquid's testnet, through the member's own approved
     testnet API wallet). Manual orders on mainnet stay off until the owner switches on `telegram_live` (Admin → Trading OS,
-    strategies JSON). The existing signal ENTER flow keeps the rules it already had;
+    strategies JSON), and then only through execution.live_gate, the same LIVE checks as every other entry (LIVE enabled
+    for the account, allowed for the member, the API wallet still listed for their current verified wallet). TESTNET orders
+    are priced and sized from testnet's own market (market.for_mode). Manual trades keep every limit signal trades have
+    (allowed contracts, trades a day, cooldown, Engine v2 portfolio checks) on top of the member's own sizing;
   · keys: the bot never asks for a private key or a recovery phrase. A message that looks like one is deleted at once
     (see looks_secret) and the member is told to move their funds. Wallets connect on the website, where the member's own
-    wallet signs a restricted API-wallet approval (it can trade, never withdraw).
+    wallet approves an API wallet for trading; Price Chat only places, cancels and changes orders and sets leverage with it,
+    never withdrawals or transfers (see accounts.PERMISSIONS: Hyperliquid's docs state no blanket "can't withdraw" rule).
 
 A manual trade needs a row in ts_signals (positions and intents are keyed by a signal): each gets a private anchor row with
-status MANUAL and a negative number, never published, never in the signal lists, the track record or AUTO.
+status MANUAL and a negative number, never published, never in the signal lists, the track record or AUTO. A member's anchor
+that never got a position and has no live preview is reused by their next preview, so unconfirmed previews don't pile up rows.
 """
 
 from __future__ import annotations
@@ -29,9 +35,11 @@ import re
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
@@ -104,6 +112,14 @@ def telegram_live(db: Session) -> bool:
     return bool(cfg.get("live")) if isinstance(cfg, dict) else False
 
 
+def gate_signal_enter(db: Session) -> bool:
+    """Does the Banter referral gate also apply to signal entries from Telegram (a signal's ENTER button and /enter)? On unless
+    the owner sets `telegram_trading.gate_signal_enter: false` (Admin → Trading OS, strategies JSON). The website's ENTER is
+    never gated. Manual /open is always gated."""
+    cfg = (signals.settings(db).strategies or {}).get("telegram_trading") or {}
+    return bool(cfg.get("gate_signal_enter", True)) if isinstance(cfg, dict) else True
+
+
 def mode_gate(db: Session, acc: TrAccount) -> str | None:
     if acc.mode == "LIVE" and not telegram_live(db):
         return ("Manual orders from Telegram run on PAPER and TESTNET for now: real-money (mainnet) orders from Telegram aren't "
@@ -146,8 +162,9 @@ def looks_secret(text: str, private: bool = True) -> bool:
 
 SECRET_WARNING = ("⚠️ That looked like a private key or a recovery phrase, so I deleted it. Never send it to anyone, Price Chat "
                   "included: we will never ask for it. If it was real, move your funds to a new wallet now.\n\n"
-                  f"To trade from here, connect at {SITE}/earn: your wallet signs a restricted API-wallet approval that can "
-                  "place orders but can never withdraw.")
+                  f"To trade from here, connect at {SITE}/earn: your wallet approves an API wallet for trading. Price Chat only "
+                  "places, cancels and changes orders with it and never sends withdrawals or transfers. You can revoke it on "
+                  "Hyperliquid at any time.")
 
 
 # ---------------------------------------------------------------- /open: parsing and planning
@@ -222,7 +239,8 @@ class Manual:
 
 def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decimals: int, funding_h: float, equity: float,
                 acc_max_leverage: int, max_loss_usd: float, max_allocation_pct: float, max_positions: int, open_positions: int,
-                daily_pnl: float, daily_loss_limit: float, paused: bool, global_paused: bool) -> Manual:
+                daily_pnl: float, daily_loss_limit: float, paused: bool, global_paused: bool, allowed: list[str] | None = None,
+                trades_today: int = 0, max_trades_today: int = risk.HARD_MAX_TRADES_PER_DAY, cooldown_left_min: float = 0.0) -> Manual:
     """The member's own sizing (margin x leverage), held to their limits and the system's: leverage, margin as a share of
     equity, loss at the stop, positions, daily loss, Hyperliquid's minimum, and a stop that triggers before liquidation.
     Without a stop given, it goes where the loss reaches the member's max loss per trade (or just before liquidation)."""
@@ -234,6 +252,13 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
         reasons.append("STOP NEW TRADES is on (/resume)")
     if global_paused:
         reasons.append("trading is paused for everyone right now")
+    if allowed and req.coin.upper() not in allowed:  # the same limits as signal trades (risk.plan_trade)
+        reasons.append(f"{req.coin} isn't in your allowed contracts")
+    day_cap = min(max_trades_today, risk.HARD_MAX_TRADES_PER_DAY)
+    if trades_today >= day_cap:
+        reasons.append(f"{trades_today} bot trades opened today (limit {day_cap} a day)")
+    if cooldown_left_min > 0:
+        reasons.append(f"cooling down on {req.coin}: {cooldown_left_min:.0f} min left since your last {req.coin} trade closed")
     if req.leverage > cap:
         why = ("your limit" if cap == acc_max_leverage else "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{req.coin}'s maximum")
         reasons.append(f"{req.leverage}x is over {why} of {cap}x (/settings leverage)")
@@ -288,21 +313,44 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
 
 
 # ---------------------------------------------------------------- manual previews and confirmations
+def _next_manual_number(db: Session) -> int:
+    return int(db.scalar(select(func.coalesce(func.min(TsSignal.number), 0)).where(TsSignal.number < 0)) or 0) - 1
+
+
 def _anchor(db: Session, member: Member, req: OpenRequest, plan: risk.Plan) -> TsSignal:
-    """The private row a manual trade hangs on: status MANUAL, a negative number (public numbering is max + 1 of positive ones)."""
-    lowest = int(db.scalar(select(func.coalesce(func.min(TsSignal.number), 0)).where(TsSignal.number < 0)) or 0)
-    sig = TsSignal(number=lowest - 1, coin=req.coin, side=req.side, timeframe="man", strategy="manual", entry_lo=plan.entry, entry_hi=plan.entry,
-                   stop=plan.stop, target=plan.tp1, lev_lo=plan.leverage, lev_hi=plan.leverage,
-                   rr=round(abs(plan.tp1 - plan.entry) / max(1e-12, abs(plan.entry - plan.stop)), 2), status=MANUAL,
-                   reason="The member's own trade from Telegram (/open)", analysis={"manual": True, "member": member.id},
-                   expires_at=utcnow() + timedelta(days=1), approved_by=f"m:{member.id}")
-    db.add(sig)
-    db.flush()
-    return sig
+    """The private row a manual trade hangs on: status MANUAL, a negative number (public numbering is max + 1 of positive ones).
+    The member's spare anchor (no position ever opened on it, no preview still waiting on it) is reused; a new number that
+    another preview took a moment earlier is retried, never an error."""
+    fields = dict(coin=req.coin, side=req.side, entry_lo=plan.entry, entry_hi=plan.entry, stop=plan.stop, target=plan.tp1,
+                  lev_lo=plan.leverage, lev_hi=plan.leverage, rr=round(abs(plan.tp1 - plan.entry) / max(1e-12, abs(plan.entry - plan.stop)), 2),
+                  expires_at=utcnow() + timedelta(days=1))
+    spare = db.scalar(select(TsSignal).where(
+        TsSignal.status == MANUAL, TsSignal.number < 0, TsSignal.approved_by == f"m:{member.id}",
+        ~select(TrPosition.id).where(TrPosition.signal_id == TsSignal.id).exists(),
+        ~select(TrIntent.id).where(TrIntent.signal_id == TsSignal.id, TrIntent.status == "PENDING", TrIntent.expires_at > utcnow()).exists())
+        .order_by(TsSignal.id).limit(1))
+    if spare is not None:
+        for k, v in fields.items():
+            setattr(spare, k, v)
+        db.flush()
+        return spare
+    for _ in range(5):
+        sig = TsSignal(number=_next_manual_number(db), timeframe="man", strategy="manual", status=MANUAL,
+                       reason="The member's own trade from Telegram (/open)", analysis={"manual": True, "member": member.id},
+                       approved_by=f"m:{member.id}", **fields)
+        try:
+            with db.begin_nested():
+                db.add(sig)
+                db.flush()
+            return sig
+        except IntegrityError:  # another preview took that number between the read and the insert
+            continue
+    raise execution.TradeError("Busy right now: send /open again.")
 
 
 def _sizing(db: Session, member: Member, acc: TrAccount, req: OpenRequest, ex: Any = None) -> tuple[Manual, Any]:
-    m = market.data().market(req.coin)
+    execution.live_gate(db, member, acc, ex)  # LIVE enabled, allowed, and the API wallet still listed: as for every entry
+    m = market.for_mode(acc.mode).market(req.coin)  # TESTNET: testnet's own price, szDecimals and max leverage
     req.coin = m.coin
     ex = ex or execution.executor(db, acc, req.coin)
     if db.scalar(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.coin == req.coin,
@@ -311,12 +359,18 @@ def _sizing(db: Session, member: Member, acc: TrAccount, req: OpenRequest, ex: A
     if acc.mode != "PAPER" and any(p["position"]["coin"] == req.coin and float(p["position"]["szi"]) != 0
                                    for p in ex.state().get("assetPositions", [])):
         raise execution.TradeError(f"You hold a {req.coin} position on Hyperliquid already. The bot won't touch or add to it.")
+    per_day, cooldown = execution.style_limits(acc)
     man = manual_plan(req, mark=m.mark, market_max_lev=m.max_leverage, sz_decimals=m.sz_decimals, funding_h=m.funding, equity=ex.equity(),
                       acc_max_leverage=acc.max_leverage, max_loss_usd=acc.max_loss_per_trade_usd, max_allocation_pct=acc.max_allocation_pct,
                       max_positions=acc.max_positions, open_positions=execution.open_count(db, acc), daily_pnl=execution.day_loss_basis(db, acc),
-                      daily_loss_limit=acc.daily_loss_limit_usd, paused=acc.paused, global_paused=signals.settings(db).paused)
+                      daily_loss_limit=acc.daily_loss_limit_usd, paused=acc.paused, global_paused=signals.settings(db).paused,
+                      allowed=[c.strip().upper() for c in (acc.allowed_coins or "").split(",") if c.strip()],
+                      trades_today=execution.trades_today(db, acc), max_trades_today=per_day,
+                      cooldown_left_min=execution.cooldown_left(db, acc, req.coin, cooldown))
     if not man.plan.ok:
         raise execution.TradeError("Can't open: " + "; ".join(man.plan.reasons) + ".")
+    # Engine v2's portfolio checks, as for signal entries: advisory (recorded on the plan) unless the owner set "enforce"
+    execution._portfolio_checks(db, acc, SimpleNamespace(coin=req.coin, analysis={}), m, man.plan, ex)  # type: ignore[arg-type]
     return man, ex
 
 
@@ -427,8 +481,8 @@ def bot_positions_text(db: Session, acc: TrAccount) -> str:
     out, f = [f"<b>Bot positions · {acc.mode}</b>"], market.fmt_price
     for p in rows:
         try:
-            mark = market.data().market(p.coin).mark
-            mm = market.data().market(p.coin).max_leverage
+            pm = market.for_mode(p.mode).market(p.coin)  # a testnet position at testnet's price
+            mark, mm = pm.mark, pm.max_leverage
         except market.MarketError:
             mark, mm = 0.0, 0
         long = p.side == "LONG"
@@ -593,7 +647,7 @@ async def send_signal_preview(db: Session, client: Any, chat_id: int, member: Me
     """/enter: the signal's private preview with Confirm / Cancel, exactly as its ENTER button sends it."""
     import asyncio
 
-    why = await gate_for_entry(db, member)
+    why = await gate_for_entry(db, member) if gate_signal_enter(db) else None
     if why:
         return esc(why)
     try:
