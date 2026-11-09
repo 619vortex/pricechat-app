@@ -548,3 +548,37 @@ def test_TR16_a_different_account_key_is_refused_while_testnet_positions_are_ope
     with pytest.raises(accounts.AccountError, match="Close your open positions"):
         accounts.connect_api_key(db, m, None, api.key.hex(), True, _HL("BANTER", 50), replace=True)
     assert execution.account(db, m).master_address != owner.address.lower()
+
+
+# ---------------------------------------------------------------- mainnet stays off by default (feat/tg-trading-v2)
+def test_default_settings_keep_every_new_telegram_entry_off_mainnet(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the default settings (no `telegram_trading` in the strategies JSON) neither /open nor /enter (private, or replying
+    in a group) can reach a LIVE (mainnet) order, even for a member whose account is fully set up for LIVE on the website."""
+    assert "telegram_trading" not in (signals.settings(db).strategies or {})
+    assert tgtrade.telegram_live(db) is False and tgtrade.gate_signal_enter(db) is True
+    sig = active_signal(db, md)
+    m = banter(db, "1001")
+    acc = execution.account(db, m)
+    acc.mode, acc.master_address = "LIVE", db.scalar(select(TbWallet.address).where(TbWallet.member_id == m.id))
+    acc.live_enabled_at = utcnow()
+    acc.mainnet_agent, acc.mainnet_agent_key, acc.mainnet_approved_at = "0x" + "2" * 40, "unused", utcnow()
+    db.commit()
+    asked: list[str] = []
+    ex = FakeExchange(mark=md.market("BTC").mark)
+
+    def guard(db_: Any, a_: Any, coin: str, mode: str | None = None) -> Any:
+        asked.append(mode or a_.mode)
+        return ex
+
+    monkeypatch.setattr(execution, "executor", guard)
+    monkeypatch.setattr(execution, "check_live_permission", lambda *a, **k: None)  # only the Telegram switch stands in the way
+    monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
+    tg = TG()
+    assert "aren't switched on" in say(db, tg, 1001, "/open BTC long 50 3x")
+    assert "aren't switched on" in say(db, tg, 1001, f"/enter #{sig.number:03d}")
+    asyncio.run(bot.handle_command(db, tg, -100, 1001, f"/enter #{sig.number}", group=True, reply_to=5))
+    assert "aren't switched on" in tg.sent[-2][2] and tg.sent[-2][1] == 1001  # the group /enter: the refusal goes privately
+    for token in ("mo:" + "0" * 16, "cf:" + "0" * 16):  # forged confirms find nothing to send
+        press(db, tg, 1001, token)
+    assert not db.scalars(select(TrIntent)).all() and not ex.orders and "LIVE" not in asked
+    assert not db.scalars(select(TrPosition)).all()

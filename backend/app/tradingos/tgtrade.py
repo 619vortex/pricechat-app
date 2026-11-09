@@ -13,7 +13,7 @@ Rules added for Telegram:
   · how: every order is a preview first (size, margin, leverage, stop, targets, liquidation estimate, fees, funding), sent
     only after the member presses Confirm within 5 minutes; single use, and never larger than what was previewed;
   · which network: PAPER (simulated on real prices) and TESTNET (Hyperliquid's testnet, through the member's own approved
-    testnet API wallet). Manual orders on mainnet stay off until the owner switches on `telegram_live` (Admin → Trading OS,
+    testnet API wallet). Manual orders (/open, /enter) on mainnet stay off until the owner sets `telegram_trading.live` (Admin → Trading OS,
     strategies JSON), and then only through execution.live_gate, the same LIVE checks as every other entry (LIVE enabled
     for the account, allowed for the member, the API wallet still listed for their current verified wallet). TESTNET orders
     are priced and sized from testnet's own market (market.for_mode). Manual trades keep every limit signal trades have
@@ -647,6 +647,9 @@ async def send_signal_preview(db: Session, client: Any, chat_id: int, member: Me
     """/enter: the signal's private preview with Confirm / Cancel, exactly as its ENTER button sends it."""
     import asyncio
 
+    if execution.account(db, member).mode == "LIVE" and not telegram_live(db):  # a new Telegram entry path: mainnet off like /open
+        return ("Real-money (mainnet) entries from /enter aren't switched on yet. Switch with /settings mode testnet or "
+                "/settings mode paper, or enter on the website.")
     why = await gate_for_entry(db, member) if gate_signal_enter(db) else None
     if why:
         return esc(why)
