@@ -123,6 +123,9 @@ def member(db: Session, client: TestClient, rank: int, telegram: str | None = "4
     if telegram:
         members.link_identity(db, m, "telegram", telegram, "tester", None)  # (linking can pay XP and recalculate the rank)
     need = next(r for r in ledger.ranks(db) if r.level == rank)
+    ledger.recalc(db, m)
+    if need.min_xp > m.rank_score:  # real ledger XP behind the rank (the wallet reward is a flat 100 and recalculates the rank)
+        ledger.adjust(db, m, need.min_xp - m.rank_score, actor="test", reason="test rank", ref=f"test-rank-{m.id}")
     m.rank_score, m.rank_level = need.min_xp, rank
     db.commit()
     client.cookies.set("pc_session", members.new_session(db, m, 7))
@@ -353,7 +356,7 @@ def test_wallet_gives_one_free_level_once(tb: Any) -> None:
     assert r["leveled_up"] and r["rank_level"] >= start + 1 and r["free_level_claimed"]
     from app.models.members import ReputationEvent
     paid = db.scalar(select(ReputationEvent.xp).where(ReputationEvent.member_id == m.id, ReputationEvent.event_type == "wallet.verified"))
-    assert paid >= service.WALLET_XP_MIN
+    assert paid == service.WALLET_XP
     # again (even with another wallet): no second level
     n = client.post("/api/members/me/wallet/nonce", json={"address": addr(0xB0B)}).json()
     r = client.post("/api/members/me/wallet/verify", json={"nonce": n["nonce"], "signature": sign(n["message"], 0xB0B)}).json()
@@ -418,7 +421,7 @@ def test_earn_wallet_step_pays_the_wallet_xp(tb: Any) -> None:
     prove(client, ADDR_KEY)  # through the Earn funnel's own route
     from app.models.members import ReputationEvent
     paid = db.scalar(select(ReputationEvent.xp).where(ReputationEvent.member_id == m.id, ReputationEvent.event_type == "wallet.verified"))
-    assert paid is not None and paid >= service.WALLET_XP_MIN
+    assert paid == service.WALLET_XP
 
 
 def test_the_code_hyperliquid_records_for_the_banter_link_counts(tb: Any) -> None:

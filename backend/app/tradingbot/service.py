@@ -53,10 +53,16 @@ _hits_lock = threading.Lock()
 LIMITS = {"nonce": (10, 600), "verify": (10, 600), "recheck": (6, 600), "apply": (3, 86400), "invite": (20, 3600), "event": (60, 600), "apikey": (8, 600)}
 
 
+MAX_LIMIT_KEYS = 20000  # past this many tracked callers, finished windows are dropped (the dict can't grow without bound)
+
+
 def limit(action: str, who: str) -> None:
     n, window = LIMITS[action]
     now = time.monotonic()
     with _hits_lock:
+        if len(_hits) > MAX_LIMIT_KEYS:
+            for k in [k for k, q in _hits.items() if not q or now - q[-1] > LIMITS[k[0]][1]]:
+                del _hits[k]
         q = _hits[(action, who)]
         while q and now - q[0] > window:
             q.popleft()
@@ -410,27 +416,26 @@ def tiers_out(w: TbWallet | None) -> dict[str, Any]:
             "next": {"usd": nxt[0], "xp": nxt[1], "name": nxt[2], "missing": round(nxt[0] - dep, 2)} if nxt else None}
 
 
-WALLET_XP_MIN = 100  # the wallet reward is at least this, or a whole level when that's more
+WALLET_XP = 100  # the one-time wallet reward, a flat amount (the "wallet.verified" rule's XP overrides it when set above 0)
 
 
 def free_level(db: Session, member: Member, address: str) -> int:
-    """The one-time reward for verifying a wallet: at least WALLET_XP_MIN XP, or enough to reach the next Kiwi rank if more. Once per
-    Passport (max_per_member=1) and once per wallet (claim key), so one wallet can't level up many accounts.
-    Returns the XP paid (0 if already claimed, at the top rank, or refused by the ledger's rules)."""
-    import math
-
+    """The one-time reward for verifying a wallet: a flat WALLET_XP (it used to be "enough to reach the next rank", which made
+    one free signature worth up to a whole rank: audit PP-2). Once per Passport (max_per_member=1) and once per wallet ever
+    (claim key, kept after account deletion), so one wallet can't reward many accounts.
+    Returns the XP paid (0 if already claimed or refused by the ledger's rules)."""
     from app.members.catalog import ensure_catalog
-    from app.members.reputation import settings as rep_settings
 
     ensure_catalog(db)  # the "wallet.verified" rule exists before the first reward
-    current = ledger.rank_for(db, member.rank_score)
-    nxt = next((r for r in ledger.ranks(db) if r.level == current.level + 1), None)
-    weight = rep_settings(db).price_chat_weight or 1.0
-    need = max(WALLET_XP_MIN, math.ceil((nxt.min_xp - member.rank_score) / weight) if nxt else 0)
     try:
-        r = ledger.award(db, member, "wallet.verified", f"wallet:{address}", xp=need, claim_key=address, commit=False, source="wallet",
-                         reason=f"Connected a wallet: +{need} XP" + (f", {nxt.name} unlocked" if nxt and need * weight >= nxt.min_xp - member.rank_score else ""),
-                         actor=f"member:{member.id}")
+        address = evm.normalize(address)  # one claim per wallet whatever the letter case it arrived in
+    except ValueError:
+        return 0
+    try:
+        rule = ledger.get_rule(db, "wallet.verified")
+        amount = rule.xp if rule.xp and rule.xp > 0 else WALLET_XP
+        r = ledger.award(db, member, "wallet.verified", f"wallet:{address}", xp=amount, claim_key=address, commit=False, source="wallet",
+                         reason=f"Connected a wallet: +{amount} XP", actor=f"member:{member.id}")
     except ValueError:  # the rule is missing (catalog not seeded): no reward, never a crash
         return 0
     return r.xp if r.awarded else 0
@@ -445,7 +450,10 @@ def login_message(address: str, nonce: str, issued: datetime, domain: str) -> st
 
 def login_nonce(db: Session, address: str, domain: str, who: str) -> dict[str, str]:
     address = evm.normalize(address)
+    # `who` is the caller's network address (never a header the caller picks, like User-Agent: audit SEC-6); the wallet has
+    # its own budget too, so neither a pool of addresses nor a pool of wallets buys unlimited tries
     limit("nonce", f"login:{who}")
+    limit("nonce", f"login-wallet:{address}")
     now = utcnow()
     n = secrets.token_hex(16)
     msg = login_message(address, n, now, domain)
@@ -462,6 +470,8 @@ def login_verify(db: Session, nonce: str, signature: str, who: str) -> tuple[Mem
     limit("verify", f"login:{who}")
     now = utcnow()
     n = db.scalar(select(TbNonce).where(TbNonce.nonce == str(nonce)[:64], TbNonce.member_id.is_(None)))
+    if n is not None:
+        limit("verify", f"login-wallet:{n.address}")
     if n is None or n.used_at is not None or _aware(n.expires_at) < now or not _spend(db, n, now):
         raise AccessError("That sign-in request expired or was already used. Try again.")
     try:
