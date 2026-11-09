@@ -136,6 +136,9 @@ def create_app(
     from app.security import client_ip
 
     client_ip.startup_check(app_settings)
+    from app.security import admin_auth as _admin_auth
+
+    _admin_auth.bind_credentials(app_settings)  # a changed ADMIN_PASSWORD_HASH ends every earlier owner session (AR-10)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

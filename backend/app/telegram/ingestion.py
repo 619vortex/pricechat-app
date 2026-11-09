@@ -83,7 +83,7 @@ class TelegramIngestor:
     def __init__(self, db: Session, client: TelegramBotClient, runtime: TelegramRuntime) -> None:
         self.db = db
         self.client = client
-        self._confirm: list[tuple[int, str]] = []  # (private chat id, purpose) of valid website sign-ins this sync
+        self._confirm: list[tuple[int, dict]] = []  # (private chat id, question) of valid website sign-ins this sync
         self._crew: list[tuple[int, int, str, bool]] = []  # (chat id, user id, code, is_bot): "Invite your crew" Start presses
         self._wk_updates: list[dict] = []  # Worker System: community join updates seen in this batch
         self._wk_starts: list[tuple[int, int, str, str | None, bool]] = []  # Worker System: (chat, user, code, username, is_bot)
@@ -180,7 +180,11 @@ class TelegramIngestor:
             await self._workers()
             await self._welcomes()
             await self._private_group([u for u in access_updates if "callback_query" not in u])
-            await self._trading_os([u["callback_query"] for u in access_updates if "callback_query" in u])
+            from app.members.auth import TELEGRAM_CONFIRM_PREFIX
+
+            cbs = [u["callback_query"] for u in access_updates if "callback_query" in u]
+            await self._sign_in_answers([c for c in cbs if str(c.get("data") or "").startswith(TELEGRAM_CONFIRM_PREFIX)])
+            await self._trading_os([c for c in cbs if not str(c.get("data") or "").startswith(TELEGRAM_CONFIRM_PREFIX)])
             if len(updates) < 100 and until - time.monotonic() < 1:
                 break
 
@@ -285,7 +289,8 @@ class TelegramIngestor:
 
     def _member_sign_in(self, parsed: object) -> bool:
         """'/start pc_<code>' sent privately to the bot from a Price Chat website sign-in link. Only who pressed Start
-        (Telegram user id, @username, name) is used. A valid code gets one fixed confirmation back (after the commit)."""
+        (Telegram user id, @username, name) is used. A valid code gets one Yes / No question back (after the commit);
+        only that person's [Yes] completes the sign-in (see _sign_in_answers)."""
         from app.members.auth import TELEGRAM_CODE_PREFIX, telegram_seen_start
 
         if not isinstance(parsed, ParsedMessage) or parsed.chat.chat_type != "private" or parsed.author_is_bot or not parsed.author_id:
@@ -303,9 +308,9 @@ class TelegramIngestor:
             return True  # a Worker's invite link (answered after the commit); never stored as a message
         if len(parts) != 2 or parts[0] != "/start" or not parts[1].startswith(TELEGRAM_CODE_PREFIX):
             return False
-        purpose = telegram_seen_start(self.db, parts[1][len(TELEGRAM_CODE_PREFIX):], parsed.author_id, parsed.chat.username, parsed.author_name)
-        if purpose:
-            self._confirm.append((parsed.chat.chat_id, purpose))
+        question = telegram_seen_start(self.db, parts[1][len(TELEGRAM_CODE_PREFIX):], parsed.author_id, parsed.chat.username, parsed.author_name)
+        if question:
+            self._confirm.append((parsed.chat.chat_id, question))
         return True
 
     async def _moderate(self) -> None:
@@ -331,15 +336,52 @@ class TelegramIngestor:
                 logger.warning("Group rule action not done (%s)", type(exc).__name__)
 
     async def _send_confirmations(self) -> None:
-        """'It worked' for each valid sign-in just seen. Best effort: a failure never affects the sign-in itself."""
-        texts = {"login": "✅ Done! You're signed in to Price Chat.\n\nGo back to the Price Chat page in your browser: it continues by itself.",
-                 "link": "✅ Telegram is now connected to your Kiwi Passport.\n\nGo back to the Price Chat page in your browser."}
+        """Ask "Sign in to Price Chat on <device>?" for each valid Start press just seen, with [Yes] / [No] buttons. Pressing
+        Start alone never signs anyone in: a link someone else created must not take over (or link) an account by one tap."""
         pending, self._confirm = self._confirm, []
-        for chat_id, purpose in pending:
+        for chat_id, q in pending:
+            device = q.get("device") or "a browser"
+            if q.get("purpose") == "link":
+                text = (f"Connect this Telegram account to the Kiwi Passport “{q.get('passport') or '?'}” on Price Chat?\n\nRequested from: {device}\n\n"
+                        "Only tap Yes if that is your own Passport and you started this yourself just now. "
+                        "If someone sent you this link, tap No.")
+                yes = "✅ Yes, connect it"
+            else:
+                text = (f"Sign in to Price Chat on {device}?\n\n"
+                        "Only tap Yes if you started this sign-in yourself, on that device, just now. "
+                        "If someone sent you this link, tap No: Yes would give them your account.")
+                yes = "✅ Yes, sign me in"
+            from app.members.auth import TELEGRAM_CONFIRM_PREFIX as P
+
+            buttons = [[{"text": yes, "callback_data": f"{P}y:{q['request']}"}, {"text": "No", "callback_data": f"{P}n:{q['request']}"}]]
             try:
-                await self.client.confirm_sign_in(chat_id, texts.get(purpose, texts["login"]))
+                await self.client.send_message(chat_id, text, buttons=buttons)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Sign-in confirmation not sent (%s)", type(exc).__name__)
+                logger.warning("Sign-in question not sent (%s)", type(exc).__name__)
+
+    async def _sign_in_answers(self, callbacks: list[dict]) -> None:
+        """The [Yes] / [No] buttons under a sign-in question. Only the Telegram user who pressed Start can answer (once)."""
+        from app.members.auth import TELEGRAM_CONFIRM_PREFIX, telegram_confirm
+
+        done = {"login": "✅ Done! You're signed in to Price Chat.\n\nGo back to the Price Chat page in your browser: it continues by itself.",
+                "link": "✅ Telegram is now connected to your Kiwi Passport.\n\nGo back to the Price Chat page in your browser."}
+        for cq in callbacks:
+            try:
+                data = str(cq.get("data") or "")[len(TELEGRAM_CONFIRM_PREFIX):]
+                uid = int((cq.get("from") or {}).get("id") or 0)
+                answer, _, rid = data.partition(":")
+                outcome, purpose = telegram_confirm(self.db, int(rid), uid, answer == "y") if uid and rid.isdigit() and answer in ("y", "n") else ("invalid", None)
+                msg = cq.get("message") or {}
+                if outcome == "invalid":
+                    await self.client.answer_callback(cq.get("id", ""), "This sign-in request has expired or was already used. Start again on the website.", alert=True)
+                    continue
+                text = done.get(purpose or "login", done["login"]) if outcome == "verified" else "Cancelled. Nothing was signed in or connected."
+                await self.client.answer_callback(cq.get("id", ""), "Done" if outcome == "verified" else "Cancelled")
+                if msg.get("message_id") and (msg.get("chat") or {}).get("id"):
+                    await self.client.edit_message_text(msg["chat"]["id"], msg["message_id"], text)  # the buttons go away
+            except Exception as exc:  # noqa: BLE001 - best effort: the outcome is already saved
+                self.db.rollback()
+                logger.warning("Sign-in answer not handled (%s)", type(exc).__name__)
 
     def _signal_group(self) -> str:
         from app.tradingos.signals import settings as ts_settings

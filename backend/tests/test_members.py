@@ -295,12 +295,23 @@ def _private_start(tg: FakeTelegram, link: str, user_id: int = 555, username: st
     tg.message(user_id, f"/start {param}", user_id=user_id, name="Alice", extra={"chat": chat})
 
 
+def _press(tg: FakeTelegram, answer: str, request_id: int, user_id: int = 555) -> None:
+    """The [Yes, sign me in] (y) / [No] (n) button under the bot's sign-in question."""
+    tg.raw({"callback_query": {"id": f"cb{tg.next_update_id}", "from": {"id": user_id, "is_bot": False, "first_name": "Alice"},
+                               "message": {"message_id": 1, "chat": {"id": user_id, "type": "private"}}, "data": f"pcs:{answer}:{request_id}"}})
+
+
 def test_telegram_sign_in_with_bot_start_link(mc: TestClient, other_browser: TestClient, fake_tg: FakeTelegram, db: Session) -> None:
     assert mc.post("/api/telegram/verify").status_code == 200  # the bot knows its username
     start = mc.post("/api/members/auth/telegram/start", json={"purpose": "login"}).json()
     assert start["link"].startswith(f"https://t.me/{BOT['username']}?start=pc_")
     assert mc.get(f"/api/members/auth/telegram/status/{start['request']}").json() == {"status": "pending"}
     _private_start(fake_tg, start["link"])
+    mc.post("/api/telegram/sync")
+    assert mc.get(f"/api/members/auth/telegram/status/{start['request']}").json() == {"status": "pending"}  # Start alone is not enough
+    sends = [b for m, b in fake_tg.calls if m == "sendMessage"]
+    assert len(sends) == 1 and sends[0]["text"].startswith("Sign in to Price Chat on")  # the Yes / No question
+    _press(fake_tg, "y", start["request"])
     mc.post("/api/telegram/sync")
     assert other_browser.get(f"/api/members/auth/telegram/status/{start['request']}").json() == {"status": "unknown"}
     done = mc.get(f"/api/members/auth/telegram/status/{start['request']}").json()
@@ -311,14 +322,15 @@ def test_telegram_sign_in_with_bot_start_link(mc: TestClient, other_browser: Tes
     assert p["member"]["username"].startswith("Kiwi")  # the Telegram handle is not made public automatically
     assert db.scalar(select(func.count()).select_from(TelegramMessage)) == 0  # the /start message is never stored
     assert mc.get(f"/api/members/auth/telegram/status/{start['request']}").json() == {"status": "used"}
-    sends = [b for m, b in fake_tg.calls if m == "sendMessage"]
-    assert len(sends) == 1 and "signed in to Price Chat" in sends[0]["text"]  # one fixed "it worked" in that private chat
+    edits = [b for m, b in fake_tg.calls if m == "editMessageText"]
+    assert len(edits) == 1 and "signed in to Price Chat" in edits[0]["text"]  # the question becomes "it worked"
     _private_start(fake_tg, start["link"])  # the same (used) code again: no second message
     mc.post("/api/telegram/sync")
     assert len([1 for m, _ in fake_tg.calls if m == "sendMessage"]) == 1
 
 
 def test_telegram_login_widget_signature(mc: TestClient) -> None:
+    mc.app.state.runtime.settings.members_telegram_deeplink = False  # type: ignore[attr-defined]  # the widget is only accepted in widget mode
     data = {"id": 777, "first_name": "Wid", "username": "widget_user", "auth_date": int(time.time())}
     check = "\n".join(f"{k}={data[k]}" for k in sorted(data))
     good = hmac.new(hashlib.sha256(TOKEN.encode()).digest(), check.encode(), hashlib.sha256).hexdigest()

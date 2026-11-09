@@ -205,6 +205,7 @@ describe("join page", () => {
     expect(open).toHaveBeenCalledWith("https://t.me/pricechat_bot?start=pc_abc", "_blank", "noopener");  // synchronously: not blocked on phones
     const steps = screen.getByRole("status").textContent!;
     expect(steps).toContain("Tap Start");
+    expect(steps).toContain("Yes, sign me in");  // the bot asks first (audit SEC-4)
     expect(steps).toContain("Done!");
     expect(sessionStorage.getItem("pc-tg-signin")).toContain("pc_abc");  // survives coming back from the Telegram app / a reload
     sessionStorage.clear();

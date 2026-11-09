@@ -115,7 +115,9 @@ class FakeTelegram:
             if chat is None:
                 return httpx.Response(400, json={"ok": False, "error_code": 400, "description": "Bad Request: chat not found"})
             return httpx.Response(200, json={"ok": True, "result": chat})
-        if method == "sendMessage":  # only ever the sign-in confirmation (see TelegramBotClient.confirm_sign_in)
+        if method in ("answerCallbackQuery", "editMessageText"):  # the sign-in Yes / No buttons (recorded in self.calls)
+            return httpx.Response(200, json={"ok": True, "result": True})
+        if method == "sendMessage":  # the sign-in question (see ingestion._send_confirmations)
             return httpx.Response(200, json={"ok": True, "result": {"message_id": 1, "chat": {"id": body.get("chat_id")}}})
         if method == "getUpdates":
             offset = body.get("offset")

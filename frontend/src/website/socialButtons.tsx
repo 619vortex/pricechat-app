@@ -23,7 +23,7 @@ export function PIcon({ p }: { p: keyof typeof ICONS }) {
 // --- Telegram ------------------------------------------------------------------------------------------------------
 
 const TG_KEY = "pc-tg-signin";
-const TG_TTL_MS = 9 * 60_000;  // the server's attempt lives 10 minutes
+const TG_TTL_MS = 4 * 60_000;  // the server's attempt lives 5 minutes
 
 interface TgFlow { request: number; link: string; at: number; purpose: "login" | "link" }
 
@@ -37,7 +37,7 @@ function savedFlow(purpose: string): TgFlow | null {
 }
 
 /**
- * Telegram: one tap opens the Price Chat bot with a one-time code; the member presses Start; the bot confirms in
+ * Telegram: one tap opens the Price Chat bot with a one-time code; the member presses Start and taps "Yes, sign me in" under the bot's question; the bot confirms in
  * Telegram and this page continues by itself (it keeps checking, also after coming back from the Telegram app or a reload).
  * The link is prepared before the tap, so Telegram opens in the tap itself (mobile browsers block late pop-ups).
  */
@@ -135,7 +135,7 @@ export function TelegramButton({ purpose, available, onDone, label, className = 
         <div className="site-provider-note tg-steps" role="status">
           <ol>
             <li>Telegram opens the <strong>Price Chat</strong> bot.</li>
-            <li>Tap <strong>Start</strong>. The bot replies “✅ Done!”.</li>
+            <li>Tap <strong>Start</strong>, then <strong>Yes, sign me in</strong> (or <strong>Yes, connect it</strong>). The bot replies “✅ Done!”.</li>
             <li>Come back here: you're signed in automatically.</li>
           </ol>
           <a className="site-link" href={flow.link} target="_blank" rel="noopener noreferrer">Telegram didn't open? Tap here</a>

@@ -5,11 +5,13 @@ kept, encrypted, so a reply or repost they press in Price Chat can be sent as th
 - Google: OpenID Connect authorization code + PKCE, scope "openid" only: an account id, no name, email or YouTube data.
 - X: OAuth 2.0 authorization code + PKCE with a member-login Client ID (separate from the brand connector),
   scopes in X_SCOPES; the token is stored encrypted (never in the browser) and deleted on disconnect.
-- Telegram: the official Login Widget (HMAC signed by the bot token) on a public domain; locally, a one-time
-  bot start link (t.me/<bot>?start=<code>) that the read-only bot sees in a private chat. The bot never replies.
+- Telegram: a one-time bot start link (t.me/<bot>?start=<code>). Pressing Start is not enough: the bot asks
+  "Sign in to Price Chat on <device>?" and only the [Yes] button from that same Telegram user completes it, so a
+  link someone else created can't sign them in by one tap. The Login Widget (HMAC signed by the bot token) is
+  only accepted when the deeplink mode is off.
 
 Every attempt is a single-use MemberAuthRequest bound to the browser that started it (hash of an httpOnly
-cookie), expiring after 10 minutes.
+cookie), expiring after 10 minutes (Telegram: 5).
 """
 
 import base64
@@ -37,6 +39,8 @@ from app.security.secrets import protect, unprotect
 logger = logging.getLogger(__name__)
 
 REQUEST_TTL = timedelta(minutes=10)
+TELEGRAM_TTL = timedelta(minutes=5)  # a Telegram start code (and its Yes / No question) lives 5 minutes
+TELEGRAM_CONFIRM_PREFIX = "pcs:"  # callback data of the bot's [Yes, sign me in] / [No] buttons: pcs:y:<id> / pcs:n:<id>
 TELEGRAM_CODE_PREFIX = "pc_"
 WIDGET_MAX_AGE = 86400  # Telegram widget data older than this is refused
 
@@ -100,7 +104,7 @@ def provider_status(db: Session, settings: Settings) -> dict[str, dict[str, Any]
 
 
 def _new_request(db: Session, provider: str, purpose: str, browser: str, state: str, member: Member | None,
-                 secret: str | None = None) -> MemberAuthRequest:
+                 secret: str | None = None, ttl: timedelta = REQUEST_TTL, result: dict[str, Any] | None = None) -> MemberAuthRequest:
     if purpose not in ("login", "link"):
         raise MemberError("Unknown purpose.")
     if purpose == "link" and member is None:
@@ -109,7 +113,7 @@ def _new_request(db: Session, provider: str, purpose: str, browser: str, state: 
         (MemberAuthRequest.expires_at < utcnow()) | (MemberAuthRequest.state_hash == _h(state))).delete()
     req = MemberAuthRequest(provider=provider, purpose=purpose, state_hash=_h(state), browser_hash=_h(browser),
                             member_id=member.id if member else None, secret=_enc(secret) if secret else None,
-                            expires_at=utcnow() + REQUEST_TTL)
+                            result=result or {}, expires_at=utcnow() + ttl)
     db.add(req)
     db.commit()
     return req
@@ -263,7 +267,17 @@ async def x_finish(db: Session, settings: Settings, state: str, code: str, brows
 # --- Telegram ---------------------------------------------------------------------------------------------------
 
 
-def telegram_start(db: Session, settings: Settings, purpose: str, browser: str, member: Member | None) -> dict[str, Any]:
+def device_label(user_agent: str | None) -> str:
+    """'Chrome on Windows' from a User-Agent, for the bot's "Sign in on <device>?" question. Never more detailed."""
+    ua = user_agent or ""
+    browser = next((name for key, name in (("Edg/", "Edge"), ("OPR/", "Opera"), ("SamsungBrowser", "Samsung Internet"), ("Firefox/", "Firefox"),
+                                           ("CriOS", "Chrome"), ("FxiOS", "Firefox"), ("Chrome/", "Chrome"), ("Safari/", "Safari")) if key in ua), "a browser")
+    system = next((name for key, name in (("Android", "Android"), ("iPhone", "iPhone"), ("iPad", "iPad"), ("Windows", "Windows"),
+                                          ("Mac OS X", "Mac"), ("CrOS", "ChromeOS"), ("Linux", "Linux")) if key in ua), "")
+    return f"{browser} on {system}" if system else browser
+
+
+def telegram_start(db: Session, settings: Settings, purpose: str, browser: str, member: Member | None, device: str | None = None) -> dict[str, Any]:
     if not settings.members_telegram_deeplink:
         raise MemberError("Use the Telegram login button.")
     from app.telegram.ingestion import get_bot_state
@@ -272,32 +286,55 @@ def telegram_start(db: Session, settings: Settings, purpose: str, browser: str, 
     if not bot:
         raise MemberError("Telegram sign-in is not available right now.")
     code = secrets.token_urlsafe(18).replace("-", "x")  # Telegram start parameters: A-Z a-z 0-9 _ - (max 64)
-    req = _new_request(db, "telegram", purpose, browser, code, member)
+    req = _new_request(db, "telegram", purpose, browser, code, member, ttl=TELEGRAM_TTL, result={"device": (device or "")[:64]})
     return {"request": req.id, "link": f"https://t.me/{bot}?start={TELEGRAM_CODE_PREFIX}{code}", "expires_at": req.expires_at.isoformat()}
 
 
-def telegram_seen_start(db: Session, code: str, user_id: int, username: str | None, name: str | None) -> str | None:
-    """Called by the bot poller for '/start pc_<code>' in a private chat. Records who pressed Start. Returns the attempt's
-    purpose ("login" / "link") when the code was valid, else None."""
+def telegram_seen_start(db: Session, code: str, user_id: int, username: str | None, name: str | None) -> dict[str, Any] | None:
+    """Called by the bot poller for '/start pc_<code>' in a private chat. Records who pressed Start, but does NOT verify
+    the attempt: the bot then asks that person to confirm (telegram_confirm). Returns what the question needs
+    ({request, purpose, device, passport}) when the code was valid, else None."""
     req = db.scalar(select(MemberAuthRequest).where(MemberAuthRequest.state_hash == _h(code), MemberAuthRequest.provider == "telegram"))
     if req is None or req.status != "pending" or req.expires_at < utcnow():
         return None
-    req.status = "verified"
-    req.result = {"platform": "telegram", "id": str(user_id), "username": username, "display_name": name}
+    device = str((req.result or {}).get("device") or "")
+    req.status = "awaiting"  # bound to this Telegram user from now on; only their [Yes] completes it
+    req.result = {"platform": "telegram", "id": str(user_id), "username": username, "display_name": name, "device": device}
+    passport = None
+    if req.purpose == "link" and req.member_id:
+        m = db.get(Member, req.member_id)
+        passport = m.username if m else None
     db.commit()
-    return req.purpose
+    return {"request": req.id, "purpose": req.purpose, "device": device, "passport": passport}
+
+
+def telegram_confirm(db: Session, request_id: int, user_id: int, yes: bool) -> tuple[str, str | None]:
+    """The [Yes, sign me in] / [No] button under the bot's question. Only the Telegram user who pressed Start can answer,
+    once, before the attempt expires. Returns (outcome, purpose): outcome is "verified", "cancelled" or "invalid"."""
+    req = db.get(MemberAuthRequest, request_id)
+    if (req is None or req.provider != "telegram" or req.status != "awaiting" or req.expires_at < utcnow()
+            or str((req.result or {}).get("id")) != str(user_id)):
+        return "invalid", None
+    if yes:
+        req.status = "verified"
+    else:
+        req.status, req.result, req.error = "failed", {}, "cancelled"
+    db.commit()
+    return ("verified" if yes else "cancelled"), req.purpose
 
 
 def telegram_claim(db: Session, request_id: int, browser: str | None) -> tuple[str, MemberAuthRequest | None, dict[str, Any] | None]:
-    """The browser that started the attempt asks whether Start was pressed. Returns (status, request, identity)."""
+    """The browser that started the attempt asks whether it was confirmed in Telegram. Returns (status, request, identity)."""
     req = db.get(MemberAuthRequest, request_id)
     if req is None or req.provider != "telegram" or not browser or not hmac.compare_digest(req.browser_hash, _h(browser)):
         return "unknown", None, None
-    if req.status == "pending":
+    if req.status in ("pending", "awaiting"):  # awaiting: Start was pressed, the Yes / No question is open
         return ("expired", None, None) if req.expires_at < utcnow() else ("pending", None, None)
+    if req.status == "failed" and req.error == "cancelled":
+        return "cancelled", None, None
     if req.status != "verified":
         return "used", None, None
-    identity = dict(req.result)
+    identity = {k: v for k, v in req.result.items() if k != "device"}
     req.status, req.result = "done", {}
     db.commit()
     return "verified", req, identity

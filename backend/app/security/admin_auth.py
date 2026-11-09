@@ -5,7 +5,8 @@ Make the hash on your own machine and paste only the hash into Railway:
 
     python -m app.security.admin_auth hash
 
-Sessions are server-side (admin_sessions: only a sha256 of the token is stored). The browser holds the token in an
+Sessions are server-side (admin_sessions: only a sha256 of the token is stored, mixed with a fingerprint of the owner
+username + password hash, so changing ADMIN_PASSWORD_HASH (a restart) ends every existing session). The browser holds the token in an
 HttpOnly cookie, Secure in production, SameSite=Lax (first-party: Vercel forwards /api to the backend on the same
 domain; Lax still sends it on the top-level redirect back from Google's OAuth for the YouTube connection). Failed logins
 are rate-limited per client and globally. A browser the owner has signed in from before carries a signed "known device"
@@ -163,8 +164,19 @@ def remember_device(settings: Settings, response: Response) -> None:
 # --- sessions -----------------------------------------------------------------------------------------------------
 
 
+_credential = ""  # fingerprint of the configured owner username + password hash (bind_credentials)
+
+
+def bind_credentials(settings: Settings) -> None:
+    """Called at startup (create_app) and at each login. Sessions are stored under a digest that includes this fingerprint,
+    so a new password hash makes every session made under the old one unknown (AR-10). No password is involved."""
+    global _credential
+    stored = settings.admin_password_hash.get_secret_value().strip() if settings.admin_password_hash else ""
+    _credential = hashlib.sha256(f"pc-admin-session\0{(settings.admin_username or '').strip()}\0{stored}".encode()).hexdigest()
+
+
 def _digest(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{token}\0{_credential}".encode("utf-8")).hexdigest()
 
 
 def check_credentials(settings: Settings, username: str, password: str) -> bool:
@@ -179,6 +191,7 @@ def check_credentials(settings: Settings, username: str, password: str) -> bool:
 
 
 def start_session(db: Session, settings: Settings, response: Response, username: str) -> None:
+    bind_credentials(settings)
     token = secrets.token_urlsafe(32)
     now = utcnow()
     db.execute(delete(AdminSession).where(AdminSession.expires_at < now))  # tidy up old ones

@@ -712,7 +712,8 @@ def telegram_start(payload: TelegramStart, response: Response, request: Request,
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, SLOW_DOWN)
     browser = _browser_binding(response, runtime.settings, pc_auth)
     try:
-        out = auth.telegram_start(db, runtime.settings, payload.purpose, browser, _current(db, pc_session))
+        out = auth.telegram_start(db, runtime.settings, payload.purpose, browser, _current(db, pc_session),
+                                  device=auth.device_label(request.headers.get("user-agent")))
     except MemberError as exc:
         raise _fail(exc) from exc
     if runtime.scheduler is not None:
@@ -727,6 +728,8 @@ def telegram_status(request_id: int, response: Response, db: DbSession, runtime:
     if state != "verified" or req is None or identity is None:
         if state == "pending" and runtime.scheduler is not None:
             runtime.scheduler.request_run("telegram.ingest", 2)
+        if state == "cancelled":
+            return {"status": state, "error": "You tapped No in Telegram, so nothing was signed in."}
         return {"status": state}
     current = _current(db, pc_session)
     if req.purpose == "link" and (current is None or current.id != req.member_id):
@@ -756,7 +759,10 @@ class TelegramWidget(StrictInput):
 @router.post("/members/auth/telegram/widget")
 def telegram_widget(payload: TelegramWidget, request: Request, response: Response, db: DbSession, runtime: Runtime,
                     pc_session: SessionToken = None, pc_auth: AuthToken = None, pc_ref: RefCode = None) -> dict[str, Any]:
-    """Telegram Login Widget (public domain only). The signature is checked with the bot token."""
+    """Telegram Login Widget (public domain only). The signature is checked with the bot token. Refused while the
+    deeplink mode is on: the site doesn't use the widget then, and a leaked bot token must not mint sessions (SEC-1)."""
+    if runtime.settings.members_telegram_deeplink:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     if _signin_flood(request):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, SLOW_DOWN)
     data = payload.model_dump(exclude={"purpose"}, exclude_none=True)
