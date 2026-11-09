@@ -2,6 +2,19 @@
 
 *Ranked engineering tasks. P0 = this week (safety/revenue at risk), P1 = this month, P2 = this quarter. Each task cites the finding it closes; details and evidence are in QA-FINDINGS.md / SECURITY-REVIEW.md. "Owner" marks steps only the owner can do (accounts, secrets, payments, approvals).*
 
+**Status 2026-11-09.**
+- **Done on branches** (waiting for approval to deploy):
+  - #4 and #5 (route): fix/audit-auth.
+  - #8: fix/audit-passport.
+  - #11 and #13: fix/audit-trading.
+  - #14 (TR-4/6/11/13/14/16): feat/tg-trading.
+  - #2, #15 (TG-4/5/6/10), #17 (build id) and #24 (AR-5/AR-10): fix/audit-ops and fix/audit-auth.
+  - #19 and #20: fix/audit-web.
+  - #23 (PP-6, PP-3 part): fix/audit-passport.
+  - New: RV-1 to RV-15 on fix/rules-hotfix.
+- **Deployed:** #9, the News Desk six-slot schedule, with feeds and staleness detection (eacfdb8c).
+- **Owner-only and still open:** #1, #3, #5 (token), #6, #7 and #10.
+
 | # | P | Task | Closes | Effort | Acceptance criteria |
 |---|---|---|---|---|---|
 | 1 | P0 | Set the owner alert Telegram chat (Admin) and verify | AR-2 | S · Owner | Startup self-check no longer warns; a forced test alert arrives in Telegram |

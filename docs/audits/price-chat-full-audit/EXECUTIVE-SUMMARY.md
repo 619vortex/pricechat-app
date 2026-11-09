@@ -2,6 +2,14 @@
 
 *2026-11-08. Code reviewed at main e978cc3 (plus feat/tg-trading and feat/kiwi-windows-2), production observed read-only. Eight independent reviewers, about 110 findings: 11 new audit tests reproduce bugs, plus the existing suites. Evidence is in the other ten files; IDs refer to QA-FINDINGS.md and SECURITY-REVIEW.md.*
 
+## Update 2026-11-09 (details: FOLLOW-UP-2026-11-09.md)
+
+- **Health score: 48/100** today (criteria in the follow-up §5); about 66 once the fix branches are deployed and the owner's day-1 steps are done.
+- **New Critical found and fixed on a branch:** RV-1, any member posting "as a channel" could mute anyone through the group rules deployed 11-08. Hotfix `fix/rules-hotfix` (11 regression tests) is waiting for approval.
+- **News Desk:** the outage cause was the release plan, not delivery. Six fixed Dubai slots with a written market brief as the fallback were deployed with approval (eacfdb8c). X has never been live (dry run).
+- **Fixed on branches, not deployed:** SEC-4 sign-in takeover, wallet XP exploits, trading safety (TR-1/3/8), ops monitors and bot robustness, SEO and untrue copy, Telegram trading TR-4/TR-6. Combined branch `audit/fixes-2026-11`: 2026 backend tests pass (4 known failures), 476 frontend tests pass.
+- **Still broken in production:** backups (failed again 22:46 UTC 11-08), owner alerts (no chat), proxy secret unset, VPN payments off (trial cliff 12-04), no build id.
+
 ## Overall verdict
 
 **The code is better than the operations, and the operations are better than the business focus.**
@@ -145,4 +153,4 @@ A reason waiting in Telegram every morning: their own P&L and positions, the mov
 **Next phase recommendation:** a 30-day "trust and revenue" phase. No new products; close every Critical and High finding; make the referral and VPN revenue measurable; then grow the Telegram trading loop.
 
 ## Files
-EXECUTIVE-SUMMARY.md (this), SYSTEM-INVENTORY.md, QA-FINDINGS.md, SECURITY-REVIEW.md, UX-DESIGN-REVIEW.md, PERFORMANCE-RELIABILITY.md, BUSINESS-GROWTH.md, FEATURE-IDEAS.md, ROADMAP.md, TEST-EVIDENCE.md, ACTION-BACKLOG.md, plus notes/ (raw reviewer evidence) and screenshots/.
+EXECUTIVE-SUMMARY.md (this), FOLLOW-UP-2026-11-09.md, SYSTEM-INVENTORY.md, QA-FINDINGS.md, SECURITY-REVIEW.md, UX-DESIGN-REVIEW.md, PERFORMANCE-RELIABILITY.md, BUSINESS-GROWTH.md, FEATURE-IDEAS.md, ROADMAP.md, TEST-EVIDENCE.md, ACTION-BACKLOG.md, plus notes/ (raw reviewer evidence) and screenshots/.
