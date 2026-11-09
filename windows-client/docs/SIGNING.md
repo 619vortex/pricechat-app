@@ -1,36 +1,56 @@
 # Code signing Kiwi VPN 2.0 (SSL.com eSigner)
 
-Signing runs only on GitHub's Windows runners in the private repo 619vortex/KIWIVPN, only when the owner starts it by hand, and
-only after the owner approves the run. The credentials live only in GitHub's encrypted environment secrets. They are never on
-the main PC, never in the repo, and never printed (ci/sign.ps1 passes them straight to SSL.com's CodeSignTool).
+Signing runs only on GitHub's Windows runners in the private repo 619vortex/KIWIVPN. The eSigner credentials live only in the
+GitHub environment `windows-signing` as encrypted secrets. They are never on the main PC, never in the repo, and never printed:
+ci/sign.ps1 and ci/check-certificate.ps1 hand them straight to SSL.com's CodeSignTool (v1.3.2, SHA-256 pinned).
 
-## What gets signed
-`kiwivpn-service.exe`, `tunnel.dll`, `KiwiVPN.exe`, Tauri's NSIS plugins, the uninstaller and the installer. Each one is
-Authenticode SHA-256, timestamped by ts.ssl.com, and checked for a valid, timestamped signature before the build continues.
-`wireguard.dll` keeps WireGuard LLC's own signature. A signed build is a private 14-day artifact; nothing is published.
-Each signed build uses about 8-10 eSigner signings. Check your eSigner plan's monthly limit.
+## Already set up in GitHub (2026-11-09)
+- Environment **`windows-signing`**: deployments from **`main` only** (custom branch policy `main`). No secrets in it yet.
+- Workflow `Kiwi VPN Windows` (`.github/workflows/kiwi-windows.yml`, source `windows-client/ci/kiwi-windows.yml`):
+  - push builds: unsigned, environment `kiwi-build` (no secrets), all tests;
+  - **Run workflow > "Code sign"**: enters `windows-signing` only if started by **619vortex**, on **main**, by hand. Signs
+    `kiwivpn-service.exe`, `tunnel.dll`, `KiwiVPN.exe`, Tauri's NSIS plugins, the uninstaller and the installer
+    (Authenticode SHA-256, RFC 3161 timestamp from ts.ssl.com). Every file is checked valid + timestamped right after
+    signing; the artifact is `KiwiVPN-2.0.0-<sha>-signed-Setup.exe` with `.sha256` and BUILD-INFO.txt (14 days, private).
+    Then the same jobs as always run against the signed installer: every installed file's signature, upgrade from the
+    public 0.1.1, kill switch, real servers.
+  - **Run workflow > "Check certificate"**: no build, nothing signed, no signing used. Lists the account's credential IDs
+    and checks the certificate behind `ES_CREDENTIAL_ID`: code signing purpose (Authenticode), RSA key, valid for 30+ days,
+    chain to a root Windows trusts and not revoked, and the thumbprint if `KIWI_SIGNER_THUMBPRINT` is set.
+- `wireguard.dll` keeps WireGuard LLC's own signature (checked, never re-signed).
 
-## One-time setup (owner)
-1. **SSL.com, the certificate.** In your SSL.com account, open the code signing order and check:
-   - it says **eSigner** (cloud signing) and is issued;
-   - the key type: **RSA** is what we want (Smart App Control may not accept ECDSA signatures);
-   - copy its **Credential ID** (the order's eSigner section; CodeSignTool `get_credential_ids` lists it too).
-2. **SSL.com, the automation secret.** On the same order, under eSigner, generate the **QR code** for 2FA and copy the
-   **secret code** shown with it (a long text string). That string is `ES_TOTP_SECRET`: it lets the build make its own
-   one-time codes, so no one types an OTP during a build. Add the same QR code to your authenticator app too: generating a
-   new one replaces the old one. Treat this string like a private key.
-3. **GitHub, the protected environment.** In 619vortex/KIWIVPN: Settings > Environments > New environment `kiwi-signing`:
-   - **Required reviewers:** yourself (every signing run waits for your click);
-   - **Deployment branches:** selected branches, `main` only;
-   - **Environment secrets:** `ES_USERNAME` (SSL.com username), `ES_PASSWORD` (SSL.com password), `ES_CREDENTIAL_ID`,
-     `ES_TOTP_SECRET`.
-4. Optional, after the first signed build: an environment **variable** `KIWI_SIGNER_THUMBPRINT` set to the thumbprint the
-   build summary shows. Every later signature must then come from exactly that certificate.
+**Not possible on the current GitHub plan:** a required reviewer on `windows-signing`. For a private repo that needs GitHub Pro
+(or Team). Until then the guard is: only the owner account can start a manual run, signing only on `main`, and only the owner
+and this PC's deploy key can push to `main`. With Pro: Settings > Environments > windows-signing > Required reviewers >
+619vortex, and every signing run also waits for your click.
 
-## A signed build
-Actions > Kiwi VPN Windows > Run workflow > branch `main` > tick **Code sign** > Run. Approve the `kiwi-signing` deployment when
-GitHub asks. The summary lists every signed file with its certificate, then the upgrade, kill switch and real-server tests run
-against the signed installer.
+## What the owner does
 
-On the main PC: `windows-client\ci-fetch.ps1` downloads the newest artifact and checks its SHA-256, then
-`windows-client\ci\main-pc-check.ps1` checks the signature, chain and timestamp, and Smart App Control's state.
+### On SSL.com
+1. Open the code signing order (Dashboard > Orders > the IV+OV code signing certificate) and check:
+   - status **issued**, delivery **eSigner** (cloud signing). If it offers "eSigner" enrollment, finish that first;
+   - **key type RSA** (Smart App Control is known to accept RSA; if it says ECDSA, ask SSL.com to reissue as RSA 3072/4096).
+2. On the same order, find the **eSigner Credential ID** (a GUID-like string). That's `ES_CREDENTIAL_ID`.
+3. Same order, eSigner section: set or confirm your **eSigner PIN**, then generate the **2FA QR code** and copy the
+   **secret code** shown with it. That's `ES_TOTP_SECRET`: it lets the build make its own one-time codes. Scan the same QR into
+   your authenticator app too (a new QR replaces the old one). Treat it like a private key.
+4. Check your eSigner plan's **monthly signing limit**: each signed build uses about 8-10 signatures; "Check certificate"
+   uses none.
+
+### On GitHub (619vortex/KIWIVPN > Settings > Environments > windows-signing > Environment secrets > Add)
+| Secret | Value |
+|---|---|
+| `ES_USERNAME` | your SSL.com account username |
+| `ES_PASSWORD` | your SSL.com account password |
+| `ES_CREDENTIAL_ID` | the eSigner Credential ID from step 2 |
+| `ES_TOTP_SECRET` | the secret code from step 3 |
+
+Put them in the **environment** (not repository secrets), so only the signing job can read them.
+
+### Then
+1. Actions > Kiwi VPN Windows > Run workflow > `main` > tick **Check certificate** only > Run. Every line should say PASS.
+   Optionally copy the thumbprint it prints into a `windows-signing` **variable** `KIWI_SIGNER_THUMBPRINT`.
+2. Run workflow > tick **Code sign** > Run. The summary lists every signed file with its certificate.
+3. On the main PC: `windows-client\ci-fetch.ps1` (downloads the newest artifact, checks SHA-256), then
+   `windows-client\ci\main-pc-check.ps1 -Installer <file>` before installing and `-Installed` after (read-only: signature,
+   chain, timestamp, Smart App Control state and any blocks). Smart App Control stays on.

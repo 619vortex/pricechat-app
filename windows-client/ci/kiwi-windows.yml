@@ -5,11 +5,14 @@
 #
 # It publishes nothing: no release, no upload anywhere, no website change. Push builds need no secrets and are NOT code signed.
 #
-# Code signing (owner's SSL.com eSigner certificate) happens ONLY when the owner starts the workflow by hand with "sign" ticked.
-# The build job then runs in the GitHub environment "kiwi-signing", which holds the eSigner secrets and requires the owner's
-# approval on every run (Settings > Environments > kiwi-signing > Required reviewers). ci/sign.ps1 signs the service,
-# tunnel.dll, KiwiVPN.exe, the NSIS plugins, the uninstaller and the installer; wireguard.dll keeps WireGuard LLC's signature.
-# A signed build is still only a private artifact: nothing here publishes it.
+# Code signing (owner's SSL.com eSigner certificate) happens ONLY when the owner (619vortex) starts the workflow by hand, on
+# main, with "sign" ticked. Only then does the build job enter the GitHub environment "windows-signing", the one place the
+# eSigner secrets exist; that environment accepts main only. (Required reviewers need a paid GitHub plan for a private repo;
+# with one, add the owner as reviewer on windows-signing and every signing run also waits for a click.)
+# ci/sign.ps1 signs the service, tunnel.dll, KiwiVPN.exe, the NSIS plugins, the uninstaller and the installer; wireguard.dll
+# keeps WireGuard LLC's signature. A signed build is still only a private artifact: nothing here publishes it.
+#
+# "check_certificate" (also by hand) only looks at the certificate through SSL.com (no build, nothing signed, no signing used).
 name: Kiwi VPN Windows
 
 on:
@@ -25,7 +28,12 @@ on:
         required: false
         default: ""
       sign:
-        description: "Code sign with the eSigner certificate (needs the owner's approval in the kiwi-signing environment)"
+        description: "Code sign with the eSigner certificate (owner only, main only; uses the windows-signing secrets)"
+        type: boolean
+        required: false
+        default: false
+      check_certificate:
+        description: "Only check the eSigner certificate (Authenticode, key type, chain, expiry): no build, nothing signed"
         type: boolean
         required: false
         default: false
@@ -49,15 +57,16 @@ jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 120
-    # the signing secrets exist only in kiwi-signing, which waits for the owner's approval; every other run uses an empty environment
-    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign) && 'kiwi-signing' || 'kiwi-build' }}
+    if: ${{ !inputs.check_certificate }}
+    # the signing secrets exist only in windows-signing (main only); every other run uses kiwi-build, which has none
+    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign && github.ref == 'refs/heads/main' && github.triggering_actor == '619vortex') && 'windows-signing' || 'kiwi-build' }}
     defaults:
       run:
         shell: powershell
         working-directory: windows-client
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}\target
-      SIGN: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign) && 'yes' || 'no' }}
+      SIGN: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign && github.ref == 'refs/heads/main' && github.triggering_actor == '619vortex') && 'yes' || 'no' }}
       # SSL.com CodeSignTool, pinned (https://github.com/SSLcom/CodeSignTool/releases)
       CODESIGNTOOL_URL: https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2-windows.zip
       CODESIGNTOOL_SHA256: 4AFC32E8B7F79BBE1DE7E4E7049AAAD4E0F754357613B9BBEC0E3052F06FD36B
@@ -164,7 +173,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET") {
-            if (-not [Environment]::GetEnvironmentVariable($v)) { throw "The kiwi-signing environment has no $v secret" }
+            if (-not [Environment]::GetEnvironmentVariable($v)) { throw "The windows-signing environment has no $v secret" }
           }
           $Zip = "$env:RUNNER_TEMP\codesigntool.zip"
           Invoke-WebRequest -UseBasicParsing -Uri $env:CODESIGNTOOL_URL -OutFile $Zip
@@ -310,6 +319,34 @@ jobs:
   # The kill switch and DNS guard on a fresh GitHub Windows machine, with no VPN account: the installed service against a
   # test server that never answers (crash recovery, give-up, pause limit, service restart), then the raw filters (what gets
   # through, what's blocked, and that the block dies with its process). Each block lasts seconds to two minutes.
+  certificate:
+    # Asks SSL.com about the eSigner certificate, without signing anything: that it's there, RSA, for code signing (Authenticode),
+    # chained to a root Windows trusts, and when it expires. Owner only, main only, by hand.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_certificate && github.ref == 'refs/heads/main' && github.triggering_actor == '619vortex' }}
+    runs-on: windows-2022
+    timeout-minutes: 10
+    environment: windows-signing
+    defaults:
+      run:
+        shell: powershell
+    env:
+      CODESIGNTOOL_URL: https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2-windows.zip
+      CODESIGNTOOL_SHA256: 4AFC32E8B7F79BBE1DE7E4E7049AAAD4E0F754357613B9BBEC0E3052F06FD36B
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: windows-client/ci
+
+      - name: Certificate, as SSL.com reports it
+        env:
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          KIWI_SIGNER_THUMBPRINT: ${{ vars.KIWI_SIGNER_THUMBPRINT }}
+        run: windows-client\ci\check-certificate.ps1
+
   upgrade:
     # Installs the public 0.1.1 (checked against its published SHA-256), then this build over it, as a user upgrading would.
     needs: build

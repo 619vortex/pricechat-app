@@ -2,7 +2,7 @@
 # GitHub Actions runner only. Called for each file: by the workflow for the service and tunnel.dll, and by Tauri (bundle >
 # windows > signCommand) for KiwiVPN.exe, the NSIS plugins, the uninstaller and the installer itself.
 #
-# The credentials come from the protected GitHub environment "kiwi-signing" as environment variables and are never written to
+# The credentials come from the GitHub environment "windows-signing" (main only) as environment variables and are never written to
 # disk or printed (GitHub also masks them in the log):
 #   ES_USERNAME, ES_PASSWORD      the SSL.com account that owns the certificate
 #   ES_CREDENTIAL_ID              which eSigner certificate (CodeSignTool get_credential_ids lists them)
@@ -15,7 +15,7 @@ param([Parameter(Mandatory = $true)][string]$Path)
 $ErrorActionPreference = "Stop"
 
 foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET", "CODESIGNTOOL_DIR") {
-  if (-not [Environment]::GetEnvironmentVariable($v)) { throw "sign.ps1: $v isn't set (signing runs only in the kiwi-signing environment)" }
+  if (-not [Environment]::GetEnvironmentVariable($v)) { throw "sign.ps1: $v isn't set (signing runs only in the windows-signing environment)" }
 }
 $File = (Resolve-Path $Path).Path
 $Tool = $env:CODESIGNTOOL_DIR
