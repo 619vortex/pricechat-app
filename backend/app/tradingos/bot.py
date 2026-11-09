@@ -1133,7 +1133,8 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     if action == "enter":
         from app.tradingos import tgtrade
 
-        why = await tgtrade.gate_for_entry(db, m)  # the Banter group's referral, from Hyperliquid's own record
+        # the Banter group's referral, from Hyperliquid's own record; owner setting telegram_trading.gate_signal_enter (default on)
+        why = await tgtrade.gate_for_entry(db, m) if tgtrade.gate_signal_enter(db) else None
         if why:
             await _answer(client, cq, uid, why[:195], alert=True)
             return

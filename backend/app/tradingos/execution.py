@@ -149,9 +149,9 @@ def ref_px(pos: TrPosition, ex: Any) -> float:
     if pos.mode == "TESTNET" and hasattr(ex, "mid_px"):
         try:
             return float(ex.mid_px(pos.coin))
-        except Exception:  # noqa: BLE001 - fall back to mainnet's mark
+        except Exception:  # noqa: BLE001 - fall back to the network's market data
             pass
-    return market.data().market(pos.coin).mark
+    return market.for_mode(pos.mode).market(pos.coin).mark
 
 
 def paper_equity(db: Session, acc: TrAccount) -> float:
@@ -227,7 +227,7 @@ def day_loss_basis(db: Session, acc: TrAccount) -> float:
         total += p.realized_pnl or 0.0
         if p.entry_px:
             try:
-                mark = market.data().market(p.coin).mark
+                mark = market.for_mode(acc.mode).market(p.coin).mark
             except Exception:  # noqa: BLE001
                 continue
             total += min(0.0, (mark - p.entry_px) * p.size * (1 if p.side == "LONG" else -1))
@@ -275,19 +275,25 @@ def _preview(db: Session, member: Member, sig: TsSignal, ex: Any = None) -> TrIn
     return it
 
 
+def live_gate(db: Session, member: Member, acc: TrAccount, ex: Any = None) -> None:
+    """Before any new LIVE entry, from any surface (website, Telegram ENTER, Telegram /open): LIVE enabled for this account and
+    allowed for the member, and (on the real exchange path) the API wallet still listed for their current verified wallet."""
+    if acc.mode == "LIVE" and not (acc.live_enabled_at and live_allowed(db, member)):
+        raise TradeError("LIVE isn't enabled for this account.")  # closing and protection still work; new entries don't
+    if acc.mode == "LIVE" and ex is None:  # the real exchange path (tests pass their own fake exchange)
+        check_live_permission(db, member, acc)
+
+
 def _plan(db: Session, member: Member, sig: TsSignal, ex: Any = None) -> tuple[risk.Plan, Any]:
     """Every check and the sizing at the current mark: (plan, the executor it used). Raises TradeError when it can't enter."""
     if sig.status not in signals.OPEN:
         raise TradeError(f"Signal #{sig.number:03d} is {signals.STATUS_LABEL.get(sig.status, sig.status).lower()}.")
     acc = account(db, member)
-    if acc.mode == "LIVE" and not (acc.live_enabled_at and live_allowed(db, member)):
-        raise TradeError("LIVE isn't enabled for this account.")  # closing and protection still work; new entries don't
-    if acc.mode == "LIVE" and ex is None:  # the real exchange path (tests pass their own fake exchange)
-        check_live_permission(db, member, acc)
+    live_gate(db, member, acc, ex)
     blocked = intraday_allowed(db, acc, sig)
     if blocked:
         raise TradeError(blocked)
-    m = market.data().market(sig.coin)
+    m = market.for_mode(acc.mode).market(sig.coin)  # testnet trades on testnet's own prices, szDecimals and max leverage
     ex = ex or executor(db, acc, sig.coin)
     # Hyperliquid nets one position per coin: never add to, or trade against, a position that's already there
     if db.scalar(select(TrPosition.id).where(TrPosition.account_id == acc.id, TrPosition.coin == sig.coin,
@@ -325,7 +331,7 @@ def _portfolio_checks(db: Session, acc: TrAccount, sig: TsSignal, m: Any, plan: 
     opened = [{"side": p.side, "notional": abs(p.size * (p.entry_px or 0)), "margin": abs(p.size * (p.entry_px or 0)) / max(1, p.leverage)}
               for p in rows]
     try:
-        levels = market.data().levels(sig.coin, 5)
+        levels = market.for_mode(acc.mode).levels(sig.coin, 5)
     except Exception:  # noqa: BLE001 - no book: the slippage check reports "unknown"
         levels = None
     week_pnl = float(db.scalar(select(func.coalesce(func.sum(TrPosition.realized_pnl), 0.0)).where(
@@ -437,7 +443,7 @@ def _order(db: Session, pos: TrPosition, kind: str, is_buy: bool, size: float, p
 
 def open_position(db: Session, acc: TrAccount, sig: TsSignal, plan: risk.Plan, via: str, ex: Any = None) -> TrPosition:
     long = sig.side == "LONG"
-    m = market.data().market(sig.coin)  # before any row: a 429 or a missing API-wallet key leaves no ghost OPENING row
+    m = market.for_mode(acc.mode).market(sig.coin)  # before any row: a 429 or a missing API-wallet key leaves no ghost OPENING row
     ex = ex or executor(db, acc, sig.coin)
     # the preview's checks again, under the account's row lock (released by the commit below, before any exchange call): two
     # entries racing (two tabs, AUTO and a manual ENTER, a 1h and a 15m signal in one coin) must not both pass and double the
@@ -731,7 +737,7 @@ def close_position(db: Session, member: Member, pos_id: int, ex: Any = None, fra
 def _close(db: Session, member: Member, acc: TrAccount, pos: TrPosition, ex: Any, fraction: float) -> TrPosition:
     """close_position, once the position is claimed. Every exchange call runs outside a write transaction: each answer is
     committed before the next call."""
-    m = market.data().market(pos.coin)
+    m = market.for_mode(pos.mode).market(pos.coin)
     try:
         ex = ex or executor(db, acc, pos.coin, pos.mode)
         mark = ref_px(pos, ex)
@@ -845,7 +851,7 @@ def adjust_protection(db: Session, member: Member, pos_id: int, stop: float | No
     if closing(pos) and not dry_run:
         raise TradeError("This position is being closed right now.")
     long = pos.side == "LONG"
-    m = market.data().market(pos.coin)
+    m = market.for_mode(pos.mode).market(pos.coin)
     ex = ex or executor(db, acc, pos.coin, pos.mode)
     mark = ref_px(pos, ex)
     f = market.fmt_price
@@ -1029,7 +1035,7 @@ def _retry_emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, now_
     if now_held + 1e-12 < pos.size:
         pos.size = now_held
     try:
-        szd = market.data().market(pos.coin).sz_decimals
+        szd = market.for_mode(pos.mode).market(pos.coin).sz_decimals
     except Exception:  # noqa: BLE001 - next reconciliation
         return
     emergency(db, acc, pos, ex, szd, "still open without a confirmed stop-loss: closed again by reconciliation")
@@ -1056,7 +1062,7 @@ def _recover_opening(db: Session, acc: TrAccount, mode: str, ex: Any, held: dict
                                                      TrPosition.status.in_(RECONCILED), TrPosition.id != pos.id).limit(1))
         if now_held > 0 and twin is None:
             try:
-                szd = market.data().market(pos.coin).sz_decimals
+                szd = market.for_mode(pos.mode).market(pos.coin).sz_decimals
             except Exception:  # noqa: BLE001 - next reconciliation
                 continue
             pos.size = now_held

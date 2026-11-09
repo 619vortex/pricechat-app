@@ -195,6 +195,15 @@ def reset_database() -> None:
 
 
 @pytest.fixture(autouse=True)
+def _one_fake_market_for_both_networks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: tests never read Hyperliquid's testnet. TESTNET accounts see the same (usually fake) market as mainnet,
+    unless a test installs its own testnet market (monkeypatch market.testnet)."""
+    from app.tradingos import market
+
+    monkeypatch.setattr(market, "testnet", lambda: market.data(), raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_database() -> Iterator[None]:
     from app.services import usage
 

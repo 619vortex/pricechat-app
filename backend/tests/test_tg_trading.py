@@ -14,6 +14,7 @@ from app.models.trading import TrIntent, TrOrder, TrPosition
 from app.models.tradingbot import TbWallet
 from app.models.tradingos import TsSignal
 from app.tradingos import bot, execution, market, risk, signals, tgtrade
+from app.tradingos import exchange as xch
 
 from tests.test_trading_execution import FakeExchange, active_signal, on_testnet
 from tests.test_trading_os import FakeMD, FakeTG, kiwi, uptrend_pullback
@@ -375,3 +376,175 @@ def test_buttons_expire_and_prices_and_targets_read_as_typed(db: Session, md: Fa
     assert "Done" in press(db, tg, 941, data)
     db.expire_all()
     assert db.get(TrPosition, pos.id).tp1 == pytest.approx(t1, rel=1e-4)
+
+
+# ---------------------------------------------------------------- audit 2026-11-08 (TR-4, TR-5, TR-6, TR-11, TR-13, TR-14, TR-16)
+def _live(db: Session, m: Any, enabled: bool) -> Any:
+    acc = execution.account(db, m)
+    acc.mode, acc.master_address = "LIVE", db.scalar(select(TbWallet.address).where(TbWallet.member_id == m.id))
+    acc.live_enabled_at = utcnow() if enabled else None
+    acc.mainnet_agent, acc.mainnet_agent_key, acc.mainnet_approved_at = "0x" + "2" * 40, "unused", utcnow()
+    s = signals.settings(db)
+    s.strategies = {**(s.strategies or {}), "telegram_trading": {"live": True}}
+    db.commit()
+    return acc
+
+
+def test_TR4_live_manual_opens_go_through_the_same_live_checks_as_every_entry(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    m = banter(db, "991")
+    _live(db, m, enabled=False)  # e.g. after connect_api_key with open LIVE positions: mode stays LIVE, live_enabled_at cleared
+    ex = FakeExchange(mark=md.market("BTC").mark)
+    with pytest.raises(execution.TradeError, match="LIVE isn't enabled"):
+        tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3), ex)
+    acc = _live(db, m, enabled=True)
+    it = tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3), ex)
+    acc.live_enabled_at = None  # LIVE withdrawn between the preview and the Confirm
+    db.commit()
+    with pytest.raises(execution.TradeError, match="LIVE isn't enabled"):
+        tgtrade.confirm_open(db, m, it.token, ex)
+    assert not ex.orders and not db.scalars(select(TrPosition)).all()
+    # the real exchange path also asks Hyperliquid whether the API wallet is still listed for the current verified wallet
+    _live(db, m, enabled=True)
+    asked: list[int] = []
+
+    def revoked(db_: Any, m_: Any, a_: Any) -> None:
+        asked.append(a_.id)
+        raise execution.TradeError("Kiwi's trading permission isn't active on Hyperliquid anymore")
+
+    monkeypatch.setattr(execution, "check_live_permission", revoked)
+    monkeypatch.setattr(execution, "executor", lambda *a, **k: ex)
+    with pytest.raises(execution.TradeError, match="permission isn't active"):
+        tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    assert asked and not ex.orders
+
+
+class NetMD(FakeMD):
+    """TEST FIXTURE: a market whose prices, szDecimals and max leverage differ (Hyperliquid testnet vs mainnet)."""
+
+    def __init__(self, series: Any, factor: float, szd: int, max_lev: int) -> None:
+        super().__init__(series)
+        self.factor, self.szd, self.max_lev = factor, szd, max_lev
+
+    def markets(self) -> Any:
+        t, out = super().markets()
+        for k, x in out.items():
+            px = x.mark * self.factor
+            out[k] = market.Market(coin=x.coin, mark=px, mid=px, oracle=px, prev_day=x.prev_day * self.factor, funding=x.funding,
+                                   open_interest=x.open_interest, day_volume=x.day_volume, max_leverage=self.max_lev,
+                                   impact_bid=px * 0.99995, impact_ask=px * 1.00005, sz_decimals=self.szd)
+        return t, out
+
+
+def test_TR6_testnet_trades_are_priced_and_sized_from_testnets_own_market(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    test_md = NetMD({"BTC": uptrend_pullback()}, factor=1.06, szd=1, max_lev=2)  # testnet: 6% higher, 1 decimal, 2x max
+    monkeypatch.setattr(market, "testnet", lambda: test_md)
+    main_px, test_px = md.market("BTC").mark, test_md.market("BTC").mark
+    m = banter(db, "992")
+    on_testnet(db, m)
+    ex = FakeExchange(mark=test_px)
+    with pytest.raises(execution.TradeError, match="BTC's maximum of 2x"):  # testnet's max leverage, not mainnet's 20x
+        tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3), ex)
+    it = tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 2), ex)
+    assert it.plan["entry"] == pytest.approx(test_px) and it.plan["entry"] != pytest.approx(main_px)
+    assert it.plan["size"] == risk.round_size(100.0 / test_px, 1)  # rounded to testnet's szDecimals
+    pos = tgtrade.confirm_open(db, m, it.token, ex)
+    entry = next(o for o in ex.orders if o["type"] == "market")
+    assert pos.status == "OPEN" and entry["px"] == pytest.approx(test_px * (1 + 2 * risk.SLIPPAGE), rel=1e-3)  # IOC limit off testnet's price
+    assert pos.stop < test_px and pos.tp1 > test_px
+    # paper keeps simulating on mainnet's real prices
+    p = banter(db, "993")
+    assert tgtrade.preview_open(db, p, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3)).plan["entry"] == pytest.approx(main_px)
+
+
+def test_TR11_manual_trades_keep_the_limits_signal_trades_have(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    m = banter(db, "994")
+    acc = execution.account(db, m)
+    acc.allowed_coins = "ETH, SOL"
+    db.commit()
+    with pytest.raises(execution.TradeError, match="allowed contracts"):
+        tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    acc.allowed_coins, acc.frequency, acc.max_trades_per_day, acc.max_positions = "", "active", 1, 3
+    db.commit()
+    tg = TG()
+    open_paper(db, tg, 994, "ETH")
+    with pytest.raises(execution.TradeError, match="limit 1 a day"):
+        tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    acc.frequency = "standard"
+    s = signals.settings(db)
+    s.strategies = {**(s.strategies or {}), "risk_v2": {"mode": "enforce"}}
+    db.commit()
+    monkeypatch.setattr(risk, "portfolio_checks", lambda cfg, **k: [{"status": "fail", "label": "Exposure", "detail": "too much"}])
+    with pytest.raises(execution.TradeError, match="exposure: too much"):
+        tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    assert db.scalar(select(TrIntent).where(TrIntent.status == "PENDING")) is None
+
+
+def test_TR13_manual_numbers_never_collide_and_unconfirmed_previews_dont_pile_up(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    a, b = banter(db, "995"), banter(db, "996")
+    acc = execution.account(db, a)
+    acc.max_positions = 3
+    db.commit()
+    first = tgtrade.preview_open(db, a, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    taken = db.get(TsSignal, first.signal_id).number
+    real = getattr(tgtrade, "_next_manual_number", None)
+    calls = [taken, taken - 1]  # another preview took the number between the read and the insert
+    monkeypatch.setattr(tgtrade, "_next_manual_number", lambda db_: calls.pop(0) if calls else real(db_), raising=False)
+    other = tgtrade.preview_open(db, b, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    assert db.get(TsSignal, other.signal_id).number == taken - 1
+    tgtrade.cancel_previews(db, a)
+    for _ in range(3):  # previews never confirmed reuse the member's spare row
+        tgtrade.preview_open(db, a, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+        tgtrade.cancel_previews(db, a)
+    mine = lambda: db.scalars(select(TsSignal).where(TsSignal.status == "MANUAL", TsSignal.approved_by == f"m:{a.id}")).all()  # noqa: E731
+    assert len(mine()) == 1
+    btc = tgtrade.preview_open(db, a, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3))
+    eth = tgtrade.preview_open(db, a, tgtrade.OpenRequest("ETH", "LONG", 50.0, 3))  # a preview still waiting keeps its own row
+    assert btc.signal_id != eth.signal_id
+    p1, p2 = tgtrade.confirm_open(db, a, btc.token), tgtrade.confirm_open(db, a, eth.token)
+    assert p1.status == p2.status == "OPEN" and db.get(TsSignal, p1.signal_id).coin == "BTC" and db.get(TsSignal, p2.signal_id).coin == "ETH"
+    nxt = tgtrade.preview_open(db, a, tgtrade.OpenRequest("SOL", "LONG", 50.0, 3))
+    assert nxt.signal_id not in (p1.signal_id, p2.signal_id)  # a row with a position is never reused
+
+
+def test_TR14_the_key_warning_doesnt_promise_what_hyperliquid_doesnt_state() -> None:
+    assert "never withdraw" not in tgtrade.SECRET_WARNING and "can never" not in tgtrade.SECRET_WARNING
+    assert "never sends withdrawals or transfers" in tgtrade.SECRET_WARNING and "revoke" in tgtrade.SECRET_WARNING
+
+
+def test_TR5_the_banter_gate_on_signal_enter_is_an_owner_setting_on_by_default(db: Session, md: FakeMD) -> None:
+    sig = active_signal(db, md)
+    banter(db, "997", code="SOMEONE")
+    tg = TG()
+    assert tgtrade.gate_signal_enter(db) and "referral" in press(db, tg, 997, f"sig:{sig.id}:enter")
+    s = signals.settings(db)
+    s.strategies = {**(s.strategies or {}), "telegram_trading": {"gate_signal_enter": False}}
+    db.commit()
+    press(db, tg, 997, f"sig:{sig.id}:enter")
+    assert db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()  # ENTER works as before the branch
+    assert "Banter group's referral code" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
+
+
+def test_TR16_a_different_account_key_is_refused_while_testnet_positions_are_open(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    import eth_account
+
+    from app.tradingbot import service as earn
+    from tests.test_trading_execution import _HL
+
+    earn.reset_limits_for_tests()
+    m = banter(db, "998")
+    on_testnet(db, m)
+    acc = execution.account(db, m)
+    acc.master_address = db.scalar(select(TbWallet.address).where(TbWallet.member_id == m.id))
+    ex = FakeExchange(mark=md.market("BTC").mark)
+    monkeypatch.setattr(execution, "executor", lambda *a, **k: ex)
+    tg = TG()
+    assert open_paper(db, tg, 998).mode == "TESTNET"
+    owner, api = eth_account.Account.create(), eth_account.Account.create()
+    monkeypatch.setattr(xch, "agent_record", lambda *a, **k: {"name": "PriceChat", "address": api.address, "validUntil": None})
+    monkeypatch.setattr(xch, "user_role", lambda *a, **k: {"role": "agent", "data": {"user": owner.address.lower()}})
+    execution._agent_seen.clear()
+    from app.tradingos import accounts
+
+    with pytest.raises(accounts.AccountError, match="Close your open positions"):
+        accounts.connect_api_key(db, m, None, api.key.hex(), True, _HL("BANTER", 50), replace=True)
+    assert execution.account(db, m).master_address != owner.address.lower()
