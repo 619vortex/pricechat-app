@@ -148,10 +148,23 @@ def _trading_bot_open(db: Session) -> bool:
     return bool(db.scalar(select(TbSettings.public_enabled).limit(1)))
 
 
+HOME_TTL = 30.0  # seconds: every visitor's first read; the database is read at most once per window (the edge keeps it 60 s too)
+HOME_KEY = ("website-home",)
+
+
 @router.get("/website/home")
 def home(db: DbSession) -> dict[str, Any]:
     """Everything the homepage needs in one read. Empty lists mean "hide that section"."""
-    return _home(db)
+    from app.pokemon import history
+
+    return history.cached(HOME_KEY, lambda: _home(db), ttl=HOME_TTL)
+
+
+def _home_changed() -> None:
+    """A dashboard edit shows on the next homepage read, not after HOME_TTL."""
+    from app.pokemon import history
+
+    history.forget(HOME_KEY)
 
 
 @router.get("/website/latest")
@@ -236,6 +249,7 @@ def update_settings(payload: WebsiteSettingsUpdate, db: DbSession) -> dict[str, 
         row.site_url = payload.site_url.strip() or None
         changes.append(f"public address {row.site_url or 'cleared'}")
     db.commit()
+    _home_changed()
     if changes:
         ActivityLogger(db).log("website_settings_updated", f"Website: {', '.join(changes)}", actor="dashboard")
     return _home(db)
@@ -297,6 +311,7 @@ def update_item(item_id: int, payload: ItemUpdate, db: DbSession) -> dict[str, A
         item.category = None if payload.category == "none" else payload.category
         changes.append(f"category {item.category}" if item.category else "category cleared")
     db.commit()
+    _home_changed()
     if changes:
         ActivityLogger(db).log("content_item_updated", f"“{item.title[:80]}”: {', '.join(changes)}", actor="dashboard",
                                details={"content_item_id": item.id})

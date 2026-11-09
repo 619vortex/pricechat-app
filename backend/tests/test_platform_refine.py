@@ -140,8 +140,7 @@ def test_market_warm_up_and_retention_run_in_a_worker_thread(client: TestClient,
     from app.pokemon import market
 
     threads: list[str] = []
-    monkeypatch.setattr(market, "base_rows", lambda *a, **k: threads.append(threading.current_thread().name) or [1, 2])
-    monkeypatch.setattr(market, "market", lambda *a, **k: {})
+    monkeypatch.setattr(market, "warm", lambda *a, **k: threads.append(threading.current_thread().name) or 2)
     monkeypatch.setattr(retention, "run", lambda *a, **k: threads.append(threading.current_thread().name) or {"activity_logs": 0})
 
     async def run(name: str) -> dict:

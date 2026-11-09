@@ -13,11 +13,13 @@ Candles are offered only when the range holds enough real sales: >= CANDLE_MIN_W
 Points are derived data, rebuilt per card + grade whenever that series' sales change (imports, syncs, reviews, exclusions).
 """
 
+import logging
 import threading
 import time as _time
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.orm import Session
@@ -25,6 +27,8 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.models.pokemon import PokemonPopulationHistory, PokemonSale, PokemonValuationPoint
 from app.pokemon import pricing
+
+_log = logging.getLogger(__name__)
 
 Key = tuple[int, str, str]  # card id, grading company, grade
 
@@ -52,6 +56,12 @@ def invalidate() -> None:
     with _lock:
         _generation += 1
         _cache.clear()
+
+
+def forget(key: Any) -> None:
+    """Drop one small cached value (no memory release pass)."""
+    with _lock:
+        _cache.pop(key, None)
 
 
 def evict(match: Any) -> int:
@@ -97,19 +107,36 @@ def _fresh(key: Any, ttl: float) -> tuple[bool, Any]:
     return False, None
 
 
-def cached(key: Any, build: Any, ttl: float = CACHE_TTL) -> Any:
+def cached(key: Any, build: Any, ttl: float = CACHE_TTL, stale: float = 0.0) -> Any:
     """Cached value for `key`, built at most once at a time: concurrent callers wait for the first build and reuse it
     (several page requests after a sync must not each build the 50k-card rows at once: that runs a small server out of
-    memory)."""
+    memory).
+
+    stale > 0 (serve stale, refresh in the background): for `stale` seconds past `ttl` an expired value (same data
+    generation; a sync / import still clears it at once) is returned straight away and ONE background thread rebuilds
+    it, so no request waits for that rebuild. `build` must then not use the caller's request session (it can run after
+    the request has ended): it opens a session of its own."""
     ok, value = _fresh(key, ttl)
     if ok:
         return value
+    if stale > 0:
+        ok, value = _fresh(key, ttl + stale)
+        if ok:
+            _refresh_in_background(key, build, ttl)
+            return value
+    with _locked(key):
+        return _build(key, build, ttl)
+
+
+@contextmanager
+def _locked(key: Any) -> Iterator[None]:
+    """The key's build lock (one build per key at a time; later callers wait for it, then reuse what it built)."""
     with _lock:
         entry = _building.setdefault(key, [threading.Lock(), 0])
         entry[1] += 1
     try:
         with entry[0]:
-            return _build(key, build, ttl)
+            yield
     finally:
         with _lock:  # the last caller drops the lock: keys carry the minute / query, so they'd otherwise pile up forever
             entry[1] -= 1
@@ -117,14 +144,55 @@ def cached(key: Any, build: Any, ttl: float = CACHE_TTL) -> Any:
                 del _building[key]
 
 
+def refresh(key: Any, build: Any, ttl: float = CACHE_TTL, older_than: float = 0.0, keep_stale: bool = True) -> Any:
+    """Refresh-ahead (the warm-up job): rebuild `key` when its value is older than `older_than` seconds (or missing, or
+    cleared by a sync) while callers keep getting the current value; no request waits. One build per key at a time,
+    shared with cached(): callers that find no value at all wait for this build instead of starting their own."""
+    ok, value = _fresh(key, older_than)
+    if ok:
+        return value
+    with _locked(key):
+        ok, value = _fresh(key, older_than)  # refreshed by the caller we waited for
+        if ok:
+            return value
+        return _store(key, build, keep_stale=keep_stale)
+
+
+_refreshing: set[Any] = set()  # keys a background refresh is rebuilding right now
+
+
+def _refresh_in_background(key: Any, build: Any, ttl: float) -> None:
+    with _lock:
+        if key in _refreshing:
+            return
+        _refreshing.add(key)
+
+    def run() -> None:
+        try:
+            refresh(key, build, ttl, older_than=ttl)
+        except Exception:  # noqa: BLE001 - visitors keep the stale value; the next request (or the warm-up job) tries again
+            _log.exception("background refresh of %s failed", key[:2] if isinstance(key, tuple) else key)
+        finally:
+            with _lock:
+                _refreshing.discard(key)
+
+    threading.Thread(target=run, name="cache-refresh", daemon=True).start()
+
+
 def _build(key: Any, build: Any, ttl: float) -> Any:
     ok, value = _fresh(key, ttl)  # built by the caller we waited for
     if ok:
         return value
+    return _store(key, build, keep_stale=False)
+
+
+def _store(key: Any, build: Any, keep_stale: bool) -> Any:
+    """Build and cache. keep_stale: the current value stays servable during the rebuild (refresh-ahead); otherwise a
+    whole catalogue's stale copy goes first, so a cold rebuild never holds two catalogues in memory."""
     heavy = isinstance(key, tuple) and bool(key) and key[0] == "base"
     with _lock:
         gen = _generation
-        if heavy:
+        if heavy and not keep_stale:
             _cache.pop(key, None)  # the stale copy goes BEFORE the rebuild: never two whole catalogues in memory
     now = _time.monotonic()
     if heavy:
@@ -136,9 +204,11 @@ def _build(key: Any, build: Any, ttl: float) -> Any:
         value = build()
     with _lock:
         if gen == _generation:
-            if len(_cache) >= CACHE_MAX:
+            if key not in _cache and len(_cache) >= CACHE_MAX:
                 _cache.pop(next(iter(_cache)))
             _cache[key] = (gen, now, value)
+    if heavy and keep_stale:
+        release_memory()  # the replaced catalogue back to the OS
     return value
 
 

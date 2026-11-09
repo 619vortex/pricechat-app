@@ -152,9 +152,10 @@ def _check(row: dict[str, Any], card: dict[str, Any], ids: dict[str, Any], obs: 
             "reasons": [checks[k][1] for k in CHECKS if checks[k][0] is False], "failed": [k for k in CHECKS if checks[k][0] is False]}
 
 
-def assess(db: Session, now: datetime | None = None, settings: Any = None) -> dict[int, dict[str, Any]]:
+def assess(db: Session, now: datetime | None = None, settings: Any = None, refresh: bool = False) -> dict[int, dict[str, Any]]:
     """Quality of every catalog card's PSA 10 record (vintage and modern; only vintage can enter the Top 100). Cached with
-    the market rows; any sync / import clears it."""
+    the market rows; any sync / import clears it. Like the rows, an expired copy is served while one background rebuild
+    runs, and the warm-up job (refresh) rebuilds it before it expires."""
     from app.pokemon import market
 
     now = now or utcnow()
@@ -162,13 +163,17 @@ def assess(db: Session, now: datetime | None = None, settings: Any = None) -> di
 
     def build() -> dict[int, dict[str, Any]]:
         # only vintage cards can enter the Top 100: modern ones aren't assessed (a 512 MB server can't hold 50k assessments)
-        rows = [r for r in market.base_rows(db, GRADE, now) if r["card"]["era"] == "vintage"]
-        ids = {cid: (x or {}) for cid, x in db.execute(select(PokemonCard.id, PokemonCard.external_ids).where(PokemonCard.era == "vintage"))}
-        obs, sales = _observations(db, now), _sales(db, now)
+        # a session of its own: a background rebuild runs after the request that started it has ended
+        with Session(bind=db.get_bind()) as own:
+            rows = [r for r in market.base_rows(own, GRADE, now) if r["card"]["era"] == "vintage"]
+            ids = {cid: (x or {}) for cid, x in own.execute(select(PokemonCard.id, PokemonCard.external_ids).where(PokemonCard.era == "vintage"))}
+            obs, sales = _observations(own, now), _sales(own, now)
         return {r["card"]["id"]: _check(r, r["card"], ids.get(r["card"]["id"], {}), obs.get(r["card"]["id"], []), sales.get(r["card"]["id"], []),
                                         now, min_history, max_age) for r in rows}
 
-    return history.cached(("quality", min_history, max_age), build, ttl=market.BASE_TTL)
+    if refresh:
+        return history.refresh(("quality", min_history, max_age), build, ttl=market.BASE_TTL, older_than=market.BASE_REFRESH)
+    return history.cached(("quality", min_history, max_age), build, ttl=market.BASE_TTL, stale=market.BASE_STALE)
 
 
 def top100(db: Session, now: datetime | None = None, language: str | None = None, settings: Any = None) -> dict[str, Any]:

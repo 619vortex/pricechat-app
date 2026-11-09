@@ -122,8 +122,9 @@ class LiteCard:
     external_ids: dict[str, Any]  # only "supertype" (Pokémon / Trainer / Energy)
 
 
-def lite(db: Session) -> list[LiteCard]:
-    """Every catalog card, light. Cached 15 min; imports and syncs clear it at once (history.invalidate)."""
+def lite(db: Session, refresh: bool = False) -> list[LiteCard]:
+    """Every catalog card, light. Cached 15 min; imports and syncs clear it at once (history.invalidate). refresh: the
+    warm-up job rebuilds it before it expires (market.warm)."""
     from app.pokemon import history
 
     def build() -> list[LiteCard]:
@@ -136,6 +137,8 @@ def lite(db: Session) -> list[LiteCard]:
     from sqlalchemy import func
 
     n, top = db.execute(select(func.count(PokemonCard.id), func.max(PokemonCard.id))).one()  # any added / removed card rebuilds it
+    if refresh:
+        return history.refresh(("catalog-lite", n, top), build, ttl=900.0, older_than=480.0)
     return history.cached(("catalog-lite", n, top), build, ttl=900.0)
 
 
