@@ -41,6 +41,8 @@ URLS = {"TESTNET": "https://api.hyperliquid-testnet.xyz", "LIVE": "https://api.h
 APPROVE_TYPES = [{"name": "hyperliquidChain", "type": "string"}, {"name": "agentAddress", "type": "address"},
                  {"name": "agentName", "type": "string"}, {"name": "nonce", "type": "uint64"}]
 AGENT_NAME = "PriceChat"
+FILLS_PAGE = 2000  # Hyperliquid's most fills per userFillsByTime answer
+FILLS_MAX_PAGES = 10
 
 
 class ExchangeError(Exception):
@@ -187,7 +189,26 @@ class HyperliquidExecutor:
         check_cancel(self.ex.cancel_by_cloid(coin, Cloid.from_str(cloid)))
 
     def fills_since(self, start_ms: int) -> list[dict[str, Any]]:
-        return self.info.user_fills_by_time(self.master, start_ms)
+        """Every fill since start_ms, paged by time: Hyperliquid answers at most FILLS_PAGE fills per call, so one call alone
+        could miss the fills that closed a position (and its P&L). A page boundary inside one millisecond is re-read from that
+        millisecond and de-duplicated by trade id."""
+        out: list[dict[str, Any]] = []
+        seen: set[Any] = set()
+        start = start_ms
+        for _ in range(FILLS_MAX_PAGES):
+            page = self.info.user_fills_by_time(self.master, start)
+            if not isinstance(page, list):
+                raise ExchangeError("Unexpected fills answer from Hyperliquid.")
+            for f in page:
+                key = f.get("tid") if f.get("tid") is not None else (f.get("hash"), f.get("oid"), f.get("time"), f.get("sz"), f.get("px"))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(f)
+            if len(page) < FILLS_PAGE:
+                break
+            nxt = max(int(f.get("time") or 0) for f in page)
+            start = nxt if nxt > start else start + 1  # a whole page in one millisecond: move on rather than loop on it
+        return out
 
     def mid_px(self, coin: str) -> float:
         return float(self.info.all_mids()[coin])

@@ -685,11 +685,14 @@ def test_referral_states_come_from_hyperliquids_record_and_no_longer_gate_bot_tr
     w.referral_code_seen = "SOMEONEELSE"  # attributed to another referrer: shown as such, still eligible
     db.commit()
     assert accounts.connection(db, m)["referral"]["status"] == "EXISTING_ACCOUNT" and accounts.connection(db, m)["eligible"]
-    es.min_rank_level, es.min_deposit_usd = 4, 10.0  # the owner can still set a rank and a minimum deposit
+    # the old Admin rank / minimum-deposit settings no longer gate bot trading (execution.eligibility: removed 2026-10-21, the
+    # owner's call; only a verified wallet is required). Shown in the connection status, never a blocker.
+    es.min_rank_level, es.min_deposit_usd = 4, 10.0
     db.commit()
     w.referral_status, w.referral_code_seen, w.deposit_status, w.deposit_usd, w.other_inflow_usd = "verified", "BANTER", "insufficient", 0.0, 9.99
     db.commit()
-    assert "$10 is the minimum" in accounts.connection(db, m)["blocker"]  # the existing minimum still applies (transfers in count)
+    c = accounts.connection(db, m)
+    assert c["eligible"] and c["blocker"] is None and c["deposit"]["min_usd"] == 10.0 and c["deposit"]["status"] != "verified"
     w.other_inflow_usd = 12.0  # sent in from another account: real money in the member's own account
     db.commit()
     assert accounts.connection(db, m)["eligible"]
@@ -704,7 +707,8 @@ def test_referral_states_come_from_hyperliquids_record_and_no_longer_gate_bot_tr
                    referral_code_seen="BANTER", deposit_status="verified", deposit_usd=50)
     db.add(_w2)
     db.commit()
-    assert "Kiwi Rank" in accounts.connection(db, lower)["blocker"]  # Passport rules are enforced on the server
+    c = accounts.connection(db, lower)
+    assert c["eligible"] and c["blocker"] is None and not c["rank"]["ok"]  # under the old rank setting: shown, not a gate
 
 
 def test_enable_bot_trading_needs_consent_and_real_checks_then_goes_live_with_auto_off(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:

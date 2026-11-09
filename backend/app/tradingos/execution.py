@@ -533,8 +533,9 @@ def _adopt(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, plan: risk.Pla
     return True
 
 
-def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: int, tag: str = "") -> None:
-    """Exchange-side stop for the whole filled size, TP1 for half, TP2 for the rest. If the stop can't be placed: close now.
+def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: int, tag: str = "", close_on_fail: bool = True) -> None:
+    """Exchange-side stop for the whole filled size, TP1 for half, TP2 for the rest. If the stop can't be placed: close now
+    (`close_on_fail=False`: only the stop is tried, for reconciliation once the emergency closes are used up).
     `tag` (a recovery run) gives the orders fresh client order ids: an id is never sent or recorded twice."""
     long = pos.side == "LONG"
     extra = [tag] if tag else []
@@ -545,20 +546,53 @@ def protect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: 
         sl = xch.Result("ERROR", error=f"{type(e).__name__}: {str(e)[:200]}")
     _order(db, pos, "sl", not long, pos.size, pos.stop, True, sl, sl_cl)
     if sl.status != "RESTING":
-        emergency(db, acc, pos, ex, sz_decimals, f"stop-loss not placed: {sl.error or sl.status}")
+        if close_on_fail:
+            emergency(db, acc, pos, ex, sz_decimals, f"stop-loss not placed: {sl.error or sl.status}")
         return
-    half = risk.round_size(pos.size / 2, sz_decimals)
-    rest = risk.round_size(pos.size - half, sz_decimals)
-    for kind, size, px in (("tp1", half, pos.tp1), ("tp2", rest, pos.tp2)):
-        if size <= 0:
-            continue
+    for kind, size, px in tp_legs(pos, pos.size, False, sz_decimals):
         cl = xch.cloid_for(acc.id, pos.signal_id, kind, *extra)
         try:
             r = ex.trigger(pos.coin, not long, size, risk.round_px(px, sz_decimals), "tp", cl)
         except Exception as e:  # noqa: BLE001
             r = xch.Result("ERROR", error=f"{type(e).__name__}: {str(e)[:200]}")
-        _order(db, pos, kind, not long, size, px, True, r, cl)  # a missing TP leaves the stop in place: logged, not fatal
+        _order(db, pos, kind, not long, size, px, True, r, cl)  # a missing TP leaves the stop in place: noted, not fatal
+        _tp_refused(pos, kind, r)
     pos.status = "OPEN"
+
+
+def _note(pos: TrPosition, text: str) -> None:
+    if text not in (pos.error or ""):
+        pos.error = ((pos.error + "; ") if pos.error else "") + text
+
+
+def tp_legs(pos: TrPosition, size: float, tp1_done: bool, sz_decimals: int) -> list[tuple[str, float, float]]:
+    """The take-profit orders for `size`: TP1 for half and TP2 for the rest. Each order must be worth Hyperliquid's $10 minimum
+    (at its trigger price): when a half would be under it, one TP1 for the whole size; when even that is under it, no target at
+    all (the stop still protects the position). Either way the position says so, instead of a refusal hidden in the order log."""
+    half = 0.0 if tp1_done else risk.round_size(size / 2, sz_decimals)
+    legs = [x for x in (("tp1", half, pos.tp1), ("tp2", risk.round_size(size - half, sz_decimals), pos.tp2)) if x[1] > 0]
+    if pos.mode == "PAPER" or all(s * px >= risk.MIN_NOTIONAL for _, s, px in legs):  # paper is simulated: no exchange minimum
+        return legs
+    whole = ("tp2", risk.round_size(size, sz_decimals), pos.tp2) if tp1_done else ("tp1", risk.round_size(size, sz_decimals), pos.tp1)
+    if whole[1] * whole[2] < risk.MIN_NOTIONAL:
+        _note(pos, f"No take-profit order: it would be under Hyperliquid's ${risk.MIN_NOTIONAL:g} minimum order; the stop-loss protects the position")
+        return []
+    _note(pos, f"One take-profit at TP1 for the whole position: half of it would be under Hyperliquid's ${risk.MIN_NOTIONAL:g} minimum order")
+    return [whole]
+
+
+def _tp_refused(pos: TrPosition, kind: str, r: xch.Result) -> None:
+    if r.status != "RESTING":
+        _note(pos, f"{kind.upper()} take-profit not placed ({r.error or r.status}); the stop-loss is in place")
+
+
+def close_px(mark: float, long: bool, sz_decimals: int) -> float:
+    """The IOC limit of a reduce-only close: TRADING_CLOSE_SLIPPAGE (3% by default) through the mark. Reduce-only means it can
+    never open or flip a position, and a fast market needs the room (at 0.24% such closes often went unfilled)."""
+    from app.config.settings import get_settings
+
+    slip = get_settings().trading_close_slippage
+    return risk.round_px(mark * (1 - slip if long else 1 + slip), sz_decimals)
 
 
 def emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals: int, why: str) -> None:
@@ -571,7 +605,7 @@ def emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
             mark = ref_px(pos, ex)
         except Exception:  # noqa: BLE001 - no price right now: still close, priced off the entry (or the stop)
             mark = pos.entry_px or pos.stop
-        px = risk.round_px(mark * (1 - 3 * risk.SLIPPAGE if long else 1 + 3 * risk.SLIPPAGE), sz_decimals)
+        px = close_px(mark, long, sz_decimals)
         res = ex.market(pos.coin, not long, pos.size, px, cl, reduce_only=True)
         _order(db, pos, "close", not long, pos.size, px, True, res, cl)
         if res.status in ("FILLED", "PARTIAL"):
@@ -741,7 +775,7 @@ def _close(db: Session, member: Member, acc: TrAccount, pos: TrPosition, ex: Any
     size = pos.size if fraction >= 1 else risk.round_size(pos.size * fraction, m.sz_decimals)
     if fraction < 1 and (size <= 0 or size * mark < risk.MIN_NOTIONAL or (pos.size - size) * mark < risk.MIN_NOTIONAL):
         raise TradeError(f"A {fraction:.0%} close would make an order under Hyperliquid's ${risk.MIN_NOTIONAL:g} minimum. Close 100% instead.")
-    px = risk.round_px(mark * (1 - 3 * risk.SLIPPAGE if long else 1 + 3 * risk.SLIPPAGE), m.sz_decimals)
+    px = close_px(mark, long, m.sz_decimals)
     cl = xch.cloid_for(acc.id, pos.signal_id, "close", pos.id, _seq(db, pos))
     try:
         res = ex.market(pos.coin, not long, size, px, cl, reduce_only=True)  # reduce-only: can never open a reverse position
@@ -826,12 +860,11 @@ def reprotect(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, sz_decimals
     else:
         pos.error = f"Resized stop-loss refused ({sl.error or sl.status}); the previous stop-loss stays in place."
     _cancel(ex, pos, _resting(db, pos, "tp1", "tp2"))
-    half = 0.0 if pos.tp1_done else risk.round_size(pos.size / 2, sz_decimals)
-    for kind, size, px in (("tp1", half, pos.tp1), ("tp2", risk.round_size(pos.size - half, sz_decimals), pos.tp2)):
-        if size <= 0:
-            continue
+    for kind, size, px in tp_legs(pos, pos.size, pos.tp1_done, sz_decimals):
         cl = xch.cloid_for(acc.id, pos.signal_id, kind, pos.id, _seq(db, pos))
-        _order(db, pos, kind, not long, size, px, True, place(kind, size, px, cl), cl)
+        r = place(kind, size, px, cl)
+        _order(db, pos, kind, not long, size, px, True, r, cl)
+        _tp_refused(pos, kind, r)
         db.commit()
 
 
@@ -1023,8 +1056,11 @@ def _reconcile(db: Session, acc: TrAccount, mode: str, ex: Any) -> int:
 
 def _retry_emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, now_held: float) -> None:
     """A position without a confirmed stop whose emergency close didn't go through (timeout, a refusal, a partial fill) is
-    still open on Hyperliquid: the emergency policy closes it, so the close is tried again, a bounded number of times."""
-    if _closes(db, pos) >= EMERGENCY_RETRIES or _resting(db, pos, "sl"):  # a confirmed resting stop: it is protected
+    still open on Hyperliquid. Every reconciliation first tries the stop-loss again (a refusal is often passing: a price that
+    moved, a busy exchange); placed, the position is protected again (OPEN, with its targets; new trades stay stopped until
+    the member resumes them). Refused, the emergency policy closes it, a bounded number of times; after that only the stop is
+    retried, every run, until it rests or the position is gone (the member and the owner are told: bot.announce_unprotected)."""
+    if _resting(db, pos, "sl"):  # a confirmed resting stop: it is protected
         return
     if now_held + 1e-12 < pos.size:
         pos.size = now_held
@@ -1032,7 +1068,15 @@ def _retry_emergency(db: Session, acc: TrAccount, pos: TrPosition, ex: Any, now_
         szd = market.data().market(pos.coin).sz_decimals
     except Exception:  # noqa: BLE001 - next reconciliation
         return
-    emergency(db, acc, pos, ex, szd, "still open without a confirmed stop-loss: closed again by reconciliation")
+    retries_left = _closes(db, pos) < EMERGENCY_RETRIES
+    before, pos.error = pos.error, None
+    protect(db, acc, pos, ex, szd, tag=f"r{_seq(db, pos)}", close_on_fail=retries_left)
+    if pos.status == "OPEN":
+        pos.error = ("Stop-loss placed by reconciliation after the first attempt was refused. New trades stay stopped until you resume them."
+                     + (f" {pos.error}" if pos.error else ""))
+        signals.audit(db, f"account:{acc.id}", "protection_restored", db.get(TsSignal, pos.signal_id), position=pos.id, mode=acc.mode)
+    elif pos.error is None:  # the stop alone was retried and refused again: the reason stays on the position
+        pos.error = before
     if pos.status == "CLOSED":
         try:
             _book_from_fills(db, pos, ex)
