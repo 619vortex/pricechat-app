@@ -497,6 +497,8 @@ def for_member(db: Session, member: Member, telegram_url: str | None = None, x_c
         mm = mine.get((m.id, period))
         if m.kind in LINK_PLATFORM and mm is not None and mm.status == "completed" and LINK_PLATFORM[m.kind] in linked:
             continue  # linked: nothing to show
+        if m.kind == "x_repost" and not x_write and not (mm is not None and mm.status == "completed"):
+            continue  # audit PP-14: a repost only completes when sent from Price Chat (X write on); otherwise the card would stay open forever
         rule_ok = True
         if m.kind in EVENT_RULE:
             rule = rules.get(EVENT_RULE[m.kind])

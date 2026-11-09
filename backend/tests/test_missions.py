@@ -412,3 +412,17 @@ def test_a_parallel_mission_row_keeps_the_callers_work(db: Session, monkeypatch:
     db.expire_all()
     assert db.scalar(select(ReputationEvent.id).where(ReputationEvent.member_id == m.id, ReputationEvent.source_ref == "day:race"))
     assert db.get(Member, m.id).display_name == "kept"
+
+
+def test_repost_card_is_hidden_while_x_write_is_off(db: Session) -> None:
+    """Audit PP-14: a repost only completes when it is sent from Price Chat (X write on). With write off the card opened X and
+    stayed open forever, so it isn't shown; a reply card stays, because a verified reply on X still completes it."""
+    mem = member(db, "repostfan")
+    x_world(db)
+    missions.generate(db)
+    mission_of(db, "x_repost")
+    link(db, mem, "x", "42")
+    off = {x["kind"]: x for x in missions.for_member(db, mem, x_can_act=True, x_write=False)}
+    assert "x_repost" not in off and "x_reply" in off
+    on = {x["kind"]: x for x in missions.for_member(db, mem, x_can_act=True, x_write=True)}
+    assert on["x_repost"]["cta"]["action"] == "x_repost"

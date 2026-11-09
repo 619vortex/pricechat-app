@@ -857,7 +857,8 @@ describe("The redesigned page", () => {
     const { container } = render(<VpnPage />);
     await settle();
     const plans = container.querySelector("#vpn-plans")!;
-    expect(plans.textContent).toMatch(/\$9\.99.*per 30 days.*No automatic billing.*Purchasing isn't open yet/);
+    expect(plans.textContent).toMatch(/Soon.*not open yet.*The paid plan isn't open yet.*Purchasing isn't open yet/);
+    expect(plans.textContent).not.toMatch(/\$/);  // audit UX-6: no price before anyone can pay it
     expect(plans.querySelectorAll("button")).toHaveLength(0);
     expect(container.querySelector(".vpn-hero")!.textContent).toMatch(/Opening soon/);
     expect(screen.queryByRole("link", { name: /Start Free Trial/ })).toBeNull();
@@ -910,14 +911,15 @@ describe("The redesigned page", () => {
     expect(cta.className).toContain("is-go");
   });
 
-  it("shows pricing to signed-out visitors even while payments are off, and what happens after the trial", async () => {
+  it("while payments are off: the trial, no price, and plainly that paid time isn't on sale yet (audit UX-6)", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: true, trial: true, payments: false, billing: null }] });
     const { container } = render(<VpnPage />);
     await settle();
     const plans = container.querySelector("#vpn-plans")!.textContent!;
     expect(plans).toMatch(/30\s*days/);
-    expect(plans).toMatch(/\$9\.99\s*per 30 days/);
-    expect(plans).toMatch(/When your trial ends nothing is charged\. Your devices switch off and are kept for 30 days/);
+    expect(plans).not.toMatch(/\$9\.99|\$\d/);
+    expect(plans).toMatch(/The paid plan isn't open yet/);
+    expect(plans).toMatch(/When your trial ends nothing is charged\. Your devices switch off and are kept for 30 days, and paid time isn't on sale yet/);
     expect(plans).toMatch(/Purchasing isn't open yet/);
     expect(plans).not.toMatch(/annual|year|% off/i);
   });

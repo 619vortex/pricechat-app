@@ -28,9 +28,27 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/website/:page(privacy|terms|disclaimer|contact|leaderboard)",
+      "destination": "/:page",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
-      "source": "/:page(pokemon|u|website|earn|giveaway|leaderboard|learn|join|content|vpn)/:rest*",
+      "source": "/:page(content|passport|join|leaderboard|giveaway|earn|trading-bot|learn|arena|realm|pokemon|u|website|privacy|terms|disclaimer|contact|admin|brain|knowledge|x|approvals|youtube|members|telegram|analytics|activity|settings|api-keys|brand-manager|short-market|invite-bot|affiliate|workers|rank-rewards|trading-os|overview|vpn)/:rest*",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(Googlebot|Google-InspectionTool|GoogleOther|Storebot-Google|AdsBot-Google|bingbot|BingPreview|msnbot|adidxbot|Applebot|DuckDuckBot|YandexBot|Baiduspider|Sogou|Exabot|SeznamBot|Qwantbot|PetalBot|Yeti|GPTBot|OAI-SearchBot|ChatGPT-User|PerplexityBot|Perplexity-User|ClaudeBot|Claude-SearchBot|Claude-User|anthropic-ai|Amazonbot|CCBot|YouBot|cohere-ai|meta-externalagent|ia_archiver).*"
+        }
+      ],
+      "destination": "/api/seo-shell?path=:page/:rest*"
+    },
+    {
+      "source": "/:page(pokemon|u|website|earn|giveaway|leaderboard|learn|join|content|vpn|privacy|terms|disclaimer|contact)/:rest*",
       "has": [
         {
           "type": "header",
@@ -57,7 +75,7 @@
       "destination": "https://api-production-b1be.up.railway.app/api/:path*"
     },
     {
-      "source": "/:page(content|passport|join|leaderboard|giveaway|earn|trading-bot|learn|arena|realm|pokemon|u|website|admin|brain|knowledge|x|approvals|youtube|members|telegram|analytics|activity|settings|api-keys|brand-manager|short-market|invite-bot|affiliate|workers|rank-rewards|trading-os|overview|vpn)/:rest*",
+      "source": "/:page(content|passport|join|leaderboard|giveaway|earn|trading-bot|learn|arena|realm|pokemon|u|website|privacy|terms|disclaimer|contact|admin|brain|knowledge|x|approvals|youtube|members|telegram|analytics|activity|settings|api-keys|brand-manager|short-market|invite-bot|affiliate|workers|rank-rewards|trading-os|overview|vpn)/:rest*",
       "destination": "/index.html"
     }
   ],

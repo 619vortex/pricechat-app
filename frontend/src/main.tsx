@@ -15,6 +15,9 @@ window.addEventListener("vite:preloadError", (event) => {
   event.preventDefault();
   location.reload();
 });
+// A search crawler's copy of this page carries the page's head from the server (api/seo-shell.ts, marked data-seo-shell):
+// once the app runs, its own head (useHead) replaces it, so nothing is left twice.
+document.querySelectorAll("head [data-seo-shell]").forEach((el) => el.remove());
 import "./styles.css";
 
 // The public website is loaded on demand so its fonts and styles never weigh on the dashboard.
@@ -82,6 +85,10 @@ function PublicSite() {
         <Route path="website/u/:username" element={page(<PublicProfilePage />)} />
         {(["privacy", "terms", "disclaimer", "contact"] as const).map((k) => (
           <Route key={k} path={`website/${k}`} element={page(<LegalPage kind={k} />)} />
+        ))}
+        {/* the legal pages' own addresses (audit UX-17); vercel.json sends /website/<page> here with a 301 */}
+        {(["privacy", "terms", "disclaimer", "contact"] as const).map((k) => (
+          <Route key={`clean-${k}`} path={k} element={page(<LegalPage kind={k} />)} />
         ))}
         {/* the dashboard used to live at the root: send those addresses to /admin */}
         {ADMIN_PAGES.map((p) => (

@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectButton } from "./community";
 import { burst } from "./fx";
 import {
-  memberApi, refreshSession, type FeedItem, type FeedResult, type Passport, type XActionResult, type XFeed,
+  memberApi, refreshSession, type FeedItem, type Providers, type FeedResult, type Passport, type XActionResult, type XFeed,
 } from "./members";
 import { reducedMotion } from "./motion";
 import { playSound, warmSounds } from "./sound";
@@ -122,11 +122,18 @@ export function XFeedSection({ reload, rewardFrom }: {
 
 /** Not connected: one clear card. The feed only appears once X has authorised Price Chat (X's own sign-in page). */
 function ConnectX() {
+  // audit PP-14: in-Passport replies / reposts only exist while the X app may write (providers x.write); otherwise they open X
+  const [write, setWrite] = useState(false);
+  useEffect(() => {
+    let on = true;
+    memberApi<Providers>("/members/auth/providers").then((p) => { if (on) setWrite(!!p.x?.write); }, () => {});
+    return () => { on = false; };
+  }, []);
   return (
     <div className="xf-connect-card">
       <span className="xf-connect-mark" aria-hidden>𝕏</span>
       <p className="xf-connect-title">Connect X to start Read &amp; Earn</p>
-      <p className="site-note">Read Price Chat's latest posts right here and earn Kiwi XP for each one. Reply and repost without leaving your Passport.</p>
+      <p className="site-note">Read Price Chat's latest posts right here and earn Kiwi XP for each one.{write ? " Reply and repost without leaving your Passport." : ""}</p>
       <ConnectButton provider="x" label="Connect X" className="site-button xf-connect-btn" />
       <small className="xf-connect-fine">You sign in on X's own page. Price Chat never sees your password and never posts without you pressing a button.</small>
     </div>

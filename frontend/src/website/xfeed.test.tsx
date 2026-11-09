@@ -78,6 +78,18 @@ describe("Read & Earn", () => {
     expect(posts("me/x-feed/shown")).toHaveLength(0);
   });
 
+  it("only promises in-Passport replies and reposts while X write is on (audit PP-14)", async () => {
+    const notConnected = feed([], { needs_x: true, x: { connected: false, username: null, can_act: false, needs_reconnect: false } });
+    serve({ "/api/members/me/x-feed": notConnected, "/api/members/auth/providers": { x: { available: true, write: false } } });
+    const off = await mount();
+    expect(off.container.querySelector(".xf-connect-card")!.textContent).not.toContain("Reply and repost");
+    cleanup();
+    serve({ "/api/members/me/x-feed": notConnected, "/api/members/auth/providers": { x: { available: true, write: true } } });
+    const on = await mount();
+    await tick();
+    expect(on.container.querySelector(".xf-connect-card")!.textContent).toContain("Reply and repost without leaving your Passport");
+  });
+
   it("keeps everything in ONE card: account, today's XP, the post with its context and media, actions and Up next", async () => {
     serve({ "/api/members/me/x-feed": feed([
       item({ media: [{ type: "photo", url: "https://pbs.twimg.com/media/a.jpg", width: 1200, height: 675, alt: "A chart" }] }),

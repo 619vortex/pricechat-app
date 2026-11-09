@@ -59,7 +59,7 @@ export const site = {
     joinLines: ["Join Price Chat.", "Participate.", "Earn your rank."],
     joinCta: "Join Price Chat",
     // what a first-time visitor gets, in one line under the call to action (signed-out visitors only)
-    joinNote: "Free, no password. Earn Kiwi XP for watching, reading and chatting, and every rank unlocks a reward.",
+    joinNote: "Free, no password. Earn Kiwi XP for watching, reading and chatting, and unlock rewards as your Kiwi ranks up.",
   },
 
   // Our story: where we come from, told forward. No dispute, no claims about anyone: we were part of something, we
@@ -82,10 +82,10 @@ export const site = {
   footer: {
     links: [
       { label: "About", href: "/#story" },
-      { label: "Contact", href: "/website/contact" },
-      { label: "Disclaimer", href: "/website/disclaimer" },
-      { label: "Terms", href: "/website/terms" },
-      { label: "Privacy", href: "/website/privacy" },
+      { label: "Contact", href: "/contact" },
+      { label: "Disclaimer", href: "/disclaimer" },
+      { label: "Terms", href: "/terms" },
+      { label: "Privacy", href: "/privacy" },
     ],
   },
 };

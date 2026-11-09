@@ -148,6 +148,8 @@ def link_preview(path: str, request: Request, db: DbSession, runtime: Runtime) -
         title, desc = heads.PAGES[""]
         found = {"title": title, "description": desc, "path": "/"}
     image = found.get("image") or f"{base}/og.jpg"
+    if image.startswith("/") and not image.startswith("//"):  # a card scan is a site path ("/cards/u/…"): previews need an absolute address
+        image = base + image
     url = base + (found.get("path") or (f"/{path}" if path else "/"))
     big = image.endswith("/og.jpg")  # the wide site picture; a card scan is portrait, so a small preview shows all of it
     t, d, u, i = escape(found["title"]), escape(found["description"]), escape(url), escape(image)

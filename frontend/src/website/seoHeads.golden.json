@@ -19,7 +19,7 @@
    "description": "Price Chat members by Kiwi XP and invites."
   },
   "giveaway": {
-   "title": "Pack Giveaway · Price Chat",
+   "title": "Open Packs · Price Chat",
    "description": "Open free virtual Pokémon packs for fun and earn Kiwi XP. Virtual cards only: no money, no real cards."
   },
   "earn": {
@@ -48,25 +48,25 @@
   },
   "vpn": {
    "title": "Kiwi VPN · Price Chat",
-   "description": "A WireGuard VPN from Price Chat. We don't log the sites you visit. 30-day free trial, then $9.99 for 30 days."
+   "description": "A WireGuard VPN from Price Chat. We don't log the sites you visit. Start with a 30-day free trial."
   },
   "vpn/privacy": {
     "title": "Kiwi VPN Privacy · Price Chat",
     "description": "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions."
   },
-  "website/privacy": {
+  "privacy": {
    "title": "Privacy · Price Chat",
    "description": "How Price Chat handles member data, connected accounts and Kiwi XP."
   },
-  "website/terms": {
+  "terms": {
    "title": "Terms · Price Chat",
    "description": "The rules of the Price Chat community and Kiwi XP."
   },
-  "website/disclaimer": {
+  "disclaimer": {
    "title": "Disclaimer · Price Chat",
    "description": "Price Chat content is for information and entertainment."
   },
-  "website/contact": {
+  "contact": {
    "title": "Contact · Price Chat",
    "description": "How to reach Price Chat."
   },

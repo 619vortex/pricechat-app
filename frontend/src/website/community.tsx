@@ -79,7 +79,7 @@ export function JoinPage() {
           </p>
           <ul className="site-join-perks" aria-label="What you get">
             <li><span aria-hidden>▶</span> Watch Price Chat videos and read our posts for Kiwi XP</li>
-            <li><span aria-hidden>🥝</span> Grow your Kiwi from The Egg to Mythic: every rank has a reward</li>
+            <li><span aria-hidden>🥝</span> Grow your Kiwi from The Egg to Mythic and unlock rewards along the way</li>
             <li><span aria-hidden>🎁</span> Free virtual Pokémon packs, a daily streak and the leaderboard</li>
           </ul>
         </div>
@@ -413,7 +413,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
   return (
-    <SitePage {...pageHead(kind === "vpnprivacy" ? "vpn/privacy" : `website/${kind}`)}>
+    <SitePage {...pageHead(kind === "vpnprivacy" ? "vpn/privacy" : kind)}>
       <article className="site-legal site-reveal">
         <p className="site-draft" role="note">
           Draft: this page has not had final legal review yet.

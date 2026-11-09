@@ -367,7 +367,7 @@ describe("Kiwi Passport V3", () => {
     expect(container.querySelectorAll(".pp-links")).toHaveLength(1);
     expect(links.closest(".pp-hero")).toBeTruthy();  // with the Kiwi profile and the XP bar, not under the missions
     expect(links.closest(".pp-stage")).toBeNull();
-    expect(links.querySelector("a")!.getAttribute("href")).toBe("/website/leaderboard");
+    expect(links.querySelector("a")!.getAttribute("href")).toBe("/leaderboard");
     expect(links.querySelector("a")!.textContent).toBe("🏆 Leaderboard #12");
     expect(container.querySelector(".pp-mcard")!.textContent).not.toContain("referral"); // no stats on the main screen
     await act(async () => screen.getByText("👥 Invite friends").click());
