@@ -43,6 +43,9 @@ KEYWORDS: dict[str, dict[str, float]] = {
 # --- settings ------------------------------------------------------------------------------------------------------
 
 
+X_FORMAT = "visual"  # owner, 2026-11-09: X posts carry the same picture as Telegram, the headline and the source. "classic" = text only
+
+
 def settings_row(db: Session) -> NdSettings:
     row = db.get(NdSettings, 1)
     if row is None:
@@ -395,7 +398,12 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
         shown = [next(x for x in ev.sources if x["name"] == n) for n in named]
-        text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
+        if X_FORMAT == "visual":  # the owner's format: the same picture as Telegram, the headline, a small source credit
+            from app.newsdesk import visual
+
+            text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
+        else:
+            text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
         source_text = f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
         urgent = ev.label == brief.BREAKING or ev.slot == "extra"
         market_kind = ev.kind in ("market", "recap") or bool(f.get("symbol"))
@@ -493,7 +501,17 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     client = make_x_client(db, settings, runtime)  # type: ignore[arg-type]
     try:
         permit = guard.issue_news_permit(req)
-        data = await client.create_post(post.text, permit=permit)
+        media = None
+        event_id = (post.facts or {}).get("event_id")
+        if X_FORMAT == "visual" and event_id:
+            from app.newsdesk import visual
+
+            ev = db.get(NdEvent, event_id)
+            if ev is not None:
+                image, meta = await visual.for_event(ev)
+                ev.facts = {**(ev.facts or {}), "visual": meta}
+                media = [await client.upload_image(image, permit=permit)]
+        data = await client.create_post(post.text, permit=permit, media_ids=media)
     except XUnavailableError as e:
         if "in time" in str(e):
             post.status, post.error = "uncertain", "X didn't answer in time: it may have posted. Check X before resending."

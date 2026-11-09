@@ -649,7 +649,7 @@ async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[st
     if db.scalar(select(NdEvent.id).where(NdEvent.key == f"recap:{slot:%Y-%m-%dT%H:%M}")) is not None:
         return None
     try:
-        ev = await recap.build(db, now, slot, slot_label(slot), quotes, market)
+        ev = await (recap.build_visual if recap.VISUAL else recap.build)(db, now, slot, slot_label(slot), quotes, market)
     except Exception as e:  # noqa: BLE001 - the market check failing never stops the desk; the slot alert tells the owner
         logger.warning("newsdesk recap: failed for the %s slot (%s)", slot_label(slot), type(e).__name__)
         db.rollback()
@@ -657,7 +657,7 @@ async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[st
     if ev is None:
         return None
     ev.status, ev.slot, ev.released_at = RELEASED, "slot", now
-    ev.why = f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so a market brief from measured data"
+    ev.why = f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so the biggest real market move" if recap.VISUAL else f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so a market brief from measured data"
     ev.x_status = ev.tg_status = "pending"
     if not _insert(db, [], ev):
         db.rollback()

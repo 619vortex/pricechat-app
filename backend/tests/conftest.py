@@ -339,3 +339,11 @@ def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
         monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "windows")
         monkeypatch.setattr(sources, "EXTRA_FEEDS", [])  # their fake web answers only the feeds they set
+    if request.module.__name__.split(".")[-1] in ("test_newsdesk", "test_newsdesk_events", "test_newsdesk_telegram", "test_newsdesk_collect", "test_x_social",
+                                                  "test_brand_publishing_safety", "test_newsdesk_slots", "test_tg_rules_hotfix"):
+        from app.newsdesk import engine as nd_engine, recap as nd_recap, telegram as nd_telegram
+
+        # written for the earlier text format (card + summary, written market brief); tests/test_newsdesk_visual.py covers the picture format
+        monkeypatch.setattr(nd_telegram, "FORMAT", "classic")
+        monkeypatch.setattr(nd_engine, "X_FORMAT", "classic")
+        monkeypatch.setattr(nd_recap, "VISUAL", False)
