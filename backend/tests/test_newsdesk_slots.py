@@ -106,9 +106,11 @@ async def test_without_a_qualifying_story_the_slot_gets_a_verified_market_check_
     out = released(db)
     assert len(out) == 1 and out[0].kind == "recap" and out[0].key == "recap:2026-11-09T04:00"
     f = out[0].facts
-    assert "Bitcoin $95,120 (+1.2% 24h)" in f["telegram_html"] and "HYPE $38.20 (+4.1% 24h)" in f["telegram_html"]
-    assert "Biggest mover: HYPE +4.1%." in f["telegram_html"]
-    assert f["x_text"].startswith("📊 Market check · 08:00 Dubai") and "$BTC 95,120 (+1.2%)" in f["x_text"] and len(f["x_text"]) <= 280 and "http" not in f["x_text"]
+    assert out[0].headline == "Crypto holds steady, HYPE up 4.1% in 24 hours"  # a news line measured from the data, not an alert
+    assert f["telegram_html"].startswith("<b>Crypto holds steady, HYPE up 4.1% in 24 hours</b>")
+    assert "Bitcoin $95,120 (+1.2%) · Ethereum $3,410 (-0.9%) · HYPE $38.20 (+4.1%)" in f["telegram_html"]
+    assert "ALERT" not in f["telegram_html"].upper() and "🚨" not in f["telegram_html"] and "📊" not in f["telegram_html"]
+    assert f["x_text"].startswith("Crypto holds steady, HYPE up 4.1% in 24 hours.") and "$BTC +1.2%" in f["x_text"] and len(f["x_text"]) <= 280 and "http" not in f["x_text"]
     assert "assets" not in f  # a market check never puts an asset on its six-hour cooldown
     await decide(db, SLOT + timedelta(minutes=10))
     assert len(released(db)) == 1  # one per slot, however many runs
@@ -131,6 +133,32 @@ async def test_a_story_under_the_bar_never_goes_out_and_the_slot_falls_back_to_t
     assert cand is not None and cand.status == "candidate" and "under the bar of 56" in cand.why
 
 
+def test_the_brief_says_what_the_market_did_and_explains_negative_funding() -> None:
+    lines = [{"tag": "$BTC", "name": "Bitcoin", "emoji": "", "price": 74940.0, "pct": -1.2, "source": "Hyperliquid", "funding": 0.0000125},
+             {"tag": "$ETH", "name": "Ethereum", "emoji": "", "price": 2140.0, "pct": -4.3, "source": "Hyperliquid", "funding": -0.00004},
+             {"tag": "$SOL", "name": "Solana", "emoji": "", "price": 87.5, "pct": -1.7, "source": "Hyperliquid", "funding": None},
+             {"tag": "Gold", "name": "Gold", "emoji": "", "price": 2650.1, "pct": 0.4, "source": "Yahoo Finance"}]
+    made = recap.compose(lines, [], "08:00", SLOT)
+    assert made is not None and made["headline"] == "Crypto slides, Ethereum down 4.3% in 24 hours"
+    assert "Gold 2,650 (+0.4%)" in made["telegram_html"] and "Data: Hyperliquid, Yahoo Finance, 04:00 UTC" in made["telegram_html"]
+    assert "Funding on Hyperliquid: Bitcoin +0.0013% an hour, Ethereum -0.0040% an hour." in made["telegram_html"]
+    assert "traders betting on a fall are paying those betting on a rise" in made["telegram_html"]
+    assert recap.headline(lines[:2] + [{**lines[2], "pct": 0.3}]) == "Crypto slides, Ethereum down 4.3% in 24 hours"
+    flat = [{**r, "pct": 0.2} for r in lines]
+    assert recap.headline(flat) == "Crypto holds steady over the last 24 hours"
+
+
+async def test_a_small_price_move_never_takes_a_slot(db: Session) -> None:
+    ev = NdEvent(key="liq:BTC:1", kind="market", title="BTC longs liquidated", headline="BTC LONGS LIQUIDATED: $8 MILLION IN AN HOUR", topic="liquidations",
+                 evidence="exchange data", category="crypto", virality=58, status="candidate", first_seen=SLOT, facts={"assets": ["LIQ:BTC"]})
+    db.add(ev)
+    db.commit()
+    await decide(db, SLOT + timedelta(minutes=1))
+    db.refresh(ev)
+    assert ev.status == "candidate" and "a move on its own needs 70" in ev.why
+    assert [e.kind for e in released(db)] == ["recap"]
+
+
 async def test_priority_subjects_rank_first_but_never_lower_the_bar(db: Session) -> None:
     p = events.policy({})
     btc = NdEvent(key="a", kind="news", title="t", headline="Bitcoin miners sell", topic="other", category="crypto", virality=58)
@@ -147,7 +175,7 @@ async def test_telegram_and_x_each_deliver_the_market_check_in_their_own_format(
     await decide(db, now)
     tg = Tg()
     out = await lane.tick(db, get_settings(), tg, now, quotes={})
-    assert out["sent"] == 144 and tg.sent[0]["card"] is False and tg.sent[0]["text"].startswith("<b>📊 MARKET CHECK · 08:00 Dubai</b>")
+    assert out["sent"] == 144 and tg.sent[0]["card"] is False and tg.sent[0]["text"].startswith("<b>Crypto holds steady")
     desk = engine.settings_row(db)
     await engine.deliver_x(db, desk, get_settings(), None, 0, now)
     ev = released(db)[0]

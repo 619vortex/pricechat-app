@@ -64,6 +64,7 @@ class Policy:
     slot_hours: tuple[int, ...] = (0, 4, 8, 12, 16, 20)  # Dubai (UTC+4, no daylight saving)
     slot_catch_up: timedelta = timedelta(minutes=90)  # a slot not filled by then (the server was down) is missed, never posted late
     recap: bool = True
+    market_bar: int = 70  # a price move or liquidation flush on its own needs this to take a slot: no small "price alert" posts
     priority_bonus: int = 6  # ranking only, never the bar: Bitcoin, Ethereum, Hyperliquid, macro, commodities, geopolitics come first
     priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC"}))
 
@@ -82,7 +83,7 @@ ESCALATE = re.compile(r"\b(lazarus|north korea\w*|behind the|blamed?|attribut\w+
                       r"recover\w*|returns? (?:the )?funds|delist\w*|sentenc\w*|guilty|shut(?:s|ting)? down|collaps\w*|liquidat\w+|depeg\w*|steps? down|stepped down|resign\w*|ousted|fired|launder\w*)\b", re.I)
 
 
-NUMBERS = ("regular_per_day", "regular_bar", "opening_bar", "extra_bar", "extra_per_day", "ceiling", "window_hours", "topic_max", "updates_per_story")
+NUMBERS = ("market_bar", "regular_per_day", "regular_bar", "opening_bar", "extra_bar", "extra_per_day", "ceiling", "window_hours", "topic_max", "updates_per_story")
 MINUTES = ("regular_gap", "extra_gap", "min_gap", "asset_cooldown")
 
 
@@ -615,6 +616,9 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         if ev.virality < p.regular_bar:
             ev.why = f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
             continue
+        if ev.kind == "market" and ev.virality < p.market_bar:
+            ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot"
+            continue
         topical = sum(1 for e in out if e.topic == ev.topic and e.kind != "recap" and now - _utc(e.released_at, now) < p.topic_window)
         if topical >= p.topic_max:
             ev.why = f"{topical} {ev.topic or 'other'} posts on this subject in 12 hours"
@@ -653,7 +657,7 @@ async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[st
     if ev is None:
         return None
     ev.status, ev.slot, ev.released_at = RELEASED, "slot", now
-    ev.why = f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so a verified market check"
+    ev.why = f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so a market brief from measured data"
     ev.x_status = ev.tg_status = "pending"
     if not _insert(db, [], ev):
         db.rollback()

@@ -66,12 +66,12 @@ def render(headline: str, brief: Brief, sources: list[str], at: datetime, *, sta
     kiwi = Image.open(ASSETS / "kiwi.webp").convert("RGBA")
     kiwi.thumbnail((84, 84))
     brand = _inter(30, "Black")
-    bw = d.textlength("PRICE ALERT", font=brand)
+    bw = d.textlength("PRICE CHAT NEWS", font=brand)
     bx = W - 64 - bw
     kx, ky = int(bx - kiwi.width - 22), 36
     d.ellipse([kx - 6, ky - 4, kx + kiwi.width + 6, ky + kiwi.width + 8], fill=(236, 246, 228))  # the Kiwi is dark: it sits on a light badge
     img.paste(kiwi, (kx, ky + (kiwi.width - kiwi.height) // 2 + 2), kiwi)
-    d.text((bx, 64), "PRICE ALERT", font=brand, fill=TEXT, anchor="lm")
+    d.text((bx, 64), "PRICE CHAT NEWS", font=brand, fill=TEXT, anchor="lm")
     d.text((bx, 96), "by Price Chat", font=_inter(20, "Medium"), fill=MUTED, anchor="lm")
     # the right-hand column: the figure, and the day's prices under it
     spark = [p for p in (spark or []) if p > 0]

@@ -1,4 +1,8 @@
-"""The market check: what a scheduled slot carries when no story clears the desk's bar (app/newsdesk/events, schedule "slots").
+"""The market brief: what a scheduled slot carries when no story clears the desk's bar (app/newsdesk/events, schedule "slots").
+
+Written as a short news item, not a price alert (owner, 2026-11-09): a headline that says what the market did, measured from the data
+("Crypto slips, Ethereum down 4.3% in 24 hours"), the moves in one or two lines, what positioning on Hyperliquid says (funding, with a
+one-line explanation when it has flipped negative), and the stories the desk verified. No alert labels, no siren emoji.
 
 Only measured numbers, never news: crypto from Hyperliquid's own market data (cross-checked against Yahoo Finance when Yahoo has a fresh
 price; an asset the two disagree on by more than CROSS_CHECK_PCT is left out), stocks and commodities from Yahoo Finance, and only while
@@ -63,7 +67,8 @@ def rows(hl: dict[str, Any], quotes: dict[str, sources.Quote], now: datetime) ->
         if q is not None and (now - q.as_of).total_seconds() <= sources.FRESH_SECONDS and abs(q.price - m.mark) / m.mark * 100 > sources.CROSS_CHECK_PCT:
             logger.info("newsdesk recap: %s left out: Hyperliquid %s vs Yahoo %s", coin, m.mark, q.price)
             continue
-        out.append({"tag": f"${coin}", "name": name, "emoji": emoji, "price": m.mark, "pct": (m.mark - m.prev_day) / m.prev_day * 100, "source": "Hyperliquid"})
+        out.append({"tag": f"${coin}", "name": name, "emoji": emoji, "price": m.mark, "pct": (m.mark - m.prev_day) / m.prev_day * 100, "source": "Hyperliquid",
+                    "funding": getattr(m, "funding", None)})
     for symbol, name, emoji in MACRO:
         q = quotes.get(symbol)
         change = q.change("24h", now) if q is not None else None
@@ -85,34 +90,61 @@ def _stories(db: Session, now: datetime, limit: int = 2) -> list[NdEvent]:
             and e.virality >= STORY_MIN and events.priority(e, p)][:limit]
 
 
+def headline(lines: list[dict[str, Any]]) -> str:
+    """What the market did, in words measured from the numbers: the direction of Bitcoin and Ethereum, and the biggest move if it's big."""
+    by = {r["tag"]: r for r in lines}
+    avg = (by["$BTC"]["pct"] + by["$ETH"]["pct"]) / 2
+    verb = ("Crypto slides" if avg <= -2.5 else "Crypto slips" if avg <= -0.5 else "Crypto rallies" if avg >= 2.5 else "Crypto edges higher" if avg >= 0.5 else "Crypto holds steady")
+    lead = max(lines, key=lambda r: abs(r["pct"]))
+    if abs(lead["pct"]) >= 2:
+        return f"{verb}, {lead['name']} {'down' if lead['pct'] < 0 else 'up'} {abs(lead['pct']):.1f}% in 24 hours"
+    return f"{verb} over the last 24 hours"
+
+
+def _funding(lines: list[dict[str, Any]]) -> str:
+    """Hyperliquid's hourly funding for Bitcoin and Ethereum, explained only when it says something (negative: shorts pay longs)."""
+    got = [(r["name"], r["funding"]) for r in lines if r["tag"] in ("$BTC", "$ETH") and isinstance(r.get("funding"), (int, float))]
+    if not got:
+        return ""
+    text = "Funding on Hyperliquid: " + ", ".join(f"{n} {f * 100:+.4f}% an hour" for n, f in got) + "."
+    if any(f < 0 for _, f in got):
+        text += " Negative funding means traders betting on a fall are paying those betting on a rise."
+    return text
+
+
 def compose(lines: list[dict[str, Any]], stories: list[NdEvent], slot_local: str, as_of: datetime) -> dict[str, Any] | None:
     """Both platforms' texts, checked. None if the data is too thin or a check fails."""
     if len(lines) < MIN_ASSETS or not {"$BTC", "$ETH"} <= {r["tag"] for r in lines}:
         return None
+    import re
     from html import escape
 
     names = list(dict.fromkeys(r["source"] for r in lines))
-    mover = max(lines, key=lambda r: abs(r["pct"]))
-    told = " ".join(f"{_price(r['price'])} {_pct(r['pct'])}" for r in lines) + " " + " ".join(f"{e.headline} {e.title}" for e in stories) + f" {slot_local} {as_of:%H:%M} 24h"
-    head = f"📊 MARKET CHECK · {slot_local} Dubai"
-    tg = [f"<b>{escape(head)}</b>", ""]
-    tg += [f"{r['emoji']} {escape(r['name'])} ${_price(r['price'])} ({_pct(r['pct'])} 24h)" for r in lines]
-    tg += ["", f"Biggest mover: {escape(mover['name'])} {_pct(mover['pct'])}."]
-    for e in stories:
-        src = e.sources[0]
-        tg.append(f"📰 {escape(e.headline)} (<a href=\"{escape(src['url'], quote=True)}\">{escape(src['name'])}</a>)")
-    tg += ["", f"<i>Prices: {escape(', '.join(names))}, {as_of:%H:%M} UTC.</i>"]
+    head = headline(lines)
+    crypto = [r for r in lines if r["source"] == "Hyperliquid"]
+    macro = [r for r in lines if r["source"] != "Hyperliquid"]
+    fund = _funding(lines)
+    told = (" ".join(f"{_price(r['price'])} {_pct(r['pct'])} {abs(r['pct']):.1f}%" for r in lines) + " " + " ".join(f"{e.headline} {e.title}" for e in stories)
+            + f" {fund} {slot_local} {as_of:%H:%M} 24")
+    tg = [f"<b>{escape(head)}</b>", "", " · ".join(f"{escape(r['name'])} ${_price(r['price'])} ({_pct(r['pct'])})" for r in crypto)]
+    if macro:
+        tg.append(" · ".join(f"{escape(r['name'])} {_price(r['price'])} ({_pct(r['pct'])})" for r in macro))
+    if fund:
+        tg += ["", escape(fund)]
+    if stories:
+        tg += ["", "Also verified today:"]
+        for e in stories:
+            src = e.sources[0]
+            tg.append(f"• {escape(e.headline)} (<a href=\"{escape(src['url'], quote=True)}\">{escape(src['name'])}</a>)")
+    tg += ["", f"<i>24-hour changes. Data: {escape(', '.join(names))}, {as_of:%H:%M} UTC</i>"]
     html = "\n".join(tg)
-    plain = "\n".join(t.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "") for t in tg)
-    import re
-
-    plain = re.sub(r"<a [^>]*>|</a>", "", plain)
-    # X: short, no links (a link costs $0.20 a post), no story lines
-    x_lines = [f"📊 Market check · {slot_local} Dubai", *[f"{r['tag']} {_price(r['price'])} ({_pct(r['pct'])})" for r in lines[:6]], f"Prices: {', '.join(names)}"]
-    x = "\n".join(x_lines)
-    while len(x) > checks.MAX_LEN and len(x_lines) > 4:
-        x_lines.pop(-2)
-        x = "\n".join(x_lines)
+    plain = re.sub(r"<[^>]+>", "", html)
+    # X: the headline and the moves, no links (a link costs $0.20 a post)
+    moves_x = [f"{r['tag'] if r['source'] == 'Hyperliquid' else r['name']} {_pct(r['pct'])}" for r in lines]
+    x = f"{head}.\n\n" + ", ".join(moves_x) + f"\n\nData: {', '.join(names)}"
+    while len(x) > checks.MAX_LEN and len(moves_x) > 2:
+        moves_x.pop()
+        x = f"{head}.\n\n" + ", ".join(moves_x) + f"\n\nData: {', '.join(names)}"
     rx = checks.check_post(x, source_text=told, source_names=names[:1])
     rt = checks.check_post(plain, source_text=told, source_names=names[:1], max_len=TG_MAX)
     if not rx.ok or not rt.ok:
@@ -131,7 +163,7 @@ async def build(db: Session, now: datetime, slot_at: datetime, slot_local: str, 
     if made is None:
         logger.warning("newsdesk recap: no recap for the %s slot: %s verified prices (needs %s, with BTC and ETH)", slot_local, len(lines), MIN_ASSETS)
         return None
-    return NdEvent(key=f"recap:{slot_at:%Y-%m-%dT%H:%M}", kind="recap", title=made["headline"], headline=made["headline"], summary="", topic="recap", label="📊 MARKET CHECK",
+    return NdEvent(key=f"recap:{slot_at:%Y-%m-%dT%H:%M}", kind="recap", title=made["headline"], headline=made["headline"], summary="", topic="recap", label="MARKET BRIEF",
                    evidence="price data", category="crypto", virality=0.0, parts={}, sources=made["sources"], first_seen=now,
                    facts={"recap": True, "slot_at": slot_at.isoformat(), "telegram_html": made["telegram_html"], "telegram_plain": made["telegram_plain"], "x_text": made["x_text"],
                           "recap_assets": made["assets"], "stories": made["stories"], "told": made["told"], "as_of": now.isoformat()})
