@@ -384,11 +384,18 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             _sync(ev, post)
             db.commit()
             return result
-        if not (s.categories or {}).get(ev.category, True):
+        following = events.X_FOLLOWS_TELEGRAM
+        if following and ev.tg_status in events.TG_WAITING:
+            continue  # wait for Telegram's outcome on this event (it also picks the picture X reuses)
+        if following and ev.tg_status not in ("delivered", "uncertain"):
+            events.mark(ev, "x", "skipped", f"Telegram didn't post it ({ev.tg_status})")
+            db.commit()
+            continue
+        if not following and not (s.categories or {}).get(ev.category, True):
             events.mark(ev, "x", "skipped", f"the {ev.category} category is off on X")
             continue
-        cap = s.target_per_day + s.max_breaking_per_day
-        if ev.slot == "slot":  # the six scheduled slots are the plan: X's older 3-4 a day setting doesn't drop them
+        cap = 10**6 if following else s.target_per_day + s.max_breaking_per_day  # following: Telegram's limits already decided it
+        if ev.slot == "slot" and not following:  # the six scheduled slots are the plan: X's older 3-4 a day setting doesn't drop them
             cap = max(cap, len(events.policy(s.state or {}).slot_hours) + 1)  # +1: yesterday's same slot can still be inside a rolling 24 h
         sent = int(db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.x_status.in_(("dry_run", "published", "uncertain")), NdEvent.released_at >= now - timedelta(days=1))) or 0)
         if sent >= cap:
@@ -414,6 +421,8 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
                                                                  "corroborated_by": [n for n in (f.get("outlets") or []) if n != (ev.sources or [{}])[0].get("name")]},
                        src=ev.sources or [], source_text=source_text, names=named, expires=now + timedelta(hours=2), now=now, dedupe=False)
         if post is None:
+            if following:
+                logger.warning("newsdesk: X couldn't follow Telegram on event %s: the X text failed the checks", ev.id)
             events.mark(ev, "x", "skipped", "the X text failed the checks")
             db.commit()
             continue

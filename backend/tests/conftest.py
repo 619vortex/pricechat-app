@@ -356,3 +356,8 @@ def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         monkeypatch.setattr(nd_telegram, "FORMAT", "classic")
         monkeypatch.setattr(nd_engine, "X_FORMAT", "classic")
         monkeypatch.setattr(nd_recap, "VISUAL", False)
+    if request.module.__name__.split(".")[-1] != "test_x_follows_telegram":
+        from app.newsdesk import events as nd_events
+
+        # the older tests drive X on its own; tests/test_x_follows_telegram.py covers X mirroring Telegram (owner, 2026-11-09)
+        monkeypatch.setattr(nd_events, "X_FOLLOWS_TELEGRAM", False)

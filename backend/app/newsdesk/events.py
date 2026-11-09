@@ -70,6 +70,11 @@ class Policy:
 
 
 DEFAULT_SCHEDULE = "slots"
+# Owner, 2026-11-09: "every telegram post will also post a tweet". X waits for Telegram's outcome on each event and posts exactly what
+# Telegram delivered: X's own daily limit and category switches no longer drop one, and X gets extra time after Telegram's delivery.
+X_FOLLOWS_TELEGRAM = True
+X_AFTER_TELEGRAM = timedelta(hours=1)  # how long X may still post an event after Telegram delivered it
+TG_WAITING = ("pending", "queued")  # "uncertain": Telegram may well have posted it, so X follows
 POLICY = Policy()
 DUBAI = timezone(timedelta(hours=4), "Dubai")
 PRIORITY_TOPICS = {"macro", "hack", "liquidations", "etf", "failure"}
@@ -790,6 +795,8 @@ def pending(db: Session, platform: str, now: datetime) -> list[NdEvent]:
     out = []
     for ev in rows:
         limit = POLICY.deliver_market if ev.kind == "market" or (ev.facts or {}).get("symbol") else POLICY.deliver_news
+        if platform == "x" and X_FOLLOWS_TELEGRAM and ev.tg_status in ("delivered", "uncertain"):
+            limit += X_AFTER_TELEGRAM  # Telegram posted it near the end of its window: X still follows
         if now - _utc(ev.released_at, now) > limit and getattr(ev, f"{'x' if platform == 'x' else 'tg'}_status") == "pending":
             mark(ev, platform, "missed", "not delivered in time")
             continue
