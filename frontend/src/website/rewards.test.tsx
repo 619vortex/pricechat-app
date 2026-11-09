@@ -60,6 +60,21 @@ describe("Rank rewards on the Passport", () => {
     expect(container.querySelector(".rw-timeline + .rw-next")!.textContent).toBe("200 / 400 XP · 200 XP to Scout Kiwi");
   });
 
+  it("never says a rank unlocks Earn while the server says Earn is open to every member (audit UX-8)", () => {
+    const data = rewards(200);
+    const scout = data.ranks.find((c) => c.rank.key === "scout")!;
+    scout.unlocked = true;
+    scout.reward = { kind: "earn", title: "EARN — Open to every member", description: "The Kiwi trading bot is already free for every Kiwi Passport member, at any rank.", enabled: true, open_to_all: true };
+    const { container } = render(<RankRewards data={data} reload={async () => {}} />);
+    tap(container, "scout");
+    const p = pop(container)!;
+    expect(p.textContent).toContain("EARN — Open to every member");
+    expect(p.textContent).not.toContain("UNLOCK EARN");
+    expect(p.textContent).not.toContain("Unlocks at Scout Kiwi");
+    expect(p.querySelector(".rw-pill")!.textContent).toBe("✓ Unlocked");
+    expect(p.querySelector<HTMLAnchorElement>("a.rw-btn")!.getAttribute("href")).toBe("/earn");
+  });
+
   it("opens a Kiwi's reward in a popover: name, XP, reward, status and its action", () => {
     const { container } = render(<RankRewards data={rewards(500)} reload={async () => {}} />);
     tap(container, "scout");

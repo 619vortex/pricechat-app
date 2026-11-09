@@ -31,7 +31,23 @@ export function useHead({ title, description, path, siteUrl, image, noindex, jso
     const url = siteUrl ? new URL(path, siteUrl.endsWith("/") ? siteUrl : `${siteUrl}/`).toString() : null;
     const img = image && !/^https?:/.test(image) ? (siteUrl ? new URL(image, siteUrl).toString() : null) : image ?? null;
     const added: HTMLElement[] = [];
+    const restore: (() => void)[] = [];
+    // the home picture from index.html: the fallback for a page without its own (as the server's link previews do)
+    const homeImage = document.head.querySelector<HTMLMetaElement>('meta[property="og:image"]:not([data-site-head])')?.content || null;
     const meta = (attr: "name" | "property", key: string, content: string | null) => {
+      // index.html's own link-preview tags (the home page's) are changed in place, never duplicated (audit UX-18): a reader
+      // that takes the first og:title / og:image would otherwise see the home card on every page
+      const own = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]:not([data-site-head])`);
+      if (own) {
+        const prev = own.content, next = own.nextSibling, parent = own.parentNode;
+        if (content) own.content = content;
+        else own.remove();  // nothing for this page (no address yet, another picture's size): the home value must not stay
+        restore.push(() => {
+          own.content = prev;
+          if (!own.isConnected && parent) parent.insertBefore(own, next && next.parentNode === parent ? next : null);
+        });
+        return;
+      }
       if (!content) return;
       const el = document.createElement("meta");
       el.setAttribute(attr, key);
@@ -50,11 +66,16 @@ export function useHead({ title, description, path, siteUrl, image, noindex, jso
     meta("property", "og:title", title);
     meta("property", "og:description", description);
     meta("property", "og:url", url);
-    meta("property", "og:image", img);
-    meta("name", "twitter:card", img ? "summary_large_image" : "summary");
+    const shown = img ?? homeImage;
+    const home = !!shown && shown === homeImage;
+    meta("property", "og:image", shown);
+    meta("property", "og:image:width", home ? "1200" : null);  // index.html's size and alt text describe the home picture only
+    meta("property", "og:image:height", home ? "630" : null);
+    meta("property", "og:image:alt", home ? title : null);
+    meta("name", "twitter:card", shown ? "summary_large_image" : "summary");
     meta("name", "twitter:title", title);
     meta("name", "twitter:description", description);
-    meta("name", "twitter:image", img);
+    meta("name", "twitter:image", shown);
     if (noindex) meta("name", "robots", "noindex");
     if (ld) {
       const origin = siteUrl ?? (typeof location !== "undefined" ? location.origin : "");
@@ -79,6 +100,7 @@ export function useHead({ title, description, path, siteUrl, image, noindex, jso
       document.title = prevTitle;
       if (base && prevDescription !== undefined) base.content = prevDescription;
       added.forEach((el) => el.remove());
+      restore.reverse().forEach((undo) => undo());  // last changed first, so removed neighbours go back in their places
     };
   }, [title, description, path, siteUrl, image, noindex, ld]);
 }

@@ -327,7 +327,7 @@ export function GiveawayPage() {
         </div>
 
         <header className="gw-head">
-          <h1 className="site-display">Pack <span className="site-green">Giveaway</span> 🎁</h1>
+          <h1 className="site-display">Open <span className="site-green">Packs</span> 🎁</h1>
           {member && levelPacks > 0 && (
             <div className="gw-levelup" role="status">
               <span className="gw-levelup-badge">★ {levelPacks}</span>

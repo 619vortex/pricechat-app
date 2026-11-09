@@ -367,7 +367,7 @@ export function PassportPlay({ p, ranks, reload, extra, rewardFrom, onEditName, 
         {p.streak && <StreakCard s={p.streak} />}
         {/* with the profile: where you stand, and bringing friends */}
         <nav className="pp-links" aria-label="Leaderboard and invites">
-          <a className="pp-link" href="/website/leaderboard">🏆 Leaderboard{p.standing ? <span className="pp-link-pos"> #{p.standing.position}</span> : null}</a>
+          <a className="pp-link" href="/leaderboard">🏆 Leaderboard{p.standing ? <span className="pp-link-pos"> #{p.standing.position}</span> : null}</a>
           <button type="button" className="pp-link" onClick={() => setInvite(true)}>👥 Invite friends</button>
         </nav>
       </div>

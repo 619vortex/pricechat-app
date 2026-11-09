@@ -17,7 +17,7 @@ export interface RewardCard {
   reached: boolean;
   current: boolean;
   unlocked: boolean;
-  reward: { kind: RewardKind; title: string; description: string; enabled: boolean };
+  reward: { kind: RewardKind; title: string; description: string; enabled: boolean; /** Earn already opens below this rank (the server says so): nothing to unlock here */ open_to_all?: boolean };
   xp_to_reach: number;
   progress: number;
   next_min_xp: number | null;
@@ -49,6 +49,7 @@ function stateOf(c: RewardCard, knight: Knight): State {
   const k = c.reward.kind;
   if (k === "tba") return "tba";
   if (!c.reward.enabled) return "off";
+  if (c.reward.open_to_all) return "unlocked";
   if (!c.reached) return "locked";
   if (k === "none") return "done";
   if (k === "trading_credit") return c.claim ? (c.claim.status === "FULFILLED" ? "done" : "unlocked") : knight.active ? "claimable" : "unlocked";
@@ -182,11 +183,11 @@ function RewardPopover({ c, state, knight, profile, reload, onProfileSaved, onCl
       </div>
       <span className={`rw-pill is-${state}`}>{state === "locked" ? "🔒 " : state === "unlocked" || state === "done" ? "✓ " : ""}{STATE_LABEL[state]}</span>
       {reward.description && reward.kind !== "tba" && <p className="rw-desc">{reward.description}</p>}
-      {!c.reached && reward.kind !== "tba" && <p className="rw-fine">Unlocks at {rank.name}: {fmt(c.xp_to_reach)} XP to go</p>}
+      {!c.reached && reward.kind !== "tba" && !reward.open_to_all && <p className="rw-fine">Unlocks at {rank.name}: {fmt(c.xp_to_reach)} XP to go</p>}
       {/* never a bare "Paused" / "Coming later": say why it can't be used and what happens next */}
       {state === "off" && <p className="rw-fine">Paused for now by the Price Chat team. It'll be back here as soon as it reopens.</p>}
       {state === "tba" && <p className="rw-fine">This reward is still being prepared. It's announced here first.</p>}
-      {state !== "off" && c.reached && (
+      {state !== "off" && (c.reached || (reward.open_to_all && c.unlocked)) && (
         <div className="rw-act">
           <RewardAction c={c} knight={knight} profile={profile} open={custom} toggle={() => setCustom((v) => !v)} reload={reload} onProfileSaved={onProfileSaved} />
         </div>

@@ -6,7 +6,8 @@ import {
 } from "./websiteLogic";
 import { PAGE_HEADS } from "./seo";
 import { useHead } from "./useHead";
-import { noteContentOpened, useSession } from "./members";
+import { memberApi, noteContentOpened, useSession } from "./members";
+import { PLAN } from "./vpnConfig";
 import { RankKiwi } from "./RankKiwi";
 import { LoginHost, openLogin } from "./emailLogin";
 import { ChatBubble } from "./chatBubble";
@@ -266,7 +267,7 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
             </a>
           ))}
           <a href="/giveaway" className={`site-link site-link-give${onGive ? " is-current" : ""}`} aria-current={onGive ? "page" : undefined}>
-            Giveaway
+            Open Packs
           </a>
           {showBot && (
             <a href="/earn" className={`site-link site-link-bot${onBot ? " is-current" : ""}`} aria-current={onBot ? "page" : undefined}>
@@ -310,9 +311,9 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
             </a>
           )}
           <a href="/giveaway" onClick={() => setOpen(false)}>
-            🎁 Pack Giveaway
+            🎁 Open Packs
           </a>
-          <a href="/website/leaderboard" onClick={() => setOpen(false)}>
+          <a href="/leaderboard" onClick={() => setOpen(false)}>
             Leaderboard
           </a>
         </nav>
@@ -387,7 +388,22 @@ function Hero() {
           <span key={s}>{s}</span>
         ))}
       </p>
+      <HeroActions />
     </section>
+  );
+}
+
+/** The first viewport's way in (audit UX-3): the free Passport (or your own, once signed in) and the Pokémon market. */
+function HeroActions() {
+  const member = useSession();
+  return (
+    <div className="site-hero-actions">
+      <a className="site-button" href={member ? "/passport" : "/join"}
+         onClick={member ? undefined : (e) => { e.preventDefault(); openLogin(); }}>
+        {member ? "Your Kiwi Passport" : "Get your free Kiwi Passport"}
+      </a>
+      <a className="site-more site-link" href="/pokemon">Explore the Pokémon market <span aria-hidden>→</span></a>
+    </div>
   );
 }
 
@@ -695,11 +711,30 @@ function Community({ links, growth }: { links: HomeData["links"]; growth?: HomeD
 const VPN_POINTS: [string, string][] = [
   ["Your address stays hidden", "Sites see our server's address instead of yours."],
   ["We don't log the sites you visit", "Our privacy page lists exactly what we do keep."],
-  ["30-day free trial", "Then $9.99 for 30 days, renewed by hand. Free for Royal Kiwi and above."],
 ];
+
+/** What GET /members/vpn/public says: billing (the price) is only sent while payments are really open. */
+export interface VpnPublic { enabled: boolean; payments?: boolean; trial?: boolean; free?: boolean; billing?: { price_usd: number; period_days: number } | null }
+
+/** The offer point follows the live settings (audit UX-6): a price only while it can actually be paid. null = not loaded (no price either). */
+export function vpnOffer(v: VpnPublic | null): [string, string] {
+  const trial = `${PLAN.trial_days}-day free trial`;
+  if (!v) return [trial, "No payment details needed. Free for Royal Kiwi and above."];
+  if (v.free) return ["Free for members", "Sign in with your Kiwi Passport and add a device. Nothing to pay."];
+  if (v.payments && v.billing) return [v.trial ? trial : "Paid plan", `${v.trial ? "Then " : ""}$${v.billing.price_usd} for ${v.billing.period_days} days, renewed by hand. Free for Royal Kiwi and above.`];
+  if (v.enabled && v.trial) return [trial, "No payment details needed. The paid plan isn't open yet. Free for Royal Kiwi and above."];
+  return ["Opening soon", "Kiwi VPN isn't open to new members yet. Free for Royal Kiwi and above."];
+}
 
 /** A member perk, sold briefly next to the sign-up: Kiwi VPN's three selling points and a link to /vpn. */
 function VpnPerk() {
+  const [live, setLive] = useState<VpnPublic | null>(null);
+  useEffect(() => {
+    let on = true;
+    memberApi<VpnPublic>("/members/vpn/public").then((v) => { if (on) setLive(v); }, () => {});
+    return () => { on = false; };
+  }, []);
+  const points = [...VPN_POINTS, vpnOffer(live)];
   return (
     <div className="site-wrap">
       <aside className="site-vpnperk site-reveal" aria-labelledby="vpnperk-title">
@@ -708,7 +743,7 @@ function VpnPerk() {
           <h3 className="site-display" id="vpnperk-title"><span aria-hidden>🛡️ </span>Kiwi VPN</h3>
         </div>
         <ul className="site-vpnperk-points">
-          {VPN_POINTS.map(([title, line]) => <li key={title}><b>{title}</b><span>{line}</span></li>)}
+          {points.map(([title, line]) => <li key={title}><b>{title}</b><span>{line}</span></li>)}
         </ul>
         <a className="site-more site-link" href="/vpn">Get Kiwi VPN <span aria-hidden>→</span></a>
       </aside>
@@ -823,7 +858,7 @@ function JoinCta({ signedIn }: { signedIn: boolean }) {
              onClick={signedIn ? undefined : (e) => { e.preventDefault(); openLogin(); }}>
             {signedIn ? "Your Kiwi Passport" : joinCta}
           </a>
-          <a className="site-more site-link" href="/website/leaderboard">
+          <a className="site-more site-link" href="/leaderboard">
             Leaderboard <span aria-hidden>→</span>
           </a>
         </div>
@@ -908,7 +943,7 @@ export function SiteFooter({ home }: { home: HomeData | null }) {
           </nav>
         )}
         <p className="site-footer-small">
-          © {new Date().getFullYear()} Price Chat. Nothing on this site is financial advice. <a className="site-link" href="/website/disclaimer">Disclaimer</a>
+          © {new Date().getFullYear()} Price Chat. Nothing on this site is financial advice. <a className="site-link" href="/disclaimer">Disclaimer</a>
         </p>
       </div>
     </footer>

@@ -694,8 +694,9 @@ function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnS
         </li>
         <li className="is-main">
           <h3>Kiwi VPN Subscription</h3>
-          <p className="vpn-price">${price}<small>per {period} days</small></p>
-          <p>You renew by hand. No automatic billing.{billing?.usdt && !billing.card ? " Paid in USDT." : ""}</p>
+          {/* audit UX-6: the server only sends billing while payments are open, so no price is promised before anyone can pay it */}
+          {billing ? <p className="vpn-price">${price}<small>per {period} days</small></p> : <p className="vpn-price">Soon<small>not open yet</small></p>}
+          <p>{billing ? <>You renew by hand. No automatic billing.{billing.usdt && !billing.card ? " Paid in USDT." : ""}</> : "The paid plan isn't open yet, so there's no way to pay for more time today."}</p>
           <div>{buy}</div>
         </li>
         <li className="is-gold">
@@ -705,7 +706,7 @@ function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnS
           <div>{member?.royal ? <span className="vpn-plan-note is-gold"><Tick />Your plan</span> : <a className="vpn-royal-link" href="#royal">How Royal works</a>}</div>
         </li>
       </ul>
-      <p className="vpn-after"><b>When your trial ends</b> nothing is charged. Your devices switch off and are kept for {PLAN.keep_days} days, and adding time switches them back on.</p>
+      <p className="vpn-after"><b>When your trial ends</b> nothing is charged. Your devices switch off and are kept for {PLAN.keep_days} days, {canBuy ? "and adding time switches them back on." : "and paid time isn't on sale yet: once it opens, adding time switches them back on."}</p>
       {err && <p className="site-error" role="alert">{err}</p>}
     </section>
   );
@@ -766,9 +767,9 @@ function Faq({ member, free, paid, open }: { member: VpnState | null; free: bool
         <aside className="vpn-help">
           <h3>Need a hand?</h3>
           <p>The team answers fastest on Telegram or X.</p>
-          <a href="/website/contact">Contact Price Chat</a>
+          <a href="/contact">Contact Price Chat</a>
           <a className="vpn-privacy" href="/vpn/privacy">How Kiwi VPN handles your data</a>
-          <a href="/website/terms">Terms</a>
+          <a href="/terms">Terms</a>
         </aside>
       </div>
     </section>

@@ -77,7 +77,8 @@ describe("header account link", () => {
     expect(login.getAttribute("href")).toBe("/website/join");
     expect(container.querySelector(".site-joincta .site-button")!.textContent).toBe("Join Price Chat");
     // a first-time visitor reads what joining gets them, right by the button
-    expect(container.querySelector(".site-joincta-note")!.textContent).toContain("every rank unlocks a reward");
+    expect(container.querySelector(".site-joincta-note")!.textContent).toContain("unlock rewards as your Kiwi ranks up");
+    expect(container.querySelector(".site-joincta-note")!.textContent).not.toMatch(/every rank/i);  // audit UX-7: 4 of 10 ranks have no reward yet
   });
 
   it("shows the member's Kiwi, username and rank when signed in", async () => {
@@ -141,7 +142,8 @@ describe("join page", () => {
     expect(buttons).toEqual(["Continue with Telegram", "Continue with Google"]);  // X isn't set up: not shown at all
     expect(screen.getByText(/never posts or messages for you/)).toBeTruthy();
     // a first-time visitor sees what they get before signing up
-    expect(screen.getByRole("list", { name: "What you get" }).textContent).toContain("every rank has a reward");
+    expect(screen.getByRole("list", { name: "What you get" }).textContent).toContain("unlock rewards along the way");
+    expect(screen.getByRole("list", { name: "What you get" }).textContent).not.toMatch(/every rank/i);  // audit UX-7
     expect(container.querySelector("input[type=email]")).toBeNull();  // email sign-in not set up: no dead end, no empty form
     expect(container.querySelector(".lg-legacy-box")).toBeNull();
   });

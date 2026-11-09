@@ -73,7 +73,7 @@ describe("homepage", () => {
     expect(container.textContent).not.toMatch(/placeholder|lorem/i);
     // the nav only links to places that exist
     const nav = within(container.querySelector(".site-nav")!);
-    expect(nav.getAllByRole("link").map((a) => a.textContent)).toEqual(["Latest", "About", "Giveaway"]);
+    expect(nav.getAllByRole("link").map((a) => a.textContent)).toEqual(["Latest", "About", "Open Packs"]);
     // Telegram has no link yet, so it is not offered
     expect(container.querySelector(".site-join-telegram")).toBeNull();
     expect(container.querySelector<HTMLAnchorElement>(".site-join-x")!.href).toBe("https://x.com/pricechat");
@@ -150,6 +150,29 @@ describe("brand and community", () => {
     expect(perk.querySelector("h3")!.textContent).toContain("Kiwi VPN");
     expect([...perk.querySelectorAll("li b")].map((b) => b.textContent)).toEqual(["Your address stays hidden", "We don't log the sites you visit", "30-day free trial"]);
     expect(perk.querySelector("a")!.getAttribute("href")).toBe("/vpn");
+  });
+
+  it("puts the sign-up and the market in the first viewport, inside the hero (audit UX-3)", async () => {
+    serve({ "/api/website/home": baseHome() });
+    const { container } = await renderSite(<Website />);
+    const actions = container.querySelector("#top .site-hero-actions")!;
+    const links = [...actions.querySelectorAll<HTMLAnchorElement>("a")];
+    expect(links.map((a) => [a.textContent!.replace("→", "").trim(), a.getAttribute("href")])).toEqual([
+      ["Get your free Kiwi Passport", "/join"], ["Explore the Pokémon market", "/pokemon"],
+    ]);
+  });
+
+  it("only names the VPN price while payments are open (audit UX-6)", async () => {
+    serve({ "/api/website/home": baseHome(), "/api/members/vpn/public": { enabled: true, payments: false, trial: true, free: false, billing: null } });
+    const off = await renderSite(<Website />);
+    const line = () => [...off.container.querySelectorAll("#community .site-vpnperk li")].map((li) => li.textContent).join(" | ");
+    expect(line()).toContain("30-day free trial");
+    expect(line()).toContain("The paid plan isn't open yet");
+    expect(line()).not.toMatch(/\$/);
+    cleanup();
+    serve({ "/api/website/home": baseHome(), "/api/members/vpn/public": { enabled: true, payments: true, trial: true, free: false, billing: { price_usd: 9.99, period_days: 30 } } });
+    const on = await renderSite(<Website />);
+    expect(on.container.querySelector("#community .site-vpnperk")!.textContent).toContain("Then $9.99 for 30 days, renewed by hand");
   });
 
   it("renders YouTube, X and Telegram in that order, with handles and real links", async () => {

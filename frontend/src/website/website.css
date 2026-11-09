@@ -172,6 +172,8 @@ html.site-menu-open { overflow: hidden; }
   letter-spacing: 0.26em;
   text-transform: uppercase;
 }
+/* the first viewport's call to action (audit UX-3) */
+.site-hero-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px 24px; margin-top: clamp(18px, 2vw, 28px); }
 
 
 /* --- trending strip ----------------------------------------------------------------------------- */

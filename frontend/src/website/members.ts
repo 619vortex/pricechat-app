@@ -255,7 +255,7 @@ export interface XPRuleInfo {
 export interface Providers {
   public_url?: string; // the one canonical website address (callbacks are derived from it on the server)
   google: { available: boolean; note: string; callback: string; javascript_origin?: string; client_id?: string | null };
-  x: { available: boolean; note: string; callback: string; scopes?: string; website_url?: string; client_id?: string | null };
+  x: { available: boolean; note: string; callback: string; scopes?: string; website_url?: string; client_id?: string | null; /** replies / reposts can be sent from Price Chat */ write?: boolean };
   telegram: { available: boolean; note: string; bot: string | null; mode: "deeplink" | "widget" };
   email?: { available: boolean; code_minutes: number; note: string };
 }

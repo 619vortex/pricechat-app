@@ -257,7 +257,7 @@ export function LoginPanel({ available, onDone }: {
       <WalletSignIn />
       {available && <><p className="lg-or"><span>or with your email</span></p><EmailLogin onDone={onDone} autoFocus={false} /></>}
       <p className="lg-fine">No password. Signing in only proves the account is yours: Price Chat never posts or messages for you unless you press a button to.{" "}
-        <a className="site-link" href="/website/privacy">Privacy</a></p>
+        <a className="site-link" href="/privacy">Privacy</a></p>
     </div>
   );
 }

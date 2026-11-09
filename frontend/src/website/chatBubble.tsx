@@ -35,15 +35,31 @@ function hue(name: string): number {
   return HUES[h % HUES.length];
 }
 
-function readSeen(): number {
+/** The newest message time this visitor has seen; null = never stored (a first visit: nothing is "unread" yet). */
+function readSeen(): number | null {
   try {
-    return Number(localStorage.getItem(SEEN_KEY) ?? 0);
+    const v = localStorage.getItem(SEEN_KEY);
+    return v === null || !Number.isFinite(Number(v)) ? null : Number(v);
   } catch {
-    return 0;
+    return null;
   }
 }
 
+function storeSeen(at: number): void {
+  try {
+    localStorage.setItem(SEEN_KEY, String(at));
+  } catch {
+    /* fine */
+  }
+}
+
+/** Sign-in and Passport pages: the fixed bubble would sit over their buttons on a phone (audit UX-11). */
+export function bubbleHiddenOn(path: string): boolean {
+  return /^\/(join|website\/join|passport)(\/|$)/.test(path);
+}
+
 export function ChatBubble() {
+  const hidden = typeof location !== "undefined" && bubbleHiddenOn(location.pathname);
   const [feed, setFeed] = useState<ChatFeed | null>(null);
   const [open, setOpen] = useState(false);
   // tucked away while the page scrolls DOWN (reading / tapping a mission), back as soon as it scrolls up or stops near the top
@@ -73,24 +89,30 @@ export function ChatBubble() {
   }, []);
 
   useEffect(() => {
+    if (hidden) return;
     void load();
     const t = window.setInterval(() => void load(), open ? OPEN_POLL : CLOSED_POLL);
     return () => window.clearInterval(t);
-  }, [open, load]);
+  }, [open, load, hidden]);
 
   const msgs = feed?.messages ?? [];
   const newest = msgs.length ? Date.parse(msgs[msgs.length - 1].at) : 0;
-  const unread = open ? 0 : msgs.filter((m) => Date.parse(m.at) > seen).length;
+  // audit UX-11: a first visit has no unread messages (it used to count the whole feed and always showed "9+"); only messages
+  // that arrive after a visitor's first look count, and the "live" dot still says the chat is active
+  const unread = open || seen === null ? 0 : msgs.filter((m) => Date.parse(m.at) > seen).length;
   const live = newest > 0 && Date.now() - newest < 15 * 60_000;
+
+  useEffect(() => {
+    if (seen === null && feed) {  // the first feed this visitor sees becomes the baseline
+      setSeen(newest);
+      storeSeen(newest);
+    }
+  }, [seen, feed, newest]);
 
   useEffect(() => {
     if (!open || !newest) return;
     setSeen(newest);
-    try {
-      localStorage.setItem(SEEN_KEY, String(newest));
-    } catch {
-      /* fine */
-    }
+    storeSeen(newest);
   }, [open, newest]);
 
   useEffect(() => {
@@ -104,7 +126,7 @@ export function ChatBubble() {
     return () => document.removeEventListener("keydown", esc);
   }, [open]);
 
-  if (!feed?.enabled || typeof document === "undefined") return null;
+  if (hidden || !feed?.enabled || typeof document === "undefined") return null;
   const byId = new Map(msgs.map((m) => [m.id, m]));
   return createPortal(
     <div className={`cb${tucked && !open ? " is-tucked" : ""}${open ? " is-open" : ""}`}>

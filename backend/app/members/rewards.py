@@ -49,6 +49,10 @@ REWARDS: list[dict[str, Any]] = [
 KINDS = {r["rank_key"]: r["kind"] for r in REWARDS}
 CLAIMABLE = {"knight", "royal"}
 NO_REWARD = {"none", "tba"}  # Egg (a teaser) and the ranks whose reward isn't announced: nothing to unlock
+# shown on the Earn rank's card while the trading bot's own rule (tradingbot min_rank_level) already lets lower ranks in
+EARN_OPEN = ("EARN — Open to every member",
+             "The Kiwi trading bot is already free for every Kiwi Passport member, at any rank: onboarding, paper trading and "
+             "connecting your Hyperliquid API wallet.")
 
 ACCENTS = ("green", "gold", "ice", "ember", "violet")
 NAME_MIN, NAME_MAX = 2, 32
@@ -172,15 +176,23 @@ def overview(db: Session, member: Member | None) -> dict[str, Any]:
     level = current_level(db, member) if member else 0
     score = member.rank_score if member else 0
     all_ranks = ledger.ranks(db)
+    from app.tradingbot import service as tradingbot
+
+    earn_level = tradingbot.settings(db).min_rank_level  # the rank Earn really needs (1 = every member); the server gates Earn on this
     cards = []
     for i, r in enumerate(all_ranks):
         rw = rows.get(r.key)
         nxt = all_ranks[i + 1] if i + 1 < len(all_ranks) else None
-        is_unlocked = bool(member and rw and rw.enabled and rw.kind not in NO_REWARD and level >= r.level and member.status == "active")
+        # audit UX-8: when Earn already opens below this rank, the card must not say this rank "unlocks" it
+        open_all = bool(rw and rw.kind == "earn" and earn_level < r.level)
+        is_unlocked = bool(member and rw and rw.enabled and rw.kind not in NO_REWARD and (level >= r.level or open_all) and member.status == "active")
+        title, desc = (rw.title, rw.description) if rw else ("", "")
+        if open_all:
+            title, desc = EARN_OPEN
         card: dict[str, Any] = {
             "rank": rank_out(r), "reached": bool(member) and level >= r.level, "current": level == r.level,
-            "reward": {"kind": rw.kind if rw else "none", "title": rw.title if rw else "", "description": rw.description if rw else "",
-                       "enabled": bool(rw and rw.enabled)},
+            "reward": {"kind": rw.kind if rw else "none", "title": title, "description": desc,
+                       "enabled": bool(rw and rw.enabled), **({"open_to_all": True} if open_all else {})},
             "unlocked": is_unlocked,
             "xp_to_reach": max(0, r.min_xp - score),
             "progress": 1.0 if level >= r.level else round(min(1.0, score / r.min_xp), 4) if r.min_xp else 1.0,
