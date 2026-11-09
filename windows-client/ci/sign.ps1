@@ -15,7 +15,9 @@ param([Parameter(Mandatory = $true)][string]$Path)
 $ErrorActionPreference = "Stop"
 
 foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET", "CODESIGNTOOL_DIR") {
-  if (-not [Environment]::GetEnvironmentVariable($v)) { throw "sign.ps1: $v isn't set (signing runs only in the windows-signing environment)" }
+  $raw = [Environment]::GetEnvironmentVariable($v)
+  if (-not $raw) { throw "sign.ps1: $v isn't set (signing runs only in the windows-signing environment)" }
+  if ($raw -ne $raw.Trim()) { [Environment]::SetEnvironmentVariable($v, $raw.Trim()) } # pasted spaces or line breaks
 }
 $File = (Resolve-Path $Path).Path
 $Tool = $env:CODESIGNTOOL_DIR

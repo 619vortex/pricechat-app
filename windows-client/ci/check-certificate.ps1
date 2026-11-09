@@ -11,6 +11,19 @@ $missing = @("ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET")
 Say ($missing.Count -eq 0) "secrets present in windows-signing$(if ($missing) { ': missing ' + ($missing -join ', ') })"
 if ($missing.Count -eq 4) { throw "No eSigner secrets yet: add them to the windows-signing environment (windows-client/docs/SIGNING.md)" }
 
+# The shape of each secret, never its value: pasted spaces or line breaks, an email where SSL.com wants the username, a
+# credential ID or 2FA secret in the wrong format. Surrounding whitespace is removed before use (here and in sign.ps1).
+foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET") {
+  $raw = [Environment]::GetEnvironmentVariable($v)
+  if ($raw -and $raw -ne $raw.Trim()) { Write-Host "NOTE $v had spaces or a line break around it (removed)"; [Environment]::SetEnvironmentVariable($v, $raw.Trim()) }
+}
+$u = $env:ES_USERNAME; $p = $env:ES_PASSWORD; $c = $env:ES_CREDENTIAL_ID; $t = $env:ES_TOTP_SECRET
+Say ($u -notmatch "@") "ES_USERNAME is an SSL.com username, not an email address$(if ($u -match '@') { ': it contains @. eSigner signs in with the account USERNAME (SSL.com > Account > Username), not the email' })"
+Say ($u -notmatch "\s") "ES_USERNAME has no spaces inside"
+Say ($p -notmatch '["\r\n]') "ES_PASSWORD has no quote marks or line breaks (they can't be passed to CodeSignTool safely)"
+Say ($c -match "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$") "ES_CREDENTIAL_ID looks like an eSigner credential ID (8-4-4-4-12 hex)"
+Say ($t -match "^[A-Za-z0-9+/=]{16,}$") "ES_TOTP_SECRET looks like the eSigner 2FA secret code (no spaces, 16+ characters)"
+
 $Zip = "$env:RUNNER_TEMP\codesigntool.zip"
 Invoke-WebRequest -UseBasicParsing -Uri $env:CODESIGNTOOL_URL -OutFile $Zip
 if ((Get-FileHash $Zip -Algorithm SHA256).Hash -ne $env:CODESIGNTOOL_SHA256) { throw "CodeSignTool isn't the pinned file" }
@@ -28,6 +41,10 @@ function Cst([string[]]$a) {
 
 $ids = Cst @("get_credential_ids", "-username=$env:ES_USERNAME", "-password=$env:ES_PASSWORD")
 Write-Host "Credential IDs on the account:`n$ids"
+if ($ids -match "authorization grant is invalid") {
+  Say $false "SSL.com accepted the username and password (it refused them: wrong username, wrong password, or an email in ES_USERNAME)"
+  throw "SSL.com refused the eSigner sign-in; nothing else can be checked until ES_USERNAME / ES_PASSWORD are right"
+}
 Say ($ids -match [regex]::Escape($env:ES_CREDENTIAL_ID)) "ES_CREDENTIAL_ID is one of the account's eSigner credentials"
 
 $info = Cst @("credential_info", "-username=$env:ES_USERNAME", "-password=$env:ES_PASSWORD", "-credential_id=$env:ES_CREDENTIAL_ID")
