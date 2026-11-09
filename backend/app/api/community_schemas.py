@@ -303,6 +303,16 @@ class JobOut(BaseModel):
     run_count: int
     failure_count: int
     consecutive_failures: int
+    # "off_here": turned off on this server (SCHEDULER_ONLY_JOBS / SCHEDULER_DISABLED_JOBS): it never runs here, whatever
+    # `enabled` says, and the switch can't change that (AR-5)
+    server_state: str = "on"
+
+
+class JobMonitorOut(BaseModel):
+    key: str
+    label: str
+    status: str  # ok | alert | off | hold | warn
+    detail: str
 
 
 class JobUpdate(StrictInput):

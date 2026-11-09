@@ -38,7 +38,7 @@ def test_public_health_needs_no_login_and_says_nothing_private(prod: TestClient,
     r = _get(prod)
     assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
     body = r.json()
-    assert set(body) == {"ok", "db", "scheduler", "version", "time"}
+    assert set(body) == {"ok", "db", "scheduler", "jobs", "backup", "version", "time"}
     assert body["ok"] is True and body["db"] == "ok" and body["scheduler"] == "off" and body["version"] == "abcdef1"
     assert prod.head("/api/health/public").status_code == 200
 
@@ -76,7 +76,7 @@ def test_database_down_is_503_without_the_error(client: TestClient, monkeypatch:
 
 def test_answer_is_shared_for_a_few_seconds(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
-    monkeypatch.setattr(health, "_probe", lambda s: calls.append(1) or (True, "off"))
+    monkeypatch.setattr(health, "_probe", lambda s: calls.append(1) or (True, "off", {"jobs": "off", "backup": "off"}))
     _get(client)
     for _ in range(3):
         client.get("/api/health/public")

@@ -312,7 +312,8 @@ def test_deep_health_scheduler_and_migration_drift(client: TestClient, monkeypat
 
 def test_public_health_stays_minimal(client: TestClient) -> None:
     body = client.get("/api/health/public").json()
-    assert set(body) == {"ok", "db", "scheduler", "version", "time"}
+    assert set(body) == {"ok", "db", "scheduler", "jobs", "backup", "version", "time"}  # words only (jobs/backup: AR-19)
+    assert body["jobs"] in ("ok", "failing", "off") and body["backup"] in ("ok", "old", "off") and isinstance(body["version"], str)
 
 
 # --- 5. startup self-check ---------------------------------------------------------------------------------------------

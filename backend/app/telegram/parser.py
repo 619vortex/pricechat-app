@@ -17,6 +17,7 @@ MEDIA_KEYS = (
     "sticker", "poll", "location", "venue", "contact", "dice", "story",
 )
 MAX_TEXT = 8000
+TELEGRAM_SERVICE_ID = 777000  # "Telegram": the sender of a channel's automatic forwards into its discussion group
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,10 @@ class ParsedMessage:
     # who wrote the message this one replies to: an admin's /warn mutes that person (app/telegram/moderation.py)
     reply_author_id: int | None = None
     reply_author_name: str | None = None
+    # a channel's own post (channel_post), or its automatic copy in the linked discussion group ("from" Telegram, 777000):
+    # no person wrote it here, so the bot never answers it as a command
+    channel_post: bool = False
+    automatic_forward: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,4 +160,6 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         forward_date=forward_date,
         reply_author_id=(reply.get("from") or {}).get("id") if isinstance((reply.get("from") or {}).get("id"), int) else None,
         reply_author_name=_person_name(reply["from"]) if isinstance(reply.get("from"), dict) else None,
+        channel_post=key.endswith("channel_post"),
+        automatic_forward=bool(msg.get("is_automatic_forward")) or sender.get("id") == TELEGRAM_SERVICE_ID,
     )

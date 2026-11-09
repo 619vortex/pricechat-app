@@ -429,7 +429,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 300, tradingos_brief, initial_delay_seconds=130, timeout_seconds=300),
         JobSpec("tradingos.track", "Trading OS: signal tracking", "Follow open signals on real prices and update their Telegram cards", 60,
                 tradingos_track, initial_delay_seconds=60, timeout_seconds=300),
-        JobSpec("telegram.ingest", "Telegram ingestion", "Fetch new messages from authorised chats (read-only) and answer bot commands; each run keeps listening for TELEGRAM_LISTEN_SECONDS so replies come within about a second", s.job_telegram_ingest_seconds, telegram_ingest, initial_delay_seconds=5, timeout_seconds=s.telegram_listen_seconds + 60),
+        JobSpec("telegram.ingest", "Telegram ingestion", "Fetch new messages from authorised chats (read-only) and answer bot commands; each run keeps listening for TELEGRAM_LISTEN_SECONDS so replies come within about a second", s.job_telegram_ingest_seconds, telegram_ingest, initial_delay_seconds=5, timeout_seconds=s.telegram_listen_seconds + 60,
+                max_backoff_seconds=60),  # a failed listen retries within a minute, never 30 (TG-4)
         JobSpec("community.process", "Conversation processing", "Classify messages, detect questions, group into topics", s.job_community_process_seconds, community_process, initial_delay_seconds=20),
         JobSpec("community.topics", "Topic analysis", "Update topic trends, name topics, word recurring questions", s.job_community_topics_seconds, community_topics, initial_delay_seconds=40),
         JobSpec("community.summary.recent", "Recent activity summary", "Summarise the last few hours of each chat", s.job_summary_recent_seconds, summary_recent, initial_delay_seconds=120),

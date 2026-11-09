@@ -541,6 +541,16 @@ export interface Job {
   run_count: number;
   failure_count: number;
   consecutive_failures: number;
+  /** "off_here": turned off on this server (SCHEDULER_ONLY_JOBS / SCHEDULER_DISABLED_JOBS); it never runs here. */
+  server_state?: string;
+}
+
+/** A silence monitor (News Desk quiet, backup age, jobs failing in a row): ok | alert | off | hold | warn. */
+export interface JobMonitor {
+  key: string;
+  label: string;
+  status: string;
+  detail: string;
 }
 
 export interface JobRun {

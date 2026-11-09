@@ -207,6 +207,8 @@ def create_app(
         if initialize_database:
             with SessionLocal() as db:
                 observability.startup_self_check(app_settings, [s.name for s in specs], db)
+                # the silence monitors' states (ND-2), in the log even while the owner alert chat isn't set (AR-2)
+                observability.log_monitors(observability.silence_monitors(db, runtime.scheduler))
         else:
             observability.startup_self_check(app_settings, [s.name for s in specs])
         if app_settings.is_production and initialize_database:
