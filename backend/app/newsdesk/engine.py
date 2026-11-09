@@ -88,10 +88,18 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     db.query(NdStory).filter(NdStory.created_at < now - timedelta(days=7)).delete(synchronize_session=False)
     db.commit()  # the purge on its own, before any insert
     seen = set(db.scalars(select(NdStory.link)))  # every stored link (the table keeps a week), not just the last few days
-    for feed in s.feeds or []:
+    health: dict[str, Any] = {}
+    for feed in sources.feeds_for(s.feeds or [], s.state or {}):
         items, problem = await sources.fetch_feed(client, feed)
+        newest = max((it["at"] for it in items if it.get("at")), default=None)
+        if not problem and newest is not None and now - (newest if newest.tzinfo else newest.replace(tzinfo=now.tzinfo)) > sources.STALE_AFTER:
+            problem = f"stale: newest item {newest:%d %b %Y}"
+        elif not problem and not items:
+            problem = "no items"
         if problem:
             problems[feed["url"]] = problem
+        before = fresh
+        health[feed["url"]] = {"name": feed["name"], "tier": feed.get("tier", 2), "items": len(items), "newest": newest.isoformat() if newest else None, "problem": problem}
         for it in sources.recent(items, now):
             if it["link"] in seen:
                 continue
@@ -110,8 +118,11 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
                 fresh += 1
             except IntegrityError:
                 logger.info("newsdesk: %s already stored, skipped", it["link"][:120])
+        health[feed["url"]]["new"] = fresh - before
     db.commit()
-    return {"new_stories": fresh, "feed_problems": problems}
+    if problems:
+        logger.info("newsdesk: feed problems: %s", "; ".join(f"{health[u]['name']}: {p}" for u, p in problems.items()))
+    return {"new_stories": fresh, "feed_problems": problems, "feed_health": health}
 
 
 def corroboration(story: NdStory, recent_rows: list[NdStory]) -> list[NdStory]:
@@ -374,6 +385,8 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             events.mark(ev, "x", "skipped", f"the {ev.category} category is off on X")
             continue
         cap = s.target_per_day + s.max_breaking_per_day
+        if ev.slot == "slot":  # the six scheduled slots are the plan: X's older 3-4 a day setting doesn't drop them
+            cap = max(cap, len(events.policy(s.state or {}).slot_hours))
         sent = int(db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.x_status.in_(("dry_run", "published", "uncertain")), NdEvent.released_at >= now - timedelta(days=1))) or 0)
         if sent >= cap:
             events.mark(ev, "x", "skipped", f"X's own daily limit ({cap})")
@@ -382,10 +395,10 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
         shown = [next(x for x in ev.sources if x["name"] == n) for n in named]
-        text = brief.x_text(ev.headline, shown, b, ev.key)
+        text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
         source_text = f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
         urgent = ev.label == brief.BREAKING or ev.slot == "extra"
-        market_kind = ev.kind == "market" or bool(f.get("symbol"))
+        market_kind = ev.kind in ("market", "recap") or bool(f.get("symbol"))
         post = enqueue(db, posts, kind="market" if market_kind else "news", category=ev.category or "viral", priority="breaking" if urgent else "scheduled", text=text, key=f"event:{ev.id}",
                        score=round(ev.virality / 10, 2), facts={"event_id": ev.id, "title": ev.title, "headline": ev.headline, "topic": ev.topic, "label": ev.label, "virality": ev.virality,
                                                                  "evidence": ev.evidence, "slot": ev.slot, "price_check": f.get("price_check", ""), "symbol": f.get("symbol"),
@@ -549,6 +562,7 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
                                   desk_state=s.state or {})
     made_snap = snapshot(db, s, quotes, posts, now) if (s.state or {}).get("snapshot") else 0
     db.commit()
+    await events.alert_slots(db, now, events.policy(s.state or {}))
     result = None
     if why is None:
         result = await deliver_x(db, s, settings, runtime, agent_id, now)
@@ -561,6 +575,7 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
     out.update({"quotes": len(quotes), "of": len(s.watchlist or []), **collected, "events": decided, "queued_markets": made_snap, "queued_news": decided.get("stories", 0), "published": result, "paused": why})
     state["last_run"] = {"at": now.isoformat(), **out}
     state["feed_problems"] = collected["feed_problems"]
+    state["feed_health"] = {"at": now.isoformat(), "feeds": collected.get("feed_health") or {}}
     s.state = state
     db.commit()
     return out
@@ -622,6 +637,7 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
     plain = float(settings.x_write_cost_estimate_usd)
     sent_30 = int(db.scalar(select(func.count()).select_from(NdPost).where(NdPost.status == "published", NdPost.published_at >= now - timedelta(days=30))) or 0)
     return {"settings": settings_out(s), "blocked": blocked_reason(s, now), "last_run": (s.state or {}).get("last_run"), "feed_problems": (s.state or {}).get("feed_problems") or {},
+            "feed_health": (s.state or {}).get("feed_health") or {},
             "x": {"configured": creds.configured, "can_write": creds.user_context, "status": state.status, "account": state.account_username, "blocked_until": state.blocked_until.isoformat() if state.blocked_until else None},
             "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "headlines",
             "today": {"published": _sent(db, s, day_ago), "breaking": _sent(db, s, day_ago, "breaking"), "target": s.target_per_day},

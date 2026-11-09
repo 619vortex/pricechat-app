@@ -1,5 +1,11 @@
 """The shared editorial desk: one decision per story or market move, released once, delivered by X and Telegram each on its own.
 
+SCHEDULE (owner, 2026-11-09, Policy.schedule = "slots", the default): exactly six posts a day, at 00:00, 04:00, 08:00, 12:00, 16:00 and
+20:00 Dubai time. Each slot carries the best verified story that clears regular_bar (Bitcoin, Ethereum, Hyperliquid, macro, commodities
+and geopolitics rank first); if none does, a market check made only of measured prices (app/newsdesk/recap). Nothing is posted between
+slots. A slot the server couldn't fill within slot_catch_up is missed, never posted late, and the owner is told. The "windows" plan
+described below is kept for state.policy.schedule = "windows".
+
 Every few minutes (from whichever lane runs first) `decide`:
 1. judges fresh stories with the evidence rules (app/newsdesk/chaos) and scores those that pass from 0 to 100 (app/newsdesk/virality);
 2. measures live market moves from our own prices (app/newsdesk/moves), and the liquidation flushes the exchange feeds recorded;
@@ -16,8 +22,8 @@ extraordinary. An update needs a real development (a bigger figure, an arrest, a
 
 import logging
 import re
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -52,9 +58,23 @@ class Policy:
     market_ttl: timedelta = timedelta(minutes=45)
     deliver_news: timedelta = timedelta(hours=2)  # a platform that can't deliver in this time misses it
     deliver_market: timedelta = timedelta(minutes=40)
+    # the schedule (owner, 2026-11-09): "slots" = exactly one post at each of these Dubai hours, the best story that clears regular_bar or,
+    # if none does, a verified market check (app/newsdesk/recap); no extraordinary posts in between. "windows" = the plan above.
+    schedule: str = ""  # "" = DEFAULT_SCHEDULE
+    slot_hours: tuple[int, ...] = (0, 4, 8, 12, 16, 20)  # Dubai (UTC+4, no daylight saving)
+    slot_catch_up: timedelta = timedelta(minutes=90)  # a slot not filled by then (the server was down) is missed, never posted late
+    recap: bool = True
+    priority_bonus: int = 6  # ranking only, never the bar: Bitcoin, Ethereum, Hyperliquid, macro, commodities, geopolitics come first
+    priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC"}))
 
 
+DEFAULT_SCHEDULE = "slots"
 POLICY = Policy()
+DUBAI = timezone(timedelta(hours=4), "Dubai")
+PRIORITY_TOPICS = {"macro", "hack", "liquidations", "etf", "failure"}
+PRIORITY_CATEGORIES = {"economics", "commodities", "politics"}
+PRIORITY_WORDS = re.compile(r"\b(bitcoin|btc|ethereum|ether|eth|hyperliquid|hype|fed|federal reserve|rate (?:cut|hike)|inflation|cpi|jobs report|tariffs?|sanctions?|"
+                            r"war|missile|ceasefire|opec|oil|gold|treasur(?:y|ies)|recession)\b", re.I)
 STRONG = ("official", "two outlets", "price data", "exchange data")
 RELEASED = "released"
 FAMILIES = ({"hack", "scam", "failure"}, {"controversy"})  # Bybaz hacked, then Bybaz halts withdrawals: one story
@@ -79,7 +99,66 @@ def policy(desk_state: dict[str, Any] | None = None) -> Policy:
             setattr(p, k[:-8], timedelta(minutes=v))
     if p.window_hours and 24 % p.window_hours:
         p.window_hours = 6
+    over = (desk_state or {}).get("policy") or {}
+    if over.get("schedule") in ("slots", "windows"):
+        p.schedule = over["schedule"]
+    hours = over.get("slot_hours")
+    if isinstance(hours, list) and hours and all(isinstance(h, int) and 0 <= h <= 23 for h in hours):
+        p.slot_hours = tuple(sorted(set(hours)))
+    if isinstance(over.get("slot_catch_up_minutes"), int) and 10 <= over["slot_catch_up_minutes"] <= 230:
+        p.slot_catch_up = timedelta(minutes=over["slot_catch_up_minutes"])
+    if over.get("recap") is False:
+        p.recap = False
     return p
+
+
+def sched(p: Policy) -> str:
+    return p.schedule or DEFAULT_SCHEDULE
+
+
+# --- the schedule --------------------------------------------------------------------------------------------------
+
+
+def slot_times(now: datetime, p: Policy, back_hours: int = 24) -> list[datetime]:
+    """Every slot (UTC) from back_hours ago up to and including the next one, oldest first."""
+    local = now.astimezone(DUBAI)
+    out = []
+    for d in (-2, -1, 0, 1):
+        day = (local + timedelta(days=d)).replace(minute=0, second=0, microsecond=0)
+        out += [day.replace(hour=h).astimezone(now.tzinfo or timezone.utc) for h in p.slot_hours]
+    out = sorted(set(out))
+    nxt = next(t for t in out if t > now)
+    return [t for t in out if now - timedelta(hours=back_hours) <= t <= nxt]
+
+
+def current_slot(now: datetime, p: Policy) -> datetime | None:
+    """The slot this moment belongs to, while it may still be filled (its start up to slot_catch_up later)."""
+    past = [t for t in slot_times(now, p, back_hours=6) if t <= now]
+    if not past:
+        return None
+    t = past[-1]
+    return t if now - t <= p.slot_catch_up else None
+
+
+def next_slot(now: datetime, p: Policy) -> datetime:
+    return slot_times(now, p, back_hours=0)[-1]
+
+
+def slot_label(t: datetime) -> str:
+    return t.astimezone(DUBAI).strftime("%H:%M")
+
+
+def slot_filled(db: Session, t: datetime, p: Policy) -> NdEvent | None:
+    """The event released for the slot starting at t (anything released from t until the next slot)."""
+    later = [x for x in slot_times(t + timedelta(minutes=1), p, back_hours=0) if x > t]
+    end = later[0] if later else t + timedelta(hours=4)
+    return db.scalar(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.released_at >= t, NdEvent.released_at < end).order_by(NdEvent.released_at).limit(1))
+
+
+def priority(ev: NdEvent, p: Policy) -> bool:
+    f = ev.facts or {}
+    assets = {str(a).upper() for a in (f.get("assets") or [])} | {str(t).upper() for t in (f.get("tickers") or [])}
+    return bool(assets & p.priority_assets or ev.topic in PRIORITY_TOPICS or ev.category in PRIORITY_CATEGORIES or PRIORITY_WORDS.search(ev.headline or ""))
 
 
 def _utc(at: datetime | None, now: datetime) -> datetime | None:
@@ -231,6 +310,9 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     db.commit()
     out["updates"] = sum(1 for e in recent if e.kind == "update" and e.status == "candidate")
     released = release(db, now, p)
+    db.commit()
+    if released is None and sched(p) == "slots":
+        released = await fill_with_recap(db, now, p, quotes, market)
     out["released"] = released.id if released is not None else None
     db.commit()
     return out
@@ -432,6 +514,8 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
     waiting = sorted(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")), key=lambda e: (-e.virality, e.id))
     if not waiting:
         return None
+    if sched(p) == "slots":
+        return _release_slot(db, now, p, out, waiting)
     times = sorted(_utc(e.released_at, now) for e in out)
     last_any = times[-1] if times else None
     regular = [e for e in out if e.slot == "regular"]
@@ -501,6 +585,152 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
         logger.info("newsdesk events: released #%s [%s %s %s]: %s", ev.id, slot, int(ev.virality), ev.evidence, ev.headline[:100])
         return ev
     return None
+
+
+def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], waiting: list[NdEvent]) -> NdEvent | None:
+    """Schedule "slots": in an open, unfilled slot, the best story that clears the bar goes (priority subjects rank first). Nothing goes
+    between slots. The market check, when no story qualifies, is decide's job (it needs live prices)."""
+    slot = current_slot(now, p)
+    if slot is None or slot_filled(db, slot, p) is not None:
+        nxt = slot_label(next_slot(now, p))
+        for ev in waiting:
+            ev.why = f"waiting for the next slot ({nxt} Dubai)" if ev.virality >= p.regular_bar else f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
+        return None
+
+    def rank(e: NdEvent) -> tuple[float, int]:
+        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0)), e.id)
+
+    for ev in sorted(waiting, key=rank):
+        f = ev.facts or {}
+        age = _age(ev, now)
+        if ev.kind == "update":
+            parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
+            if parent is None or parent.status != RELEASED:
+                ev.why = "its original never went out"
+                continue
+        assets = set(f.get("assets") or [])
+        if ev.kind != "update" and assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
+            ev.why = "this asset's move went out within six hours"
+            continue
+        if ev.virality < p.regular_bar:
+            ev.why = f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
+            continue
+        topical = sum(1 for e in out if e.topic == ev.topic and e.kind != "recap" and now - _utc(e.released_at, now) < p.topic_window)
+        if topical >= p.topic_max:
+            ev.why = f"{topical} {ev.topic or 'other'} posts on this subject in 12 hours"
+            continue
+        strong = ev.evidence in STRONG
+        label = brief.UPDATE if ev.kind == "update" else virality.label_for(int(ev.virality), topic=ev.topic, strong=strong, age_minutes=age, risk=bool(f.get("risk")))
+        problem = preflight(ev, label, now)
+        if problem:
+            ev.status, ev.why = "rejected", f"failed the checks: {problem}"
+            continue
+        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, "slot", now, label
+        ev.facts = {**f, "slot_at": slot.isoformat()}
+        ev.why = f"the {slot_label(slot)} Dubai slot: scores {ev.virality:g} ({virality.describe(ev.parts or {})})" + (", a priority subject" if priority(ev, p) else "")
+        ev.x_status = ev.tg_status = "pending"
+        logger.info("newsdesk events: released #%s for the %s Dubai slot [%s %s]: %s", ev.id, slot_label(slot), int(ev.virality), ev.evidence, ev.headline[:100])
+        return ev
+    return None
+
+
+async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[str, sources.Quote], market: Any = None) -> NdEvent | None:
+    """Schedule "slots": an open slot no story filled gets the verified market check. The key (recap:<slot>) makes it once per slot,
+    whichever lane runs first."""
+    from app.newsdesk import recap
+
+    slot = current_slot(now, p)
+    if sched(p) != "slots" or not p.recap or slot is None or slot_filled(db, slot, p) is not None:
+        return None
+    if db.scalar(select(NdEvent.id).where(NdEvent.key == f"recap:{slot:%Y-%m-%dT%H:%M}")) is not None:
+        return None
+    try:
+        ev = await recap.build(db, now, slot, slot_label(slot), quotes, market)
+    except Exception as e:  # noqa: BLE001 - the market check failing never stops the desk; the slot alert tells the owner
+        logger.warning("newsdesk recap: failed for the %s slot (%s)", slot_label(slot), type(e).__name__)
+        db.rollback()
+        return None
+    if ev is None:
+        return None
+    ev.status, ev.slot, ev.released_at = RELEASED, "slot", now
+    ev.why = f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so a verified market check"
+    ev.x_status = ev.tg_status = "pending"
+    if not _insert(db, [], ev):
+        db.rollback()
+        return None
+    db.commit()
+    logger.info("newsdesk events: released #%s for the %s Dubai slot: market check (%s)", ev.id, slot_label(slot), ", ".join((ev.facts or {}).get("recap_assets") or []))
+    return ev
+
+
+FAILED = ("missed", "failed", "skipped", "uncertain")
+ALERT_HOURS = 6
+
+
+def slots_since(db: Session, now: datetime | None = None) -> datetime | None:
+    """When the six-slot schedule started on this database (stored in the desk's state). Slots before it were never owed, so they are
+    neither shown as missed nor alerted on. With `now`, the moment is recorded if it isn't yet."""
+    from app.models.newsdesk import NdSettings
+
+    row = db.get(NdSettings, 1)
+    if row is None:
+        return None
+    at = (row.state or {}).get("slots_since")
+    if at:
+        return datetime.fromisoformat(at)
+    if now is not None:
+        row.state = {**(row.state or {}), "slots_since": now.isoformat()}
+        db.commit()
+        return now
+    return None  # only slots this recent are alerted on, so each problem is told once (the owner-alert cooldown is 6 hours)
+
+
+async def alert_slots(db: Session, now: datetime, p: Policy) -> int:
+    """Owner alerts, never silent: a missed slot, and a platform that failed to deliver a slot's post. Returns how many were sent."""
+    if sched(p) != "slots":
+        return 0
+    from app.alerts import notify_owner
+
+    sent = 0
+    since = slots_since(db, now)
+    for sl in schedule(db, now, p)["slots"]:
+        at = datetime.fromisoformat(sl["at"])
+        if now - at > timedelta(hours=ALERT_HOURS) or (since is not None and at < since - p.slot_catch_up):
+            continue
+        if sl["state"] == "missed":
+            sent += await notify_owner(db, f"newsdesk:slot:{sl['at']}", f"News Desk: the {sl['dubai']} Dubai slot was missed. Nothing was released within "
+                                       f"{int(p.slot_catch_up.total_seconds() // 60)} minutes: no story cleared the bar and no market check could be verified, "
+                                       "or the server was down. Check Admin > X > News Desk.", now=now)
+        for platform, status in (("Telegram", sl["telegram"]), ("X", sl["x"])):
+            if sl["event"] and status in FAILED:
+                sent += await notify_owner(db, f"newsdesk:delivery:{sl['event']}:{platform}", f"News Desk: the {sl['dubai']} Dubai post (event #{sl['event']}) "
+                                           f"was not delivered to {platform}: {status}. Check Admin > X > News Desk.", now=now)
+    return sent
+
+
+def schedule(db: Session, now: datetime, p: Policy) -> dict[str, Any]:
+    """What Admin and the monitors show: every slot of the last 24 hours with what filled it and each platform's delivery, the next slot,
+    the last delivery per platform."""
+    slots = []
+    since = slots_since(db)
+    for t in slot_times(now, p):
+        if t > now:
+            continue
+        ev = slot_filled(db, t, p)
+        state = "filled" if ev is not None else ("open" if now - t <= p.slot_catch_up else "missed")
+        if ev is None and since is not None and t < since - p.slot_catch_up:
+            state = "before"  # the schedule wasn't running yet
+        slots.append({"at": t.isoformat(), "dubai": slot_label(t), "state": state, "event": ev.id if ev else None, "kind": ev.kind if ev else None,
+                      "headline": ev.headline if ev else None, "x": ev.x_status if ev else None, "telegram": ev.tg_status if ev else None,
+                      "telegram_message_id": ev.tg_message_id if ev else None})
+    last_tg = db.scalar(select(NdEvent).where(NdEvent.tg_status == "delivered").order_by(NdEvent.released_at.desc()).limit(1))
+    last_x = db.scalar(select(NdEvent).where(NdEvent.x_status.in_(("published", "dry_run"))).order_by(NdEvent.released_at.desc()).limit(1))
+    nxt = next_slot(now, p)
+    return {"schedule": sched(p), "slot_hours_dubai": list(p.slot_hours), "next_slot": nxt.isoformat(), "next_slot_dubai": slot_label(nxt), "slots": slots,
+            "last_telegram": {"event": last_tg.id, "at": last_tg.released_at.isoformat() if last_tg.released_at else None, "message_id": last_tg.tg_message_id} if last_tg else None,
+            "last_x": {"event": last_x.id, "at": last_x.released_at.isoformat() if last_x.released_at else None, "status": last_x.x_status} if last_x else None,
+            "failures": [{"event": x["event"], "dubai": x["dubai"], "x": x["x"], "telegram": x["telegram"]} for x in slots
+                         if x["event"] and (x["telegram"] in FAILED or x["x"] in FAILED)]}
 
 
 def preflight(ev: NdEvent, label: str, now: datetime) -> str:
@@ -578,4 +808,5 @@ def overview(db: Session, now: datetime) -> dict[str, Any]:
     rows = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=48)).order_by(NdEvent.id.desc()).limit(60)))
     day = [e for e in rows if e.status == RELEASED and e.released_at and _utc(e.released_at, now) >= now - timedelta(hours=24)]
     return {"plan": {"regular_per_day": POLICY.regular_per_day, "regular_bar": POLICY.regular_bar, "extra_bar": POLICY.extra_bar, "extra_per_day": POLICY.extra_per_day, "ceiling": POLICY.ceiling},
-            "released_24h": {"regular": sum(1 for e in day if e.slot == "regular"), "extra": sum(1 for e in day if e.slot == "extra")}, "events": [event_out(e) for e in rows]}
+            "released_24h": {"regular": sum(1 for e in day if e.slot == "regular"), "extra": sum(1 for e in day if e.slot == "extra"), "slot": sum(1 for e in day if e.slot == "slot")},
+            "schedule": schedule(db, now, policy()), "events": [event_out(e) for e in rows]}

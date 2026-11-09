@@ -84,8 +84,11 @@ def rejected(story: NdStory) -> str | None:
 
 
 def over_limit(db: Session, s: NdTelegramSettings, now: datetime, slot: str = "regular") -> str | None:
+    """The lane's own safety limits. A scheduled slot (the desk's six a day) is held to the schedule's own count, so the old 3-4 a day
+    setting can't silently drop slots; between any two posts there are still MIN_GAP minutes."""
     day = int(db.scalar(select(func.count()).select_from(NdTelegramPost).where(NdTelegramPost.status.in_(COUNTED), NdTelegramPost.created_at >= now - timedelta(days=1))) or 0)
-    if day >= s.max_per_day:
+    cap = max(s.max_per_day, len(events.policy(engine.settings_row(db).state or {}).slot_hours)) if slot == "slot" else s.max_per_day
+    if day >= cap:
         return f"{day} posts in 24 hours, the limit"
     last = _aware(db.scalar(select(func.max(NdTelegramPost.created_at)).where(NdTelegramPost.status.in_(COUNTED))), now)
     gap = timedelta(minutes=s.gap_minutes) if slot == "regular" else MIN_GAP
@@ -148,6 +151,13 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
                   now: datetime | None = None) -> tuple[dict[str, Any] | None, str]:
     """(the message, or None; why not). Whoever wrote the summary, the desk's checks decide, against what the sources actually said."""
     now = now or utcnow()
+    f = ev.facts or {}
+    if ev.kind == "recap":  # the market check is written and checked when it's made (app/newsdesk/recap): text only, no card
+        if not f.get("telegram_html"):
+            return None, "the market check has no Telegram text"
+        return {"headline": ev.headline, "summary": "", "html": f["telegram_html"], "plain": f.get("telegram_plain") or "", "sources": ev.sources or [], "writer": "recap", "card": None,
+                "choice": {}, "link": f"event:{ev.id}", "title": ev.title, "source": "Price Chat", "fingerprint": checks.fingerprint(f"{ev.headline} {ev.key}"),
+                "label": ev.label, "evidence": ev.evidence}, ""
     recent = _recent_choices(s)
     b = events.brief_of(ev, now)
     f = ev.facts or {}
@@ -336,6 +346,7 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
     if why:
         return done(skipped=why)
     await _decide_if_desk_is_not(db, now, transport, quotes)
+    await events.alert_slots(db, now, events.policy(engine.settings_row(db).state or {}))
     handle = channel_handle(db)
     if not handle:
         return done(skipped="No announcement channel is set")

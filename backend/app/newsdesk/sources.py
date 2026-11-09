@@ -55,6 +55,29 @@ DEFAULT_WATCHLIST: list[dict[str, Any]] = [
     {"symbol": "CL=F", "name": "Oil (WTI)", "group": "commodity", "category": "commodities", "emoji": "🛢️", "step": 10},
     {"symbol": "HG=F", "name": "Copper", "group": "commodity", "category": "commodities", "emoji": "🟠"},
 ]
+# Tiered additions (2026-11-09: the desk was starved by thin crypto coverage and a dead MarketWatch feed). Read alongside the feeds stored
+# in Admin (which a new list here wouldn't reach), unless state.extra_feeds is false. A second crypto outlet is what lets most crypto
+# stories meet the evidence rules (two outlets), so this widens what can be verified without lowering the bar.
+EXTRA_FEEDS: list[dict[str, Any]] = [
+    {"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "tier": 2, "category": "crypto"},
+    {"name": "The Defiant", "url": "https://thedefiant.io/api/feed", "tier": 2, "category": "crypto"},
+    {"name": "CryptoSlate", "url": "https://cryptoslate.com/feed/", "tier": 2, "category": "crypto"},
+    {"name": "Bitcoin Magazine", "url": "https://bitcoinmagazine.com/.rss/full/", "tier": 2, "category": "crypto"},
+    {"name": "CNBC", "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html", "tier": 1, "category": "economics"},
+    {"name": "OilPrice", "url": "https://oilprice.com/rss/main", "tier": 2, "category": "commodities"},
+    {"name": "CFTC", "url": "https://www.cftc.gov/RSS/RSSGP/rssgp.xml", "tier": 0, "category": None},
+]
+STALE_AFTER = timedelta(days=7)  # a feed whose newest item is older than this is broken, whatever its HTTP status says
+
+
+def feeds_for(stored: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:
+    """The stored feeds plus the tiered additions not already there (by address)."""
+    if state.get("extra_feeds") is False:
+        return list(stored)
+    have = {f.get("url") for f in stored}
+    return [*stored, *[f for f in EXTRA_FEEDS if f["url"] not in have]]
+
+
 # percent moves at sensitivity "medium"
 THRESHOLDS: dict[str, dict[str, float]] = {
     "crypto_major": {"5m": 1.5, "1h": 3.0, "24h": 8.0},

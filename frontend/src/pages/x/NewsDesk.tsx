@@ -17,7 +17,36 @@ export type DeskSettings = { automation: boolean; mode: "dry_run" | "live"; kill
 export type Desk = { settings: DeskSettings; blocked: string | null; last_run: (Record<string, unknown> & { at?: string }) | null; feed_problems: Record<string, string>;
   x: { configured: boolean; can_write: boolean; status: string; account: string | null; blocked_until: string | null }; writer: "model" | "headlines";
   today: { published: number; breaking: number; target: number }; cost: { per_post_usd: number; posted_30d: number; estimate_30d_usd: number; budget: { daily_usd: number; monthly_usd: number }; x_spend_today_usd: number; x_spend_month_usd: number };
-  queue: DeskPost[]; published: DeskPost[]; problems: DeskPost[] };
+  queue: DeskPost[]; published: DeskPost[]; problems: DeskPost[];
+  feed_health?: { at?: string; feeds?: Record<string, { name: string; tier: number; items: number; new?: number; newest: string | null; problem: string | null }> };
+  desk?: { schedule?: Schedule } };
+export type SlotRow = { at: string; dubai: string; state: "filled" | "open" | "missed" | "before"; event: number | null; kind: string | null; headline: string | null; x: string | null; telegram: string | null;
+  telegram_message_id: number | null };
+export type Schedule = { schedule: string; slot_hours_dubai: number[]; next_slot: string; next_slot_dubai: string; slots: SlotRow[];
+  last_telegram: { event: number; at: string | null; message_id: number | null } | null; last_x: { event: number; at: string | null; status: string } | null;
+  failures: { event: number; dubai: string; x: string | null; telegram: string | null }[] };
+
+const SLOT_TONE: Record<string, Tone> = { filled: "good", open: "info", missed: "bad" };
+
+/** The six Dubai slots: what filled each, each platform's delivery, and the feeds' health (2026-11-09). */
+export function SchedulePanel({ schedule, feeds }: { schedule: Schedule; feeds?: Desk["feed_health"] }) {
+  const rows = Object.entries(feeds?.feeds ?? {});
+  return (
+    <Card title={`Schedule: next post ${schedule.next_slot_dubai} Dubai`}>
+      <p className="small">Six posts a day at {schedule.slot_hours_dubai.map((h) => `${String(h).padStart(2, "0")}:00`).join(", ")} Dubai. Last Telegram post:{" "}
+        {schedule.last_telegram?.message_id ? <a href={`https://t.me/Pricechatupdates/${schedule.last_telegram.message_id}`} target="_blank" rel="noreferrer">#{schedule.last_telegram.message_id}</a> : "none"}
+        {schedule.last_telegram?.at ? ` (${new Date(schedule.last_telegram.at).toLocaleString()})` : ""}. Last X: {schedule.last_x ? `${schedule.last_x.status}${schedule.last_x.at ? ` (${new Date(schedule.last_x.at).toLocaleString()})` : ""}` : "none"}.</p>
+      {schedule.failures.length > 0 && <p className="small banner banner-warn">Not delivered: {schedule.failures.map((f) => `${f.dubai} (Telegram ${f.telegram ?? "-"}, X ${f.x ?? "-"})`).join(", ")}</p>}
+      <table className="table small"><thead><tr><th>Dubai</th><th>Slot</th><th>Post</th><th>Telegram</th><th>X</th></tr></thead>
+        <tbody>{schedule.slots.slice().reverse().map((r) => (
+          <tr key={r.at}><td>{r.dubai}</td><td><Badge tone={SLOT_TONE[r.state] ?? "neutral"}>{r.state}</Badge></td><td>{r.kind === "recap" ? "Market check" : r.headline ?? "-"}</td>
+            <td>{r.telegram ?? "-"}{r.telegram_message_id ? ` #${r.telegram_message_id}` : ""}</td><td>{r.x ?? "-"}</td></tr>))}</tbody></table>
+      {rows.length > 0 && <details><summary>Feed health ({rows.filter(([, f]) => f.problem).length} with problems of {rows.length})</summary>
+        <table className="table small"><thead><tr><th>Feed</th><th>Tier</th><th>Items</th><th>New</th><th>Newest</th><th>Problem</th></tr></thead>
+          <tbody>{rows.map(([u, f]) => <tr key={u}><td>{f.name}</td><td>{f.tier}</td><td>{f.items}</td><td>{f.new ?? 0}</td><td>{f.newest ? new Date(f.newest).toLocaleString() : "-"}</td><td>{f.problem ?? ""}</td></tr>)}</tbody></table></details>}
+    </Card>
+  );
+}
 
 const body = (method: string, value: unknown): RequestInit => ({ method, body: JSON.stringify(value), headers: { "Content-Type": "application/json" } });
 const CATEGORY_NAME: Record<string, string> = { crypto: "Crypto", stocks: "Stocks", commodities: "Commodities", politics: "Politics", economics: "Economics", viral: "Viral market stories" };
@@ -86,6 +115,8 @@ export function NewsDesk() {
           {Object.keys(data.feed_problems).length > 0 && <p className="small banner banner-warn">Feeds not answering: {Object.entries(data.feed_problems).map(([u, p]) => `${new URL(u).hostname} (${p})`).join(", ")}</p>}
         </details>
       </Card>
+
+      {data.desk?.schedule && <SchedulePanel schedule={data.desk.schedule} feeds={data.feed_health} />}
 
       <NewPost busy={busy} onAdd={(text) => act(() => request("/x/newsdesk/posts", body("POST", { text })))} />
 
