@@ -595,18 +595,24 @@ def worst(checks: dict[str, dict[str, Any]]) -> str:
 def _features_in_use(db: Session | None) -> list[tuple[str, bool, str]]:
     vpn = False
     owner = False
+    paying = False
+    open_ = False
     if db is not None:
         try:
             from app.models.alerts import OwnerAlertSettings
-            from app.models.vpn import VpnServer
+            from app.models.vpn import VpnServer, VpnSettings
 
             vpn = db.scalar(select(VpnServer.id).where(VpnServer.enabled.is_(True)).limit(1)) is not None
+            vs = db.get(VpnSettings, 1)
+            paying, open_ = bool(vs and vs.payments_enabled), bool(vs and vs.enabled)
             row = db.get(OwnerAlertSettings, 1)
             owner = bool(row and row.enabled and row.telegram_chat.strip())
         except Exception:  # noqa: BLE001 - a self-check never stops the start
             db.rollback()
     return [
         ("vpn.sync", vpn, "Kiwi VPN servers are enabled"),
+        ("vpn.reconcile", paying, "Kiwi VPN payments are on (a lost webhook would lose a customer's payment)"),
+        ("vpn.reminders", open_, "Kiwi VPN is open (trial and paid time end without a reminder)"),
         ("tradingbot.affiliate", True, "the Hyperliquid affiliate snapshot"),
         ("system.alerts", owner, "owner alerts are switched on"),
     ]

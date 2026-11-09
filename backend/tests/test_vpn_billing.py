@@ -186,7 +186,8 @@ def test_no_keys_means_that_way_of_paying_is_off(client: TestClient, db: Session
     assert client.post("/api/members/vpn/webhooks/nowpayments", content="{}").status_code == 503  # no secret: never credits
 
 
-def test_card_needs_a_passport_and_renews_without_stacking(client: TestClient, db: Session, fake: Any, keys: None) -> None:  # noqa: F811
+def test_card_needs_a_passport_and_renews_without_stacking(client: TestClient, db: Session, fake: Any, keys: None, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    monkeypatch.setattr(billing, "CARD_SUBSCRIPTIONS", True)  # off in production, by the owner's rule: this keeps the switched-off code honest
     open_vpn(db)
     anon, _ = billing.new_anonymous(db)
     with pytest.raises(billing.BillingError, match="Passport"):

@@ -41,9 +41,9 @@ def _open_or_preview(db: DbSession, request: Request) -> None:
 
 
 def _payments_on(db: DbSession) -> None:
-    """Nobody starts a payment while Kiwi VPN is free. Webhooks still credit an invoice from before it was turned off."""
+    """Nobody starts a payment while payments are off. Webhooks still credit an invoice from before they were turned off."""
     if not service.settings(db).payments_enabled:
-        raise HTTPException(403, "Payments are off: Kiwi VPN is free right now.")
+        raise HTTPException(403, "Payments are off right now.")
 
 
 # --- member -------------------------------------------------------------------------------------------------------
@@ -159,6 +159,8 @@ class UsdtInput(StrictInput):
 
 
 def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]:
+    if service.access(db, acct) == "blocked":  # a blocked account, or a banned member: it couldn't use what it paid for
+        raise HTTPException(403, "This account can't use Kiwi VPN, so it can't be charged.")
     try:
         return billing.start_usdt(db, acct, payload.amount_usd, payload.network)
     except BillingError as e:
@@ -187,6 +189,7 @@ def member_usdt(payload: UsdtInput, request: Request, db: DbSession, pc_session:
 
 @router.post("/members/vpn/card", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
 def member_card(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
+    """Off: billing.CARD_SUBSCRIPTIONS. Kiwi VPN is paid in USDT and renewed by hand."""
     _open_or_preview(db, request)
     _payments_on(db)
     acct = service.account_of(db, _require(db, pc_session))
@@ -205,13 +208,31 @@ def member_card_portal(db: DbSession, pc_session: SessionToken = None) -> dict[s
         raise _fail(e) from e
 
 
+@router.get("/members/vpn/payments", dependencies=[Depends(rate_limit.limit("earn"))])
+def my_payments(db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    out = {"items": billing.history(db, service.account_of(db, _require(db, pc_session)))}
+    db.commit()
+    return out
+
+
+@router.post("/members/vpn/payments/{payment_id}/check", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
+def check_my_payment(payment_id: int, db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
+    try:
+        return {"status": service.check_my_payment(db, service.account_of(db, _require(db, pc_session)), payment_id)}
+    except VpnError as e:
+        raise _fail(e) from e
+
+
 @router.post("/members/vpn/webhooks/nowpayments")
 async def nowpayments_webhook(request: Request, db: DbSession) -> dict[str, str]:
     raw = await request.body()
     try:
-        return {"status": billing.nowpayments_webhook(db, raw, request.headers.get("x-nowpayments-sig"))}
+        status_, credited = billing.nowpayments_webhook(db, raw, request.headers.get("x-nowpayments-sig"))
     except BillingError as e:
         raise _fail(e) from e
+    if credited is not None:
+        service.activate(db, credited)
+    return {"status": status_}
 
 
 @router.post("/members/vpn/webhooks/stripe")
@@ -238,7 +259,7 @@ def anon_create(request: Request, db: DbSession) -> dict[str, str]:
     """A new key. Shown this once: there is no way to recover it. Only while paying: free access goes with a Passport, so one person can't take every slot on a server."""
     _open_or_preview(db, request)
     if not service.settings(db).payments_enabled:
-        raise HTTPException(403, "New keys are off while Kiwi VPN is free. Sign in with a Passport instead.")
+        raise HTTPException(403, "New keys are off while payments are off. Sign in with a Passport instead.")
     return {"key": billing.new_anonymous(db)[1]}
 
 
@@ -275,6 +296,19 @@ def anon_usdt(payload: UsdtInput, request: Request, db: DbSession, acct: VpnAcco
     return _usdt(db, acct, payload)
 
 
+@router.get("/members/vpn/anon/payments", dependencies=[Depends(rate_limit.limit("vpn_key"))])
+def anon_payments(db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
+    return {"items": billing.history(db, acct)}
+
+
+@router.post("/members/vpn/anon/payments/{payment_id}/check", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
+def anon_check_payment(payment_id: int, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, str]:
+    try:
+        return {"status": service.check_my_payment(db, acct, payment_id)}
+    except VpnError as e:
+        raise _fail(e) from e
+
+
 # --- admin (owner login) ------------------------------------------------------------------------------------------
 
 
@@ -294,7 +328,7 @@ class SettingsUpdate(StrictInput):
 @router.put("/vpn/admin/settings")
 def admin_settings(payload: SettingsUpdate, db: DbSession) -> dict[str, Any]:
     if payload.payments_enabled and not billing.can_charge():  # USDT only: never an automatic charge
-        raise HTTPException(400, "Add the NOWPayments or Stripe keys first: there's no way to take a payment yet.")
+        raise HTTPException(400, "Add the NOWPayments keys first: there's no way to take a payment yet.")
     try:
         return service.update_settings(db, payload.model_dump(exclude_unset=True))
     except VpnError as e:
@@ -323,6 +357,44 @@ def admin_customers(db: DbSession) -> dict[str, Any]:
 @router.get("/vpn/admin/payments")
 def admin_payments(db: DbSession) -> dict[str, Any]:
     return {"items": service.admin_payments(db)}
+
+
+@router.post("/vpn/admin/payments/{payment_id}/check")
+def admin_check_payment(payment_id: int, db: DbSession) -> dict[str, Any]:
+    """Ask the provider about this payment now."""
+    try:
+        return service.admin_check_payment(db, payment_id)
+    except VpnError as e:
+        raise _fail(e) from e
+
+
+class CreditInput(StrictInput):
+    usd: float = Field(gt=0, le=1000)  # this payment's total worth, not an extra amount: repeating it adds nothing
+    reason: str = Field(min_length=3, max_length=160)
+    account_id: int | None = None  # only for a payment that has lost its account link
+    key: str | None = Field(None, min_length=8, max_length=80)  # or the customer's anonymous key. It's hashed for the lookup, never stored
+
+
+@router.post("/vpn/admin/payments/{payment_id}/credit")
+def admin_credit_payment(payment_id: int, payload: CreditInput, db: DbSession) -> dict[str, Any]:
+    """The money arrived and nothing automatic could credit it."""
+    try:
+        return service.admin_credit_payment(db, payment_id, payload.usd, payload.reason, payload.account_id, payload.key)
+    except VpnError as e:
+        raise _fail(e) from e
+
+
+class RefundInput(StrictInput):
+    reason: str = Field(min_length=3, max_length=160)
+
+
+@router.post("/vpn/admin/payments/{payment_id}/refund")
+def admin_refund_payment(payment_id: int, payload: RefundInput, db: DbSession) -> dict[str, Any]:
+    """Records a refund already made in NOWPayments, and takes the time back. It doesn't move any money itself."""
+    try:
+        return service.admin_refund_payment(db, payment_id, payload.reason)
+    except VpnError as e:
+        raise _fail(e) from e
 
 
 class BlockInput(StrictInput):

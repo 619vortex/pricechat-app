@@ -32,6 +32,8 @@ export const PAGE_HEADS = {
   learn: { title: "Beginner content · Price Chat", description: "Exclusive beginner lessons for Kiwi Chicks and above." },
   vpn: { title: "Kiwi VPN · Price Chat", description: "A WireGuard VPN from Price Chat. We don't log the sites you visit. Start with a 30-day free trial." },
   "vpn/privacy": { title: "Kiwi VPN Privacy · Price Chat", description: "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions." },
+  "vpn/terms": { title: "Kiwi VPN Terms · Price Chat", description: "What you get with Kiwi VPN, what it costs, how renewal works and when access ends." },
+  "vpn/refunds": { title: "Kiwi VPN Refund Policy · Price Chat", description: "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong." },
   privacy: { title: "Privacy · Price Chat", description: "How Price Chat handles member data, connected accounts and Kiwi XP." },
   terms: { title: "Terms · Price Chat", description: "The rules of the Price Chat community and Kiwi XP." },
   disclaimer: { title: "Disclaimer · Price Chat", description: "Price Chat content is for information and entertainment." },
