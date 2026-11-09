@@ -147,9 +147,10 @@ class TelegramBotClient:
 
     async def restrict_member(self, chat_id: int | str, user_id: int, until: int, can_send: bool) -> None:
         """Group rules (app/telegram/moderation.py): mute (can_send False) until a Unix time, 0 = for good; or lift a mute."""
-        perms = {k: can_send for k in ("can_send_messages", "can_send_audios", "can_send_documents", "can_send_photos", "can_send_videos",
-                                       "can_send_video_notes", "can_send_voice_notes", "can_send_polls", "can_send_other_messages",
-                                       "can_add_web_page_previews")}
+        keys = ("can_send_messages", "can_send_audios", "can_send_documents", "can_send_photos", "can_send_videos", "can_send_video_notes",
+                "can_send_voice_notes", "can_send_polls", "can_send_other_messages", "can_add_web_page_previews")
+        # lifting a mute: Telegram ends a restriction only when every permission is true (the group's own defaults still apply)
+        perms = {k: can_send for k in keys + (("can_change_info", "can_invite_users", "can_pin_messages", "can_manage_topics") if can_send else ())}
         await self._call("restrictChatMember", {"chat_id": chat_id, "user_id": user_id, "permissions": perms, "until_date": until,
                                                 "use_independent_chat_permissions": True})
 

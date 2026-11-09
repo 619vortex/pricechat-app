@@ -669,6 +669,7 @@ async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[st
 
 FAILED = ("missed", "failed", "skipped", "uncertain")
 ALERT_HOURS = 6
+_alerted: dict[str, datetime] = {}  # this process: each alert key handled once per ALERT_HOURS, even while the owner chat is unset (no log spam)
 
 
 def slots_since(db: Session, now: datetime | None = None) -> datetime | None:
@@ -689,6 +690,14 @@ def slots_since(db: Session, now: datetime | None = None) -> datetime | None:
     return None  # only slots this recent are alerted on, so each problem is told once (the owner-alert cooldown is 6 hours)
 
 
+def _fresh(key: str, now: datetime) -> bool:
+    last = _alerted.get(key)
+    if last is not None and now - last < timedelta(hours=ALERT_HOURS):
+        return False
+    _alerted[key] = now
+    return True
+
+
 async def alert_slots(db: Session, now: datetime, p: Policy) -> int:
     """Owner alerts, never silent: a missed slot, and a platform that failed to deliver a slot's post. Returns how many were sent."""
     if sched(p) != "slots":
@@ -701,12 +710,12 @@ async def alert_slots(db: Session, now: datetime, p: Policy) -> int:
         at = datetime.fromisoformat(sl["at"])
         if now - at > timedelta(hours=ALERT_HOURS) or (since is not None and at < since - p.slot_catch_up):
             continue
-        if sl["state"] == "missed":
+        if sl["state"] == "missed" and _fresh(f"newsdesk:slot:{sl['at']}", now):
             sent += await notify_owner(db, f"newsdesk:slot:{sl['at']}", f"News Desk: the {sl['dubai']} Dubai slot was missed. Nothing was released within "
                                        f"{int(p.slot_catch_up.total_seconds() // 60)} minutes: no story cleared the bar and no market check could be verified, "
                                        "or the server was down. Check Admin > X > News Desk.", now=now)
         for platform, status in (("Telegram", sl["telegram"]), ("X", sl["x"])):
-            if sl["event"] and status in FAILED:
+            if sl["event"] and status in FAILED and _fresh(f"newsdesk:delivery:{sl['event']}:{platform}", now):
                 sent += await notify_owner(db, f"newsdesk:delivery:{sl['event']}:{platform}", f"News Desk: the {sl['dubai']} Dubai post (event #{sl['event']}) "
                                            f"was not delivered to {platform}: {status}. Check Admin > X > News Desk.", now=now)
     return sent
@@ -808,9 +817,9 @@ def event_out(ev: NdEvent) -> dict[str, Any]:
             "x": {"status": ev.x_status, "note": ev.x_note, "post_id": ev.x_post_id}, "telegram": {"status": ev.tg_status, "note": ev.tg_note, "message_id": ev.tg_message_id}}
 
 
-def overview(db: Session, now: datetime) -> dict[str, Any]:
+def overview(db: Session, now: datetime, desk_state: dict[str, Any] | None = None) -> dict[str, Any]:
     rows = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=48)).order_by(NdEvent.id.desc()).limit(60)))
     day = [e for e in rows if e.status == RELEASED and e.released_at and _utc(e.released_at, now) >= now - timedelta(hours=24)]
     return {"plan": {"regular_per_day": POLICY.regular_per_day, "regular_bar": POLICY.regular_bar, "extra_bar": POLICY.extra_bar, "extra_per_day": POLICY.extra_per_day, "ceiling": POLICY.ceiling},
             "released_24h": {"regular": sum(1 for e in day if e.slot == "regular"), "extra": sum(1 for e in day if e.slot == "extra"), "slot": sum(1 for e in day if e.slot == "slot")},
-            "schedule": schedule(db, now, policy()), "events": [event_out(e) for e in rows]}
+            "schedule": schedule(db, now, policy(desk_state)), "events": [event_out(e) for e in rows]}

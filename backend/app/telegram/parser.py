@@ -55,6 +55,10 @@ class ParsedMessage:
     # no person wrote it here, so the bot never answers it as a command
     channel_post: bool = False
     automatic_forward: bool = False
+    # sent as the group itself: an anonymous admin (sender_chat is this chat). Anyone may post "as" their own channel, which is
+    # NOT this, and carries no admin rights (2026-11-09 review: channel senders could /warn anyone)
+    as_group: bool = False
+    as_channel: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +144,10 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
     author_name = _person_name(sender) if sender else sender_chat.get("title")
     forward_from, forward_date = _forward(msg)
     reply = msg.get("reply_to_message") or {}
+    if reply.get("forum_topic_created") or (msg.get("is_topic_message") and reply.get("message_id") == msg.get("message_thread_id")):
+        reply = {}  # in a forum, every message "replies" to its topic's opening service message: that's not a reply to a person
+    chat_id = (msg.get("chat") or {}).get("id")
+    auto = bool(msg.get("is_automatic_forward")) or sender.get("id") == TELEGRAM_SERVICE_ID
 
     return ParsedMessage(
         update_id=update_id,
@@ -147,7 +155,7 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         message_id=msg["message_id"],
         edited=key.startswith("edited_"),
         thread_id=msg.get("message_thread_id") if msg.get("is_topic_message") else None,
-        reply_to_message_id=reply.get("message_id") if isinstance(reply.get("message_id"), int) else None,
+        reply_to_message_id=(msg.get("reply_to_message") or {}).get("message_id") if isinstance((msg.get("reply_to_message") or {}).get("message_id"), int) else None,
         author_id=author_id if isinstance(author_id, int) else None,
         author_name=author_name,
         author_is_bot=bool(sender.get("is_bot")),
@@ -161,5 +169,7 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         reply_author_id=(reply.get("from") or {}).get("id") if isinstance((reply.get("from") or {}).get("id"), int) else None,
         reply_author_name=_person_name(reply["from"]) if isinstance(reply.get("from"), dict) else None,
         channel_post=key.endswith("channel_post"),
-        automatic_forward=bool(msg.get("is_automatic_forward")) or sender.get("id") == TELEGRAM_SERVICE_ID,
+        automatic_forward=auto,
+        as_group=bool(sender_chat.get("id")) and sender_chat.get("id") == chat_id,
+        as_channel=bool(sender_chat.get("id")) and sender_chat.get("id") != chat_id and not auto,
     )

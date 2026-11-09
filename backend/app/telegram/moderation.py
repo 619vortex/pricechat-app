@@ -49,7 +49,9 @@ COMMANDS = ("/warn", "/unmute", "/strikes")
 NEEDS_RIGHTS = "I need to be a group admin with the \"Delete messages\" and \"Ban users\" rights to enforce the rules."
 
 _LINK = re.compile(r"(?i)(?:https?://|www\.)\S+|\b(?:t\.me|telegram\.me|telegram\.dog)/\S+"
-                   r"|\b[a-z0-9-]{2,}(?:\.[a-z0-9-]+)*\.(?:com|io|xyz|net|org|app|gg|me|co|finance|exchange|top|club|site|online|link|ly|ru|cc|info|pro|vip|ai)\b(?:/\S*)?")
+                   r"|(?<![@\w.])\b[a-z0-9-]{2,}(?:\.[a-z0-9-]+)*\.(?:com|io|xyz|net|org|gg|finance|exchange|club|site|online|ly|ru|cc|info|vip)\b(?:/\S*)?")
+# Bare domains only on TLDs that are rarely ordinary words or tickers (not .ai/.me/.top/.co/.pro/.app/.link: "Fetch.ai", "lol.me too",
+# "the dip.Top"), and never inside an e-mail address. Written links (https://, www., t.me/) are always caught.
 _ALLOWED = ("pricechat.live", "t.me/pricechatupdates", "t.me/botpricechat")
 
 
@@ -83,7 +85,10 @@ def _length(d: timedelta | None) -> str:
 
 
 _admins: dict[int, tuple[float, set[int]]] = {}
-ADMIN_CACHE_SECONDS = 600
+ADMIN_CACHE_SECONDS = 120
+NOT_PEOPLE = {136817688, 1087968824, 777000}  # @Channel_Bot (sent as a channel), @GroupAnonymousBot, Telegram's automatic forwards
+BURST = timedelta(minutes=10)  # one strike per member per chat in this window: a burst of links (or a link and its edit) is one offence
+_no_rights_logged: set[int] = set()
 
 
 async def is_admin(client: Any, chat_id: int, user_id: int) -> bool:
@@ -99,7 +104,14 @@ async def is_admin(client: Any, chat_id: int, user_id: int) -> bool:
 
 async def punish(db: Session, client: Any, chat_id: int, user_id: int, name: str | None, rule: int | None, reason: str, by: str,
                  message_id: int | None) -> str:
-    """Deletes the message, mutes its author one step up the ladder, records the strike. Returns the text for the group."""
+    """Deletes the message, mutes its author one step up the ladder, records the strike. Returns the text for the group.
+    An automatic second offence inside BURST only deletes the message: no new strike, nothing said (an admin's /warn always counts)."""
+    recent = None if by != "auto" else db.scalar(select(TgStrike.id).where(TgStrike.chat_id == chat_id, TgStrike.user_id == user_id, TgStrike.cleared.is_(False),
+                                                 TgStrike.created_at >= utcnow() - BURST).limit(1))
+    if recent is not None:
+        if message_id:
+            await delete_quietly(client, chat_id, message_id)
+        return ""
     before = strikes(db, chat_id, user_id)
     length = ladder_step(before)
     until = utcnow() + length if length else None
@@ -122,6 +134,13 @@ async def punish(db: Session, client: Any, chat_id: int, user_id: int, name: str
     nxt = "" if length is None else f" Next time: {'a permanent mute' if after is None else _length(after).replace('for ', '')}."
     return (f"🔇 {esc(name or 'This member')} is muted {_length(length)} for breaking {what} (strike {n}).{nxt}\n"
             f"Rules: /rules · Disputes: {DISPUTE}")
+
+
+async def delete_quietly(client: Any, chat_id: int, message_id: int) -> None:
+    try:
+        await client.delete_message(chat_id, message_id)
+    except Exception as e:  # noqa: BLE001
+        logger.info("rules: couldn't delete message %s in %s (%s)", message_id, chat_id, type(e).__name__)
 
 
 def _target_and_rest(cmd: str, words: list[str], reply_author_id: int | None) -> tuple[int | None, list[str]]:
@@ -180,6 +199,10 @@ async def command(db: Session, client: Any, chat_id: int, issuer_id: int, anonym
     # /warn
     if bot_id and target == bot_id:
         return None
+    if target in NOT_PEOPLE:
+        if reply_message_id:
+            await delete_quietly(client, chat_id, reply_message_id)
+        return "That was sent as a channel or as the group, so there's no member to mute. I deleted it; to stop a channel, ban it in the group settings."
     try:
         if await is_admin(client, chat_id, target):
             return "Admins aren't muted by the bot."
@@ -208,4 +231,10 @@ async def check_links(db: Session, client: Any, chat_id: int, user_id: int, name
             return None
     except Exception:  # noqa: BLE001 - Telegram didn't answer: never punish on a guess
         return None
-    return await punish(db, client, chat_id, user_id, name, 5, f"link: {found[0][:120]}", "auto", message_id)
+    text = await punish(db, client, chat_id, user_id, name, 5, f"link: {found[0][:120]}", "auto", message_id)
+    if text == NEEDS_RIGHTS:  # the automatic check stays quiet without rights (no reply to every link); the log says it once per group
+        if chat_id not in _no_rights_logged:
+            _no_rights_logged.add(chat_id)
+            logger.warning("rules: no rights to enforce the link rule in %s; give the bot Delete messages + Ban users", chat_id)
+        return None
+    return text or None

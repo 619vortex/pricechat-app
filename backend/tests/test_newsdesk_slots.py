@@ -46,6 +46,7 @@ HL = FakeHL({"BTC": (95120.0, 94000.0), "ETH": (3410.0, 3440.0), "HYPE": (38.2, 
 def _slots(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "slots")
     monkeypatch.setattr(sources, "EXTRA_FEEDS", [])
+    events._alerted.clear()
     program(db).updates_channel = "@Pricechatupdates"
     db.commit()
 

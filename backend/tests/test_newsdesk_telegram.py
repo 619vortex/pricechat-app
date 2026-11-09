@@ -515,6 +515,7 @@ async def test_the_x_emergency_stop_doesnt_stop_telegram_and_the_lane_reads_the_
     verified(db)
     desk = engine.settings_row(db)
     desk.kill_switch, desk.feeds = True, [{"name": "Decrypt", "url": "https://decrypt.test/feed", "tier": 2, "category": "crypto"}]
+    desk.state = {"policy": OPEN}  # the plan opened up, as in the other delivery tests: otherwise the result depends on the time of day
     db.commit()
     asked: list[str] = []
 
