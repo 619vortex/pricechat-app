@@ -509,6 +509,9 @@ async def sync(db: Session, settings: Settings, rt: YouTubeRuntime) -> SyncRepor
     _set_caps(db, channel=ch, sync={"last_sync_at": now.isoformat(), **report.as_dict()})
     state.status, state.last_success_at, state.last_error = "connected", now, None
     db.commit()
+    from app.pokemon import history
+
+    history.forget(("website-home",))  # the website's cached homepage (api/routes/website.py HOME_KEY): new uploads show at once
     log = ActivityLogger(db)
     first_sync = len(new_items) == len(known)  # everything was new: a first sync, summarised in one line
     if first_sync and len(new_items) > 3:

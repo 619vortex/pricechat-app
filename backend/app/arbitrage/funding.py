@@ -203,7 +203,21 @@ async def build(settings: Settings | None = None, transport: Any = None, wait_hi
     }
 
 
+_refresh_task: asyncio.Task[Any] | None = None
+
+
 async def board(force: bool = False, transport: Any = None) -> dict[str, Any]:
+    """The board, rebuilt at most every CACHE_SECONDS. Past that age the last board is returned at once and ONE background task
+    rebuilds it (no visitor waits seconds for every venue); only the very first board (nothing cached yet) is waited for."""
+    global _refresh_task
+    if not force and _cache["data"] is not None and time.monotonic() - _cache["at"] >= CACHE_SECONDS:
+        if _refresh_task is None or _refresh_task.done():
+            _refresh_task = asyncio.get_running_loop().create_task(_rebuild(False, transport))
+        return _cache["data"]
+    return await _rebuild(force, transport)
+
+
+async def _rebuild(force: bool, transport: Any) -> dict[str, Any]:
     async with _lock:
         if not force and _cache["data"] is not None and time.monotonic() - _cache["at"] < CACHE_SECONDS:
             return _cache["data"]

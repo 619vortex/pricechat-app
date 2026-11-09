@@ -272,6 +272,9 @@ class Settings(BaseSettings):
     job_pokemon_catalog_seconds: int = Field(3600, ge=600)  # hourly; each set is refreshed once a week
     pokemon_catalog_sets_per_run: int = Field(40, ge=1, le=500)
     pokemon_catalog_requests_per_run: int = Field(150, ge=1, le=1000)  # 1 credit each
+    # market refresh-ahead: the PSA 10 rows stay servable while the warm-up rebuilds them (a second ~150-250 MB copy for the
+    # few seconds of the build). False: the old copy goes first (less memory; visitors during that rebuild wait for it)
+    pokemon_market_keep_stale: bool = True
     combot_api_base: str = "https://api.combot.org/v5"
     job_combot_sync_seconds: int = Field(6 * 3600, ge=900)
     x_access_token: SecretStr | None = None

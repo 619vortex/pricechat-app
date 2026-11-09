@@ -694,18 +694,14 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         return out["summary"]
 
     async def pokemon_warm(ctx: JobContext) -> dict[str, Any]:
-        """Keep the market's PSA 10 rows (the homepage) computed, so no visitor waits for the ~50k-card build."""
+        """Keep the market's PSA 10 rows (the homepage) computed, so no visitor waits for the ~50k-card build: refresh-ahead,
+        each run rebuilds them (and the other 15-minute values) before they expire, visitors keep the current ones meanwhile."""
         import asyncio
 
         from app.pokemon import market
 
-        def warm() -> int:
-            rows = market.base_rows(ctx.db, market.DEFAULT_GRADE, ctx.now)
-            market.market(ctx.db, market.DEFAULT_GRADE, None, "", 100, 0, ctx.now, view="top100")  # the homepage's default view
-            return len(rows)
-
         # seconds of CPU: in a worker thread, so the event loop (every API request, the job timeout) keeps running meanwhile
-        return {"rows": await asyncio.to_thread(warm)}
+        return {"rows": await asyncio.to_thread(market.warm, ctx.db, ctx.now, s)}
 
     async def pokemon_market_expire(ctx: JobContext) -> dict[str, Any]:
         """Card Marketplace: testnet payments waiting for confirmations are checked again (read-only chain calls, only when

@@ -154,11 +154,14 @@ def market_rows(db: Session, g: Grade, cards: list[PokemonCard], now: datetime, 
 
 
 BASE_TTL = 900.0  # seconds: the whole-catalogue rows per grade; any sync / import invalidates them at once
+BASE_REFRESH = 480.0  # the warm-up job (every 600 s) rebuilds rows older than this, well before BASE_TTL: no visitor waits
+BASE_STALE = BASE_TTL  # PSA 10 rows past BASE_TTL (warm-up late or off) are still served this long while one background rebuild runs
 
 
-def base_rows(db: Session, g: Grade, now: datetime | None = None, spark_days: int = movement.SPARK_DAYS) -> list[dict[str, Any]]:
+def base_rows(db: Session, g: Grade, now: datetime | None = None, spark_days: int = movement.SPARK_DAYS, refresh: bool = False) -> list[dict[str, Any]]:
     """Every catalog card's row at grade g (prices, moves, cap history), ranked. Computed once and shared by the market,
-    movers, trending, sets, years and grades views; callers filter copies and never mutate these rows."""
+    movers, trending, sets, years and grades views; callers filter copies and never mutate these rows.
+    refresh (the warm-up job): rebuild rows older than BASE_REFRESH while visitors keep getting the current ones."""
     now = now or utcnow()
 
     def build() -> list[dict[str, Any]]:
@@ -170,7 +173,33 @@ def base_rows(db: Session, g: Grade, now: datetime | None = None, spark_days: in
 
     # memory: keep the homepage grade (PSA 10) plus at most ONE other grade's rows (~200 MB each on 50k cards)
     history.evict(lambda k: isinstance(k, tuple) and len(k) == 2 and k[0] == "base" and k[1] not in (g.label, DEFAULT_GRADE.label))
-    return history.cached(("base", g.label), build, ttl=BASE_TTL)
+    keep = _keep_stale()
+    if refresh:
+        return history.refresh(("base", g.label), build, ttl=BASE_TTL, older_than=BASE_REFRESH, keep_stale=keep)
+    # PSA 10 (the homepage): an expired copy is served while it rebuilds in the background (its build has its own session).
+    # Other grades are built on demand and evicted soon after: no stale copy kept for them
+    return history.cached(("base", g.label), build, ttl=BASE_TTL, stale=BASE_STALE if g == DEFAULT_GRADE and keep else 0.0)
+
+
+def _keep_stale() -> bool:
+    from app.config.settings import get_settings
+
+    return bool(get_settings().pokemon_market_keep_stale)
+
+
+def warm(db: Session, now: datetime | None = None, settings: Any = None) -> int:
+    """The pokemon.warm job (refresh-ahead): rebuild the homepage's shared 15-minute values (PSA 10 rows, the light
+    catalogue, X mentions, data quality) before they expire, while visitors keep getting the current ones; then the
+    homepage's default view. Returns the number of PSA 10 rows."""
+    from app.pokemon import top100
+
+    now = now or utcnow()
+    rows = base_rows(db, DEFAULT_GRADE, now, refresh=True)
+    catalog.lite(db, refresh=True)
+    x_mentions(db, now, refresh=True)
+    top100.assess(db, now, settings, refresh=True)
+    market(db, DEFAULT_GRADE, None, "", 100, 0, now, settings=settings, view="top100")  # the homepage's default view
+    return len(rows)
 
 
 def row_ok(card: dict[str, Any], era: str | None, f: dict[str, Any]) -> bool:
@@ -382,10 +411,8 @@ def movers(db: Session, g: Grade, direction: str, period: str = "30d", limit: in
 TREND_BASIS = "X mentions of the Pokémon in the last 7 days + size of its 30-day price move (capped at 50%) + verified sales (30 days) and stars"
 
 
-def trend_rank(db: Session, rows: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
-    """Score every row, keep the best card per Pokémon. Each kept row gets `trend` = {score, x_mentions, move_30d, why}."""
-    import math
-
+def x_mentions(db: Session, now: datetime, refresh: bool = False) -> dict[int, int]:
+    """X posts of the last 7 days that name each card (the trending score's mentions). refresh: the warm-up job."""
     from app.models.pokemon import PokemonPulsePost
     from app.pokemon import pulse
 
@@ -397,7 +424,16 @@ def trend_rank(db: Session, rows: list[dict[str, Any]], now: datetime) -> list[d
                 out[c.id] = out.get(c.id, 0) + 1
         return out
 
-    mentions: dict[int, int] = history.cached(("x-mentions",), count, ttl=BASE_TTL)
+    if refresh:
+        return history.refresh(("x-mentions",), count, ttl=BASE_TTL, older_than=BASE_REFRESH)
+    return history.cached(("x-mentions",), count, ttl=BASE_TTL)
+
+
+def trend_rank(db: Session, rows: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+    """Score every row, keep the best card per Pokémon. Each kept row gets `trend` = {score, x_mentions, move_30d, why}."""
+    import math
+
+    mentions = x_mentions(db, now)
     scored = []
     for r in rows:
         x = mentions.get(r["card"]["id"], 0)
@@ -551,12 +587,17 @@ def rank_of(db: Session, card: PokemonCard, g: Grade, now: datetime | None = Non
     build 50,000 rows just for a rank pill."""
     if g != DEFAULT_GRADE and not history.is_cached(("base", g.label), BASE_TTL):
         return None
-    m = market(db, g, card.era, "", MAX_LIMIT, 0, now)
-    hit = next((r for r in m["rows"] if r["card"]["id"] == card.id), None)
-    if hit is None and m["total"] > MAX_LIMIT:
-        rows = rows_for(db, g, now or utcnow(), card.era)
-        hit = next((r for r in rows if r["card"]["id"] == card.id), None)
-    return hit.get("rank") if hit else None
+    return era_ranks(db, g, card.era, now or utcnow()).get(card.id)
+
+
+def era_ranks(db: Session, g: Grade, era: str, now: datetime) -> dict[int, int]:
+    """card id -> market-cap rank among the cards of its era (the same ranking as the market's era view), as one lookup
+    map: a card page no longer builds a whole market response just for its rank pill."""
+    def build() -> dict[int, int]:
+        capped = sorted((r for r in base_rows(db, g, now) if (not era or r["card"]["era"] == era) and r["market_cap"] is not None), key=lambda r: -r["market_cap"])
+        return {r["card"]["id"]: i + 1 for i, r in enumerate(capped)}
+
+    return history.cached(("ranks", g.label, era), build)
 
 
 def chart(db: Session, card: PokemonCard, g: Grade, range_key: str, now: datetime | None = None) -> dict[str, Any]:
