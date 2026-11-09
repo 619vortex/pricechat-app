@@ -326,3 +326,16 @@ def connect_x_user(db: Session) -> None:
     state.account_external_id = "1600"
     state.account_username = "pricechat"
     db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The News Desk's older tests were written for the 3-4 a day windows plan; production runs the six Dubai slots (2026-11-09), which
+    tests/test_newsdesk_slots.py covers. Tests that want the slots set events.DEFAULT_SCHEDULE themselves."""
+    if request.module.__name__.split(".")[-1] in ("test_newsdesk", "test_newsdesk_events", "test_newsdesk_telegram", "test_newsdesk_collect", "test_x_social", "test_brand_publishing_safety"):
+        from app.newsdesk import events
+
+        from app.newsdesk import sources
+
+        monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "windows")
+        monkeypatch.setattr(sources, "EXTRA_FEEDS", [])  # their fake web answers only the feeds they set

@@ -133,7 +133,7 @@ async def test_a_verified_story_is_delivered_once_with_its_sources_and_the_messa
     assert out["sent"] == 144 and len(tg.sent) == 1
     sent = tg.sent[0]
     assert sent["chat"] == CHANNEL_ID and sent["html"] is True and sent["silent"] is True
-    assert "🥝 PRICE ALERT" in sent["text"] and "🔴 ALERT: BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION" in sent["text"]
+    assert "🥝 Price Chat" in sent["text"] and "🔴 ALERT: BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION" in sent["text"]
     assert TWO in sent["text"] and ONE not in sent["text"]  # the outlet's sentence that only repeats the headline is left out
     assert f'href="{a.link}"' in sent["text"] and f'href="{b.link}"' in sent["text"]
     post = rows(db)[0]
@@ -166,7 +166,7 @@ async def test_x_and_telegram_carry_the_same_event_with_the_same_headline(db: Se
     assert ev.tg_status == "delivered" and ev.x_status == "dry_run" and ev.tg_message_id == 144
     assert ev.headline in tg.sent[0]["text"] and ev.headline in x.text  # one decision, one headline, two deliveries
     assert "BYBAZ" in ev.headline  # a fresh $40m exchange hack, two outlets, outranks a three-hour-old rug pull
-    assert "🥝 PRICE ALERT" in x.text and "http" not in x.text and len(x.text) <= 280 and x.facts["event_id"] == ev.id
+    assert "🥝 Price Chat" in x.text and "http" not in x.text and len(x.text) <= 280 and x.facts["event_id"] == ev.id
 
 
 async def test_a_second_run_never_sends_the_same_story_or_its_other_outlet(db: Session) -> None:

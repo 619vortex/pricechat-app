@@ -42,7 +42,7 @@ def _lead(label: str, emoji: str) -> str:
 
 
 def _foot(as_of: str) -> str:
-    return f"🥝 PRICE ALERT · Data: Yahoo Finance, {as_of} UTC"
+    return f"🥝 Price Chat · Data: Yahoo Finance, {as_of} UTC"
 
 
 def move_headline(item: dict[str, Any], window: str, change: float, price: float, ratio: float) -> str:
