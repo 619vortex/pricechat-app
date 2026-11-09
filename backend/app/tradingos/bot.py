@@ -115,6 +115,14 @@ COMMITTEE = {"/committee", "/debate", "/research"}  # committeecmd.py (Kiwi AI I
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
 PRIVATE = {"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close", "/vpn"} | alerts.COMMANDS  # DMs only
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
+# Per-user throttle for the commands that fetch candles and draw or scan ("fc" is /chart): one per THROTTLE_SECONDS per
+# Telegram user (rate_limit "tg_heavy"), so one person can't keep the listener busy for everyone else (TG-3). Only the
+# commands read from Telegram are throttled (ingestion passes throttle=True). Over the limit: one short reply, then silence
+# until a heavy command of theirs gets through again.
+THROTTLED = {"/chart", "/signal", "/scan"}
+THROTTLE_SECONDS = 10
+THROTTLE_TEXT = "⏳ One chart, scan or signal every {} seconds, please. Try again in a moment."
+_THROTTLE_WARNED: set[int] = set()  # users told about the limit since their last heavy command went through
 HEADLINE = ("BTC", "ETH", "SOL", "HYPE")
 
 
@@ -402,7 +410,8 @@ def _whole_lines(text: str, limit: int) -> str:
 
 
 async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, text: str, group: bool = False, reply_to: int | None = None,
-                         chat_username: str | None = None, author: str | None = None) -> None:
+                         chat_username: str | None = None, author: str | None = None, throttle: bool = False) -> None:
+    raw = client
     client = _Footed(client, footer(db))
     db.commit()  # (a first run creates settings rows): no write transaction waits on Telegram or an exchange below
     parts = text.strip().split()
@@ -414,6 +423,8 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
         from app.tradingos.chartcmd import _timeframe
 
         cmd, args = "/chart", (args + ([] if any(_timeframe(a.lower()) for a in args[1:]) else ["4h"]) if args else [])
+    if throttle and cmd in THROTTLED and await _throttled(raw, chat_id, user_id, reply_to):
+        return
     if cmd not in PUBLIC | PRIVATE:
         if not group:  # in groups an unknown command is usually another bot's: stay quiet
             await client.send_message(chat_id, f"I don't know {esc(cmd)}. /help lists every command.", html=True)
@@ -476,6 +487,38 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
     if reply:
         await client.send_message(chat_id, reply, html=True, reply_to=reply_to)
     logger.info("Bot answered %s in %s chat %s", "fc" if brief else cmd, "a group" if group else "a private", chat_id if group else "-")
+
+
+async def _throttled(client: Any, chat_id: int, user_id: int, reply_to: int | None) -> bool:
+    """TG-3: True when this user's heavy command is over the limit (they get one polite line the first time, then nothing)."""
+    from app.security.rate_limit import LIMITS
+
+    if LIMITS["tg_heavy"].hit(f"tg:{user_id}") is None:
+        _THROTTLE_WARNED.discard(user_id)
+        return False
+    logger.info("Heavy bot command throttled (user over %ss)", THROTTLE_SECONDS)
+    if user_id in _THROTTLE_WARNED:
+        return True
+    if len(_THROTTLE_WARNED) > 10_000:  # bounded: forgetting only means someone may get the line once more
+        _THROTTLE_WARNED.clear()
+    _THROTTLE_WARNED.add(user_id)
+    try:
+        await client.send_message(chat_id, THROTTLE_TEXT.format(THROTTLE_SECONDS), reply_to=reply_to)
+    except Exception as exc:  # noqa: BLE001 - the command is refused either way
+        logger.warning("Throttle notice not sent (%s)", type(exc).__name__)
+    return True
+
+
+async def fc_button_throttled(client: Any, cq: dict[str, Any]) -> bool:
+    """TG-3: an "fc" timeframe button pressed too often by one user (each press redraws a chart). Over the limit the press
+    gets a short toast (every button press must be answered anyway) and nothing is drawn."""
+    from app.security.rate_limit import LIMITS
+
+    uid = int((cq.get("from") or {}).get("id") or 0)
+    if not uid or LIMITS["tg_fc_button"].hit(f"tg:{uid}") is None:
+        return False
+    await _answer(client, cq, uid, "One moment: wait a few seconds before the next timeframe.", dm=False)
+    return True
 
 
 async def _trade_check(db: Session, client: Any, chat_id: int, user_id: int, text: str, reply_to: int | None) -> bool:

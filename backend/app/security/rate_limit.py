@@ -79,6 +79,10 @@ LIMITS = {
     "chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
     # starting a Kiwi AI Investment Committee run (each can cost several model calls; the daily limit per member still applies)
     "committee": Bucket(burst=5, every=20, shared_burst=30, shared_every=2),
+    # the Telegram bot's heavy commands (/chart and fc, /signal, /scan), per Telegram user: one every 10 s (tradingos/bot.py,
+    # TG-3). The shared bucket is effectively off: a busy group with many people asking is fine; one person flooding is not
+    "tg_heavy": Bucket(burst=1, every=10, shared_burst=100_000, shared_every=0.001),
+    "tg_fc_button": Bucket(burst=3, every=5, shared_burst=100_000, shared_every=0.001),  # "fc" timeframe buttons: browsing a few is fine
     # the public candles under a committee run's chart (cached per market for a minute; a page loads them once per run shown)
     "committee_chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
     # visitors' Pokémon Market reads (card pages, charts, tables): a person browsing opens a few a second at most; a crawler

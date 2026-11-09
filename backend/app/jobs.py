@@ -105,6 +105,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             then("community.process")
         if stored and db.scalar(select(LinkedIdentity.id).where(LinkedIdentity.platform == "telegram").limit(1)):
             then("members.verify", 3)  # a linked member may have just taken part: missions + XP update within seconds
+        if bot_on and s.telegram_listen_seconds:
+            then("telegram.ingest", 1)  # always on: the next listen starts about a second after this one (own lane, AR-3 / TG-2)
         return out
 
     async def community_process(ctx: JobContext) -> dict[str, Any]:
@@ -431,7 +433,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         JobSpec("tradingos.track", "Trading OS: signal tracking", "Follow open signals on real prices and update their Telegram cards", 60,
                 tradingos_track, initial_delay_seconds=60, timeout_seconds=300),
         JobSpec("telegram.ingest", "Telegram ingestion", "Fetch new messages from authorised chats (read-only) and answer bot commands; each run keeps listening for TELEGRAM_LISTEN_SECONDS so replies come within about a second", s.job_telegram_ingest_seconds, telegram_ingest, initial_delay_seconds=5, timeout_seconds=s.telegram_listen_seconds + 60,
-                max_backoff_seconds=60),  # a failed listen retries within a minute, never 30 (TG-4)
+                max_backoff_seconds=60,  # a failed listen retries within a minute, never 30 (TG-4)
+                own_lane=True),  # its own always-on loop, never behind the one-at-a-time lane (AR-3 / TG-2)
         JobSpec("community.process", "Conversation processing", "Classify messages, detect questions, group into topics", s.job_community_process_seconds, community_process, initial_delay_seconds=20),
         JobSpec("community.topics", "Topic analysis", "Update topic trends, name topics, word recurring questions", s.job_community_topics_seconds, community_topics, initial_delay_seconds=40),
         JobSpec("community.summary.recent", "Recent activity summary", "Summarise the last few hours of each chat", s.job_summary_recent_seconds, summary_recent, initial_delay_seconds=120),

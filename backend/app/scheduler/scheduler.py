@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # job taking 80 ms is not news), SLOW_RUNS times in a row. In memory only: a restart re-learns the median.
 DURATION_HISTORY, SLOW_MIN_SAMPLES, SLOW_FACTOR, SLOW_RUNS, SLOW_MIN_MS = 20, 5, 3.0, 3, 2000.0
 LISTENER_WAIT_LOG_S = 30.0  # telegram.ingest waiting longer than this for its turn is logged (the bot is silent meanwhile)
+LANE_IDLE_S, LANE_CRASH_BACKOFF_MAX = 0.2, 60.0  # an own-lane job's loop: shortest sleep, and its longest back-off after a crash
 
 
 class JobSkipped(Exception):
@@ -62,6 +63,10 @@ class JobSpec:
     max_backoff_seconds: int = 1800
     # Turns a successful result into one plain-English activity line (event, message), or None.
     describe: Callable[[dict[str, Any]], tuple[str, str] | None] | None = None
+    # Runs in its own always-on loop, outside the one-at-a-time lane (AR-3 / TG-2): the Telegram listener, so bot replies
+    # never wait behind a backup or a News Desk run. Such a job must keep its write transactions short (it shares SQLite
+    # with whatever job holds the lane).
+    own_lane: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +100,8 @@ class Scheduler:
         self.last_tick_at: datetime | None = None  # the loop's last pass (deep health: is the scheduler alive?)
         self.durations: dict[str, deque[float]] = {}  # recent successful run times (ms) per job
         self.slow: dict[str, dict[str, float]] = {}  # job -> {"streak", "last_ms", "median_ms"} while its runs are slow
+        self._lanes: dict[str, asyncio.Task[None]] = {}  # own-lane jobs' loops (started with the scheduler)
+        self._lane_running: set[str] = set()  # own-lane jobs running right now (they never take the one-at-a-time lane)
 
     def note_duration(self, name: str, duration_ms: float) -> None:
         """Remember a successful run's time and keep the slow-run streak (SLOW_FACTOR x the recent median)."""
@@ -143,7 +150,7 @@ class Scheduler:
         return self._serial.locked()
 
     def is_running(self, name: str) -> bool:
-        return self._active == name
+        return self._active == name or name in self._lane_running
 
     def queue(self) -> dict[str, Any]:
         """What is running now and what is waiting for its turn (labels, for the dashboard)."""
@@ -154,14 +161,14 @@ class Scheduler:
         }
 
     def is_queued(self, name: str) -> bool:
-        return self._locks[name].locked() and self._active != name
+        return self._locks[name].locked() and not self.is_running(name)
 
     def request_run(self, name: str, delay_seconds: int = 5) -> None:
         """Bring a job's next run forward (used to chain pipeline stages). Never delays a job."""
         if name not in self.specs or name in self.disabled:
             return
         soon = utcnow() + timedelta(seconds=delay_seconds)
-        if self._active == name:  # its row is rewritten when this run ends: remember the request until then
+        if self.is_running(name):  # its row is rewritten when this run ends: remember the request until then
             self._chained[name] = min(soon, self._chained.get(name, soon))
             return
         with self.session_factory() as db:
@@ -178,7 +185,14 @@ class Scheduler:
             return JobOutcome(name, "disabled", {}, "Turned off on this server (SCHEDULER_DISABLED_JOBS)")
         lock = self._locks[name]
         if lock.locked():
-            return JobOutcome(name, "busy", {}, "Already running" if self._active == name else "Already queued: it runs after the current background job")
+            return JobOutcome(name, "busy", {}, "Already running" if self.is_running(name) else "Already queued: it runs after the current background job")
+        if spec.own_lane:  # never waits for the one-at-a-time lane (AR-3 / TG-2)
+            async with lock:
+                self._lane_running.add(name)
+                try:
+                    return await self._execute(spec, name, trigger)
+                finally:
+                    self._lane_running.discard(name)
         async with lock:
             asked = time.perf_counter()
             ahead = self._active
@@ -311,15 +325,61 @@ class Scheduler:
         for name in due:
             if self._locks[name].locked():  # running or waiting for its turn
                 continue
+            if name in self._lanes and not self._lanes[name].done():  # its own loop starts it
+                continue
             task = asyncio.create_task(self.run_job(name))
             self._running.add(task)
             task.add_done_callback(self._running.discard)
             started.append(name)
         return started
 
+    def _due_in(self, name: str) -> float | None:
+        """Seconds until an own-lane job is due (<= 0: now), or None while it is switched off."""
+        with self.session_factory() as db:
+            row = db.get(ScheduledJob, name)
+            if row is None or not row.enabled:
+                return None
+            return 0.0 if row.next_run_at is None else (row.next_run_at - utcnow()).total_seconds()
+
+    async def _lane(self, name: str) -> None:
+        """An own-lane job's always-on loop: runs it whenever it is due (a listener chaining itself runs back to back). A
+        failed run backs off through its row like any job; an error in this loop itself is logged and retried with a growing
+        pause, and _ensure_lanes restarts the loop if it ever ends."""
+        pause = 0.0
+        while True:
+            try:
+                due_in = self._due_in(name)
+                if due_in is not None and due_in <= 0 and not self._locks[name].locked():
+                    outcome = await self.run_job(name)
+                    pause = 0.0
+                    if outcome.status not in ("disabled", "busy"):  # (those leave its row as it was: don't spin on it)
+                        continue
+                    due_in = None
+                await asyncio.sleep(self.tick_seconds if due_in is None else min(self.tick_seconds, max(due_in, LANE_IDLE_S)))
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the loop must outlive any one error (a locked database, a bad row)
+                pause = min(max(pause * 2, 1.0), LANE_CRASH_BACKOFF_MAX)
+                logger.exception("Job %s's own loop failed; retrying in %.0fs", name, pause)
+                await asyncio.sleep(pause)
+
+    def _ensure_lanes(self) -> None:
+        """Start (or restart, if one ever ended) the own-lane jobs' loops."""
+        for name, spec in self.specs.items():
+            if not spec.own_lane or name in self.disabled:
+                continue
+            task = self._lanes.get(name)
+            if task is not None and not task.done():
+                continue
+            if task is not None:
+                exc = task.exception() if not task.cancelled() else None
+                logger.warning("Job %s's own loop stopped (%s); restarting it", name, type(exc).__name__ if exc else "cancelled")
+            self._lanes[name] = asyncio.create_task(self._lane(name))
+
     async def _loop(self) -> None:
         while True:
             try:
+                self._ensure_lanes()
                 await self.tick()
                 self.last_tick_at = utcnow()
             except Exception:  # noqa: BLE001
@@ -340,6 +400,11 @@ class Scheduler:
             except asyncio.CancelledError:
                 pass
             self._loop_task = None
+        for task in self._lanes.values():
+            task.cancel()
+        if self._lanes:
+            await asyncio.gather(*self._lanes.values(), return_exceptions=True)
+            self._lanes = {}
         for task in list(self._running):
             task.cancel()
         if self._running:

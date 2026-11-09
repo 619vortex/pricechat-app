@@ -134,8 +134,10 @@ class TelegramIngestor:
             remaining = until - time.monotonic()
             wait = long_poll_seconds if batch == 0 else (max(1, min(long_poll_seconds, int(remaining))) if remaining >= 1 else 0)
             # the long poll waits up to `wait` seconds: whatever the last batch's handlers wrote is saved first, so no
-            # write transaction (SQLite's single write lock) is held while Telegram has nothing to say
-            self.db.commit()
+            # write transaction (SQLite's single write lock) is held while Telegram has nothing to say. In a worker thread: the
+            # listener runs beside the other jobs (AR-3), so if one of them holds the write lock, the event loop (and that job)
+            # keeps running while this waits, instead of both stalling until SQLite's busy timeout
+            await asyncio.to_thread(self.db.commit)
             try:
                 updates = await self.client.get_updates(offset, timeout=wait)
                 transient = 0
@@ -155,44 +157,8 @@ class TelegramIngestor:
                 if until - time.monotonic() >= 1:
                     continue  # nothing yet: keep listening until this pass's time is up
                 break
-            if batch == 0:
-                repair_source_ids(self.db)
-            sources = {s.chat_id: s for s in self.db.scalars(select(TelegramSource))}
-            max_update_id = state.last_update_id or 0
-            stored_before = report.stored  # `report` adds up every batch of this pass
-            access_updates: list[dict] = []  # VIP Trading Bot private group: join requests and joins/leaves
-            try:
-                for update in updates:
-                    report.updates += 1
-                    uid = update.get("update_id") if isinstance(update, dict) else None
-                    if isinstance(uid, int):
-                        max_update_id = max(max_update_id, uid)
-                    if isinstance(update, dict) and "callback_query" in update:
-                        access_updates.append(update)  # Trading OS signal buttons (handled after the commit)
-                        report.ignored_other += 1
-                        continue
-                    if isinstance(update, dict) and ("chat_join_request" in update or "chat_member" in update):
-                        access_updates.append(update)  # never stored as community content
-                        if "chat_member" in update:
-                            self._wk_updates.append(update)  # Worker System: joins through a worker's invite link
-                        report.ignored_other += 1
-                        continue
-                    try:
-                        self._handle(update, sources, report)
-                    except SQLAlchemyError:
-                        raise
-                    except Exception as exc:  # noqa: BLE001 - one odd update must not block every later one
-                        # Its offset is still acknowledged below: re-raising would re-deliver (and fail on) it every run.
-                        report.malformed += 1
-                        logger.warning("Skipping Telegram update %s that could not be handled (%s)", uid, type(exc).__name__)
-                # Messages and the new offset are committed together: if this fails, nothing
-                # is acknowledged, Telegram re-delivers, and the unique key prevents duplicates.
-                state.last_update_id = max_update_id
-                state.total_ingested += report.stored - stored_before
-                self.db.commit()
-            except SQLAlchemyError:
-                self.db.rollback()
-                raise
+            # storing the batch is plain database work: done in a worker thread for the same reason as the commit above
+            access_updates = await asyncio.to_thread(self._store_batch, updates, report, state, batch == 0)
             await self._moderate()
             await self._send_confirmations()
             await self._crew_starts()
@@ -207,6 +173,10 @@ class TelegramIngestor:
             if len(updates) < 100 and until - time.monotonic() < 1:
                 break
 
+        await asyncio.to_thread(self._finish, report)  # a write like the batch's: in a worker thread (see above)
+        return report
+
+    def _finish(self, report: SyncReport) -> None:
         now = utcnow()
         state = get_bot_state(self.db)
         state.status = "connected"
@@ -219,7 +189,49 @@ class TelegramIngestor:
             if source.id in report.sources:
                 source.last_error = None
         self.db.commit()
-        return report
+
+    def _store_batch(self, updates: list, report: SyncReport, state: TelegramBotState, first: bool) -> list[dict]:
+        """Store one getUpdates batch and save the new offset with it (one short write transaction). Returns the updates
+        handled after the commit (buttons, joins). Runs in a worker thread (see sync); nothing here awaits."""
+        if first:
+            repair_source_ids(self.db)
+        sources = {s.chat_id: s for s in self.db.scalars(select(TelegramSource))}
+        max_update_id = state.last_update_id or 0
+        stored_before = report.stored  # `report` adds up every batch of this pass
+        access_updates: list[dict] = []  # VIP Trading Bot private group: join requests and joins/leaves
+        try:
+            for update in updates:
+                report.updates += 1
+                uid = update.get("update_id") if isinstance(update, dict) else None
+                if isinstance(uid, int):
+                    max_update_id = max(max_update_id, uid)
+                if isinstance(update, dict) and "callback_query" in update:
+                    access_updates.append(update)  # Trading OS signal buttons (handled after the commit)
+                    report.ignored_other += 1
+                    continue
+                if isinstance(update, dict) and ("chat_join_request" in update or "chat_member" in update):
+                    access_updates.append(update)  # never stored as community content
+                    if "chat_member" in update:
+                        self._wk_updates.append(update)  # Worker System: joins through a worker's invite link
+                    report.ignored_other += 1
+                    continue
+                try:
+                    self._handle(update, sources, report)
+                except SQLAlchemyError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - one odd update must not block every later one
+                    # Its offset is still acknowledged below: re-raising would re-deliver (and fail on) it every run.
+                    report.malformed += 1
+                    logger.warning("Skipping Telegram update %s that could not be handled (%s)", uid, type(exc).__name__)
+            # Messages and the new offset are committed together: if this fails, nothing
+            # is acknowledged, Telegram re-delivers, and the unique key prevents duplicates.
+            state.last_update_id = max_update_id
+            state.total_ingested += report.stored - stored_before
+            self.db.commit()
+        except SQLAlchemyError:
+            self.db.rollback()
+            raise
+        return access_updates
 
     def _handle(self, update: object, sources: dict[int, TelegramSource], report: SyncReport) -> None:
         if isinstance(update, dict) and (update.get("message") or {}).get("new_chat_members"):
@@ -497,7 +509,7 @@ class TelegramIngestor:
         for chat_id, user_id, text, group, msg_id, chat_username, author in pending:
             try:
                 await bot.handle_command(self.db, self.client, chat_id, user_id, text, group=group, reply_to=msg_id,
-                                         chat_username=chat_username, author=author)
+                                         chat_username=chat_username, author=author, throttle=True)  # heavy ones: per-user limit (TG-3)
             except Exception as exc:  # noqa: BLE001
                 self.db.rollback()
                 # TelegramError messages are written by our client and never carry the token (see client._call)
@@ -515,6 +527,8 @@ class TelegramIngestor:
                     logger.warning("Trade check follow-up not handled (%s)", type(exc).__name__)
         for cq in callbacks:
             try:
+                if str(cq.get("data") or "").startswith("fc:") and await bot.fc_button_throttled(self.client, cq):
+                    continue
                 await bot.handle_callback(self.db, self.client, cq)
             except Exception as exc:  # noqa: BLE001
                 self.db.rollback()
