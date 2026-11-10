@@ -943,9 +943,84 @@ async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any, now: Any = No
     return data, {**chosen, "kind": "chart", "coin": coin, "number_check": check.out()}
 
 
+SECTION_FOR_TYPE = {"incident": "breaking", "market": "markets", "flows": "markets", "geopolitics": "geopolitics", "regulation": "policy",
+                    "corporate": "business", "controversy": "developing", "macro": "macro", "news": "news"}
+
+
+def display_headline(ev: Any) -> str:
+    """The picture's headline in the outlet's own capitals (owner: a premium paper, not a shouting bot): the post's verified words, each
+    written the way the source title wrote it. When the title doesn't cover the headline, headline case: small words lower, names and
+    other words capitalised, acronyms and figures as they are. Never lower-cases a name it can't check."""
+    head = post_headline(ev)
+    title = re.sub(r"^[^\w$]+", "", getattr(ev, "title", "") or "")
+    cased = {w.lower(): w for w in re.findall(r"[\w$.'’&-]+", title)} if title and not title.isupper() else {}
+    parts = [(w, re.sub(r"^[\"'‘“(]+|[\"'’”),.:;!?]+$", "", w)) for w in head.split()]
+    known = sum(1 for _, c in parts if c and c.lower() in cased)
+    use_title = bool(parts) and known >= 0.7 * sum(1 for _, c in parts if c)
+    words = []
+    for i, (w, core) in enumerate(parts):
+        if not core:
+            words.append(w)
+            continue
+        got = cased.get(core.lower()) if use_title else None
+        if got is None:
+            if not core.isalpha() or (core.isupper() and ((len(core) <= 3 and core.lower() not in COMMON) or core in ACRONYMS)):
+                got = core  # figures, tickers, acronyms (C.E.O., $16B, ETF, SEC)
+            elif core.lower() in SMALL and i:
+                got = core.lower()
+            else:
+                got = core[:1].upper() + core[1:].lower()
+        if i == 0:
+            got = got[:1].upper() + got[1:]
+        words.append(w.replace(core, got, 1))
+    return " ".join(words)
+
+
+ACRONYMS = {"NATO", "OPEC", "NYSE", "FOMC", "NASA", "AMEX", "ECB", "IMF", "USDT", "USDC", "HYPE", "DOGE", "BLS", "CFTC", "FDIC", "OFAC",
+            "SPAC", "NVDA", "TSLA", "AAPL", "MSFT", "GOOG", "AMZN", "META", "MSTR", "COIN", "HOOD", "BRICS", "ASEAN", "OECD", "WTI", "LNG"}
+SMALL = {"a", "an", "the", "of", "to", "in", "on", "at", "for", "as", "by", "and", "or", "but", "vs", "via", "with", "from", "into", "over"}
+COMMON = {"a", "an", "the", "of", "to", "in", "on", "at", "for", "as", "by", "and", "or", "but", "is", "are", "was", "be", "its", "it", "has",
+          "had", "new", "now", "up", "out", "off", "all", "after", "over", "into", "with", "from", "says", "say", "set", "cut", "hit", "top",
+          "big", "war", "gas", "oil", "ban", "low", "high", "rise", "fall", "jump", "sink", "deal", "plan", "bid", "buy", "sell", "will", "may",
+          "can", "not", "no", "hires", "fed", "law", "bank", "day", "key", "end", "two", "six", "ten", "one", "nor", "yet", "own", "than", "more", "less", "why", "how", "what", "who", "his", "her", "he", "she", "they", "we", "you"}
+
+
+def kicker_for(ev: Any, section: str) -> str:
+    from app.newsdesk import brief
+
+    label = getattr(ev, "label", "") or ""
+    if label == brief.BREAKING:
+        return "BREAKING"
+    if label == brief.ALERT:
+        return "ALERT"
+    if label == brief.UPDATE:
+        return "UPDATE"
+    if label == brief.JUST_IN:
+        return "JUST IN"
+    return section.upper()
+
+
+def cinematic_for(ev: Any, background: Any, bg_meta: dict[str, Any], chosen: dict[str, Any], now: Any = None) -> tuple[bytes, dict[str, Any]]:
+    from datetime import datetime, timezone
+
+    from app.newsdesk import editorial_layouts as el
+
+    typ = chosen.get("type") or story_type(ev)
+    section = SECTION_FOR_TYPE.get(typ, "news")
+    when = getattr(ev, "released_at", None) or now or datetime.now(timezone.utc)
+    when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+    layout = "left" if (chosen.get("seed", 0) >> 7) % 2 else "lower"
+    model = str(bg_meta.get("model") or "")
+    short = "Qwen-Image" if "qwen" in model.lower() else "FLUX.2 klein" if "klein" in model.lower() else "Z-Image" if "z-image" in model.lower() else "AI model"
+    data, typeset = el.cinematic(background, headline=display_headline(ev), kicker=kicker_for(ev, section), section=section, sources=[source_name(ev)],
+                                 when=when, layout=layout, illustration=short)
+    return data, {**chosen, "kind": "cinematic", "render_job": bg_meta.get("job"), "scene": bg_meta.get("scene"), "model": model, **typeset}
+
+
 async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None,
-                    now: Any = None) -> tuple[bytes, dict[str, Any]]:
-    """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed)."""
+                    now: Any = None, db: Any = None) -> tuple[bytes, dict[str, Any]]:
+    """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed). With a GPU
+    background ready for the story (app/newsdesk/render_queue), a non-chart story gets the cinematic editorial format."""
     f = ev.facts or {}
     used = used or set()
     chosen = dict(f.get("visual") or {}) or plan(ev, recent)
@@ -953,6 +1028,19 @@ async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = N
     order = [chosen["kind"], *[k for k in chosen.get("options", kinds_for(ev)) if k != chosen["kind"]]]
     if f.get("visual") and chosen.get("kind") != "photo":
         order = [chosen["kind"]]  # already shown on Telegram: the same picture
+    if db is not None and getattr(ev, "id", None) and (chosen.get("kind") == "cinematic" or (not f.get("visual") and chosen.get("kind") != "chart")):
+        from app.newsdesk import render_queue
+
+        try:
+            bg = render_queue.background_for(db, ev.id)
+        except Exception as e:  # noqa: BLE001 - the desk's own visuals instead
+            logger.info("newsdesk visual: no GPU background for %s (%s)", getattr(ev, "id", None), type(e).__name__)
+            bg = None
+        if bg is not None:
+            return cinematic_for(ev, bg[0], bg[1], chosen, now)
+    if chosen.get("kind") == "cinematic":  # its background was dropped (kept 7 days): the story's own plan instead
+        chosen = plan(ev, recent)
+        order = [chosen["kind"], *[k for k in chosen.get("options", kinds_for(ev)) if k != chosen["kind"]]]
     for kind in order:
         if kind == "chart":
             got = await _chart_for(ev, chosen, market, now)

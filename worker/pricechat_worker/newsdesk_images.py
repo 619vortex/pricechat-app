@@ -9,8 +9,10 @@ render the text-free 16:9 background with the chosen open-weight model, upload i
 and is unloaded after PCW_IMAGE_IDLE_UNLOAD seconds idle, so the video jobs can have the GPU. Network errors back off; a failed render
 is reported (the server retries it with a new seed, or the post goes out with the desk's own drawn visual).
 
-Models (all Apache-2.0, commercial use allowed): klein = black-forest-labs/FLUX.2-klein-4B (default), zimage = Tongyi-MAI/Z-Image-Turbo,
-qwen = Qwen/Qwen-Image-2512.
+Models (all Apache-2.0, commercial use allowed): klein = black-forest-labs/FLUX.2-klein-4B, zimage = Tongyi-MAI/Z-Image-Turbo,
+qwen = Qwen/Qwen-Image-2512. Each job names its model (the server: Qwen for scheduled slots, klein for breaking); one model is held on
+the GPU at a time, so switching unloads the other. After every render EasyOCR looks for lettering (the model must never draw text):
+anything legible is re-rendered with a new seed, up to PCW_IMAGE_TRIES times, and the server is told if it never came out clean.
 """
 
 import argparse
@@ -28,7 +30,7 @@ import httpx
 
 log = logging.getLogger("newsdesk_images")
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.0"
+VERSION = "1.1"
 STOP = False
 
 MODELS = {
@@ -109,6 +111,44 @@ class Renderer:
                                 "gpu": torch.cuda.get_device_name(0), "vram_gb": round(torch.cuda.max_memory_allocated() / 1e9, 1)}
 
 
+class TextCheck:
+    """EasyOCR on the GPU: any word-like lettering the image model drew. Small or low-confidence marks (texture) pass."""
+
+    def __init__(self) -> None:
+        self.reader: Any = None
+        self.ok = True
+
+    def load(self) -> bool:
+        if self.reader is None and self.ok:
+            try:
+                import easyocr
+
+                self.reader = easyocr.Reader(["en"], gpu=True, verbose=False)
+            except Exception as exc:  # noqa: BLE001 - no OCR: the server's own checks still run
+                log.warning("text check unavailable: %s", exc)
+                self.ok = False
+        return self.reader is not None
+
+    def lettering(self, data: bytes) -> list[str]:
+        if not self.load():
+            return []
+        import numpy as np
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        found = []
+        for box, text, conf in self.reader.readtext(np.asarray(img)):
+            xs, ys = [p[0] for p in box], [p[1] for p in box]
+            h = max(ys) - min(ys)
+            letters = sum(ch.isalnum() for ch in text)
+            if conf >= 0.5 and letters >= 3 and h >= img.height * 0.02:
+                found.append(f"{text} ({conf:.2f})")
+        return found
+
+    def unload(self) -> None:
+        self.reader = None
+
+
 class Server:
     def __init__(self, base: str, token: str) -> None:
         self.base = base.rstrip("/") + "/api/newsdesk-worker"
@@ -136,9 +176,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="newsdesk_images")
     ap.add_argument("--server", default=os.environ.get("PRICECHAT_SERVER", "https://api.pricechat.live"))
     ap.add_argument("--token", default=os.environ.get("PRICECHAT_WORKER_TOKEN"))
-    ap.add_argument("--model", default=os.environ.get("PCW_IMAGE_MODEL", "klein"), choices=sorted(MODELS))
+    ap.add_argument("--model", default=os.environ.get("PCW_IMAGE_MODEL", "klein"), choices=sorted(MODELS), help="when a job names none")
     ap.add_argument("--idle", type=float, default=5.0)
     ap.add_argument("--unload-after", type=float, default=float(os.environ.get("PCW_IMAGE_IDLE_UNLOAD", "600")))
+    ap.add_argument("--tries", type=int, default=int(os.environ.get("PCW_IMAGE_TRIES", "3")))
+    ap.add_argument("--no-ocr", action="store_true")
     ap.add_argument("--once", action="store_true")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
@@ -154,19 +196,32 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _stop)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _stop)
-    server, renderer = Server(a.server, a.token), Renderer(a.model)
+    server = Server(a.server, a.token)
+    renderers: dict[str, Renderer] = {name: Renderer(name) for name in MODELS}
+    ocr = None if a.no_ocr else TextCheck()
     try:
         import torch
 
         gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
     except Exception:  # noqa: BLE001
         gpu = None
-    info = {"version": VERSION, "model": MODELS[a.model][0], "gpu": gpu}
+    info = {"version": VERSION, "model": MODELS[a.model][0], "models": sorted(MODELS), "gpu": gpu, "ocr": ocr is not None}
     log.info("newsdesk images ready: %s", info)
+
+    def loaded() -> str | None:
+        return next((n for n, r in renderers.items() if r.pipe is not None), None)
+
+    def renderer_for(name: str) -> Renderer:
+        name = name if name in renderers else a.model
+        for other, r in renderers.items():  # one model on the GPU at a time
+            if other != name and r.pipe is not None:
+                r.unload()
+        return renderers[name]
+
     backoff = a.idle
     while not STOP:
         try:
-            job = server.claim({**info, "loaded": renderer.pipe is not None})
+            job = server.claim({**info, "loaded": loaded()})
         except httpx.HTTPError as exc:
             log.warning("server: %s (retrying in %.0fs)", exc, backoff)
             time.sleep(backoff)
@@ -174,15 +229,29 @@ def main(argv: list[str] | None = None) -> int:
             continue
         backoff = a.idle
         if job is None:
-            if renderer.pipe is not None and time.time() - renderer.used_at > a.unload_after:
-                renderer.unload()
+            for r in renderers.values():
+                if r.pipe is not None and time.time() - r.used_at > a.unload_after:
+                    r.unload()
+                    if ocr is not None:
+                        ocr.unload()
             if a.once:
                 return 0
             time.sleep(a.idle)
             continue
-        log.info("job %s (event %s): %s", job["id"], job["event_id"], job.get("scene"))
+        renderer = renderer_for(str(job.get("model") or a.model))
+        log.info("job %s (event %s, %s): %s", job["id"], job["event_id"], renderer.name, job.get("scene"))
         try:
-            data, result = renderer.render(job)
+            seed = int(job.get("seed") or 1)
+            for attempt in range(max(1, a.tries)):
+                data, result = renderer.render({**job, "seed": seed})
+                found = ocr.lettering(data) if ocr is not None else []
+                result = {**result, "ocr": {"checked": ocr is not None and ocr.ok, "found": found[:5]}, "tries": attempt + 1}
+                if not found:
+                    break
+                log.info("job %s: lettering in the picture %s, new seed", job["id"], found[:3])
+                seed = (seed * 1103515245 + 12345) % 2**31 or 1
+            else:
+                raise RuntimeError(f"lettering in every try: {', '.join(found[:3])}")
         except Exception as exc:  # noqa: BLE001 - reported; the server retries or the post uses its own visual
             log.exception("job %s failed", job["id"])
             try:
@@ -203,7 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             log.warning("job %s: upload failed (%s); the lease will expire and it goes back to the queue", job["id"], exc)
         if a.once:
             return 0
-    renderer.unload()
+    for r in renderers.values():
+        r.unload()
     return 0
 
 

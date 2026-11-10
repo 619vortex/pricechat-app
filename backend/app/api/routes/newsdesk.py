@@ -23,7 +23,36 @@ def render_health(db: DbSession) -> dict[str, Any]:
     """The GPU PC's News Desk pictures: worker online, queue, success rate, speed, recent jobs (app/newsdesk/render_queue)."""
     from app.newsdesk import render_queue
 
-    return render_queue.health(db)
+    return {**render_queue.health(db), "enabled": render_queue.enabled(engine.settings_row(db).state or {})}
+
+
+class RenderInput(StrictInput):
+    enabled: bool
+
+
+@router.put("/render")
+def render_switch(payload: RenderInput, db: DbSession) -> dict[str, Any]:
+    """Admin: GPU backgrounds on or off. Off: no jobs are queued and posts use the desk's own drawn visuals at once."""
+    from app.newsdesk import render_queue
+
+    s = engine.settings_row(db)
+    s.state = {**(s.state or {}), "gpu_render": payload.enabled}
+    db.commit()
+    return {**render_queue.health(db), "enabled": payload.enabled}
+
+
+@router.get("/render/jobs/{job_id}/image")
+def render_image(job_id: int, db: DbSession) -> dict[str, Any]:
+    """A finished background (text-free, as the GPU made it), for the Admin panel."""
+    from app.models.newsdesk import NdRenderJob
+
+    job = db.get(NdRenderJob, job_id)
+    if job is None or not job.image:
+        raise HTTPException(404, "No image for this job (not finished, or older than 7 days).")
+    import base64
+
+    return {"id": job.id, "image": "data:image/jpeg;base64," + base64.b64encode(job.image).decode(), "scene": (job.payload or {}).get("scene"),
+            "prompt": (job.payload or {}).get("prompt"), "result": job.result or {}}
 
 
 @router.get("")

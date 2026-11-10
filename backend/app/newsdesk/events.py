@@ -396,8 +396,11 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
             recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=36))))
     db.commit()
     out["updates"] = sum(1 for e in recent if e.kind == "update" and e.status == "candidate")
+    _prerender(db, now, p)
     released = release(db, now, p)
     db.commit()
+    if released is not None:
+        _render_for(db, released, now)
     if released is None and sched(p) == "slots":
         released = await fill_with_recap(db, now, p, quotes, market)
         if released is None:
@@ -405,6 +408,47 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     out["released"] = released.id if released is not None else None
     db.commit()
     return out
+
+
+def _gpu_on(db: Session) -> bool:
+    from app.newsdesk import engine
+
+    return render_queue_enabled(engine.settings_row(db).state or {})
+
+
+def render_queue_enabled(state: dict[str, Any]) -> bool:
+    from app.newsdesk import render_queue
+
+    return render_queue.enabled(state)
+
+
+def _prerender(db: Session, now: datetime, p: Policy) -> None:
+    """The GPU PC paints the likely stories' backgrounds before a slot opens (app/newsdesk/render_queue). Never stops the desk."""
+    try:
+        if sched(p) != "slots" or not _gpu_on(db):
+            return
+        from app.newsdesk import render_queue
+
+        waiting = sorted(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")), key=lambda e: (-e.virality, e.id))
+        waiting = [e for e in waiting if e.virality >= p.regular_bar - 4 and not _blocked(e)]
+        if render_queue.prerender(db, now, next_slot(now, p), waiting):
+            db.commit()
+    except Exception as e:  # noqa: BLE001
+        logger.info("newsdesk events: prerender: %s", type(e).__name__)
+        db.rollback()
+
+
+def _render_for(db: Session, ev: NdEvent, now: datetime) -> None:
+    try:
+        if not _gpu_on(db):
+            return
+        from app.newsdesk import render_queue
+
+        if render_queue.on_release(db, ev, now) is not None:
+            db.commit()
+    except Exception as e:  # noqa: BLE001
+        logger.info("newsdesk events: render on release: %s", type(e).__name__)
+        db.rollback()
 
 
 def important(held: list[chaos.Verdict], rows: list[NdStory], now: datetime) -> list[chaos.Verdict]:

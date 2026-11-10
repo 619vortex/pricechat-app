@@ -27,7 +27,7 @@ from app.newsdesk import checks, sources
 logger = logging.getLogger(__name__)
 
 CRYPTO = (("BTC", "Bitcoin", "₿", "BTC-USD"), ("ETH", "Ethereum", "🔷", "ETH-USD"), ("HYPE", "HYPE", "🟢", None), ("SOL", "Solana", "🟣", "SOL-USD"))
-MACRO = (("^GSPC", "S&P 500", "📊"), ("^IXIC", "Nasdaq", "📊"), ("GC=F", "Gold", "🥇"), ("CL=F", "Oil (WTI)", "🛢️"))
+MACRO = (("^GSPC", "S&P 500", "📊"), ("^IXIC", "Nasdaq", "📊"), ("GC=F", "Gold", "🥇"), ("SI=F", "Silver", "🥈"), ("CL=F", "Oil (WTI)", "🛢️"))
 MIN_ASSETS = 3
 STORY_HOURS = 4
 STORY_MIN = 40  # a story named under the prices must be worth a line: a priority subject scoring at least this
@@ -40,6 +40,31 @@ def _price(v: float) -> str:
 
 def _pct(v: float) -> str:
     return f"{'+' if v >= 0 else '-'}{abs(v):.1f}%"
+
+
+# a second, independent price for the macro movers (owner: gold and silver had only Yahoo's own figures): Hyperliquid's trade.xyz markets
+XYZ = {"Gold": "xyz:GOLD", "Silver": "xyz:SILVER", "Oil (WTI)": "xyz:CL", "Brent": "xyz:BRENTOIL"}
+
+
+async def xyz_change(name: str, transport: Any = None) -> float | None:
+    """24-hour change of the trade.xyz market for this macro name (mark vs the price 24 hours ago), or None."""
+    coin = XYZ.get(name)
+    if not coin:
+        return None
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=8) as c:
+            r = await c.post("https://api.hyperliquid.xyz/info", json={"type": "metaAndAssetCtxs", "dex": "xyz"})
+            r.raise_for_status()
+            meta, ctxs = r.json()
+        for a, x in zip(meta["universe"], ctxs):
+            if a.get("name") == coin:
+                mark, prev = float(x.get("markPx") or 0), float(x.get("prevDayPx") or 0)
+                return (mark / prev - 1) * 100 if mark > 0 and prev > 0 else None
+    except Exception as e:  # noqa: BLE001 - no second source: the gate falls back to the first source's own summary
+        logger.info("newsdesk recap: trade.xyz %s: %s", coin, type(e).__name__)
+    return None
 
 
 async def _hl_markets(market: Any) -> dict[str, Any]:
@@ -241,6 +266,10 @@ async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local
     yq = quotes.get(yahoo) if yahoo else None
     second = yq.change("24h", now) if yq is not None else None
     second_name = "Yahoo Finance" if second is not None else mover["source"]
+    if second is None and not coin:
+        second = await xyz_change(mover["name"])
+        if second is not None:
+            second_name = "Hyperliquid (trade.xyz)"
     if second is None:
         second = mover["pct"]  # the source's own summary figure, from a different call than the series
     head = visual.move_headline(mover["name"], series)

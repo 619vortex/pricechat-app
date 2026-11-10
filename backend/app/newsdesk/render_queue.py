@@ -27,7 +27,7 @@ from app.db.base import utcnow
 from app.models.brand_manager import BmWorker
 from app.models.newsdesk import NdEvent, NdRenderJob
 
-LEASE = timedelta(minutes=4)
+LEASE = timedelta(minutes=6)  # Qwen-Image loads (~40 s) and renders (~60 s) inside one lease
 KEEP = timedelta(days=7)  # finished images kept this long (Admin previews, repeat checks), then dropped from the row
 ONLINE = timedelta(minutes=3)
 SIZE = (1536, 864)  # 16:9, multiple of 16
@@ -78,6 +78,87 @@ LIGHT = ["golden hour light", "blue hour light", "overcast soft light", "hard si
 GRADE = ["muted teal and amber grade", "cool steel grade", "warm low-contrast grade", "deep shadows, crisp highlights", "desaturated natural grade"]
 
 
+# which model renders what (benchmark on the RTX 5090, 2026-11-10): Qwen-Image-2512 is the best picture at ~57 s, so it paints the
+# scheduled slots, rendered ahead of time; FLUX.2 klein 4B takes ~2 s, so breaking news never waits on Qwen.
+MODEL_SLOT, MODEL_BREAKING = "qwen", "klein"
+PRERENDER_BEFORE = timedelta(minutes=25)  # a slot's likely stories get their backgrounds this long before it opens
+PRERENDER_TOP = 3
+MAX_JOBS_PER_EVENT = 3  # first try plus two fresh art directions  # the best few waiting candidates
+WAIT_SLOT = timedelta(minutes=6)  # the longest a released post waits for its background, then it goes with the desk's own visual
+WAIT_BREAKING = timedelta(seconds=150)
+FORMATS_WITH_BACKGROUND = ("cinematic",)
+
+
+def enabled(state: dict[str, Any] | None) -> bool:
+    """Admin switch: News Desk state.gpu_render (on unless turned off)."""
+    return (state or {}).get("gpu_render") is not False
+
+
+def online(db: Session, now: datetime) -> bool:
+    return any(w.last_seen_at and now - _aware(w.last_seen_at) < ONLINE and (w.info or {}).get("newsdesk")
+               for w in db.scalars(select(BmWorker).where(BmWorker.enabled.is_(True))))
+
+
+def _aware(t: datetime) -> datetime:
+    from datetime import timezone
+
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def wants_background(ev: Any) -> bool:
+    """Charts and market checks are their numbers; every other story may carry a painted background."""
+    return getattr(ev, "kind", "") not in ("recap", "market") and len((getattr(ev, "facts", None) or {}).get("points") or []) < 10
+
+
+def _breaking(ev: Any) -> bool:
+    from app.newsdesk import brief
+
+    return getattr(ev, "slot", "") == "extra" or getattr(ev, "label", "") in (brief.BREAKING, brief.ALERT)
+
+
+def prerender(db: Session, now: datetime, upcoming: datetime | None, candidates: list[NdEvent]) -> int:
+    """Before a slot opens, the likely stories get Qwen backgrounds, so the post doesn't wait at release."""
+    if upcoming is None or not timedelta(0) <= _aware(upcoming) - now <= PRERENDER_BEFORE or not online(db, now):
+        return 0
+    n = 0
+    for ev in [e for e in candidates if wants_background(e)][:PRERENDER_TOP]:
+        if db.scalar(select(NdRenderJob.id).where(NdRenderJob.event_id == ev.id).limit(1)) is None:
+            enqueue(db, ev, now, priority=0, deadline=_aware(upcoming) + WAIT_SLOT, model=MODEL_SLOT)
+            n += 1
+    return n
+
+
+def on_release(db: Session, ev: NdEvent, now: datetime) -> NdRenderJob | None:
+    """A released story with no background coming: one now (klein for breaking, Qwen for a slot), if the PC is there to paint it."""
+    if not wants_background(ev) or not online(db, now):
+        return None
+    jobs = list(db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id)))
+    if any(j.status == "done" and j.image for j in jobs):
+        return None
+    breaking = _breaking(ev)
+    wait = WAIT_BREAKING if breaking else WAIT_SLOT
+    live = [j for j in jobs if j.status in ("queued", "claimed")]
+    if live:  # rendering ahead already: it may take up to the post's wait from now
+        for j in live:
+            j.deadline = max(_aware(j.deadline), now + wait) if j.deadline else now + wait
+            if breaking and j.status == "queued" and (j.payload or {}).get("model") != MODEL_BREAKING:
+                j.payload, j.priority = {**(j.payload or {}), "model": MODEL_BREAKING}, 10
+        return live[0]
+    return enqueue(db, ev, now, priority=10 if breaking else 5, deadline=now + wait, model=MODEL_BREAKING if breaking else MODEL_SLOT, attempt=len(jobs))
+
+
+def waiting(db: Session, ev: Any, now: datetime) -> bool:
+    """True while this released post should hold for its background: a job is queued or rendering, inside its deadline, the PC online."""
+    if not wants_background(ev) or (getattr(ev, "facts", None) or {}).get("visual"):
+        return False
+    live = list(db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id, NdRenderJob.status.in_(("queued", "claimed")))))
+    if not live:
+        return False
+    if not online(db, now):
+        return False
+    return any(j.deadline is None or _aware(j.deadline) > now for j in live)
+
+
 @dataclass
 class Direction:
     scene_key: str
@@ -118,7 +199,8 @@ def _recent_done(db: Session, n: int = 30) -> list[NdRenderJob]:
     return list(db.scalars(select(NdRenderJob).where(NdRenderJob.status == "done").order_by(NdRenderJob.id.desc()).limit(n)))
 
 
-def enqueue(db: Session, ev: NdEvent, now: datetime, *, priority: int = 0, deadline: datetime | None = None, attempt: int = 0) -> NdRenderJob:
+def enqueue(db: Session, ev: NdEvent, now: datetime, *, priority: int = 0, deadline: datetime | None = None, attempt: int = 0,
+            model: str = MODEL_SLOT) -> NdRenderJob:
     recent = [str((j.payload or {}).get("scene") or "") for j in _recent_done(db, 12)]
     d = direction(ev, recent, attempt)
     key = f"nd:{ev.id}:{attempt}"
@@ -127,7 +209,7 @@ def enqueue(db: Session, ev: NdEvent, now: datetime, *, priority: int = 0, deadl
         return job
     job = NdRenderJob(event_id=ev.id, idempotency_key=key, status="queued", priority=priority, attempts=0, max_attempts=3, run_after=now,
                       deadline=deadline, result={},
-                      payload={"prompt": d.prompt, "negative": NEGATIVE, "width": SIZE[0], "height": SIZE[1], "seed": d.seed,
+                      payload={"prompt": d.prompt, "negative": NEGATIVE, "width": SIZE[0], "height": SIZE[1], "seed": d.seed, "model": model,
                                "scene_key": d.scene_key, "scene": d.scene, "light": d.light, "grade": d.grade})
     db.add(job)
     db.flush()
@@ -136,7 +218,7 @@ def enqueue(db: Session, ev: NdEvent, now: datetime, *, priority: int = 0, deadl
 
 def expire(db: Session, now: datetime) -> int:
     n = 0
-    for job in db.scalars(select(NdRenderJob).where(NdRenderJob.status == "claimed", NdRenderJob.lease_until < now)):
+    for job in db.scalars(select(NdRenderJob).where(NdRenderJob.status == "claimed", NdRenderJob.lease_until < now)):  # noqa: SIM118
         if job.attempts >= job.max_attempts:
             job.status, job.error, job.finished_at = "failed", "the GPU worker stopped responding too many times", now
         else:
@@ -231,14 +313,15 @@ def complete(db: Session, job_id: int, worker: BmWorker, data: bytes, result: di
         raise RenderError(400, f"Not a readable image: {type(e).__name__}") from e
     hashes = [int(str((j.result or {}).get("quality", {}).get("dhash") or "0"), 16) for j in _recent_done(db) if j.id != job.id]
     problems, measured = quality(img, [x for x in hashes if x])
-    info = {k: v for k, v in (result or {}).items() if k in ("model", "seconds", "steps", "gpu", "vram_gb", "seed")}
+    info = {k: v for k, v in (result or {}).items() if k in ("model", "seconds", "steps", "gpu", "vram_gb", "seed", "ocr", "tries")}
     if problems:
-        retry = job.attempts < job.max_attempts and (job.deadline is None or job.deadline > now)
+        tries = len(list(db.scalars(select(NdRenderJob.id).where(NdRenderJob.event_id == job.event_id))))
+        retry = tries < MAX_JOBS_PER_EVENT and (job.deadline is None or _aware(job.deadline) > now)
         job.result = {**info, "quality": measured, "rejected": problems}
         job.status, job.error, job.finished_at = "failed", "rejected: " + "; ".join(problems), now
         if retry:  # a fresh art direction and seed, once more
             nxt = enqueue(db, db.get(NdEvent, job.event_id) or NdEvent(id=job.event_id, title="", headline=""), now, priority=job.priority,
-                          deadline=job.deadline, attempt=job.attempts)
+                          deadline=job.deadline, attempt=tries, model=(job.payload or {}).get("model") or MODEL_SLOT)
             db.commit()
             return {"ok": False, "rejected": problems, "retry_job": nxt.id}
         db.commit()
@@ -293,6 +376,7 @@ def health(db: Session, now: datetime | None = None) -> dict[str, Any]:
         "avg_seconds": round(sum(secs) / len(secs), 1) if secs else None,
         "p95_seconds": secs[min(len(secs) - 1, int(len(secs) * 0.95))] if secs else None,
         "cost_usd": 0.0,  # local GPU: electricity only
+        "models": {"slot": MODEL_SLOT, "breaking": MODEL_BREAKING},
         "recent": [{"id": j.id, "event": j.event_id, "status": j.status, "scene": (j.payload or {}).get("scene"), "model": (j.result or {}).get("model"),
                     "seconds": (j.result or {}).get("seconds"), "quality": (j.result or {}).get("quality"), "error": j.error,
                     "at": (j.finished_at or j.created_at).isoformat() if (j.finished_at or j.created_at) else None}

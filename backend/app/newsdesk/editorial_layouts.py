@@ -202,6 +202,12 @@ def cinematic(background: Image.Image, *, headline: str, deck: str = "", kicker:
     header(img, THEMES["ink"], section, when, accent, on_photo=True)
     width = 980 if layout == "left" else 1240
     font, lines = fit(headline, width, (84, 78, 72, 66, 60, 56), 3)
+    for narrower in (0.92, 0.85, 0.78):  # no lone word on the last line: a slightly narrower measure, same size, same line count
+        if len(lines) < 2 or len(lines[-1].split()) > 1:
+            break
+        again = wrap(headline, font, int(width * narrower))
+        if len(again) == len(lines):
+            lines = again
     lh = int(font.size * 1.12)
     deck_f = sans(30, "Regular")
     deck_lines = wrap(deck, deck_f, width)[:2] if deck else []

@@ -154,7 +154,7 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
     now = now or utcnow()
     f = ev.facts or {}
     if FORMAT == "visual":
-        return await compose_visual(ev, s, now, transport)
+        return await compose_visual(ev, s, now, transport, db=db)
     if ev.kind == "recap":  # the market check is written and checked when it's made (app/newsdesk/recap): text only, no card
         if not f.get("telegram_html"):
             return None, "the market check has no Telegram text"
@@ -190,7 +190,8 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
     return None, result.reason if result else "nothing to say"
 
 
-async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetime, transport: Any = None, market: Any = None) -> tuple[dict[str, Any] | None, str]:
+async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetime, transport: Any = None, market: Any = None,
+                         db: Session | None = None) -> tuple[dict[str, Any] | None, str]:
     """The owner's format: the picture (app/newsdesk/visual), the headline in bold beneath it, the source in small italics. Nothing else.
     The headline is the event's own verified one; the desk's checks run on exactly what is posted."""
     from app.newsdesk import visual
@@ -206,7 +207,7 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     used = {u for u, _ in ((s.state or {}).get("used_photos") or []) if u} if s is not None else set()
     recent = list((s.state or {}).get("recent_visuals") or []) if s is not None else []
     try:
-        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now)
+        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now, db=db)
     except Exception as e:  # noqa: BLE001 - no picture, no post: the format is the picture
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"
@@ -401,7 +402,11 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
         logger.warning("tgnews: can't post: %s", problem)
         return done(skipped=problem)
     out["bot"] = rights["bot"]
+    from app.newsdesk import render_queue
+
     for ev in due[:3]:
+        if render_queue.waiting(db, ev, now):  # its background is being painted on the GPU PC: a few minutes at most
+            return done(skipped=f"event {ev.id}: waiting for its picture from the GPU PC")
         message, reason = await compose(settings, ev, writer_transport, db=db, s=s, now=now)
         if message is None:  # remembered, so it isn't tried again every run
             db.add(NdTelegramPost(story_link=f"event:{ev.id}", title=ev.title[:300], headline=ev.headline[:200], text="", source=((ev.sources or [{}])[0].get("name") or "Price Chat")[:60],

@@ -110,7 +110,7 @@ async def preview(db: Session, event_id: int, now: datetime) -> tuple[bytes, dic
     state = (tg.state or {}) if tg is not None else {}
     used = {u for u, _ in (state.get("used_photos") or []) if u}
     try:
-        got = await visual.for_event(copy, used=used, recent=list(state.get("recent_visuals") or []), now=now)
+        got = await visual.for_event(copy, used=used, recent=list(state.get("recent_visuals") or []), now=now, db=db)
     except visual.NumbersRefused as e:
         got = visual.graphic(visual.post_headline(copy), palette="crimson", layout="lower", seed=1, source=f"NOT POSTED: numbers check failed: {str(e)[:80]}")
     if len(_images) > 40:

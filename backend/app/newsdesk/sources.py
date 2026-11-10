@@ -19,7 +19,8 @@ from app.brand_manager.discovery import parse_feed
 
 logger = logging.getLogger(__name__)
 
-UA = {"User-Agent": "Mozilla/5.0 (compatible; PriceChatNewsDesk/1.0; +https://pricechat.live)"}
+UA = {"User-Agent": "Mozilla/5.0 (compatible; PriceChatNewsDesk/1.0; +https://pricechat.live)",
+      "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5"}  # Euronews: 406 from Railway without it
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 CATEGORIES = ("crypto", "stocks", "commodities", "politics", "economics", "viral")
 # tier: 0 official, 1 major outlet, 2 specialist. category None: decided from the headline's words.
