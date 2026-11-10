@@ -204,12 +204,16 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     if not result.ok:
         return None, result.reason
     used = {u for u, _ in ((s.state or {}).get("used_photos") or []) if u} if s is not None else set()
+    recent = list((s.state or {}).get("recent_visuals") or []) if s is not None else []
     try:
-        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market)
+        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent)
     except Exception as e:  # noqa: BLE001 - no picture, no post: the format is the picture
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"
     ev.facts = {**f, "visual": meta}
+    if s is not None:  # what the picture looked like, so the next ones look different
+        seen = {k: meta.get(k) for k in ("kind", "motif", "palette", "layout", "tone")}
+        s.state = {**(s.state or {}), "recent_visuals": [*recent, {**seen, "event": ev.id, "at": now.isoformat()}][-visual.RECENT * 2:]}
     if s is not None and meta.get("kind") == "photo":
         keep = [(u, at) for u, at in ((s.state or {}).get("used_photos") or []) if at >= (now - timedelta(days=visual.USED_DAYS)).isoformat()]
         s.state = {**(s.state or {}), "used_photos": [*keep, (meta["url"], now.isoformat())][-200:]}

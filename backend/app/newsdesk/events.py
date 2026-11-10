@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.newsdesk import NdEvent, NdStory
-from app.newsdesk import brief, chaos, checks, engagement, headline, moves, sources, virality
+from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, moves, sources, virality
 
 logger = logging.getLogger(__name__)
 
@@ -77,15 +77,28 @@ X_AFTER_TELEGRAM = timedelta(hours=1)  # how long X may still post an event afte
 TG_WAITING = ("pending", "queued")  # "uncertain": Telegram may well have posted it, so X follows
 POLICY = Policy()
 DUBAI = timezone(timedelta(hours=4), "Dubai")
-PRIORITY_TOPICS = {"macro", "hack", "liquidations", "etf", "failure"}
+PRIORITY_TOPICS = {"macro", "hack", "liquidations", "etf", "failure", "geopolitics", "flows"}
 PRIORITY_CATEGORIES = {"economics", "commodities", "politics"}
 PRIORITY_WORDS = re.compile(r"\b(bitcoin|btc|ethereum|ether|eth|hyperliquid|hype|fed|federal reserve|rate (?:cut|hike)|inflation|cpi|jobs report|tariffs?|sanctions?|"
                             r"war|missile|ceasefire|opec|oil|gold|treasur(?:y|ies)|recession)\b", re.I)
 STRONG = ("official", "two outlets", "price data", "exchange data")
+# slots are four hours apart, so a story can wait up to four hours for one while freshness fades its score. For the bar (never the ranking),
+# a news story is judged by its best score before freshness (facts["peak"]) until it has waited one full slot interval: a strong story at
+# 22:10 is still strong at 00:00, and one that more outlets picked up since counts them. Older than that, it had its slot: freshness counts.
+# Freshness always decides between candidates.
+
+
+def held_score(ev: NdEvent, now: datetime, p: Policy) -> float:
+    if ev.kind == "market":
+        return float(ev.virality)
+    interval = 24 * 60 / max(1, len(p.slot_hours))
+    peak = float((ev.facts or {}).get("peak") or 0)
+    return max(float(ev.virality), peak) if _age(ev, now) <= interval else float(ev.virality)
 RELEASED = "released"
 FAMILIES = ({"hack", "scam", "failure"}, {"controversy"})  # Bybaz hacked, then Bybaz halts withdrawals: one story
 ESCALATE = re.compile(r"\b(lazarus|north korea\w*|behind the|blamed?|attribut\w+|(?:reopen|resum)\w* withdrawals|outflows|refund\w*|arrest\w*|charged|indict\w*|bankrupt\w*|insolven\w*|(?:halt|paus|suspend|freez)\w* (?:all )?withdrawals|seiz\w+|frozen|confirms?|confirmed|"
-                      r"recover\w*|returns? (?:the )?funds|delist\w*|sentenc\w*|guilty|shut(?:s|ting)? down|collaps\w*|liquidat\w+|depeg\w*|steps? down|stepped down|resign\w*|ousted|fired|launder\w*)\b", re.I)
+                      r"recover\w*|returns? (?:the )?funds|delist\w*|sentenc\w*|guilty|shut(?:s|ting)? down|collaps\w*|liquidat\w+|depeg\w*|steps? down|stepped down|resign\w*|ousted|fired|launder\w*|"
+                      r"fbi|doj|justice department|criminal)\b", re.I)
 
 
 NUMBERS = ("market_bar", "regular_per_day", "regular_bar", "opening_bar", "extra_bar", "extra_per_day", "ceiling", "window_hours", "topic_max", "updates_per_story")
@@ -222,15 +235,29 @@ def score_story(v: chaos.Verdict, quotes: dict[str, sources.Quote], now: datetim
                 spark = moves.spark(q, published)
             else:
                 measured = None
-    s = virality.news(title=story.title or "", summary=story.summary or "", evidence=v.evidence, lead_topic=b.topic, outlets=len(outlets), outlets_3h=len(near),
-                      age_minutes=max(0.0, (now - published).total_seconds() / 60) if published else 999, alleged=b.alleged, tickers=b.tickers,
-                      measured_ratio=measured[2] if measured else 0.0, engagement=_engagement_points(adj, b.topic))
+    age_min = max(0.0, (now - published).total_seconds() / 60) if published else 999
+    if v.importance is not None:
+        s = editorial.importance_score(v.importance, evidence=v.evidence, outlets=len(outlets), outlets_3h=len(near), age_minutes=age_min, title=story.title or "")
+    else:
+        s = virality.news(title=story.title or "", summary=story.summary or "", evidence=v.evidence, lead_topic=b.topic, outlets=len(outlets), outlets_3h=len(near),
+                          age_minutes=age_min, alleged=b.alleged, tickers=b.tickers, measured_ratio=measured[2] if measured else 0.0, engagement=_engagement_points(adj, b.topic))
     head = headline.news(story.title or "", tag=tag)
     told = " ".join(f"{x.title} {x.summary or ''}" for x in [story, *v.others]) + f" {v.price_check} {tag}"
     assets = [claim.asset] if claim is not None and claim.at < lead else []  # the asset the headline leads with: "Bitcoin ... as Wall Street sells off" is Bitcoin's
     facts = {"tickers": b.tickers, "flag": b.flag, "alleged": b.alleged, "falling": b.falling, "risk": b.topic in ("hack", "scam", "failure"), "price_check": v.price_check,
              "price_tag": tag, "told": told[:4000], "assets": assets, "stat": _stat(story.title or "", tag, measured), "spark": spark,
              "published_at": published.isoformat() if published else None, "story_ids": [story.id, *[o.id for o in v.others]], "outlets": sorted({story.source, *outlets})}
+    if v.importance is not None:
+        facts["importance"] = {"kind": v.importance.kind, "why": v.importance.why}
+    if measured and claim is not None and measured[2] >= 1 and published is not None:
+        # the story's own move, past its alert line by our prices: the picture can be the real chart of it
+        q = quotes[claim.symbol]
+        cut = published.timestamp()
+        pts = [(int(t), float(c)) for t, c, _ in q.bars if cut - 86400 <= t <= cut and c > 0]
+        if len(pts) >= 10:
+            step = max(1, len(pts) // 120)
+            facts.update({"points": [list(x) for x in pts[::step]], "pct": round(measured[1], 2), "window": measured[0], "coin": claim.asset,
+                          "name": {"OIL": "Brent crude" if claim.symbol == "BZ=F" else "WTI crude"}.get(claim.asset, claim.asset), "data_source": "Yahoo Finance"})
     return s, facts, head
 
 
@@ -297,8 +324,8 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     _expire(db, recent, now)
     # stories
     rows = list(db.scalars(select(NdStory).where(NdStory.created_at >= now - timedelta(hours=36))))
-    ready, _ = chaos.candidates(rows, quotes, now, max_age=p.news_ttl, categories=categories)
-    for v in ready:
+    ready, held = chaos.candidates(rows, quotes, now, max_age=p.news_ttl, categories=categories)
+    for v in [*ready, *important(held, rows, now)]:
         out["stories"] += _offer_story(db, v, recent, quotes, now, adj, p)
     # market moves
     enabled = categories or {}
@@ -321,6 +348,28 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
         released = await fill_with_recap(db, now, p, quotes, market)
     out["released"] = released.id if released is not None else None
     db.commit()
+    return out
+
+
+def important(held: list[chaos.Verdict], rows: list[NdStory], now: datetime) -> list[chaos.Verdict]:
+    """Stories the chaos filter turned away only for not being market chaos, that still matter (app/newsdesk/editorial.significance):
+    geopolitics, regulation milestones, mega-cap corporate shocks, big institutions on crypto rails, large ETF flows. Verified only by an
+    official source or a second outlet; a single outlet's word is not enough here."""
+    out = []
+    for v in held:
+        if v.status not in ("rejected", "held") or not editorial.admissible(v.why):
+            continue
+        sig = editorial.significance(v.story.title or "", v.story.summary or "")
+        if sig is None:
+            continue
+        others = editorial.corroborating(v.story, rows)
+        evidence = "official" if v.story.tier == 0 else "two outlets" if {o.source for o in others} - {v.story.source} else ""
+        if not evidence:
+            continue
+        b = brief.assess(v.story, others, now)
+        b.topic, b.falling = sig.kind, False
+        b = brief.relabel(b, strong=True)
+        out.append(chaos.Verdict(v.story, "post", "", evidence, b, others, "", importance=sig))
     return out
 
 
@@ -348,6 +397,8 @@ def _offer_story(db: Session, v: chaos.Verdict, recent: list[NdEvent], quotes: d
     match = None
     for ev in sorted(recent, key=lambda e: e.id or 0):
         horizon = timedelta(hours=72) if ev.status == RELEASED else timedelta(hours=24)  # a story out there can develop for three days
+        if ev.status in ("missed", "rejected"):
+            continue  # an earlier telling that never went out (it expired waiting) mustn't swallow the story's later, fresher tellings
         if ev.kind in ("news", "update") and _same(ev, story, {str(x.get("url")) for x in ev.sources or []}) and _utc(ev.created_at, now) >= now - horizon:
             match = ev if ev.parent_id is None else (db.get(NdEvent, ev.parent_id) or ev)  # an update's story is its original's
             break
@@ -407,7 +458,10 @@ def _fill(ev: NdEvent, v: chaos.Verdict, score: virality.Score, facts: dict[str,
     b = v.brief
     ev.title, ev.headline, ev.summary = (v.story.title or "")[:300], head[:300], _summary(v)
     ev.topic, ev.evidence, ev.category = b.topic, v.evidence, v.story.category or "viral"
-    ev.virality, ev.parts, ev.facts, ev.sources = float(score.total), score.parts, facts, _sources(v)
+    # what the story is worth before freshness fades it, the best yet: the slot bar is judged on this (slots are 4 h apart; news_ttl caps age)
+    fresh = float((score.parts or {}).get("freshness") or 1.0)
+    peak = max(float((ev.facts or {}).get("peak") or 0), round(float(score.total) / max(fresh, 0.55)))
+    ev.virality, ev.parts, ev.facts, ev.sources = float(score.total), score.parts, {**facts, "peak": peak}, _sources(v)
 
 
 async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy, second_opinion: Any, market: Any) -> int:
@@ -530,9 +584,13 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
     into = (now - window).total_seconds() / (p.window_hours * 3600) if window is not None else 1.0
     bar = round(p.opening_bar - (p.opening_bar - p.regular_bar) * min(1.0, into / 0.75))
     last_regular = max((_utc(e.released_at, now) for e in regular), default=None)
+    covered = editorial.coverage(db, now)
     for ev in waiting:
         f = ev.facts or {}
         age = _age(ev, now)
+        if _repeat(ev, covered, now):
+            continue
+        f = ev.facts or {}
         if ev.kind == "update":
             parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
             if parent is None or parent.status != RELEASED:
@@ -586,6 +644,7 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
             continue
         ev.status, ev.slot, ev.released_at, ev.label = RELEASED, slot, now, label
+        editorial.stamp(ev, now)
         ev.why = ("extraordinary: " if slot == "extra" else "") + f"scores {ev.virality:g} ({virality.describe(ev.parts or {})})"
         ev.x_status = ev.tg_status = "pending"
         logger.info("newsdesk events: released #%s [%s %s %s]: %s", ev.id, slot, int(ev.virality), ev.evidence, ev.headline[:100])
@@ -604,11 +663,15 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         return None
 
     def rank(e: NdEvent) -> tuple[float, int]:
-        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0)), e.id)
+        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e)), e.id)
 
+    covered = editorial.coverage(db, now)
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
         age = _age(ev, now)
+        if _repeat(ev, covered, now):
+            continue
+        f = ev.facts or {}
         if ev.kind == "update":
             parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
             if parent is None or parent.status != RELEASED:
@@ -618,12 +681,18 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         if ev.kind != "update" and assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
             ev.why = "this asset's move went out within six hours"
             continue
-        if ev.virality < p.regular_bar:
+        standing = held_score(ev, now, p)
+        if standing < p.regular_bar:
             ev.why = f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
             continue
         if ev.kind == "market" and ev.virality < p.market_bar:
             ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot"
             continue
+        if ev.kind == "market":
+            big, detail = editorial.exceptional(ev)
+            if not big:
+                ev.why = f"a routine market move, not exceptional: {detail}"
+                continue
         topical = sum(1 for e in out if e.topic == ev.topic and e.kind != "recap" and now - _utc(e.released_at, now) < p.topic_window)
         if topical >= p.topic_max:
             ev.why = f"{topical} {ev.topic or 'other'} posts on this subject in 12 hours"
@@ -636,11 +705,27 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             continue
         ev.status, ev.slot, ev.released_at, ev.label = RELEASED, "slot", now, label
         ev.facts = {**f, "slot_at": slot.isoformat()}
-        ev.why = f"the {slot_label(slot)} Dubai slot: scores {ev.virality:g} ({virality.describe(ev.parts or {})})" + (", a priority subject" if priority(ev, p) else "")
+        editorial.stamp(ev, now)
+        best = float(f.get("peak") or 0)
+        ev.why = (f"the {slot_label(slot)} Dubai slot: scores {ev.virality:g}" + (f" (best {best:g})" if best > ev.virality else "")
+                  + f" ({virality.describe(ev.parts or {})})" + (", a priority subject" if priority(ev, p) else "")
+                  + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
         ev.x_status = ev.tg_status = "pending"
         logger.info("newsdesk events: released #%s for the %s Dubai slot [%s %s]: %s", ev.id, slot_label(slot), int(ev.virality), ev.evidence, ev.headline[:100])
         return ev
     return None
+
+
+def _repeat(ev: NdEvent, covered: list[editorial.Covered], now: datetime) -> bool:
+    """The same story as one already out, with nothing materially new: folded away for good (status superseded), with the reason."""
+    material = ev.kind == "update" and editorial.material_development(str((ev.facts or {}).get("development") or ""))
+    v = editorial.judge(editorial.signature(ev), covered, now, is_update=material)
+    if v.ok:
+        if v.reason:
+            ev.facts = {**(ev.facts or {}), "new_because": v.reason}
+        return False
+    ev.status, ev.why = "superseded", v.reason
+    return True
 
 
 async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[str, sources.Quote], market: Any = None) -> NdEvent | None:
@@ -662,6 +747,7 @@ async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[st
     if ev is None:
         return None
     ev.status, ev.slot, ev.released_at = RELEASED, "slot", now
+    editorial.stamp(ev, now)
     ev.why = f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so the biggest real market move" if recap.VISUAL else f"the {slot_label(slot)} Dubai slot: no story cleared the bar of {p.regular_bar}, so a market brief from measured data"
     ev.x_status = ev.tg_status = "pending"
     if not _insert(db, [], ev):

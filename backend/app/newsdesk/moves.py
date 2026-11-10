@@ -29,6 +29,8 @@ EXTRA_MOVERS: list[dict[str, Any]] = [
     {"symbol": "AMZN", "name": "Amazon", "group": "stock", "category": "stocks", "emoji": "📈"},
     {"symbol": "MSFT", "name": "Microsoft", "group": "stock", "category": "stocks", "emoji": "📈"},
     {"symbol": "GOOGL", "name": "Alphabet", "group": "stock", "category": "stocks", "emoji": "📈"},
+    # Brent: oil stories are usually told in Brent ("Brent crashes 7% on Iran peace hopes"); without its prices the claim can't be checked
+    {"symbol": "BZ=F", "name": "Oil (Brent)", "group": "commodity", "category": "commodities", "emoji": "🛢️"},
 ]
 KEYS = {"BTC-USD": "BTC", "ETH-USD": "ETH", "SOL-USD": "SOL", "XRP-USD": "XRP", "^GSPC": "SPX", "^IXIC": "IXIC", "^DJI": "DJI", "GC=F": "GOLD", "SI=F": "SILVER",
         "CL=F": "OIL", "HG=F": "COPPER", "BZ=F": "BRENT"}

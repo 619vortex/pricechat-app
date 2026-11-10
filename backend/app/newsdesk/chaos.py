@@ -48,11 +48,12 @@ ASSETS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("COIN", "COIN", re.compile(r"\bcoinbase(?:'s)? (?:shares|stock)\b", re.I)), ("MSTR", "MSTR", re.compile(r"\b(microstrategy|strategy(?:'s)? (?:shares|stock)|mstr)\b", re.I)),
     ("META", "META", re.compile(r"\bMeta\b")), ("AMZN", "AMZN", re.compile(r"\bamazon\b", re.I)), ("MSFT", "MSFT", re.compile(r"\bmicrosoft\b", re.I)),
     ("GOOGL", "GOOGL", re.compile(r"\b(alphabet|google)\b", re.I)),
-    ("GOLD", "GC=F", re.compile(r"\bgold\b", re.I)), ("SILVER", "SI=F", re.compile(r"\bsilver\b", re.I)), ("OIL", "CL=F", re.compile(r"\b(oil|crude|wti)\b", re.I)),
+    ("GOLD", "GC=F", re.compile(r"\bgold\b", re.I)), ("SILVER", "SI=F", re.compile(r"\bsilver\b", re.I)),
+    ("OIL", "BZ=F", re.compile(r"\bbrent\b", re.I)), ("OIL", "CL=F", re.compile(r"\b(oil|crude|wti)\b", re.I)),
     # the market as a whole, checked against its index
     ("IXIC", "^IXIC", re.compile(r"\b(tech|ai) stocks\b", re.I)), ("SPX", "^GSPC", re.compile(r"\b(us stocks|wall street|stock market|stocks)\b", re.I)),
 )
-GROUP = {w["symbol"]: w.get("group", "stock") for w in sources.DEFAULT_WATCHLIST}
+GROUP = {w["symbol"]: w.get("group", "stock") for w in sources.DEFAULT_WATCHLIST} | {"BZ=F": "commodity"}
 SYMBOLS = sorted({symbol for _, symbol, _ in ASSETS})
 
 
@@ -75,6 +76,7 @@ class Verdict:
     brief: Brief | None = None
     others: list[Any] = field(default_factory=list)
     price_check: str = ""
+    importance: Any = None  # app/newsdesk/editorial.Significance: admitted as important news, not as market chaos
 
     @property
     def ok(self) -> bool:

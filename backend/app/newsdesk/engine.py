@@ -35,7 +35,9 @@ KEYWORDS: dict[str, dict[str, float]] = {
     "crypto": {"bitcoin": 1.5, "ethereum": 1.5, "crypto": 1.0, "stablecoin": 1.0, "etf": 1.0, "hack": 2.0, "exploit": 2.0, "liquidat": 1.5, "binance": 1.0, "coinbase": 1.0, "solana": 1.0, "bankrupt": 2.0},
     "stocks": {"earnings": 1.5, "nvidia": 1.5, "tesla": 1.5, "apple": 1.0, "s&p 500": 1.5, "nasdaq": 1.5, "dow": 1.0, "wall street": 1.0, "stocks": 1.0, "shares": 1.0, "ipo": 1.0, "merger": 1.0, "takeover": 1.0, "layoffs": 1.0},
     "commodities": {"gold": 1.5, "silver": 1.5, "oil": 1.5, "brent": 1.5, "opec": 2.0, "copper": 1.5, "natural gas": 1.0, "crude": 1.5},
-    "politics": {"tariff": 2.5, "sanction": 2.5, "trade deal": 2.0, "trade war": 2.0, "election": 1.5, "ceasefire": 2.0, "invasion": 2.5, "executive order": 2.0, "shutdown": 2.0, "summit": 1.0, "missile": 1.5},
+    "politics": {"tariff": 2.5, "sanction": 2.5, "trade deal": 2.0, "trade war": 2.0, "election": 1.5, "ceasefire": 2.0, "invasion": 2.5, "executive order": 2.0, "shutdown": 2.0, "summit": 1.0, "missile": 1.5,
+                  "iran": 1.5, "israel": 1.5, "russia": 1.5, "ukrain": 1.5, "houthi": 2.0, "airstrike": 2.0, "air strike": 2.0, "nuclear": 1.5, "peace talks": 2.0,
+                  "peace deal": 2.0, "attack on": 1.0, "impeach": 1.5, "troops": 1.5},
     "viral": {"record high": 2.0, "all-time high": 2.0, "biggest ever": 2.0, "billionaire": 1.0, "record": 1.0, "collapse": 1.5},
 }
 

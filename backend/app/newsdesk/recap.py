@@ -171,24 +171,48 @@ async def build(db: Session, now: datetime, slot_at: datetime, slot_local: str, 
 
 # --- the visual format (owner, 2026-11-09): the slot without a story carries the day's biggest real move as a chart, or nothing ---------
 
-MOVE_MIN = {"Hyperliquid": 3.0, "Yahoo Finance": 1.5}  # crypto 3%, stocks and commodities 1.5% in 24 hours: smaller isn't news
 VISUAL = True  # tests of the older written brief set this False
 
 
-def biggest_move(lines: list[dict[str, Any]]) -> dict[str, Any] | None:
-    real = [r for r in lines if abs(r["pct"]) >= MOVE_MIN.get(r["source"], 3.0)]
-    return max(real, key=lambda r: abs(r["pct"]) / MOVE_MIN.get(r["source"], 3.0)) if real else None
+def _subject(r: dict[str, Any]) -> str:
+    from app.newsdesk import editorial
+
+    return editorial.canon(r["tag"] if r["source"] == "Hyperliquid" else r["name"])
+
+
+def biggest_move(lines: list[dict[str, Any]], covered: list[Any] | None = None, now: datetime | None = None) -> tuple[dict[str, Any] | None, list[str]]:
+    """(the move this slot may carry, why each other one can't). Owner, 2026-11-10: only an EXCEPTIONAL move (at or past the desk's 24-hour
+    alert line for its class: crypto majors 8%, other crypto 15%, indices 2.5%, commodities 5%), and never one the channel already showed
+    unless it has escalated (app/newsdesk/editorial.judge). The old floor (3% crypto, 1.5% macro) posted routine days: Ethereum -6% twice,
+    then WTI -4.4% and -6.0% four hours apart."""
+    from app.newsdesk import editorial
+
+    notes: list[str] = []
+    ranked = []
+    for r in lines:
+        subj = _subject(r)
+        cls = editorial.asset_class({subj})
+        if not editorial.exceptional_pct(cls, r["pct"]):
+            notes.append(f"{r['name']} {_pct(r['pct'])}: routine (under {editorial.TIERS[cls][0]:g}%)")
+            continue
+        ranked.append((editorial.tier(cls, r["pct"]), abs(r["pct"]) / editorial.TIERS[cls][0], r, subj, cls))
+    for _, _, r, subj, cls in sorted(ranked, key=lambda x: (-x[0], -x[1])):
+        sig = {"subjects": [subj], "type": "market", "direction": "down" if r["pct"] < 0 else "up", "magnitude": round(abs(r["pct"]), 2), "class": cls, "cause": False, "event": None}
+        v = editorial.judge(sig, covered or [], now) if now is not None else editorial.Verdict(True)
+        if v.ok:
+            return r, notes
+        notes.append(f"{r['name']} {_pct(r['pct'])}: {v.reason}")
+    return None, notes
 
 
 async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local: str, quotes: dict[str, sources.Quote], market: Any = None) -> NdEvent | None:
-    from app.newsdesk import visual
+    from app.newsdesk import editorial, visual
 
     hl = await _hl_markets(market)
     lines = rows(hl, quotes, now)
-    mover = biggest_move(lines)
+    mover, notes = biggest_move(lines, editorial.coverage(db, now), now)
     if mover is None:
-        logger.warning("newsdesk recap: the %s slot has no story and no market move big enough (largest %s): nothing posted",
-                       slot_local, max((f"{r['name']} {_pct(r['pct'])}" for r in lines), key=lambda t: abs(float(t.split()[-1].rstrip('%'))), default="none"))
+        logger.warning("newsdesk recap: the %s slot has no story and no exceptional new market move: nothing posted (%s)", slot_local, "; ".join(notes)[:600] or "no prices")
         return None
     points: list[tuple[int, float]] = []
     coin = mover["tag"].lstrip("$") if mover["source"] == "Hyperliquid" else ""

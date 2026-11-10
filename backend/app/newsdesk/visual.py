@@ -1,15 +1,30 @@
-"""The News Desk's post image (owner's format, 2026-11-09): one cinematic 16:9 picture that carries the story, a small "PRICE CHAT NEWS"
-mark, and nothing else. The headline and a discreet source credit go in the post text beneath it, never on the picture.
+"""The News Desk's post image: one 16:9 picture, a small "PRICE CHAT NEWS" mark, ONE bold headline, a small credit. The post text beneath
+it is the same headline in bold and the source in small italics; nothing else (owner, 2026-11-09, 2026-11-10).
 
-Two kinds of picture, both real:
-- market moves: a chart drawn from our own price data (Hyperliquid candles, or Yahoo bars), lit red for a fall and green for a rise;
-- news: a real photograph from Wikimedia Commons, only under a licence that allows reuse (public domain, CC0, CC BY, CC BY-SA), credited
-  on the image in small type, graded dark and dramatic. A photo used in the last USED_DAYS is skipped, so pictures don't repeat.
-No generated people, no invented scenes, no logos drawn by us.
+Four kinds of picture, chosen per story (`plan`), all honest:
+- chart: an exceptional market move, drawn from our own price data (Hyperliquid candles or Yahoo bars). The big figure is the measured move;
+  the headline stays in the caption, so the chart is never crowded.
+- artwork: a major breaking story (a hack, an exchange failure, a scam, a flush; or a story the desk labelled BREAKING). Editorial artwork
+  composed here from light, texture and abstract motifs (fracture lines, pulses, ridgelines, light beams) with Pillow. No people, no logos,
+  no invented scenes, and credited "Illustration: Price Chat" so nobody mistakes it for a photograph.
+- photo: a company, a government, a country, a world event. A real photograph from Wikimedia Commons, only under a licence that allows
+  reuse (public domain, CC0, CC BY, CC BY-SA), only one whose title names the subject (a company's headquarters, a parliament, a city), in
+  colour and recent, credited on the image, not reused within USED_DAYS. Never a generic stand-in: the server room of some other
+  institution is not a picture of a hacked exchange (the 2026-11-09 Mercado Bitcoin post carried CERN's data centre).
+- graphic: everything else. A premium branded typographic picture: the headline large on a rich field, with the story's own figure.
+
+Variety (`plan`): the last few pictures are remembered (Telegram's settings state, "recent_visuals"); a palette, motif or layout used in the
+last ones is avoided, and when the last two posts were the same kind and the story allows another, the other is used. A chart is never
+swapped for variety: accuracy first.
+
+Mobile: a phone shows the picture about 390 px wide, a quarter of its 1600. The headline is set no smaller than MIN_TYPE px (about 17 px on
+the phone), at most four lines, inside 96 px safe margins, white on a darkened field (contrast checked by `contrast`). An optional AI artwork
+provider can be plugged in (`ArtworkProvider`), off by default: no key exists, and nothing here needs one.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import math
@@ -18,7 +33,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
@@ -26,16 +41,42 @@ from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFo
 logger = logging.getLogger(__name__)
 
 W, H = 1600, 900
+MARGIN = 96
+MIN_TYPE = 72  # headline px at 1600 wide: ~17.5 px on a 390 px phone
 ASSETS = Path(__file__).with_name("assets")
 TEXT, MUTED = (246, 247, 246), (170, 178, 174)
 DOWN, UP = (236, 52, 44), (120, 214, 40)
 COMMONS = "https://commons.wikimedia.org/w/api.php"
 UA = {"User-Agent": "PriceChatNewsDesk/1.0 (https://pricechat.live)"}
-OLD = re.compile(r"construction|drawing|engraving|\bmap\b|\bplan\b|diagram|logo|sketch|lithograph|LCCN|postcard|stereograph", re.I)
+OLD = re.compile(r"construction|drawing|engraving|\bmap\b|\bplan\b|diagram|logo|sketch|lithograph|LCCN|postcard|stereograph|interior|lobby|cafeteria|toilet|parking", re.I)
 FREE = re.compile(r"^(cc0|public domain|pd|cc[- ]by(-sa)?( \d(\.\d)?)?)", re.I)
 
+PALETTES: dict[str, dict[str, tuple[int, int, int]]] = {
+    "ember": {"bg": (12, 6, 5), "a": (255, 86, 40), "b": (255, 196, 110)},
+    "crimson": {"bg": (12, 4, 9), "a": (230, 38, 72), "b": (255, 150, 140)},
+    "cobalt": {"bg": (4, 8, 22), "a": (52, 112, 255), "b": (140, 214, 255)},
+    "violet": {"bg": (10, 6, 22), "a": (140, 92, 246), "b": (246, 120, 190)},
+    "emerald": {"bg": (3, 14, 12), "a": (20, 190, 132), "b": (196, 244, 110)},
+    "gold": {"bg": (14, 10, 4), "a": (240, 170, 10), "b": (255, 232, 160)},
+    "ice": {"bg": (5, 12, 20), "a": (110, 200, 250), "b": (226, 244, 255)},
+}
+MOTIFS = ("fracture", "pulse", "ridges", "beams")
+LAYOUTS = ("lower", "left", "center")
+# what each kind of story may look like (motifs, palettes), most fitting first
+STYLE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "incident": (("fracture", "beams", "pulse"), ("ember", "crimson", "violet", "gold")),
+    "geopolitics": (("pulse", "beams", "ridges"), ("ember", "gold", "ice", "crimson")),
+    "market": (("ridges", "beams", "pulse"), ("emerald", "crimson", "cobalt", "gold")),
+    "regulation": (("beams", "ridges", "pulse"), ("cobalt", "ice", "gold", "violet")),
+    "structure": (("ridges", "beams"), ("cobalt", "emerald", "ice", "gold")),
+    "corporate": (("beams", "pulse", "ridges"), ("violet", "cobalt", "ice", "emerald")),
+    "flows": (("ridges", "beams"), ("emerald", "crimson", "gold", "cobalt")),
+    "news": (MOTIFS, tuple(PALETTES)),
+}
+RECENT = 6  # how many past pictures variety looks at
 
-@lru_cache(maxsize=16)
+
+@lru_cache(maxsize=32)
 def _anton(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(ASSETS / "Anton-Regular.ttf"), size)
 
@@ -58,6 +99,10 @@ def _png(img: Image.Image) -> bytes:
     return out.getvalue()
 
 
+def _seed(text: str) -> int:
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:8], 16)
+
+
 def _vignette(img: Image.Image, strength: float = 0.75) -> Image.Image:
     mask = Image.new("L", (W, H), 0)
     d = ImageDraw.Draw(mask)
@@ -69,8 +114,8 @@ def _vignette(img: Image.Image, strength: float = 0.75) -> Image.Image:
     return Image.composite(img, Image.blend(img, dark, strength), mask)
 
 
-def _grain(img: Image.Image, amount: int = 10) -> Image.Image:
-    rnd = random.Random(7)
+def _grain(img: Image.Image, amount: int = 10, seed: int = 7) -> Image.Image:
+    rnd = random.Random(seed)
     noise = Image.frombytes("L", (W // 2, H // 2), bytes(rnd.randrange(128 - amount, 128 + amount) for _ in range((W // 2) * (H // 2)))).resize((W, H))
     return ImageChops.overlay(img, Image.merge("RGB", (noise, noise, noise)))
 
@@ -88,53 +133,145 @@ def _brand(img: Image.Image) -> None:
 
 def _credit(img: Image.Image, text: str) -> None:
     d = ImageDraw.Draw(img)
-    d.text((W - 36, H - 26), text, font=_inter(15, "Medium"), fill=(200, 205, 202), anchor="rs")
+    d.text((W - 36, H - 26), text, font=_inter(16, "Medium"), fill=(206, 210, 208), anchor="rs")
+
+
+def _glow(img: Image.Image, layer: Image.Image, colour: tuple[int, int, int], radii: tuple[int, ...] = (28, 10), strength: float = 1.0) -> Image.Image:
+    """Light a mask: soft wide glow, tighter glow, then the mask itself."""
+    for r in radii:
+        m = layer.filter(ImageFilter.GaussianBlur(r)).point(lambda v: int(min(255, v * strength)))
+        img = ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), colour), Image.new("RGB", (W, H), (0, 0, 0)), m))
+    return ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), colour), Image.new("RGB", (W, H), (0, 0, 0)), layer))
+
+
+# --- type ------------------------------------------------------------------------------------------------------------
+
+
+def _wrap(text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
+    d = ImageDraw.Draw(Image.new("L", (1, 1)))
+    lines: list[str] = []
+    for word in text.split():
+        if lines and d.textlength(f"{lines[-1]} {word}", font=font) <= width:
+            lines[-1] = f"{lines[-1]} {word}"
+        else:
+            lines.append(word)
+    return lines
+
+
+def fit_headline(text: str, width: int, sizes: tuple[int, ...] = (124, 112, 100, 92, 84, 76, MIN_TYPE), max_lines: int = 4) -> tuple[int, list[str]]:
+    """The largest size at which the headline fits the width in at most max_lines (3 for the big sizes): (px, lines)."""
+    for size in sizes:
+        lines = _wrap(text, _anton(size), width)
+        if len(lines) <= (3 if size >= 100 else max_lines):
+            return size, lines
+    size = sizes[-1]
+    lines = _wrap(text, _anton(size), width)
+    return size, lines[:max_lines]
+
+
+def luminance(rgb: tuple[float, float, float]) -> float:
+    def ch(c: float) -> float:
+        c = c / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+
+def contrast(img: Image.Image, box: tuple[int, int, int, int], fg: tuple[int, int, int] = TEXT) -> float:
+    """WCAG contrast of the text colour against the brightest tenth of a field (the worst case for reading). Measured before the
+    headline is drawn on it."""
+    region = img.convert("RGB").crop(box).resize((80, 40))
+    px = sorted(region.getdata(), key=lambda c: luminance(c))
+    bright = px[int(len(px) * 0.9)]
+    a, b = luminance(fg), luminance(bright)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+def _scrim(img: Image.Image, layout: str, strength: int = 215) -> Image.Image:
+    """Darken where the headline goes: a soft gradient, never a hard box."""
+    m = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(m)
+    if layout == "left":
+        for x in range(W):
+            d.line([(x, 0), (x, H)], fill=int(strength * max(0.0, min(1.0, 1.15 - x / (W * 0.62))) ** 1.2))
+    else:
+        top = H * (0.30 if layout == "center" else 0.36)
+        for y in range(H):
+            d.line([(0, y), (W, y)], fill=int(strength * max(0.0, min(1.0, (y - top) / (H - top) * 1.35)) ** 1.1))
+    m = m.filter(ImageFilter.GaussianBlur(24))
+    return Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img.convert("RGB"), m)
+
+
+def _headline(img: Image.Image, text: str, layout: str, accent: tuple[int, int, int]) -> dict[str, Any]:
+    """Set the headline: big, white, inside the safe margins, with a short accent bar above it. Returns what was set (for the checks)."""
+    width = int(W * 0.56) if layout == "left" else W - 2 * MARGIN
+    size, lines = fit_headline(text, width)
+    font = _anton(size)
+    lead = int(size * 1.06)
+    block = lead * len(lines)
+    d = ImageDraw.Draw(img)
+    x = MARGIN
+    if layout == "left":
+        y0 = max(150, (H - block) // 2 + 20)
+    else:
+        y0 = H - 92 - block
+    if layout == "center":
+        y0 = H - 100 - block
+    widest = max(int(d.textlength(ln, font=font)) for ln in lines)
+    left = (W - widest) // 2 if layout == "center" else x
+    field = contrast(img, (left, y0, left + widest, y0 + block))  # the field the words sit on, before they go on it
+    bar_x = W // 2 - 48 if layout == "center" else x
+    d.rectangle([bar_x, y0 - 30, bar_x + 96, y0 - 22], fill=accent)
+    for i, line in enumerate(lines):
+        if layout == "center":
+            d.text((W // 2, y0 + i * lead), line, font=font, fill=TEXT, anchor="ma")
+        else:
+            d.text((x, y0 + i * lead), line, font=font, fill=TEXT)
+    return {"type_px": size, "lines": len(lines), "box": [left, y0, left + widest, y0 + block], "contrast": round(field, 2)}
 
 
 # --- market moves: a real chart ------------------------------------------------------------------------------------
 
+TONES = {"ink": (6, 7, 8), "navy": (5, 8, 17), "plum": (11, 6, 12)}
 
-def chart(points: list[tuple[int, float]], *, name: str, ticker: str, pct: float, window: str = "24H", source: str = "Hyperliquid") -> bytes:
-    """points: (unix seconds, price), oldest first, from our own data. The picture shows only what the data says: the line, the move."""
+
+def chart(points: list[tuple[int, float]], *, name: str, ticker: str, pct: float, window: str = "24H", source: str = "Hyperliquid", tone: str = "ink") -> bytes:
+    """points: (unix seconds, price), oldest first, from our own data. The picture shows only what the data says: the line, the move, the
+    last price and the window's high and low."""
     if len(points) < 10:
         raise ValueError("not enough price points for a chart")
     falling = pct < 0
     accent = DOWN if falling else UP
-    img = Image.new("RGB", (W, H), (6, 7, 8))
-    # dramatic light: a coloured glow behind where the move happens
+    img = Image.new("RGB", (W, H), TONES.get(tone, TONES["ink"]))
     glow = Image.new("L", (W, H), 0)
     gd = ImageDraw.Draw(glow)
     cx, cy = (W * 0.78, H * 0.78) if falling else (W * 0.78, H * 0.22)
     for r in range(900, 0, -10):
         gd.ellipse([cx - r * 1.4, cy - r, cx + r * 1.4, cy + r], fill=int(70 * (1 - r / 900) ** 1.6))
     img.paste(Image.new("RGB", (W, H), accent), (0, 0), glow)
-    # the ticker, huge and faint, behind everything
     wm = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(wm).text((W // 2, H // 2 + 30), ticker.upper(), font=_anton(560), fill=11, anchor="mm")
+    ImageDraw.Draw(wm).text((W // 2, H // 2 + 30), ticker.upper()[:5], font=_anton(560), fill=11, anchor="mm")
     img.paste(Image.new("RGB", (W, H), TEXT), (0, 0), wm)
-    # faint grid
     d = ImageDraw.Draw(img)
     for i in range(1, 6):
         y = int(150 + i * (H - 260) / 6)
-        d.line([(0, y), (W, y)], fill=(26, 28, 30), width=1)
-    # the line
+        d.line([(0, y), (W, y)], fill=(28, 30, 33), width=1)
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
     lo, hi = min(ys), max(ys)
     span = (hi - lo) or hi * 0.01
-    left, right, top, bottom = 0, W - 110, 200, H - 110
+    left, right, top, bottom = 0, W - 150, 200, H - 110
+
     def at(i: int) -> tuple[float, float]:
         x = left + (xs[i] - xs[0]) / ((xs[-1] - xs[0]) or 1) * (right - left)
         y = bottom - (ys[i] - lo) / span * (bottom - top)
         return x, y
+
     line = [at(i) for i in range(len(points))]
-    # area under the line, fading down
     area = Image.new("L", (W, H), 0)
     ImageDraw.Draw(area).polygon([*line, (line[-1][0], H), (line[0][0], H)], fill=255)
-    fade = Image.linear_gradient("L").resize((W, H))
-    fade = ImageOps.invert(fade).point(lambda v: int(v * 0.42))
+    fade = ImageOps.invert(Image.linear_gradient("L").resize((W, H))).point(lambda v: int(v * 0.42))
     img.paste(Image.new("RGB", (W, H), accent), (0, 0), ImageChops.multiply(area, fade))
-    # glow under the line, then the line itself
     lay = Image.new("L", (W, H), 0)
     ImageDraw.Draw(lay).line(line, fill=255, width=14, joint="curve")
     img.paste(Image.new("RGB", (W, H), accent), (0, 0), lay.filter(ImageFilter.GaussianBlur(18)))
@@ -149,17 +286,251 @@ def chart(points: list[tuple[int, float]], *, name: str, ticker: str, pct: float
     img = _vignette(img, 0.55)
     img = _grain(img, 8)
     d = ImageDraw.Draw(img)
-    # the move, large, where the eye lands; the asset and the window small beneath it
+    # the real numbers, small: the last price at the line's end, the window's high and low on the right edge
+    money = (lambda v: f"{v:,.0f}" if v >= 1000 else f"{v:,.2f}")
+    d.text((W - 40, top - 8), f"H {money(hi)}", font=_inter(22, "Medium"), fill=MUTED, anchor="rs")
+    d.text((W - 40, bottom + 34), f"L {money(lo)}", font=_inter(22, "Medium"), fill=MUTED, anchor="rs")
+    d.text((ex - 4, ey - 30), money(ys[-1]), font=_inter(26, "Bold"), fill=TEXT, anchor="rs")
     stat = f"{'+' if pct >= 0 else '-'}{abs(pct):.1f}%"
-    # the stat goes in the empty corner: top right when the line fell from the left, top left when it rose to the right
     first_half_high = sum(p[1] for p in points[: len(points) // 2]) >= sum(p[1] for p in points[len(points) // 2:])
     sx, anchor = (W - 70, "r") if first_half_high else (70, "l")
-    sy = 255
-    d.text((sx, sy), stat, font=_anton(210), fill=TEXT, anchor=anchor + "m")
-    d.text((sx + (6 if anchor == "l" else -6), sy + 128), f"{name.upper()}  ·  {window}", font=_inter(30, "Bold"), fill=accent, anchor=anchor + "m")
+    sy = 265
+    d.text((sx, sy), stat, font=_anton(220), fill=TEXT, anchor=anchor + "m")
+    d.text((sx + (6 if anchor == "l" else -6), sy + 134), f"{name.upper()}  ·  {window}", font=_inter(34, "Bold"), fill=accent, anchor=anchor + "m")
     _brand(img)
     _credit(img, f"Data: {source}")
     return _png(img)
+
+
+# --- artwork: composed here, credited as an illustration ---------------------------------------------------------------
+
+
+class ArtworkProvider(Protocol):
+    """Hook for generated artwork (off: ARTWORK_PROVIDER is None). A provider returns a 1600x900 image for a prompt describing the story's
+    subject in abstract terms (never a real person's likeness). Wiring one in would need its API key in the encrypted secrets store, e.g. an
+    image model's key; none exists, and the local artwork below needs none."""
+
+    async def render(self, prompt: str, *, width: int, height: int) -> Image.Image: ...
+
+
+ARTWORK_PROVIDER: ArtworkProvider | None = None
+
+
+def _base(pal: dict[str, tuple[int, int, int]], rnd: random.Random, focus: tuple[float, float]) -> Image.Image:
+    bg = pal["bg"]
+    img = Image.new("RGB", (W, H), bg)
+    grad = Image.linear_gradient("L").resize((W, H)).point(lambda v: int(v * 0.55))
+    img = Image.composite(Image.new("RGB", (W, H), tuple(max(0, c - 8) for c in bg)), img, grad)
+    glow = Image.new("L", (W, H), 0)
+    gd = ImageDraw.Draw(glow)
+    fx, fy = focus
+    for r in range(1000, 0, -12):
+        gd.ellipse([fx - r * 1.5, fy - r, fx + r * 1.5, fy + r], fill=int(120 * (1 - r / 1000) ** 2.2))
+    img.paste(Image.new("RGB", (W, H), pal["a"]), (0, 0), glow.filter(ImageFilter.GaussianBlur(40)))
+    return img
+
+
+def _dust(img: Image.Image, pal: dict[str, tuple[int, int, int]], rnd: random.Random, n: int = 260, focus: tuple[float, float] | None = None) -> Image.Image:
+    """Floating motes and a few large out-of-focus discs: depth."""
+    near = Image.new("L", (W, H), 0)
+    far = Image.new("L", (W, H), 0)
+    dn, df = ImageDraw.Draw(near), ImageDraw.Draw(far)
+    fx, fy = focus or (W * 0.7, H * 0.4)
+    for _ in range(n):
+        x = rnd.gauss(fx, W * 0.28)
+        y = rnd.gauss(fy, H * 0.3)
+        r = rnd.choice((1, 1, 2, 2, 3))
+        dn.ellipse([x - r, y - r, x + r, y + r], fill=rnd.randrange(90, 255))
+    for _ in range(14):
+        x, y, r = rnd.uniform(0, W), rnd.uniform(0, H * 0.8), rnd.uniform(18, 70)
+        df.ellipse([x - r, y - r, x + r, y + r], fill=rnd.randrange(16, 46))
+    img = _glow(img, near, pal["b"], radii=(4,), strength=0.9)
+    return _glow(img, far.filter(ImageFilter.GaussianBlur(10)), pal["a"], radii=(), strength=1.0)
+
+
+def _fracture(img: Image.Image, pal: dict[str, tuple[int, int, int]], rnd: random.Random, focus: tuple[float, float]) -> Image.Image:
+    """Cracks running out of a white-hot point, like a breached pane: a hack, a failure."""
+    lay = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(lay)
+    fx, fy = focus
+
+    def crack(x: float, y: float, angle: float, length: float, width: int, depth: int) -> None:
+        pts = [(x, y)]
+        for _ in range(int(length / 26)):
+            angle += rnd.uniform(-0.35, 0.35)
+            x += math.cos(angle) * 26
+            y += math.sin(angle) * 26
+            pts.append((x, y))
+            if depth < 2 and rnd.random() < 0.12:
+                crack(x, y, angle + rnd.choice((-1, 1)) * rnd.uniform(0.5, 1.1), length * 0.45, max(1, width - 2), depth + 1)
+        d.line(pts, fill=255 if depth == 0 else 190, width=width, joint="curve")
+
+    for i in range(11):
+        crack(fx, fy, i / 11 * 2 * math.pi + rnd.uniform(-0.2, 0.2), rnd.uniform(500, 1100), 5, 0)
+    # shards: pale facets near the impact
+    facets = Image.new("L", (W, H), 0)
+    fd = ImageDraw.Draw(facets)
+    for _ in range(9):
+        a, r = rnd.uniform(0, 2 * math.pi), rnd.uniform(60, 320)
+        cx, cy = fx + math.cos(a) * r, fy + math.sin(a) * r
+        fd.polygon([(cx + rnd.uniform(-90, 90), cy + rnd.uniform(-90, 90)) for _ in range(3)], fill=rnd.randrange(14, 34))
+    img = ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), pal["b"]), Image.new("RGB", (W, H), (0, 0, 0)), facets.filter(ImageFilter.GaussianBlur(2))))
+    img = _glow(img, lay, pal["a"], radii=(36, 12), strength=1.4)
+    core = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(core).ellipse([fx - 26, fy - 26, fx + 26, fy + 26], fill=255)
+    return _glow(img, core.filter(ImageFilter.GaussianBlur(8)), pal["b"], radii=(60, 20), strength=1.6)
+
+
+def _pulse(img: Image.Image, pal: dict[str, tuple[int, int, int]], rnd: random.Random, focus: tuple[float, float]) -> Image.Image:
+    """A planet's rim lit from behind, with rings of a signal spreading over it: the world, a shock travelling."""
+    lay = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(lay)
+    R = W * 0.95
+    cx, cy = W * 0.62, H + R * 0.78
+    d.ellipse([cx - R, cy - R, cx + R, cy + R], outline=255, width=4)
+    rim = lay.copy()
+    img = _glow(img, rim, pal["b"], radii=(70, 24, 8), strength=1.2)
+    grid = Image.new("L", (W, H), 0)
+    g = ImageDraw.Draw(grid)
+    for k in range(1, 9):  # latitude arcs
+        rr = R * (1 - k * 0.035)
+        g.ellipse([cx - rr * 1.02, cy - rr, cx + rr * 1.02, cy + rr], outline=40, width=2)
+    for k in range(-8, 9):  # meridians, squeezed toward the rim
+        x = cx + R * math.sin(k / 9 * 1.2)
+        g.line([(x, cy - R * math.cos(k / 9 * 1.2)), (cx + (x - cx) * 0.3, H)], fill=26, width=2)
+    img = ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), pal["a"]), Image.new("RGB", (W, H), (0, 0, 0)), grid))
+    fx, fy = focus
+    rings = Image.new("L", (W, H), 0)
+    rd = ImageDraw.Draw(rings)
+    for i in range(1, 8):
+        r = i * 70
+        rd.ellipse([fx - r * 1.6, fy - r * 0.55, fx + r * 1.6, fy + r * 0.55], outline=int(230 * (1 - i / 8)), width=3)
+    img = _glow(img, rings, pal["a"], radii=(18, 6), strength=1.1)
+    core = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(core).ellipse([fx - 14, fy - 14, fx + 14, fy + 14], fill=255)
+    return _glow(img, core, pal["b"], radii=(80, 26), strength=1.8)
+
+
+def _ridges(img: Image.Image, pal: dict[str, tuple[int, int, int]], rnd: random.Random, focus: tuple[float, float], series: list[float] | None = None) -> Image.Image:
+    """Stacked ridgelines, a landscape of data under a low light. With a real price series, the front ridge is that series."""
+    n = 22
+    phase = [rnd.uniform(0, 6.28) for _ in range(4)]
+    out = img
+    for k in range(n):
+        depth = k / (n - 1)  # 0 back, 1 front
+        base = H * (0.40 + 0.5 * depth)
+        amp = 30 + 150 * depth
+        pts = []
+        for i in range(0, W + 20, 16):
+            t = i / W
+            bump = math.exp(-((t - 0.55 - 0.15 * math.sin(k)) ** 2) / 0.02) * 1.2
+            v = (math.sin(t * 9 + phase[0] + k * 0.6) * 0.35 + math.sin(t * 23 + phase[1] + k) * 0.18 + math.sin(t * 3 + phase[2]) * 0.3 + bump)
+            if series and k == n - 1:
+                j = min(len(series) - 1, int(t * (len(series) - 1)))
+                lo, hi = min(series), max(series)
+                v = ((series[j] - lo) / ((hi - lo) or 1)) * 1.6
+            pts.append((i, base - v * amp))
+        fill = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(fill).polygon([*pts, (W + 20, H), (0, H)], fill=255)
+        out = Image.composite(Image.new("RGB", (W, H), tuple(int(c * (0.25 + 0.2 * (1 - depth))) for c in (0, 0, 0))), out, fill)
+        edge = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(edge).line(pts, fill=int(70 + 185 * depth), width=2 if depth < 0.8 else 3)
+        colour = tuple(int(pal["a"][c] * (1 - depth) + pal["b"][c] * depth) for c in range(3))
+        out = _glow(out, edge, colour, radii=(6,) if depth > 0.6 else (), strength=0.9)
+    return out
+
+
+def _beams(img: Image.Image, pal: dict[str, tuple[int, int, int]], rnd: random.Random, focus: tuple[float, float]) -> Image.Image:
+    """Shafts of light falling through haze onto a polished floor: an institution, a decision."""
+    lay = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(lay)
+    sx = rnd.uniform(W * 0.45, W * 0.95)
+    for i in range(7):
+        x0 = sx + i * 70 - 200
+        spread = rnd.uniform(160, 300)
+        d.polygon([(x0, -40), (x0 + 50, -40), (x0 - spread * 0.4 + 50 - 520, H), (x0 - spread - 520, H)], fill=rnd.randrange(40, 95))
+    lay = lay.filter(ImageFilter.GaussianBlur(26))
+    img = ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), pal["b"]), Image.new("RGB", (W, H), (0, 0, 0)), lay))
+    floor = Image.new("L", (W, H), 0)
+    fd = ImageDraw.Draw(floor)
+    hz = H * 0.72
+    for k in range(14):  # floor lines receding
+        y = hz + (H - hz) * (k / 13) ** 1.8
+        fd.line([(0, y), (W, y)], fill=int(20 + 60 * k / 13), width=1)
+    for k in range(-12, 13):
+        fd.line([(W * 0.5 + k * 30, hz), (W * 0.5 + k * 260, H)], fill=26, width=1)
+    img = ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), pal["a"]), Image.new("RGB", (W, H), (0, 0, 0)), floor))
+    pillar = Image.new("L", (W, H), 0)
+    px = sx - 330
+    ImageDraw.Draw(pillar).rectangle([px, H * 0.18, px + 120, hz], fill=255)
+    img = Image.composite(Image.new("RGB", (W, H), (4, 4, 6)), img, pillar.filter(ImageFilter.GaussianBlur(1)))
+    edge = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(edge).line([(px + 120, H * 0.18), (px + 120, hz)], fill=255, width=3)
+    return _glow(img, edge, pal["b"], radii=(20, 6), strength=1.0)
+
+
+def artwork(headline: str, *, motif: str, palette: str, layout: str, seed: int, series: list[float] | None = None) -> tuple[bytes, dict[str, Any]]:
+    """An editorial illustration with the headline set on it. Deterministic for (motif, palette, layout, seed): X re-renders Telegram's."""
+    pal = PALETTES.get(palette, PALETTES["ember"])
+    rnd = random.Random(seed)
+    focus = {"left": (W * 0.74, H * 0.42), "lower": (W * rnd.uniform(0.55, 0.75), H * 0.36), "center": (W * 0.5, H * 0.34)}.get(layout, (W * 0.7, H * 0.4))
+    img = _base(pal, rnd, focus)
+    draw = {"fracture": _fracture, "pulse": _pulse, "beams": _beams}.get(motif)
+    img = _ridges(img, pal, rnd, focus, series) if motif == "ridges" else draw(img, pal, rnd, focus) if draw else img
+    img = _dust(img, pal, rnd, focus=focus)
+    img = _vignette(img, 0.6)
+    img = _grain(img, 9, seed)
+    img = _scrim(img, layout)
+    meta = _headline(img, headline, layout, pal["a"])
+    _brand(img)
+    _credit(img, "Illustration: Price Chat")
+    return _png(img), meta
+
+
+# --- graphic: premium branded typographic picture ----------------------------------------------------------------------
+
+
+def graphic(headline: str, *, palette: str, layout: str, seed: int, stat: str = "", source: str = "", motif: str = "ridges", mark: str = "") -> tuple[bytes, dict[str, Any]]:
+    """The headline as the picture: a rich field of colour, soft light, a fine pattern, the story's motif kept quiet, its lead name as a
+    large outlined watermark, and the story's own figure large if it has one."""
+    pal = PALETTES.get(palette, PALETTES["cobalt"])
+    rnd = random.Random(seed)
+    deep = tuple(int(c * 0.55 + b * 0.45) for c, b in zip(pal["bg"], (0, 0, 0)))
+    img = Image.new("RGB", (W, H), deep)
+    light = Image.new("L", (W, H), 0)
+    ld = ImageDraw.Draw(light)
+    cx, cy = (W * 0.85, H * 0.15) if layout != "center" else (W * 0.5, -H * 0.1)
+    for r in range(1200, 0, -14):
+        ld.ellipse([cx - r * 1.3, cy - r, cx + r * 1.3, cy + r], fill=int(150 * (1 - r / 1200) ** 1.8))
+    img.paste(Image.new("RGB", (W, H), pal["a"]), (0, 0), light.filter(ImageFilter.GaussianBlur(50)))
+    pattern = Image.new("L", (W, H), 0)
+    pd = ImageDraw.Draw(pattern)
+    step = rnd.choice((34, 42, 54))
+    for x in range(-H, W, step):  # fine diagonal hatching, faint
+        pd.line([(x, H), (x + H, 0)], fill=12, width=1)
+    img = ImageChops.add(img, Image.composite(Image.new("RGB", (W, H), pal["b"]), Image.new("RGB", (W, H), (0, 0, 0)), pattern))
+    focus = (W * 0.72, H * 0.3)
+    draw = {"fracture": _fracture, "pulse": _pulse, "beams": _beams}.get(motif)
+    art = _ridges(img, pal, rnd, focus) if motif == "ridges" else draw(img, pal, rnd, focus) if draw else img
+    img = Image.blend(img, art, 0.42)
+    if mark and not stat:
+        wm = Image.new("L", (W, H), 0)
+        size = 300 if len(mark) <= 6 else 220
+        ImageDraw.Draw(wm).text((W - 50, 40), mark.upper(), font=_anton(size), fill=0, anchor="ra", stroke_width=3, stroke_fill=255)
+        img = _glow(img, wm.point(lambda v: int(v * 0.5)), pal["b"], radii=(12,), strength=0.8)
+        wm = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(wm).text((W - 60, 330), stat, font=_anton(330), fill=255, anchor="rm")
+        img = _glow(img, wm.point(lambda v: int(v * 0.16)), pal["b"], radii=(30,), strength=1.0)
+        d = ImageDraw.Draw(img)
+        d.text((W - 60, 330), stat, font=_anton(330), fill=tuple(min(255, int(c * 0.9) + 20) for c in pal["b"]), anchor="rm")
+    img = _vignette(img, 0.45)
+    img = _grain(img, 7, seed)
+    img = _scrim(img, layout, strength=150)
+    meta = _headline(img, headline, layout, pal["b"])
+    _brand(img)
+    if source:
+        _credit(img, f"Source: {source}")
+    return _png(img), meta
 
 
 # --- news: a real photograph ----------------------------------------------------------------------------------------
@@ -215,44 +586,52 @@ def is_colour(img: Image.Image) -> bool:
     return sum(small.getchannel("S").getdata()) / (64 * 36) > 28
 
 
-def photo(img: Image.Image, credit: str, *, tone: str = "neutral") -> bytes:
-    """A real photograph, cropped to 16:9 and graded like a front page: deep shadows, cooler mids, a vignette. tone "risk" adds a red cast."""
-    img = ImageOps.fit(img, (W, H), method=Image.LANCZOS, centering=(0.5, 0.45))
-    img = ImageEnhance.Color(img).enhance(0.62)
-    img = ImageEnhance.Contrast(img).enhance(1.38)
-    img = ImageEnhance.Brightness(img).enhance(0.62)
-    # split tone: cool shadows, warm (red, for a risk story) highlights
+def photo(img: Image.Image, credit: str, *, tone: str = "neutral", headline: str = "", layout: str = "lower") -> tuple[bytes, dict[str, Any]] | bytes:
+    """A real photograph, cropped to 16:9 and graded like a front page: deep shadows, cooler mids, a vignette. tone "risk" adds a red cast.
+    With a headline, it is set over a soft dark gradient and (bytes, what was set) is returned."""
+    img = ImageOps.fit(img, (W, H), method=Image.LANCZOS, centering=(0.5, 0.42))
+    img = ImageEnhance.Color(img).enhance(0.72)
+    img = ImageEnhance.Contrast(img).enhance(1.28)
+    img = ImageEnhance.Brightness(img).enhance(0.74)
     lum = img.convert("L").point(lambda v: 255 if v > 110 else 0).filter(ImageFilter.GaussianBlur(30))
-    hi = Image.blend(img, Image.new("RGB", (W, H), (190, 40, 30) if tone == "risk" else (210, 150, 90)), 0.18)
-    lo = Image.blend(img, Image.new("RGB", (W, H), (10, 30, 48)), 0.28)
+    hi = Image.blend(img, Image.new("RGB", (W, H), (190, 40, 30) if tone == "risk" else (210, 150, 90)), 0.14)
+    lo = Image.blend(img, Image.new("RGB", (W, H), (10, 30, 48)), 0.24)
     img = Image.composite(hi, lo, lum)
-    # darker top for the mark, darker bottom for the credit
     shade = Image.new("L", (W, H), 0)
     sd = ImageDraw.Draw(shade)
-    for y in range(H):
-        t = max(0.0, 1 - y / 220) * 150 + max(0.0, (y - (H - 260)) / 260) * 170
-        sd.line([(0, y), (W, y)], fill=int(min(230, t)))
+    for y in range(220):
+        sd.line([(0, y), (W, y)], fill=int(150 * (1 - y / 220)))
     img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, shade)
-    img = _vignette(img, 0.6)
+    img = _vignette(img, 0.5)
     img = _grain(img, 6)
+    meta: dict[str, Any] = {}
+    if headline:
+        img = _scrim(img, layout, strength=225)
+        meta = _headline(img, headline, layout, (236, 52, 44) if tone == "risk" else (246, 200, 80))
     _brand(img)
     _credit(img, credit)
+    if headline:
+        return _png(img), meta
     return _png(img)
 
 
-# --- the words beneath the picture ----------------------------------------------------------------------------------
+# --- the words ----------------------------------------------------------------------------------------------------------
+
+DISPLAY = {"Oil (WTI)": "WTI crude", "Oil (Brent)": "Brent crude", "S&P 500": "S&P 500", "HYPE": "Hyperliquid's HYPE"}
 
 
-def move_headline(name: str, pct: float, window: str = "24 hours") -> str:
-    """A bold headline that says exactly what the data says. The verb only grows with the move."""
-    a = abs(pct)
+def move_headline(name: str, pct: float, window: str = "24 hours", cls: str = "") -> str:
+    """A bold headline that says exactly what the data says. The verb is earned by the move's severity tier for its asset class (app/newsdesk/
+    editorial.TIERS), never by mood: "falls"/"rises" at the alert line, "tumbles"/"jumps" a tier up, "plunges"/"soars" two tiers up."""
+    from app.newsdesk import editorial
+
+    cls = cls or editorial.asset_class({editorial.canon(name)})
+    t = editorial.tier(cls, pct)
     if pct < 0:
-        verb = "CRASHES" if a >= 12 else "GETS HAMMERED" if a >= 5 else "SLIDES" if a >= 3 else "SLIPS"
-        way = "DOWN"
+        verb = "PLUNGES" if t >= 3 else "TUMBLES" if t >= 2 else "FALLS"
     else:
-        verb = "SOARS" if a >= 12 else "RIPS HIGHER" if a >= 5 else "JUMPS" if a >= 3 else "EDGES HIGHER"
-        way = "UP"
-    return f"{name.upper()} {verb} — {way} {a:.1f}% IN {window.upper()}"
+        verb = "SOARS" if t >= 3 else "JUMPS" if t >= 2 else "RISES"
+    return f"{DISPLAY.get(name, name).upper()} {verb} {abs(pct):.1f}% IN {window.upper()}"
 
 
 def caption_html(headline: str, source: str) -> str:
@@ -265,41 +644,9 @@ def x_text(headline: str, source: str) -> str:
     return f"{headline}\n\nSource: {source}"
 
 
-# --- choosing the picture for an event --------------------------------------------------------------------------------
-
-USED_DAYS = 14
-# subject words -> what to photograph (searched in order; a photo counts only if its title names the subject)
-SUBJECTS: list[tuple[re.Pattern[str], str, str]] = [
-    (re.compile(r"\b(fed|federal reserve|powell|fomc|rate (?:cut|hike)s?)\b", re.I), "Marriner S. Eccles Federal Reserve Board Building", "eccles|federal reserve"),
-    (re.compile(r"\b(treasury|ofac|fincen|sanction\w*)\b", re.I), "United States Treasury Building", "treasury"),
-    (re.compile(r"\b(sec|securities and exchange commission|gensler|atkins)\b", re.I), "Securities and Exchange Commission headquarters", "securities|sec "),
-    (re.compile(r"\b(cftc)\b", re.I), "Commodity Futures Trading Commission", "commodity futures"),
-    (re.compile(r"\b(white house|trump|president)\b", re.I), "White House north facade", "white house"),
-    (re.compile(r"\b(nyse|wall street|s&p|dow|nasdaq|stocks?|etfs?)\b", re.I), "New York Stock Exchange facade", "stock exchange|wall street"),
-    (re.compile(r"\b(oil|opec|crude|brent|refiner\w*)\b", re.I), "oil refinery night", "refinery|oil"),
-    (re.compile(r"\b(gold|bullion)\b", re.I), "gold bars", "gold"),
-    (re.compile(r"\b(silver)\b", re.I), "silver bars", "silver"),
-    (re.compile(r"\b(hack\w*|exploit\w*|drain\w*|breach\w*|stolen)\b", re.I), "data center server room", "server|data cent"),
-    (re.compile(r"\b(mining|miners?|hashrate)\b", re.I), "cryptocurrency mining farm", "mining"),
-    (re.compile(r"\b(china|beijing|chinese)\b", re.I), "Beijing skyline night", "beijing"),
-    (re.compile(r"\b(court|judge|lawsuit|indict\w*|charged|guilty|sentenced)\b", re.I), "United States courthouse", "court"),
-]
-COMPANIES = re.compile(r"\b(nvidia|apple|tesla|microsoft|google|alphabet|amazon|meta|blackrock|coinbase|binance|tether|circle|microstrategy|strategy|"
-                       r"jpmorgan|goldman sachs|robinhood|kraken|okx|bybit|mexc|bitget)\b", re.I)
-
-
-def subject_queries(headline: str) -> list[tuple[str, str]]:
-    """(search, word the photo's title must contain), most specific first: a named company's headquarters, then the subject."""
-    out: list[tuple[str, str]] = []
-    for name in dict.fromkeys(m.group(1).lower() for m in COMPANIES.finditer(headline)):
-        out.append((f"{name} headquarters", name))
-        out.append((f"{name} office building", name))
-    out += [(q, must) for rx, q, must in SUBJECTS if rx.search(headline)]
-    return out
-
-
 def post_headline(ev: Any) -> str:
-    """ONE short bold line: the event's own verified headline, written short ($16 billion -> $16B), no labels, no emoji."""
+    """ONE bold line: the event's own verified headline, written short ($16 billion -> $16B), no labels, no emoji, no added words.
+    Over MAX_HEADLINE characters, a trailing "as ..."/"amid ..." clause is dropped (context goes, the event stays: nothing is added)."""
     f = ev.facts or {}
     if f.get("visual_headline"):
         return str(f["visual_headline"])
@@ -307,12 +654,138 @@ def post_headline(ev: Any) -> str:
     h = re.sub(r"^(BREAKING|JUST IN|ALERT|UPDATE)\s*[:\-–—]\s*", "", h, flags=re.I)
     h = re.sub(r"\$\s?(\d[\d.,]*)\s*(billion|bn)\b", r"$\1B", h, flags=re.I)
     h = re.sub(r"\$\s?(\d[\d.,]*)\s*(million|mn)\b", r"$\1M", h, flags=re.I)
-    return re.sub(r"\s+", " ", h).upper()[:120]
+    h = re.sub(r"\s+", " ", h).upper()
+    return trim(h, MAX_HEADLINE)[:140]
+
+
+MAX_HEADLINE = 100
+CLAUSE = re.compile(r"\s*,?\s+\b(AS|AMID|AFTER|WHILE|FOLLOWING|AHEAD OF|DESPITE|WITH)\b\s+")
+
+
+def trim(h: str, limit: int) -> str:
+    """Drop trailing clauses, the last first, until the headline fits; never below three words, never adding anything."""
+    while len(h) > limit:
+        found = list(CLAUSE.finditer(h))
+        if not found:
+            break
+        cut = h[:found[-1].start()].rstrip(" ,:;-")
+        if len(cut.split()) < 3:
+            break
+        h = cut
+    return h
 
 
 def source_name(ev: Any) -> str:
     names = [s.get("name") for s in (ev.sources or []) if s.get("name")]
     return names[0] if names else "Price Chat"
+
+
+# --- choosing the picture for an event --------------------------------------------------------------------------------
+
+USED_DAYS = 14
+# subject words -> a photograph of the actual subject (searched in order; a photo counts only if its title names it). No generic stand-ins.
+SUBJECTS: list[tuple[re.Pattern[str], str, str]] = [
+    (re.compile(r"\b(fed|federal reserve|powell|fomc|rate (?:cut|hike)s?)\b", re.I), "Marriner S. Eccles Federal Reserve Board Building", "eccles|federal reserve"),
+    (re.compile(r"\b(treasury|ofac|fincen)\b", re.I), "United States Treasury Building", "treasury"),
+    (re.compile(r"\b(sec|securities and exchange commission|gensler|atkins)\b", re.I), "Securities and Exchange Commission headquarters", "securities|sec "),
+    (re.compile(r"\b(cftc)\b", re.I), "Commodity Futures Trading Commission", "commodity futures"),
+    (re.compile(r"\b(occ|comptroller of the currency)\b", re.I), "Office of the Comptroller of the Currency", "comptroller"),
+    (re.compile(r"\b(white house|trump|president)\b", re.I), "White House north facade", "white house"),
+    (re.compile(r"\b(congress|senate|senator|house of representatives|impeach\w*)\b", re.I), "United States Capitol west front", "capitol"),
+    (re.compile(r"\b(pentagon|hegseth|defen[cs]e secretary)\b", re.I), "The Pentagon aerial", "pentagon"),
+    (re.compile(r"\b(nyse|new york stock exchange|wall street)\b", re.I), "New York Stock Exchange facade", "stock exchange|wall street"),
+    (re.compile(r"\b(nasdaq)\b(?![- ]listed)", re.I), "Nasdaq MarketSite Times Square", "nasdaq"),
+    (re.compile(r"\b(ecb|european central bank|lagarde)\b", re.I), "European Central Bank Frankfurt", "european central bank"),
+    (re.compile(r"\b(bank of england)\b", re.I), "Bank of England building", "bank of england"),
+    (re.compile(r"\b(bank of japan|boj)\b", re.I), "Bank of Japan head office", "bank of japan"),
+    (re.compile(r"\b(iran\w*|tehran)\b", re.I), "Tehran skyline Milad Tower", "tehran"),
+    (re.compile(r"\b(israel\w*|knesset)\b", re.I), "Knesset building Jerusalem", "knesset"),
+    (re.compile(r"\b(russia\w*|kremlin|putin)\b", re.I), "Moscow Kremlin view", "kremlin"),
+    (re.compile(r"\b(ukrain\w*|kyiv|zelensk\w*)\b", re.I), "Kyiv Maidan Nezalezhnosti", "kyiv|maidan"),
+    (re.compile(r"\b(saudi\w*|riyadh)\b", re.I), "Riyadh skyline Kingdom Centre", "riyadh"),
+    (re.compile(r"\b(qatar\w*|doha)\b", re.I), "Doha skyline West Bay", "doha"),
+    (re.compile(r"\b(uae|dubai|abu dhabi|emirati)\b", re.I), "Dubai skyline Burj Khalifa", "dubai"),
+    (re.compile(r"\b(china|beijing|chinese)\b", re.I), "Beijing CBD skyline", "beijing"),
+    (re.compile(r"\b(japan\w*|tokyo)\b", re.I), "Tokyo skyline", "tokyo"),
+    (re.compile(r"\b(european union|european commission|brussels)\b", re.I), "Berlaymont building Brussels", "berlaymont"),
+    (re.compile(r"\b(court|judge|lawsuit|indict\w*|charged|guilty|sentenced)\b", re.I), "United States courthouse", "court"),
+]
+COMPANIES = re.compile(r"\b(nvidia|apple|tesla|microsoft|google|alphabet|amazon|meta|blackrock|coinbase|binance|tether|circle|microstrategy|"
+                       r"jpmorgan|goldman sachs|robinhood|kraken|okx|bybit|mexc|bitget|openai|anthropic|samsung|tsmc|intel|nyse)\b", re.I)
+
+
+def subject_queries(headline: str) -> list[tuple[str, str]]:
+    """(search, word the photo's title must contain), most specific first: a named company's headquarters, then the subject."""
+    out: list[tuple[str, str]] = []
+    for name in dict.fromkeys(m.group(1).lower() for m in COMPANIES.finditer(headline)):
+        if name == "nyse":
+            continue  # its own subject below
+        out.append((f"{name} headquarters", name))
+        out.append((f"{name} office building", name))
+    out += [(q, must) for rx, q, must in SUBJECTS if rx.search(headline)]
+    return out
+
+
+def story_type(ev: Any) -> str:
+    from app.newsdesk import editorial
+
+    f = ev.facts or {}
+    if (f.get("importance") or {}).get("kind"):
+        return str(f["importance"]["kind"])
+    if ev.kind in ("recap", "market"):
+        return "market"
+    return editorial.FAMILY.get(ev.topic or "", "news")
+
+
+def kinds_for(ev: Any) -> list[str]:
+    """The kinds of picture this story may carry, most fitting first."""
+    f = ev.facts or {}
+    typ = story_type(ev)
+    chartable = len(f.get("points") or []) >= 10 or ev.kind in ("recap", "market")
+    if chartable and ev.kind in ("recap", "market"):
+        return ["chart"]
+    from app.newsdesk import brief
+
+    major = typ == "incident" or ev.topic == "liquidations" or ev.label == brief.BREAKING
+    if chartable:
+        return ["chart", "artwork"]
+    if major:
+        return ["artwork", "graphic"]
+    if subject_queries(f"{ev.headline} {ev.title}") or typ in ("geopolitics", "corporate", "regulation", "controversy"):
+        return ["photo", "artwork" if typ in ("geopolitics", "controversy") else "graphic", "graphic"]
+    return ["graphic", "artwork"]
+
+
+def _least_used(options: tuple[str, ...], used: list[str], seed: int) -> str:
+    """The option used least in the recent pictures (the most recent counting most); ties broken by the story's own seed."""
+    def weight(o: str) -> float:
+        return sum(1.0 / (1 + i) for i, u in enumerate(reversed(used)) if u == o)
+    rot = seed % len(options)
+    ordered = options[rot:] + options[:rot]
+    first = options[0]
+    return min(ordered, key=lambda o: (weight(o) - (0.2 if o == first else 0.0), ordered.index(o)))
+
+
+def plan(ev: Any, recent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """What the picture will be: kind, motif, palette, layout. Avoids what the last pictures used."""
+    recent = list(recent or [])[-RECENT:]
+    seed = _seed(f"{ev.key}|{ev.id}")
+    kinds = kinds_for(ev)
+    kind = kinds[0]
+    last_two = [r.get("kind") for r in recent[-2:]]
+    if kind != "chart" and len(kinds) > 1 and len(last_two) == 2 and all(k == kind for k in last_two):
+        kind = kinds[1]  # two of the same in a row already: the story allows another
+    typ = story_type(ev)
+    motifs, palettes = STYLE.get(typ, STYLE["news"])
+    f = ev.facts or {}
+    if typ in ("market", "flows") and f.get("falling") is not None:
+        palettes = tuple(p for p in palettes if p != ("emerald" if f.get("falling") else "crimson")) or palettes
+    out = {"kind": kind, "motif": _least_used(motifs, [r.get("motif", "") for r in recent], seed),
+           "palette": _least_used(palettes, [r.get("palette", "") for r in recent], seed >> 3),
+           "layout": _least_used(LAYOUTS, [r.get("layout", "") for r in recent], seed >> 5), "seed": seed, "type": typ, "options": kinds}
+    if kind == "chart":
+        out["tone"] = _least_used(tuple(TONES), [r.get("tone", "") for r in recent], seed)
+    return out
 
 
 async def candles_for(coin: str, market: Any = None) -> list[tuple[int, float]]:
@@ -326,49 +799,92 @@ async def candles_for(coin: str, market: Any = None) -> list[tuple[int, float]]:
     return [(int(c.t) // 1000, float(c.c)) for c in rows]
 
 
-async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None) -> tuple[bytes, dict[str, Any]]:
-    """The picture for an event, and what it was (stored on the event, so X and Telegram carry the same one).
-    Market moves: our chart. News: a real photo of the subject, not used in the last USED_DAYS. Nothing fitting: the branded card."""
+def _mark(ev: Any) -> str:
+    """The name a story leads with (NYSE, Coinbase), for the graphic's watermark: the first specific name in the headline, if short."""
+    from app.newsdesk import editorial
+
+    words = re.findall(r"[A-Za-z][A-Za-z0-9&]{2,}", ev.title or ev.headline or "")
+    names = editorial.names_in(ev.title or "")
+    for w in words:
+        if w.lower() in names and len(w) <= 10:
+            return w
+    return ""
+
+
+def _stat(ev: Any) -> str:
+    f = ev.facts or {}
+    s = str(f.get("stat") or "")
+    return s if re.match(r"^[$+-]?\d", s) and len(s) <= 7 else ""
+
+
+async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any) -> tuple[bytes, dict[str, Any]] | None:
+    f = ev.facts or {}
+    points = [tuple(p) for p in f.get("points") or []]
+    coin = str(f.get("coin") or (f.get("tickers") or [""])[0] or "").lstrip("$").upper()
+    if len(points) < 10 and coin and ev.kind in ("recap", "market"):
+        try:
+            points = await candles_for(coin, market)
+        except Exception as e:  # noqa: BLE001
+            logger.info("newsdesk visual: no candles for %s (%s)", coin, type(e).__name__)
+    pct = f.get("pct")
+    if pct is None and len(points) >= 2:
+        pct = (points[-1][1] - points[0][1]) / points[0][1] * 100
+    if len(points) < 10 or pct is None:
+        return None
+    name = DISPLAY.get(str(f.get("name") or coin), str(f.get("name") or coin))
+    window = str(f.get("window") or "24h").upper()
+    data = chart(points, name=name, ticker=coin or name[:4], pct=float(pct), window=window, source=str(f.get("data_source") or "Hyperliquid"), tone=chosen.get("tone", "ink"))
+    return data, {**chosen, "kind": "chart", "coin": coin}
+
+
+async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None) -> tuple[bytes, dict[str, Any]]:
+    """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed)."""
     f = ev.facts or {}
     used = used or set()
-    chosen = f.get("visual") or {}
-    if f.get("points") or chosen.get("kind") == "chart" or ev.kind in ("recap", "market"):
-        points = [tuple(p) for p in f.get("points") or []]
-        coin = str(f.get("coin") or (f.get("tickers") or [""])[0] or "").lstrip("$").upper()
-        if len(points) < 10 and coin:
-            try:
-                points = await candles_for(coin, market)
-            except Exception as e:  # noqa: BLE001
-                logger.info("newsdesk visual: no candles for %s (%s)", coin, type(e).__name__)
-        pct = f.get("pct")
-        if pct is None and len(points) >= 2:
-            pct = (points[-1][1] - points[0][1]) / points[0][1] * 100
-        if len(points) >= 10 and pct is not None:
-            name = str(f.get("name") or coin)
-            return chart(points, name=name, ticker=coin or name[:4], pct=float(pct), source=str(f.get("data_source") or "Hyperliquid")), {"kind": "chart", "coin": coin}
-    async with httpx.AsyncClient(transport=transport) as client:
-        if chosen.get("kind") == "photo" and chosen.get("url"):
-            img = await fetch_image(client, chosen["url"])
-            return photo(img, chosen["credit"], tone=chosen.get("tone", "neutral")), chosen
-        tone = "risk" if ev.topic in ("hack", "scam", "failure", "controversy") or f.get("risk") else "neutral"
-        for query, must in subject_queries(f"{ev.headline} {ev.title}"):
-            try:
-                found = await find_photos(client, query)
-            except Exception as e:  # noqa: BLE001
-                logger.info("newsdesk visual: photo search failed (%s)", type(e).__name__)
-                break
-            for p in found:
-                if p.url in used or not re.search(must, p.title, re.I):
-                    continue
-                try:
-                    img = await fetch_image(client, p.url)
-                except Exception:  # noqa: BLE001
-                    continue
-                if not is_colour(img):
-                    continue
-                meta = {"kind": "photo", "url": p.url, "credit": p.credit, "page": p.page, "tone": tone, "title": p.title}
-                return photo(img, p.credit, tone=tone), meta
-    from app.newsdesk import card, events
-
-    b = events.brief_of(ev, __import__("app.db.base", fromlist=["utcnow"]).utcnow())
-    return card.render(ev.headline, b, [source_name(ev)], ev.released_at or ev.first_seen), {"kind": "card"}
+    chosen = dict(f.get("visual") or {}) or plan(ev, recent)
+    head = post_headline(ev)
+    order = [chosen["kind"], *[k for k in chosen.get("options", kinds_for(ev)) if k != chosen["kind"]]]
+    if f.get("visual") and chosen.get("kind") != "photo":
+        order = [chosen["kind"]]  # already shown on Telegram: the same picture
+    for kind in order:
+        if kind == "chart":
+            got = await _chart_for(ev, chosen, market)
+            if got:
+                return got
+            continue
+        if kind == "photo":
+            async with httpx.AsyncClient(transport=transport) as client:
+                tone = "risk" if ev.topic in ("hack", "scam", "failure", "controversy") or f.get("risk") else "neutral"
+                if chosen.get("kind") == "photo" and chosen.get("url"):
+                    img = await fetch_image(client, chosen["url"])
+                    data, _ = photo(img, chosen["credit"], tone=chosen.get("tone", tone), headline=head, layout=chosen.get("layout", "lower"))
+                    return data, chosen
+                for query, must in subject_queries(f"{ev.headline} {ev.title}"):
+                    try:
+                        found = await find_photos(client, query)
+                    except Exception as e:  # noqa: BLE001
+                        logger.info("newsdesk visual: photo search failed (%s)", type(e).__name__)
+                        break
+                    for p in found:
+                        if p.url in used or not re.search(must, p.title, re.I):
+                            continue
+                        try:
+                            img = await fetch_image(client, p.url)
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if not is_colour(img):
+                            continue
+                        layout = chosen.get("layout", "lower")
+                        data, typeset = photo(img, p.credit, tone=tone, headline=head, layout=layout)
+                        return data, {**chosen, "kind": "photo", "url": p.url, "credit": p.credit, "page": p.page, "tone": tone, "title": p.title, **typeset}
+            continue
+        if kind == "artwork":
+            series = [p[1] for p in f.get("points") or []] or None
+            data, typeset = artwork(head, motif=chosen["motif"], palette=chosen["palette"], layout=chosen["layout"], seed=chosen["seed"], series=series)
+            return data, {**chosen, "kind": "artwork", **typeset}
+        if kind == "graphic":
+            data, typeset = graphic(head, palette=chosen["palette"], layout=chosen["layout"], seed=chosen["seed"], stat=_stat(ev), source=source_name(ev),
+                                    motif=chosen.get("motif", "ridges"), mark=_mark(ev))
+            return data, {**chosen, "kind": "graphic", **typeset}
+    data, typeset = graphic(head, palette=chosen.get("palette", "cobalt"), layout=chosen.get("layout", "lower"), seed=chosen.get("seed", 1), source=source_name(ev))
+    return data, {**chosen, "kind": "graphic", **typeset}

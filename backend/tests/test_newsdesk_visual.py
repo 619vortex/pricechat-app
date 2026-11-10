@@ -1,5 +1,6 @@
-"""The picture format (owner, 2026-11-09): every post is one 16:9 picture, one bold factual headline beneath it and a small source credit.
-Market moves get a chart from our own prices, news a real licensed photo of the subject. No test reaches a real service."""
+"""The picture format (owner, 2026-11-09, 2026-11-10): every post is one 16:9 picture, one bold factual headline and a small source credit.
+Exceptional market moves get a chart from our own prices, major breaking stories editorial artwork credited as an illustration, companies,
+governments and countries a real licensed photo of the subject, the rest a branded graphic. No test reaches a real service."""
 
 import io
 from dataclasses import dataclass
@@ -58,7 +59,8 @@ class FakeHL:
         return [Candle(t0 + i * 900_000, prev + (mark - prev) * i / 96) for i in range(97)]
 
 
-HAMMERED = FakeHL({"BTC": (73900.0, 75900.0), "ETH": (2094.0, 2240.0), "HYPE": (72.5, 75.0), "SOL": (85.6, 88.0)})  # ETH -6.5%
+HAMMERED = FakeHL({"BTC": (73900.0, 75900.0), "ETH": (2094.0, 2407.0), "HYPE": (72.5, 75.0), "SOL": (85.6, 88.0)})  # ETH -13.0%: exceptional
+ROUTINE = FakeHL({"BTC": (73900.0, 75900.0), "ETH": (2094.0, 2240.0), "HYPE": (72.5, 75.0), "SOL": (85.6, 88.0)})  # ETH -6.5%: under its 8% line
 QUIET = FakeHL({"BTC": (75100.0, 75000.0), "ETH": (2240.0, 2236.0), "HYPE": (75.0, 74.6), "SOL": (88.0, 87.9)})
 
 
@@ -94,11 +96,13 @@ async def decide(db: Session, now: datetime, market: Any) -> dict[str, Any]:
 # --- the words ---------------------------------------------------------------------------------------------------------
 
 
-def test_the_headline_says_exactly_what_the_data_says_and_the_verb_grows_with_the_move() -> None:
-    assert visual.move_headline("Ethereum", -6.5) == "ETHEREUM GETS HAMMERED — DOWN 6.5% IN 24 HOURS"
-    assert visual.move_headline("Bitcoin", -3.4).startswith("BITCOIN SLIDES — DOWN 3.4%")
-    assert visual.move_headline("Gold", 1.6) == "GOLD EDGES HIGHER — UP 1.6% IN 24 HOURS"
-    assert visual.move_headline("Solana", 14.0).startswith("SOLANA SOARS — UP 14.0%")
+def test_the_headline_says_exactly_what_the_data_says_and_the_verb_is_earned_by_the_severity_tier() -> None:
+    assert visual.move_headline("Oil (WTI)", -6.0) == "WTI CRUDE FALLS 6.0% IN 24 HOURS"  # no "gets hammered": the number carries it
+    assert visual.move_headline("Ethereum", -13.0) == "ETHEREUM TUMBLES 13.0% IN 24 HOURS"  # a tier past the 8% line
+    assert visual.move_headline("Gold", 12.0) == "GOLD SOARS 12.0% IN 24 HOURS"  # three tiers for a commodity
+    assert visual.move_headline("Solana", 16.0) == "SOLANA RISES 16.0% IN 24 HOURS"  # a smaller coin's line is 15%
+    for h in (visual.move_headline(n, p) for n, p in (("Bitcoin", -40.0), ("S&P 500", 3.0))):
+        assert not any(w in h for w in ("HAMMERED", "CRASH", "BLOODBATH", "—", "!"))
     assert visual.caption_html("A & B", "CoinDesk") == "<b>A &amp; B</b>\n\n<i>Source: CoinDesk</i>"
 
 
@@ -119,7 +123,9 @@ def test_the_chart_is_a_16_by_9_picture_from_the_data() -> None:
 
 def test_photo_search_matches_the_subject() -> None:
     q = visual.subject_queries("NVIDIA INVESTIGATES CEO OVER AFFAIR WITH SUSPECTED CHINESE SPY")
-    assert q[0] == ("nvidia headquarters", "nvidia") and ("Beijing skyline night", "beijing") in q
+    assert q[0] == ("nvidia headquarters", "nvidia") and ("Beijing CBD skyline", "beijing") in q
+    # no generic stand-ins: a hack is not a photo of someone else's server room (the CERN data centre, 2026-11-09)
+    assert visual.subject_queries("MERCADO BITCOIN BEGINS POST-HACK REOPENING") == []
     assert visual.subject_queries("U.S. TREASURY MOVES TO CUT OFF MEXC")[0][1] == "mexc"
     assert ("United States Treasury Building", "treasury") in visual.subject_queries("U.S. TREASURY MOVES TO CUT OFF MEXC")
 
@@ -148,15 +154,19 @@ async def test_a_news_picture_is_a_real_licensed_photo_of_the_subject_never_reus
     assert again["url"] == "https://img/t2.jpg"
 
 
-async def test_without_a_fitting_photo_the_branded_card_stands_in(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def nothing(client: Any, query: str, limit: int = 12) -> list[visual.Photo]:
-        return []
+async def test_a_major_breaking_story_gets_editorial_artwork_credited_as_an_illustration(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def never(client: Any, query: str, limit: int = 12) -> list[visual.Photo]:
+        raise AssertionError("a hack is never illustrated with a stock photo")
 
-    monkeypatch.setattr(visual, "find_photos", nothing)
+    monkeypatch.setattr(visual, "find_photos", never)
     ev = NdEvent(key="k", kind="news", title="Bybaz hacked", headline="BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION", topic="hack", sources=[{"name": "The Block"}],
                  facts={}, first_seen=SLOT, virality=70, label="")
     data, meta = await visual.for_event(ev)
-    assert meta == {"kind": "card"} and data[:4] == b"\x89PNG"
+    assert meta["kind"] == "artwork" and jpeg_size(data) == (1600, 900)
+    assert meta["type_px"] >= visual.MIN_TYPE and meta["contrast"] >= 4.5  # readable on a phone
+    ev.facts = {"visual": meta}  # X re-renders exactly what Telegram showed
+    again, same = await visual.for_event(ev)
+    assert same["kind"] == "artwork" and same["motif"] == meta["motif"] and same["palette"] == meta["palette"]
 
 
 # --- the slots, end to end ---------------------------------------------------------------------------------------------
@@ -166,17 +176,17 @@ async def test_a_slot_without_a_story_posts_the_biggest_real_move_as_a_chart_on_
     now = SLOT + timedelta(minutes=1)
     await decide(db, now, HAMMERED)
     ev = db.scalar(select(NdEvent).where(NdEvent.status == "released"))
-    assert ev is not None and ev.kind == "recap" and visual.post_headline(ev) == "ETHEREUM GETS HAMMERED — DOWN 6.5% IN 24 HOURS"
+    assert ev is not None and ev.kind == "recap" and visual.post_headline(ev) == "ETHEREUM TUMBLES 13.0% IN 24 HOURS"
     tg = Tg()
     out = await lane.tick(db, get_settings(), tg, now, quotes={})
     sent = tg.sent[0]
     assert out["sent"] == 144 and sent["card"] is True
-    assert sent["text"] == "<b>ETHEREUM GETS HAMMERED — DOWN 6.5% IN 24 HOURS</b>\n\n<i>Source: Hyperliquid</i>"  # nothing else
+    assert sent["text"] == "<b>ETHEREUM TUMBLES 13.0% IN 24 HOURS</b>\n\n<i>Source: Hyperliquid</i>"  # nothing else
     desk = engine.settings_row(db)
     await engine.deliver_x(db, desk, get_settings(), None, 0, now)
     db.refresh(ev)
     post = db.get(__import__("app.models.newsdesk", fromlist=["NdPost"]).NdPost, ev.x_post_id)
-    assert ev.x_status == "dry_run" and post.text == "ETHEREUM GETS HAMMERED — DOWN 6.5% IN 24 HOURS\n\nSource: Hyperliquid"
+    assert ev.x_status == "dry_run" and post.text == "ETHEREUM TUMBLES 13.0% IN 24 HOURS\n\nSource: Hyperliquid"
 
 
 async def test_a_quiet_market_and_no_story_means_no_post_rather_than_filler(db: Session) -> None:
@@ -184,25 +194,39 @@ async def test_a_quiet_market_and_no_story_means_no_post_rather_than_filler(db: 
     assert db.scalar(select(NdEvent).where(NdEvent.status == "released")) is None
 
 
-async def test_a_verified_story_goes_out_as_photo_headline_and_source(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_routine_move_is_not_news_and_the_slot_stays_empty(db: Session) -> None:
+    await decide(db, SLOT + timedelta(minutes=1), ROUTINE)  # Ethereum -6.5% in 24 h: posted twice on 2026-11-09 as a "brief"; under its 8% line
+    assert db.scalar(select(NdEvent).where(NdEvent.status == "released")) is None
+
+
+async def test_a_verified_story_goes_out_as_picture_headline_and_source_and_nothing_else(db: Session) -> None:
+    verified(db, "Bybaz exchange says hackers drained $400 million from its hot wallet", now=SLOT, hours=0.2)
+    now = SLOT + timedelta(minutes=2)
+    await decide(db, now, QUIET)
+    tg = Tg()
+    await lane.tick(db, get_settings(), tg, now, quotes={})
+    sent = tg.sent[0]
+    assert sent["card"] is True and sent["text"] == "<b>BYBAZ EXCHANGE SAYS HACKERS DRAINED $400M FROM ITS HOT WALLET</b>\n\n<i>Source: The Block</i>"
+    assert "PRICE ALERT" not in sent["text"] and "#" not in sent["text"] and "http" not in sent["text"]
+    seen = lane.settings_row(db).state["recent_visuals"]
+    assert seen[-1]["kind"] == "artwork"  # remembered, so the next pictures look different
+
+
+async def test_a_company_story_gets_a_real_licensed_photo_of_the_company(monkeypatch: pytest.MonkeyPatch) -> None:
     async def find(client: Any, query: str, limit: int = 12) -> list[visual.Photo]:
-        return [visual.Photo("File:Data center server room.jpg", "https://img/dc.jpg", "E", "CC BY 4.0", "p")]
+        return [visual.Photo("File:CERN data centre.jpg", "https://img/cern.jpg", "X", "CC BY-SA 4.0", "p"),
+                visual.Photo("File:NVIDIA Headquarters.jpg", "https://img/nv.jpg", "Coolcaesar", "CC BY-SA 4.0", "p")]
 
     async def fetch(client: Any, url: str) -> Image.Image:
         return Image.new("RGB", (1920, 1080), (40, 90, 160))
 
     monkeypatch.setattr(visual, "find_photos", find)
     monkeypatch.setattr(visual, "fetch_image", fetch)
-    verified(db, "Bybaz exchange says hackers drained $400 million from its hot wallet", now=SLOT, hours=0.2)
-    now = SLOT + timedelta(minutes=2)
-    await decide(db, now, HAMMERED)
-    tg = Tg()
-    await lane.tick(db, get_settings(), tg, now, quotes={})
-    sent = tg.sent[0]
-    assert sent["card"] is True and sent["text"].startswith("<b>") and "400" in sent["text"] and sent["text"].endswith("<i>Source: The Block</i>")
-    assert "PRICE ALERT" not in sent["text"] and "#" not in sent["text"] and "http" not in sent["text"]
-    used = lane.settings_row(db).state["used_photos"]
-    assert used[0][0] == "https://img/dc.jpg"
+    ev = NdEvent(key="k2", kind="news", title="Nvidia board investigates Jensen Huang", headline="NVIDIA BOARD INVESTIGATES JENSEN HUANG", topic="corporate",
+                 sources=[{"name": "Decrypt"}], facts={"importance": {"kind": "corporate"}})
+    data, meta = await visual.for_event(ev)
+    assert meta["kind"] == "photo" and meta["url"] == "https://img/nv.jpg" and meta["credit"] == "Photo: Coolcaesar, Wikimedia Commons (CC BY-SA 4.0)"
+    assert jpeg_size(data) == (1600, 900) and meta["type_px"] >= visual.MIN_TYPE
 
 
 # --- X image upload ----------------------------------------------------------------------------------------------------
