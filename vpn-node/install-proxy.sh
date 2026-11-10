@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The browser proxy for the Kiwi VPN extension, added to a node that already runs the agent (install-shared.sh or install.sh).
 # Adds its own user, service, certificate and firewall rules. Never touches wg0, wg1, their peers, SSH or ufw's policy; it stops if wg0 changes.
+# Works on shared nodes (ufw + iptables owner rules) and on nodes made by install.sh (nftables: run that with WITH_PROXY=1 first).
 #
 #   PROXY_HOST=hel1.vpn.example.com bash install-proxy.sh    install or re-apply (the name must already point at this server)
 #   bash install-proxy.sh --uninstall                        remove all of it
@@ -21,6 +22,9 @@ UNIT=/etc/systemd/system/kiwi-vpn-proxy.service
 AGENT_DROPIN=/etc/systemd/system/kiwi-vpn-agent.service.d/proxy.conf
 HOOK=/etc/letsencrypt/renewal-hooks/deploy/kiwi-vpn-proxy.sh
 RULES="$ETC/rules.sh"
+NFT_FILE=/etc/kiwi-vpn/nft.d/kiwi-proxy.nft  # nftables nodes (install.sh): reloaded with the node's ruleset
+NFT=0
+grep -q "Managed by kiwi-vpn install.sh" /etc/nftables.conf 2>/dev/null && NFT=1
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -41,8 +45,14 @@ if [ "${1:-}" = "--uninstall" ]; then
   agent_env_clear
   systemctl daemon-reload
   systemctl try-restart kiwi-vpn-agent
-  ufw delete allow "$PROXY_PORT/tcp" >/dev/null 2>&1 || true
-  ufw delete allow 80/tcp >/dev/null 2>&1 || true
+  if [ "$NFT" = 1 ]; then
+    rm -f "$NFT_FILE"
+    nft delete table inet kiwi_proxy 2>/dev/null || true
+    echo "note: 80 and 443 stay open in this node's firewall until install.sh is re-run with WITH_PROXY=0" >&2
+  else
+    ufw delete allow "$PROXY_PORT/tcp" >/dev/null 2>&1 || true
+    ufw delete allow 80/tcp >/dev/null 2>&1 || true
+  fi
   if [ -f "$ETC/host" ] && command -v certbot >/dev/null; then certbot delete --non-interactive --cert-name "$(cat "$ETC/host")" >/dev/null 2>&1 || true; fi
   rm -rf "$ETC" "$LIB"
   gpasswd -d "$AGENT_USER" "$USER_NAME" >/dev/null 2>&1 || true
@@ -59,6 +69,15 @@ printf '%s' "$PROXY_HOST" | grep -Eq '^[a-z0-9.-]+$' || die "PROXY_HOST doesn't 
 [ -f "$AGENT_ENV" ] || die "no agent here: run install-shared.sh or install.sh first"
 PUBLIC_IP="${PUBLIC_IP:-$(ip -4 -o addr show "$WAN_IF" scope global | awk '{print $4}' | cut -d/ -f1 | head -n1)}"
 [ -n "$PUBLIC_IP" ] || die "couldn't find the public IP: set PUBLIC_IP"
+# This server's own IPv6 networks (Hetzner gives each server a /64): the proxy's users must not reach them either.
+OWN_NETS="${OWN_NETS-$(ip -6 -o addr show "$WAN_IF" scope global | awk '{print $4}' | python3 -c 'import ipaddress,sys; print(",".join(sorted({str(ipaddress.ip_interface(l.strip()).network) for l in sys.stdin if l.strip()})))')}"
+if [ "$NFT" = 1 ]; then
+  # a node made by install.sh: nftables owns the firewall and opens 80/443 itself (WITH_PROXY=1)
+  grep -q 'tcp dport { 80, 443 } accept' /etc/nftables.conf || die "this node's firewall doesn't open 80 and 443: re-run install.sh with WITH_PROXY=1 first"
+  grep -qF 'include "/etc/kiwi-vpn/nft.d/*.nft"' /etc/nftables.conf || die "this node's install.sh is too old for the proxy: re-run the current install.sh (WITH_PROXY=1)"
+else
+  command -v ufw >/dev/null && ufw status | grep -q "^Status: active" || die "ufw isn't active on this server: its firewall is set up another way, so opening 80 and 443 needs a different step (stop and check)"
+fi
 RESOLVED="$(getent ahostsv4 "$PROXY_HOST" | awk '{print $1; exit}' || true)"
 [ "$RESOLVED" = "$PUBLIC_IP" ] || die "$PROXY_HOST points at '${RESOLVED:-nothing}', not $PUBLIC_IP: fix DNS first"
 if ss -ltn "sport = :$PROXY_PORT" | grep -q LISTEN && ! systemctl is-active --quiet kiwi-vpn-proxy; then die "something else is using port $PROXY_PORT"; fi
@@ -75,8 +94,10 @@ printf '%s' "$PROXY_HOST" > "$ETC/host"
 
 say "Certificate for $PROXY_HOST (browsers only accept a publicly trusted one for a proxy)"
 command -v certbot >/dev/null || { DEBIAN_FRONTEND=noninteractive apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot >/dev/null; }
-ufw allow 80/tcp >/dev/null
-ufw allow "$PROXY_PORT/tcp" >/dev/null
+if [ "$NFT" = 0 ]; then
+  ufw allow 80/tcp >/dev/null
+  ufw allow "$PROXY_PORT/tcp" >/dev/null
+fi
 EMAIL_ARGS=(--register-unsafely-without-email)
 [ -n "${CERT_EMAIL:-}" ] && EMAIL_ARGS=(-m "$CERT_EMAIL")
 install -d -m 0755 "$(dirname "$HOOK")"
@@ -94,6 +115,41 @@ certbot certonly --standalone --preferred-challenges http --non-interactive --ag
 "$HOOK"
 
 say "Firewall rules for the proxy's user only: the public internet and nothing else"
+if [ "$NFT" = 1 ]; then
+V6_DENY="fc00::/7, fe80::/10, ff00::/8"
+[ -n "$OWN_NETS" ] && V6_DENY="$(echo "$OWN_NETS" | sed 's/,/, /g'), $V6_DENY"
+install -d -m 0750 "$(dirname "$NFT_FILE")"
+cat > "$NFT_FILE" <<EOF
+# Managed by kiwi-vpn install-proxy.sh. Matches only the $USER_NAME user. No log rules on purpose.
+# Loaded with the node's ruleset (install.sh's nftables.conf includes this folder), so a reload never drops it.
+table inet kiwi_proxy
+delete table inet kiwi_proxy
+table inet kiwi_proxy {
+  chain output {
+    type filter hook output priority 0; policy accept;
+    meta skuid "$USER_NAME" jump guard
+  }
+  chain guard {
+    ct state established,related return
+    ip daddr 127.0.0.53 meta l4proto { udp, tcp } th dport 53 return
+    oif lo reject
+    ip daddr $PUBLIC_IP reject
+    ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4 } reject
+    ip6 daddr { $V6_DENY } reject
+    tcp dport { 25, 465, 587 } reject
+  }
+}
+EOF
+nft -c -f "$NFT_FILE" || die "the proxy's nftables rules don't load"
+cat > "$RULES" <<EOF
+#!/bin/sh
+# nftables node: the rules live in $NFT_FILE (also loaded with the node's ruleset).
+case "\$1" in
+  up) nft -f $NFT_FILE ;;
+  down) nft delete table inet kiwi_proxy 2>/dev/null; exit 0 ;;
+esac
+EOF
+else
 cat > "$RULES" <<EOF
 #!/bin/sh
 # Every rule matches only the $USER_NAME user. No LOG rules on purpose.
@@ -122,6 +178,9 @@ case "\$1" in
     ip6tables -N KIWI-PROXY
     ip6tables -A KIWI-PROXY -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
     ip6tables -A KIWI-PROXY -o lo -j REJECT
+    for net in $(echo "$OWN_NETS" | tr ',' ' '); do
+      ip6tables -A KIWI-PROXY -d "\$net" -j REJECT
+    done
     for net in fc00::/7 fe80::/10 ff00::/8; do
       ip6tables -A KIWI-PROXY -d "\$net" -j REJECT
     done
@@ -131,6 +190,7 @@ case "\$1" in
   down) remove ;;
 esac
 EOF
+fi
 chmod 0750 "$RULES"
 
 say "Proxy service"
@@ -142,6 +202,7 @@ TLS_KEY=$ETC/tls/privkey.pem
 USERS_FILE=$LIB/users.json
 USAGE_FILE=$LIB/usage.json
 PUBLIC_IPS=$PUBLIC_IP
+OWN_NETS=$OWN_NETS
 EOF
 )
 chown root:"$USER_NAME" "$ETC/proxy.env"

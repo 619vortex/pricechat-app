@@ -18,7 +18,11 @@
 # Optional env: PUBLIC_IP (auto-detected), SSH_PORT (22), WG_PORT (51820),
 #               AGENT_PORT (8443), POOL (10.66.0.1/16), POOL6 (fd66:66::1/64, "" = off),
 #               BLOCKLIST_URL (StevenBlack unified hosts),
-#               KIWI_AGENT_URL (where to download agent.py if it is not next to this script)
+#               KIWI_AGENT_URL (where to download agent.py if it is not next to this script),
+#               AGENT_ALLOW (comma-separated IPv4/CIDR allowed to reach the agent port; empty = anyone),
+#               WITH_PROXY=1 (open 80+443/tcp for install-proxy.sh's browser proxy and certificate),
+#               QUIET_SECRETS=1 (don't print the agent token: it goes to /root/kiwi-node.txt, root only;
+#                                used by unattended installs so no log ever holds it)
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -47,6 +51,17 @@ WG_PORT="${WG_PORT:-51820}"
 AGENT_PORT="${AGENT_PORT:-8443}"
 POOL="${POOL:-10.66.0.1/16}"
 POOL6="${POOL6-fd66:66::1/64}"
+# a re-run keeps the agent allowlist and proxy ports chosen at install (env still overrides)
+if [ -r /etc/kiwi-vpn/install.env ]; then
+  while IFS='=' read -r k v; do
+    case "$k" in AGENT_ALLOW|WITH_PROXY) [ -n "${!k+x}" ] || export "$k=$v" ;; esac
+  done < /etc/kiwi-vpn/install.env
+fi
+AGENT_ALLOW="${AGENT_ALLOW:-}"
+WITH_PROXY="${WITH_PROXY:-0}"
+QUIET_SECRETS="${QUIET_SECRETS:-0}"
+NFT_D=/etc/kiwi-vpn/nft.d  # extra tables (the browser proxy's) that survive every reload of this ruleset
+[ -z "$AGENT_ALLOW" ] || printf '%s' "$AGENT_ALLOW" | grep -Eq '^[0-9./,]+$' || die "AGENT_ALLOW must be IPv4 addresses or CIDRs, comma-separated"
 BLOCKLIST_URL="${BLOCKLIST_URL:-https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts}"
 WG_IF=wg0
 WG_ADDR="${POOL%/*}"
@@ -129,7 +144,8 @@ table inet filter {
     iifname "$WG_IF" reject with icmpx type admin-prohibited comment "kiwi: tunnel to host"
     tcp dport $SSH_PORT accept
     udp dport $WG_PORT accept
-    tcp dport $AGENT_PORT accept
+$(agent_rule)
+$(proxy_rule)
   }
   chain forward {
     type filter hook forward priority 0; policy drop;
@@ -152,7 +168,20 @@ table ip nat {
     oifname "$WAN_IF" ip saddr $POOL_NET masquerade
   }
 }
+include "$NFT_D/*.nft"
 EOF
+}
+
+agent_rule() {
+  if [ -n "$AGENT_ALLOW" ]; then
+    echo "    ip saddr { $(echo "$AGENT_ALLOW" | sed 's/,/, /g') } tcp dport $AGENT_PORT accept comment \"kiwi: agent, backend only\""
+  else
+    echo "    tcp dport $AGENT_PORT accept"
+  fi
+}
+
+proxy_rule() {
+  if [ "$WITH_PROXY" = 1 ]; then echo '    tcp dport { 80, 443 } accept comment "kiwi: browser proxy + its certificate"'; fi
 }
 
 render_unbound_conf() {
@@ -655,6 +684,7 @@ if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active
   echo "note: disabling ufw; nftables rules below replace it" >&2
   ufw --force disable >/dev/null
 fi
+install -d -m 0750 "$NFT_D"
 render_nftables > /etc/nftables.conf.new
 if ! nft -c -f /etc/nftables.conf.new 2>/dev/null; then
   # Old kernels cannot reject in prerouting; client v6 is then dropped (still never leaked).
@@ -677,9 +707,12 @@ fi
 chown root:"$SVC_USER" "$ETC/tls.key" "$ETC/tls.crt"
 chmod 0640 "$ETC/tls.key"; chmod 0644 "$ETC/tls.crt"
 
-TOKEN="$(sed -n 's/^TOKEN=//p' "$ETC/agent.env" 2>/dev/null | head -n1)"
+TOKEN="$( (sed -n 's/^TOKEN=//p' "$ETC/agent.env" 2>/dev/null || true) | head -n1)"
 [ "${#TOKEN}" -ge 32 ] || TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 (umask 027; render_agent_env > "$ETC/agent.env")
+printf 'AGENT_ALLOW=%s
+WITH_PROXY=%s
+' "$AGENT_ALLOW" "$WITH_PROXY" > "$ETC/install.env"
 chown root:"$SVC_USER" "$ETC/agent.env"; chmod 0640 "$ETC/agent.env"
 
 # ---------- private resolver (always) + ad & tracker blocklist (optional) ----------
@@ -726,13 +759,18 @@ systemctl restart kiwi-vpn-agent
 wait_agent
 
 CERT_SHA256="$(openssl x509 -in "$ETC/tls.crt" -outform DER | sha256sum | cut -d' ' -f1)"
+SHOW_TOKEN="$TOKEN"
+if [ "$QUIET_SECRETS" = 1 ]; then
+  (umask 077; printf 'agent_url=https://%s:%s\nagent_token=%s\ncert_sha256=%s\n' "$PUBLIC_IP" "$AGENT_PORT" "$TOKEN" "$CERT_SHA256" > /root/kiwi-node.txt)
+  SHOW_TOKEN="(in /root/kiwi-node.txt, root only)"
+fi
 cat <<EOF
 
 ================ Kiwi VPN node ready ================
 Paste into Price Chat -> Admin -> VPN -> Add server:
 
   agent_url:    https://$PUBLIC_IP:$AGENT_PORT
-  agent_token:  $TOKEN
+  agent_token:  $SHOW_TOKEN
   cert_sha256:  $CERT_SHA256
 
 (Filled in automatically from the agent: endpoint $PUBLIC_IP, listen port $WG_PORT/udp,
@@ -740,6 +778,6 @@ Paste into Price Chat -> Admin -> VPN -> Add server:
 
 Client DNS: $WG_ADDR (this node, no logs). Ad blocking: $(if [ "$ADBLOCK" = 1 ]; then echo ON; else echo off; fi)
 Health check any time: kiwi-vpn-doctor
-If your provider has a cloud firewall, allow: $SSH_PORT/tcp, $WG_PORT/udp, $AGENT_PORT/tcp.
+If your provider has a cloud firewall, allow: $SSH_PORT/tcp, $WG_PORT/udp, $AGENT_PORT/tcp${AGENT_ALLOW:+ (from $AGENT_ALLOW only)}$(if [ "$WITH_PROXY" = 1 ]; then echo ", 80/tcp, 443/tcp"; fi).
 =====================================================
 EOF
