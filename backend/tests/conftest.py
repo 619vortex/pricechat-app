@@ -341,6 +341,12 @@ def connect_x_user(db: Session) -> None:
 def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """The News Desk's older tests were written for the 3-4 a day windows plan; production runs the six Dubai slots (2026-11-09), which
     tests/test_newsdesk_slots.py covers. Tests that want the slots set events.DEFAULT_SCHEDULE themselves."""
+    from app.newsdesk import recap as _recap
+
+    async def _no_xyz(name: str, transport: object = None) -> None:  # the trade.xyz second source is live data: never in tests
+        return None
+
+    monkeypatch.setattr(_recap, "xyz_change", _no_xyz)
     if request.module.__name__.split(".")[-1] in ("test_newsdesk", "test_newsdesk_events", "test_newsdesk_telegram", "test_newsdesk_collect", "test_x_social", "test_brand_publishing_safety"):
         from app.newsdesk import events
 
