@@ -51,6 +51,7 @@ class Policy:
     # owner, 2026-11-10: 70, and only clear financial, market or major geopolitical significance (editorial.breaking_worthy); routine
     # political controversy never breaks ("Pete Hegseth decries impeachment push" broke at 67 in the replay)
     breaking_bar: int = 70  # its score now (fresh), not a remembered best
+    controversy_penalty: int = 12  # regular slots: routine political controversy without market/geopolitical consequence ranks this much lower
     breaking_max_age: timedelta = timedelta(minutes=90)  # from first publication: breaking means it just happened
     breaking_per_day: int = 2
     breaking_gap: timedelta = timedelta(minutes=90)  # since the last post of any kind
@@ -724,8 +725,11 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
 
     covered = editorial.coverage(db, now)
 
+    def damp(e: NdEvent) -> float:
+        return p.controversy_penalty if e.kind in ("news", "update") and editorial.routine_controversy(e.title or "", e.topic or "") else 0.0
+
     def rank(e: NdEvent) -> tuple[float, int]:
-        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e) - editorial.diversity(e, covered, now)[0]), e.id)
+        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e) - editorial.diversity(e, covered, now)[0] - damp(e)), e.id)
 
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
@@ -749,6 +753,9 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         standing = held_score(ev, now, p)
         if standing < p.regular_bar:
             ev.why = f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
+            continue
+        if damp(ev) and standing - damp(ev) < p.regular_bar:
+            ev.why = f"{editorial.routine_controversy(ev.title or '', ev.topic or '')}: ranked {p.controversy_penalty} lower, {standing - damp(ev):g} is under the bar of {p.regular_bar}"
             continue
         if _age(ev, now) > 24 * 60 / max(1, len(p.slot_hours)) and ev.kind == "news" and not (ev.facts or {}).get("importance") \
                 and (ev.topic or "") not in IMPORTANT_TOPICS and editorial.significance(ev.title or "", ev.summary or "") is None:

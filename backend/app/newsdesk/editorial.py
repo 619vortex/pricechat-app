@@ -632,6 +632,23 @@ def breaking_worthy(title: str, topic: str = "", importance: dict[str, Any] | No
     return False, "no clear financial, market or major geopolitical significance"
 
 
+# Regular slots (owner, 2026-11-10): routine political controversy ranks lower unless it has market or geopolitical consequences.
+CONSEQUENCE = _rx(r"\b(shares?|stocks?|markets?|oil|crude|brent|gas prices|gold|bitcoin|crypto\w*|dollar|yields?|bonds?|treasur(?:y|ies)|tariffs?|"
+                  r"interest rates?|rate (?:cut|hike)s?|fed|central bank|default|shutdown|debt ceiling|budget|sanction\w*|embargo|ceasefire|"
+                  r"troops|invasion|missiles?|strikes? on)\b|\$\s?\d")
+
+
+def routine_controversy(title: str, topic: str = "") -> str | None:
+    """Why this reads as routine political controversy with no market or geopolitical consequence, or None."""
+    t = title or ""
+    if not POLITICAL_ROUTINE.search(t) and topic != "controversy":
+        return None
+    if CONSEQUENCE.search(t) or GEO_HARD.search(t) or MEGA.search(t):
+        return None
+    hit = POLITICAL_ROUTINE.search(t)
+    return f"routine political controversy ({hit.group(0).lower() if hit else topic}), no market or geopolitical consequence"
+
+
 def material_development(development: str) -> bool:
     """An update's development (events.development) is material: a bigger figure, an official source, or a strong event word."""
     d = development or ""
@@ -642,5 +659,5 @@ def escalation_note(before: float, after: float) -> str:
     return f"{before:g}% -> {after:g}% (x{after / before:.2f})" if before else f"{after:g}%"
 
 
-__all__ = ["Covered", "Significance", "Verdict", "admissible", "breaking_worthy", "canon", "corroborating", "coverage", "exceptional", "exceptional_pct", "importance_score",
+__all__ = ["Covered", "Significance", "Verdict", "admissible", "breaking_worthy", "routine_controversy", "canon", "corroborating", "coverage", "exceptional", "exceptional_pct", "importance_score",
            "desk_of", "diversity", "judge", "rank_bonus", "signature", "significance", "stamp", "tier"]

@@ -282,3 +282,39 @@ def test_an_allowed_development_names_its_source_and_new_fact(monkeypatch: pytes
                  facts={"development": "new: fbi", "development_source": {"outlet": "Reuters", "headline": "FBI investigating Nvidia boss"}})
     assert events._repeat(ev, [], BETWEEN) is False
     assert ev.facts["new_because"] == 'a development of a story already out (new: fbi, reported by Reuters: "FBI investigating Nvidia boss")'
+
+
+# --- regular slots: routine political controversy ranks lower unless it moves markets or geopolitics (owner, 2026-11-10) ------------
+
+
+@pytest.mark.parametrize(("title", "routine"), [
+    ("Pete Hegseth decries impeachment push, defends Iran war handling", True),
+    ("Defiant Hegseth defends Iran war as he faces impeachment vote", True),
+    ("Vance slams Democrats over Senate hearing", True),
+    ("Trump slams Fed, demands rate cuts as dollar slides", False),  # a market consequence
+    ("Senate hearing on tariffs sends stocks lower", False),
+    ("Lawmakers blast Nvidia over China chip sales", False),  # a mega-cap company
+    ("Missile strikes on Kyiv as Kremlin defends offensive", False),  # a hard geopolitical event
+    ("Brent falls below $90 a barrel for first time since August", False),
+])
+def test_routine_controversy_is_recognised(title: str, routine: bool) -> None:
+    assert (editorial.routine_controversy(title) is not None) is routine, title
+
+
+def test_a_controversy_loses_the_slot_to_a_market_story_it_outscores(db: Session) -> None:
+    _news(db, "c1", "Defiant Hegseth defends Iran war as he faces impeachment vote", 67, ["Bloomberg", "Financial Times", "The National"], age_min=30)
+    brent = _news(db, "c2", "Brent falls below $90 a barrel for first time since August", 60, ["CNBC", "The Guardian"], age_min=30, topic="macro")
+    got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
+    assert got is not None and got.id == brent.id
+
+
+def test_a_controversy_alone_needs_twelve_more_points(db: Session) -> None:
+    ev = _news(db, "c3", "Defiant Hegseth defends Iran war as he faces impeachment vote", 67, ["Bloomberg", "Financial Times"], age_min=30)
+    assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
+    assert "routine political controversy" in ev.why and "under the bar of 56" in ev.why
+
+
+def test_a_big_enough_controversy_still_goes(db: Session) -> None:
+    ev = _news(db, "c4", "Defiant Hegseth defends Iran war as he faces impeachment vote", 70, ["Bloomberg", "Financial Times"], age_min=30)
+    got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
+    assert got is not None and got.id == ev.id
