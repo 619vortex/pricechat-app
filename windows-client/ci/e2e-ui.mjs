@@ -137,17 +137,21 @@ async function main() {
   let cut = null;
   try {
     cut = await cutOff(first);
+    const tCut = Date.now();
     // the cut itself must work, or a failure below says nothing about the app: the tunnel carries nothing once its server is unreachable
     await sleep(5000);
     const through = await publicIp();
     if (!check("failover: test cut-off takes effect", through !== first, `public IPv4 seen through the cut tunnel: ${through ?? "none (cut)"}`)) throw new Error("cut-off had no effect");
-    const t0 = Date.now();
-    const dropped = await waitFor(async () => (await headline()) !== "Connected", 300_000, 2000);
-    check("failover: the cut-off is noticed", !!dropped, dropped ? `after ${Math.round((Date.now() - t0) / 1000)} s (the tunnel counts as down once its handshake is 180 s old)` : "still Connected after 5 minutes");
-    const moved = await waitFor(async () => /moved you to/.test(await bodyText()) && (await headline()) === "Connected", 300_000, 2000);
+    const dropped = await waitFor(async () => (await headline()) !== "Connected", 300_000, 1000);
+    const noticedS = Math.round((Date.now() - tCut) / 1000);
+    check("failover: the cut-off is noticed", !!dropped, dropped ? `${noticedS} s after the cut (2.1: liveness probes through the tunnel; before, the handshake had to be 180 s old)` : "still Connected after 5 minutes");
+    const moved = await waitFor(async () => /moved you to/.test(await bodyText()) && (await headline()) === "Connected", 300_000, 1000);
+    const movedS = Math.round((Date.now() - tCut) / 1000);
     const now = await vpnIp(home);
     const msg = await js(`[...document.querySelectorAll('p[role=status]')].map(p => p.textContent).find(t => t.includes('moved you')) ?? ''`);
-    check("failover: moved to another server", !!moved && now && now !== first && now !== home, `${msg || "no message"}; public IPv4 ${first} -> ${now} after ${Math.round((Date.now() - t0) / 1000)} s`);
+    check("failover: moved to another server", !!moved && now && now !== first && now !== home, `${msg || "no message"}; public IPv4 ${first} -> ${now}; Connected again ${movedS} s after the cut, traffic through the new server ${Math.round((Date.now() - tCut) / 1000)} s after`);
+    // the 2.1 target: noticed and recovered in under a minute
+    if (moved) check("failover: back within 60 s of the cut", movedS <= 60, `noticed after ${noticedS} s, Connected to the next server after ${movedS} s`);
   } catch (e) {
     add("failover", "FAIL", String(e?.message ?? e));
   } finally {

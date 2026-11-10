@@ -17,7 +17,9 @@ export interface Server { id: number; name: string; region: string; country_code
   /** its resolver blocks ads and trackers */ adblock?: boolean; /** its HTTPS proxy's name, used to time it */ proxy_host?: string | null }
 export interface Account { enabled: boolean; eligible: boolean; reason: string | null; max_devices: number; servers: Server[]; devices: { id: number; name: string; server_id: number }[];
   plan: { kind: string; days_left: number | null } | null; trial: { available: boolean; days: number } | null }
-export interface AccountView { signed_in: boolean; account: Account | null; suggested: number | null; last_server: number | null; error: string | null }
+export interface AccountView { signed_in: boolean; account: Account | null; suggested: number | null; last_server: number | null; error: string | null;
+  /** 2.1: servers this PC already holds a working device (and key) for, so connecting there creates nothing new. Absent from an older app. */
+  known_servers?: number[] }
 
 /** The same limit as HANDSHAKE_FRESH_SECONDS in the service's protocol.rs. WireGuard rekeys about every two minutes. */
 export const HANDSHAKE_FRESH_SECONDS = 180;
@@ -35,7 +37,11 @@ export function phaseOf(answer: Answer | null): Phase {
 
 export const vpnStatus = () => invoke<Answer>("vpn_status");
 export const vpnDisconnect = () => invoke<Answer>("vpn_disconnect");
-export const vpnConnect = (serverId: number) => invoke<Answer>("vpn_connect", { serverId });
+/** `pauseFirst`: failover's switch. The current tunnel is closed first (the kill switch keeps blocking), because a server that stopped
+ * answering still has this PC's routes, so the next server's settings couldn't be fetched through it. */
+export const vpnConnect = (serverId: number, pauseFirst = false) => invoke<Answer>("vpn_connect", pauseFirst ? { serverId, pauseFirst } : { serverId });
+/** One liveness probe through the tunnel: true if the tunnel's resolver answered, false if not, null if the app can't tell (it didn't start this tunnel). */
+export const probeTunnel = () => invoke<boolean | null>("probe_tunnel");
 /** Median time in ms to reach each server (3 HTTPS requests to its proxy name), null where it didn't answer. Only run while disconnected. */
 export const probeServers = () => invoke<Record<number, number | null>>("probe_servers");
 export interface SpeedReport { ping_ms: number | null; down_bytes: number; down_ms: number; up_bytes: number; up_ms: number; via: string }

@@ -1956,7 +1956,7 @@ dependencies = [
 
 [[package]]
 name = "kiwivpn-app"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "kiwivpn-client",
  "kiwivpn-service",

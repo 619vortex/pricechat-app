@@ -23,11 +23,20 @@ export function smartScore(s: SmartServer, ms: number | null | undefined): numbe
   return ms + busy * BUSY_PENALTY_MS;
 }
 
-/** Online servers best first. Measured ones by score, then unmeasured ones (recommended first), so there's always an order. */
+/** How busy a server is, 0..1; unknown counts as half full, so a server known to be quiet beats one we know nothing about. */
+export function busyOf(s: SmartServer): number {
+  const v = s.live_load ?? s.load;
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5;
+}
+
+/**
+ * Online servers best first. Measured ones by score (time + load), then unmeasured ones by load, then recommended first,
+ * so there's always an order: with no timings at all (nothing answered, or nothing to time) it falls back to load alone.
+ */
 export function rankServers<T extends SmartServer>(servers: T[], timings: Record<number, number | null>): T[] {
   const key = (s: T) => {
     const score = smartScore(s, timings[s.id]);
-    return Number.isFinite(score) ? [0, score, 0, s.id] : [1, 0, s.recommended ? 0 : 1, s.id];
+    return Number.isFinite(score) ? [0, score, 0, s.id] : [1, busyOf(s), s.recommended ? 0 : 1, s.id];
   };
   return servers.filter((s) => s.online).sort((a, b) => {
     const ka = key(a), kb = key(b);
@@ -38,11 +47,17 @@ export function rankServers<T extends SmartServer>(servers: T[], timings: Record
 
 // ----- failover -----
 
-export interface FailoverPolicy { enabled: boolean; graceSeconds: number; retriesBeforeSwitch: number; maxSwitches: number }
-export const DEFAULT_FAILOVER: FailoverPolicy = { enabled: true, graceSeconds: 45, retriesBeforeSwitch: 1, maxSwitches: 2 };
+/**
+ * `graceSeconds`: how long a stale handshake is waited out before acting (WireGuard's own signal, slow: a tunnel only counts
+ * as down once its handshake is 180 s old). `switchGraceSeconds`: how long a server just switched to gets to answer for the
+ * first time before the next one is tried (a working server handshakes in a second or two).
+ */
+export interface FailoverPolicy { enabled: boolean; graceSeconds: number; retriesBeforeSwitch: number; maxSwitches: number; switchGraceSeconds: number }
+export const DEFAULT_FAILOVER: FailoverPolicy = { enabled: true, graceSeconds: 45, retriesBeforeSwitch: 1, maxSwitches: 3, switchGraceSeconds: 15 };
 
-export interface FailoverState { serverId: number | null; downSince: number | null; retries: number; switches: number; tried: number[] }
-export const freshFailover = (serverId: number | null): FailoverState => ({ serverId, downSince: null, retries: 0, switches: 0, tried: serverId == null ? [] : [serverId] });
+/** `settled`: this server has answered since the app moved to it (or since the person connected). */
+export interface FailoverState { serverId: number | null; downSince: number | null; retries: number; switches: number; tried: number[]; settled?: boolean }
+export const freshFailover = (serverId: number | null): FailoverState => ({ serverId, downSince: null, retries: 0, switches: 0, tried: serverId == null ? [] : [serverId], settled: false });
 
 export type FailoverStep =
   | { kind: "wait" }
@@ -52,22 +67,76 @@ export type FailoverStep =
 
 /**
  * One look at the connection while the person wants to be connected. `healthy` is the service's verdict (a fresh handshake).
- * The kill switch, not this, keeps traffic from leaking while it decides: switching only happens after the old tunnel is closed.
+ * `dead` is the liveness probe's verdict (see `observeRx`): the server stopped answering through the tunnel, confirmed by several
+ * probes in a row, so there's nothing to wait out and retrying the same server would only waste time: the next server is tried
+ * at once. The kill switch, not this, keeps traffic from leaking while it decides: switching only happens after the old tunnel is
+ * paused (closed, with the kill switch still blocking).
  */
-export function nextFailoverStep(p: FailoverPolicy, st: FailoverState, healthy: boolean, nowMs: number, ranked: SmartServer[]): { state: FailoverState; step: FailoverStep } {
-  if (healthy) return { state: { ...st, downSince: null, retries: 0 }, step: { kind: "wait" } };
+export function nextFailoverStep(p: FailoverPolicy, st: FailoverState, healthy: boolean, nowMs: number, ranked: SmartServer[], dead = false): { state: FailoverState; step: FailoverStep } {
+  if (healthy && !dead) return { state: { ...st, downSince: null, retries: 0, settled: true }, step: { kind: "wait" } };
   if (st.serverId == null) return { state: st, step: { kind: "give-up", reason: "No server chosen." } };
   const downSince = st.downSince ?? nowMs;
   const state = { ...st, downSince };
-  if (nowMs - downSince < p.graceSeconds * 1000) return { state, step: { kind: "wait" } };
-  if (!p.enabled || st.retries < p.retriesBeforeSwitch) {
+  const confirmed = dead && p.enabled;
+  // a server just switched to that hasn't answered yet: a short grace, not the long one meant for a working tunnel's blip,
+  // and no retry of it (it never answered, so trying it again only wastes time)
+  const freshSwitch = st.switches > 0 && !st.settled;
+  const grace = freshSwitch ? Math.min(p.switchGraceSeconds, p.graceSeconds) : p.graceSeconds;
+  if (!confirmed && nowMs - downSince < grace * 1000) return { state, step: { kind: "wait" } };
+  if (!confirmed && !freshSwitch && (!p.enabled || st.retries < p.retriesBeforeSwitch)) {
     if (!p.enabled && st.retries >= p.retriesBeforeSwitch) return { state, step: { kind: "give-up", reason: "The server isn't answering. Automatic switching is off." } };
     return { state: { ...state, retries: st.retries + 1, downSince: nowMs }, step: { kind: "retry", serverId: st.serverId } };
   }
+  if (!p.enabled) return { state, step: { kind: "give-up", reason: "The server isn't answering. Automatic switching is off." } };
   if (st.switches >= p.maxSwitches) return { state, step: { kind: "give-up", reason: "No server answered. Check your internet connection." } };
   const next = ranked.find((s) => s.online && !st.tried.includes(s.id));
   if (!next) return { state, step: { kind: "give-up", reason: "No other server is online right now." } };
-  return { state: { serverId: next.id, downSince: nowMs, retries: 0, switches: st.switches + 1, tried: [...st.tried, next.id] }, step: { kind: "switch", serverId: next.id } };
+  return { state: { serverId: next.id, downSince: nowMs, retries: 0, switches: st.switches + 1, tried: [...st.tried, next.id], settled: false }, step: { kind: "switch", serverId: next.id } };
+}
+
+/**
+ * The order failover tries servers in: servers this PC already holds a working device for come first (switching to them needs
+ * no new device, so the device limit can't refuse it and no slot is used up), each group best first as ranked.
+ */
+export function failoverOrder<T extends SmartServer>(ranked: T[], known: number[] | null | undefined): T[] {
+  const k = new Set(known ?? []);
+  return [...ranked.filter((s) => k.has(s.id)), ...ranked.filter((s) => !k.has(s.id))];
+}
+
+// ----- liveness: is the server still answering through the tunnel? -----
+
+/**
+ * WireGuard only handshakes about every two minutes, so a dead server takes minutes to show in the handshake's age. Faster: watch
+ * the bytes coming in. Anything received from the server (data, a handshake, a keepalive) proves it's alive. When nothing has come
+ * in for `idleSeconds`, the app sends a tiny probe through the tunnel (a DNS question to the tunnel's own resolver, sent from the
+ * tunnel's own address, so it can't leave any other way) and waits for the answer. Only `failuresToDeclareDead` unanswered probes
+ * in a row, `probeEverySeconds` apart, with nothing received in between, count as dead. A quiet but working link answers the first
+ * probe, so being idle never triggers a switch.
+ */
+export interface LivenessPolicy { idleSeconds: number; probeEverySeconds: number; failuresToDeclareDead: number }
+export const DEFAULT_LIVENESS: LivenessPolicy = { idleSeconds: 12, probeEverySeconds: 4, failuresToDeclareDead: 3 };
+
+export interface LivenessState { rx: number | null; rxAt: number | null; failures: number; inFlight: boolean; lastProbeAt: number | null; dead: boolean }
+export const freshLiveness = (): LivenessState => ({ rx: null, rxAt: null, failures: 0, inFlight: false, lastProbeAt: null, dead: false });
+
+/** One reading of the tunnel's received-bytes counter. Says whether to send a probe now. */
+export function observeRx(p: LivenessPolicy, st: LivenessState, rx: number, nowMs: number): { state: LivenessState; probe: boolean } {
+  // the first reading, or a counter that went backwards (a new tunnel): start over from here
+  if (st.rx == null || st.rxAt == null || rx < st.rx) return { state: { ...freshLiveness(), rx, rxAt: nowMs }, probe: false };
+  if (rx > st.rx) return { state: { ...st, rx, rxAt: nowMs, failures: 0, dead: false }, probe: false };
+  if (st.dead || st.inFlight) return { state: st, probe: false };
+  const idle = nowMs - st.rxAt >= p.idleSeconds * 1000;
+  const due = st.lastProbeAt == null || nowMs - st.lastProbeAt >= p.probeEverySeconds * 1000;
+  if (idle && due) return { state: { ...st, inFlight: true, lastProbeAt: nowMs }, probe: true };
+  return { state: st, probe: false };
+}
+
+/** A probe's answer. `answered` is null when the app couldn't probe (it doesn't know the tunnel's addresses): never a failure. */
+export function probeResult(p: LivenessPolicy, st: LivenessState, answered: boolean | null, nowMs: number): LivenessState {
+  if (!st.inFlight) return st; // a probe for a tunnel that has since been replaced
+  if (answered !== false) return { ...st, inFlight: false, failures: 0, rxAt: nowMs, dead: false };
+  const failures = st.failures + 1;
+  return { ...st, inFlight: false, failures, dead: failures >= p.failuresToDeclareDead };
 }
 
 // ----- speed test -----
