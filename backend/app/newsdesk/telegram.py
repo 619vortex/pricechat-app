@@ -88,7 +88,13 @@ def over_limit(db: Session, s: NdTelegramSettings, now: datetime, slot: str = "r
     """The lane's own safety limits. A scheduled slot (the desk's six a day) is held to the schedule's own count, so the old 3-4 a day
     setting can't silently drop slots; between any two posts there are still MIN_GAP minutes."""
     day = int(db.scalar(select(func.count()).select_from(NdTelegramPost).where(NdTelegramPost.status.in_(COUNTED), NdTelegramPost.created_at >= now - timedelta(days=1))) or 0)
-    cap = max(s.max_per_day, len(events.policy(engine.settings_row(db).state or {}).slot_hours) + 1) if slot == "slot" else s.max_per_day
+    plan = events.policy(engine.settings_row(db).state or {})
+    if slot == "slot":
+        cap = max(s.max_per_day, len(plan.slot_hours) + 1)
+    elif slot == "breaking":  # between-slot breaking news is part of the plan too (at most breaking_per_day): a full day of slots never blocks it
+        cap = max(s.max_per_day, len(plan.slot_hours) + 1 + plan.breaking_per_day)
+    else:
+        cap = s.max_per_day
     if day >= cap:
         return f"{day} posts in 24 hours, the limit"
     last = _aware(db.scalar(select(func.max(NdTelegramPost.created_at)).where(NdTelegramPost.status.in_(COUNTED))), now)

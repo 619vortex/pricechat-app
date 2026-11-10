@@ -513,7 +513,26 @@ def importance_score(sig: Significance, *, evidence: str, outlets: int, outlets_
     reach = 12 if sig.kind == "geopolitics" else 12 if MEGA.search(title) or INSTITUTION.search(title) else 10 if assets_in(title) & {"BTC", "ETH", "OIL"} else 6
     ev = virality.EVIDENCE.get(evidence, 0) + (min(outlets - 1, 2) * 1.5 if evidence == "two outlets" and outlets > 1 else 0)
     parts = {"significance": sig.points, "reach": float(min(15, reach)), "evidence": float(min(15, ev)), "spread": float(min(10, 2.5 * max(outlets, outlets_3h)))}
+    tie = consequence(sig, title)
+    if tie:
+        parts["consequence"] = tie
     return virality._finish(parts, age_minutes)
+
+
+# what a hard event does to markets (owner, 2026-11-11: verified major World Monitor events break between slots at 70+). Without this part an
+# importance story topped out at 67 (geopolitics) or 65 (corporate) and could never break, however big: a missile strike on Saudi Aramco's
+# largest export terminal, confirmed by two outlets, scored 56. Only a hard event (never talk) with a direct market tie earns it.
+MARKET_TIE = _rx(r"(oil|crude|brent|wti|refiner(?:y|ies)|oil (?:field|terminal|facility|facilities)|export terminal|pipelines?|gas ?fields?|lng|"
+                 r"tankers?|shipping|strait|suez|red sea|bab el-mandeb|aramco|opec|power grid|chip ?plants?|semiconductor|stock exchange|central bank)")
+
+
+def consequence(sig: Significance, title: str) -> float:
+    t = title or ""
+    if sig.kind == "geopolitics" and GEO_HARD.search(t) and not TALK.search(t) and (MARKET_TIE.search(t) or assets_in(t) & {"OIL", "GOLD", "BTC", "ETH"}):
+        return 15.0
+    if sig.kind == "corporate" and CORP_BIG.search(t) and MEGA.search(t):
+        return 6.0
+    return 0.0
 
 
 # --- market moves on their own ---------------------------------------------------------------------------------------

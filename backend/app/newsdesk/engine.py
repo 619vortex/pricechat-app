@@ -426,7 +426,7 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         else:
             text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
         source_text = f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
-        urgent = ev.label == brief.BREAKING or ev.slot == "extra"
+        urgent = ev.label == brief.BREAKING or ev.slot in ("extra", "breaking")
         market_kind = ev.kind in ("market", "recap") or bool(f.get("symbol"))
         post = enqueue(db, posts, kind="market" if market_kind else "news", category=ev.category or "viral", priority="breaking" if urgent else "scheduled", text=text, key=f"event:{ev.id}",
                        score=round(ev.virality / 10, 2), facts={"event_id": ev.id, "title": ev.title, "headline": ev.headline, "topic": ev.topic, "label": ev.label, "virality": ev.virality,

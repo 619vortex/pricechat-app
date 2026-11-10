@@ -113,7 +113,7 @@ def wants_background(ev: Any) -> bool:
 def _breaking(ev: Any) -> bool:
     from app.newsdesk import brief
 
-    return getattr(ev, "slot", "") == "extra" or getattr(ev, "label", "") in (brief.BREAKING, brief.ALERT)
+    return getattr(ev, "slot", "") in ("extra", "breaking") or getattr(ev, "label", "") in (brief.BREAKING, brief.ALERT)
 
 
 def prerender(db: Session, now: datetime, upcoming: datetime | None, candidates: list[NdEvent]) -> int:
