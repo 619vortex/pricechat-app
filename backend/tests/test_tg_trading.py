@@ -145,6 +145,14 @@ def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Sessi
         assert "Banter group" not in text
 
 
+def test_open_takes_the_side_before_the_coin_too() -> None:
+    for words in (["long", "btc", "10", "5x"], ["LONG", "BTC", "10", "5X"], ["btc", "long", "10", "5x"]):
+        r = tgtrade.parse_open(words)
+        assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage) == ("BTC", "LONG", 10.0, 5), words
+    r = tgtrade.parse_open(["short", "eth", "20", "3x", "tp", "2k"])
+    assert (r.coin, r.side, r.tp) == ("ETH", "SHORT", 2000.0)
+
+
 def test_signal_numbers_come_from_the_command_or_the_card_replied_to() -> None:
     assert tgtrade.signal_from(["#012"]) == 12 and tgtrade.signal_from(["7"]) == 7
     assert tgtrade.signal_from([], "🟢 $SOL LONG · #012\n\n🎯 Entry 99 – 101") == 12
