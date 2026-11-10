@@ -24,7 +24,7 @@ WORKER = 8 * MB  # AI workers' scripts, progress and media lists
 UPLOAD = 16 * MB  # photo uploads (portfolio.photos.MAX_UPLOAD = 15 MB) + multipart overhead
 _UPLOADS = re.compile(r"^/api/members/(portfolio/scan|portfolio/holdings/\d+/photos|market/listings/\d+/photos)/?$")
 _WORKER_RESULT = re.compile(r"^/api/(brand-manager|short-market)/worker/jobs/\d+/result/?$")
-_WORKER = ("/api/brand-manager/worker/", "/api/short-market/worker/")
+_WORKER = ("/api/brand-manager/worker/", "/api/short-market/worker/", "/api/newsdesk-worker/")
 _BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 Scope = dict[str, Any]

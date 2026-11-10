@@ -18,6 +18,14 @@ router = APIRouter(prefix="/x/newsdesk", tags=["newsdesk"])
 router.include_router(editorial_router)  # story history, preview queue, the owner's block (app/api/routes/newsdesk_editorial)
 
 
+@router.get("/render/health")
+def render_health(db: DbSession) -> dict[str, Any]:
+    """The GPU PC's News Desk pictures: worker online, queue, success rate, speed, recent jobs (app/newsdesk/render_queue)."""
+    from app.newsdesk import render_queue
+
+    return render_queue.health(db)
+
+
 @router.get("")
 def overview(db: DbSession, runtime: Runtime) -> dict[str, Any]:
     return engine.overview(db, runtime.settings)

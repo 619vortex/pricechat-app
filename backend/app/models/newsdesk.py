@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, Float, Index, Integer, String, Text, false, true
+from sqlalchemy import JSON, BigInteger, Boolean, Float, Index, Integer, LargeBinary, String, Text, UniqueConstraint, false, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
@@ -150,3 +150,30 @@ class NdEvent(IdMixin, TimestampMixin, Base):
     tg_post_id: Mapped[int | None] = mapped_column(Integer)
     tg_message_id: Mapped[int | None] = mapped_column(BigInteger)
     tg_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+
+class NdRenderJob(IdMixin, TimestampMixin, Base):
+    """A News Desk picture background for the owner's GPU PC (app/newsdesk/render_queue.py). The PC claims it over outbound HTTPS with
+    its Brand Manager worker token, renders a text-free 16:9 image and uploads it; the backend draws every headline, number and credit
+    itself. One job per event and art direction (idempotency key); an expired lease goes back to the queue; when the PC is offline the
+    post uses the desk's own drawn visuals instead."""
+
+    __tablename__ = "nd_render_jobs"
+    __table_args__ = (UniqueConstraint("idempotency_key"), Index("ix_nd_render_jobs_status", "status", "run_after"))
+
+    event_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="queued", nullable=False)  # queued | claimed | done | failed | cancelled
+    priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # breaking first
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    run_after: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    lease_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    deadline: Mapped[datetime | None] = mapped_column(UTCDateTime())  # past this the post goes without it
+    worker_id: Mapped[int | None] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # prompt, negative, size, seed, model, art direction
+    image: Mapped[bytes | None] = mapped_column(LargeBinary)  # JPEG, text-free
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # model, seconds, quality checks
+    error: Mapped[str | None] = mapped_column(Text)
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
