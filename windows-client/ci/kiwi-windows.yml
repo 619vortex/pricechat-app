@@ -372,8 +372,19 @@ jobs:
           Start-Sleep 5
           $v1 = (Get-Item "C:\Program Files\KiwiVPN\KiwiVPN.exe").VersionInfo.ProductVersion
           Write-Host "installed first: $v1, service $((Get-Service KiwiVPN).Status)"
+          # As on a PC with Smart App Control: 0.1.1's programs are unsigned and may not be started. Deny "execute" on them, so
+          # an installer that tries to run the old uninstall.exe or kiwivpn-service.exe fails here as it does there.
+          # (The already-running old service keeps running, as it does there.)
+          foreach ($f in "uninstall.exe", "kiwivpn-service.exe", "KiwiVPN.exe") { & icacls "C:\Program Files\KiwiVPN\$f" /deny "*S-1-1-0:(X)" | Out-Null }
+          $blocked = $false
+          try { $t = Start-Process "C:\Program Files\KiwiVPN\uninstall.exe" -ArgumentList "/S" -PassThru -ErrorAction Stop; $t.WaitForExit(10000) | Out-Null } catch { $blocked = $true }
+          if (-not $blocked) { throw "The Smart App Control stand-in didn't work: the old uninstall.exe could still start" }
+          New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\live.pricechat.kiwivpn" | Out-Null
+          "keep me" | Out-File "$env:LOCALAPPDATA\live.pricechat.kiwivpn\ci-user-data.txt"
           $exe = Get-ChildItem build\*-Setup.exe | Select-Object -First 1
-          $p = Start-Process $exe.FullName -ArgumentList "/S" -Wait -PassThru
+          # /P = passive: the same pages a person clicks through (incl. the "already installed" page), without the clicks
+          $p = Start-Process $exe.FullName -ArgumentList "/P" -PassThru
+          if (-not $p.WaitForExit(300000)) { Stop-Process -Id $p.Id -Force; throw "2.0's installer hung over 0.1.1 (it probably tried the old uninstaller and is showing an error)" }
           if ($p.ExitCode -ne 0) { throw "2.0 didn't install over 0.1.1 ($($p.ExitCode))" }
           Start-Sleep 5
           $v2 = (Get-Item "C:\Program Files\KiwiVPN\KiwiVPN.exe").VersionInfo.ProductVersion
@@ -383,7 +394,30 @@ jobs:
           if (-not $v2.StartsWith("2.")) { throw "KiwiVPN.exe is still $v2 after the upgrade" }
           if ($svc.Status -ne "Running") { throw "The service isn't running after the upgrade" }
           if ($entries.Count -ne 1) { throw "Expected one Kiwi VPN entry in Apps, found $($entries.Count)" }
-          "### Upgrade from 0.1.1`n`n$v1 -> $v2, service $($svc.Status), one Apps entry" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if (-not (Test-Path "$env:LOCALAPPDATA\live.pricechat.kiwivpn\ci-user-data.txt")) { throw "The upgrade lost the person's Kiwi settings folder" }
+          $u = Get-AuthenticodeSignature "C:\Program Files\KiwiVPN\uninstall.exe"
+          Write-Host "uninstall.exe after the upgrade: $($u.Status) $($u.SignerCertificate.Subject)"
+          $signedBuild = [bool](Get-ChildItem build -Recurse -Filter BUILD-INFO.txt | Select-String -Pattern "signed\s*:?\s*yes" -Quiet)
+          if ($signedBuild -and $u.Status -ne "Valid") { throw "After the upgrade, Apps would still launch an unsigned uninstall.exe ($($u.Status))" }
+          "### Upgrade from 0.1.1 (old programs blocked, as Smart App Control does)`n`n$v1 -> $v2, service $($svc.Status), one Apps entry, settings kept, uninstall.exe $($u.Status)" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Uninstall 2.0 from Apps, without starting any old program
+        run: |
+          $ErrorActionPreference = "Stop"
+          $entry = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\KiwiVPN
+          $cmd = $entry.UninstallString.Trim('"')
+          Write-Host "Apps runs: $($entry.UninstallString)"
+          $p = Start-Process $cmd -ArgumentList "/S" -PassThru
+          if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force; throw "The uninstaller hung" }
+          Start-Sleep 10 # the NSIS uninstaller copies itself to %TEMP% and finishes from there
+          $left = @()
+          if (Get-Service KiwiVPN -ErrorAction SilentlyContinue) { $left += "KiwiVPN service" }
+          if (Get-Service 'WireGuardTunnel$kiwi' -ErrorAction SilentlyContinue) { $left += "tunnel service" }
+          if (Test-Path "C:\Program Files\KiwiVPN\KiwiVPN.exe") { $left += "KiwiVPN.exe" }
+          if (Test-Path HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\KiwiVPN) { $left += "Apps entry" }
+          if ($left) { throw "Uninstall left: $($left -join ', ')" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\live.pricechat.kiwivpn\ci-user-data.txt")) { Write-Host "note: the uninstaller removed the settings folder" }
+          "- Uninstall from Apps: service, files and entry gone" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   kill-switch:
     needs: build
