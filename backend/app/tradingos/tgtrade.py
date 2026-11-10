@@ -60,7 +60,7 @@ LIMIT_MAX_AWAY = 0.05  # a limit (worst accepted fill) more than 5% from the pri
 COMMANDS = {"/market", "/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet"}
 HELP = ("<b>Trading (private chat, Banter group)</b>\n"
         "/market BTC: price, funding, open interest, max leverage\n"
-        "/open BTC long 100 5x [sl 60000] [tp 70000] [limit 64500]: $100 margin at 5x, previewed first\n"
+        "/open BTC long 5x: market order, your full margin limit · /open BTC long 100 5x tp 79k sl 60k: $100 margin, with targets\n"
         "/enter: reply to a Price Chat signal to trade it\n"
         "/preview BTC long 100 5x: a mainnet order preview (read-only) · /mainnet: your mainnet readiness\n"
         "/positions · /pnl · /balance · /orders\n"
@@ -241,29 +241,39 @@ SECRET_WARNING = ("⚠️ That looked like a private key or a recovery phrase, s
 class OpenRequest:
     coin: str
     side: str  # LONG | SHORT
-    margin: float
+    margin: float | None  # None: "/open BTC long 20x" without an amount uses the member's full margin limit (max allocation)
     leverage: int
     stop: float | None = None
     tp: float | None = None
     limit: float | None = None  # worst fill price for the immediate entry (None: market)
 
 
-OPEN_USAGE = ("Usage: /open BTC long 100 5x [sl 60000] [tp 70000] [limit 64500]  (coin, long or short, margin in USD, leverage; "
-              "limit = the worst price you accept, filled now or not at all)")
+OPEN_USAGE = ("Usage: /open BTC long 5x (market, your full margin limit) or /open BTC long 100 5x (with $100 margin), then optionally "
+              "tp 79k · sl 60k · limit 64.5k (limit = the worst price you accept, filled now or not at all)")
 
 
 def _num(s: str) -> float | None:
+    """100 · $100 · 1,250 · 79k · 1.2m"""
+    t = s.replace("$", "").replace(",", "").strip().lower()
+    mult = 1.0
+    if t[-1:] in ("k", "m"):
+        mult, t = (1_000.0 if t[-1] == "k" else 1_000_000.0), t[:-1]
     try:
-        v = float(s.replace("$", "").replace(",", ""))
+        v = float(t) * mult
     except ValueError:
         return None
     return v if v > 0 else None
 
 
+def _lev(s: str) -> int | None:
+    t = s.lower().rstrip("x")
+    return int(t) if t.isdigit() and 1 <= int(t) <= 100 else None
+
+
 def parse_open(args: list[str]) -> OpenRequest | str:
     """`/open BTC long 100 5x sl 60000 tp 70000`: an OpenRequest, or what's wrong with it."""
     words = [a.strip() for a in args if a.strip()]
-    if len(words) < 4:
+    if len(words) < 3:
         return OPEN_USAGE
     coin = words[0].lstrip("$").upper()
     if not re.fullmatch(r"[A-Z0-9]{1,15}", coin):
@@ -271,14 +281,17 @@ def parse_open(args: list[str]) -> OpenRequest | str:
     side = {"long": "LONG", "buy": "LONG", "short": "SHORT", "sell": "SHORT"}.get(words[1].lower())
     if side is None:
         return "Say long or short. " + OPEN_USAGE
-    margin = _num(words[2])
-    lev_s = words[3].lower().rstrip("x")
-    if margin is None:
-        return "The margin is an amount in USD, like 100. " + OPEN_USAGE
-    if not lev_s.isdigit() or not 1 <= int(lev_s) <= 100:
+    if words[2].lower().endswith("x") and _lev(words[2]) is not None:  # "/open BTC long 20x": no amount, a market order at the full margin limit
+        margin, lev, rest = None, _lev(words[2]), words[3:]
+    else:
+        if len(words) < 4:
+            return OPEN_USAGE
+        margin, lev, rest = _num(words[2]), _lev(words[3]), words[4:]
+        if margin is None:
+            return "The margin is an amount in USD, like 100. " + OPEN_USAGE
+    if lev is None:
         return "The leverage is a whole number, like 5x. " + OPEN_USAGE
-    req = OpenRequest(coin, side, round(margin, 2), int(lev_s))
-    rest = words[4:]
+    req = OpenRequest(coin, side, round(margin, 2) if margin is not None else None, lev)
     while rest:
         key = rest[0].lower()
         if key not in ("sl", "stop", "tp", "target", "limit", "lmt") or len(rest) < 2 or _num(rest[1]) is None:
@@ -341,6 +354,8 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     if daily_pnl <= -abs(daily_loss_limit):
         reasons.append("your daily loss limit is reached")
     max_margin = equity * max_allocation_pct / 100
+    if req.margin is None:  # no amount typed: the full margin the member's limit allows
+        req.margin = round(max_margin, 2)
     if req.margin > max_margin + 1e-9:
         reasons.append(f"${req.margin:,.2f} margin is over your limit of {max_allocation_pct:g}% of ${equity:,.2f} (${max_margin:,.2f})")
     lev = max(1, min(req.leverage, cap))

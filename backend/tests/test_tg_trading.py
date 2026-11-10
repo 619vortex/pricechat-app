@@ -111,6 +111,18 @@ def test_open_reads_coin_side_margin_leverage_and_optional_stop_and_target() -> 
         assert isinstance(tgtrade.parse_open(bad), str), bad
 
 
+def test_open_without_an_amount_is_a_market_order_at_the_full_margin_limit_and_prices_take_k() -> None:
+    r = tgtrade.parse_open(["btc", "long", "20x"])
+    assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage, r.limit) == ("BTC", "LONG", None, 20, None)
+    r = tgtrade.parse_open(["BTC", "LONG", "20X", "TP", "79K", "SL", "15K"])
+    assert (r.margin, r.leverage, r.tp, r.stop) == (None, 20, 79000.0, 15000.0)
+    r = tgtrade.parse_open(["eth", "short", "1.5k", "3x", "limit", "2.4k"])
+    assert (r.margin, r.limit) == (1500.0, 2400.0)
+    m = man(req=tgtrade.OpenRequest("BTC", "LONG", None, 3))  # equity 1000, max allocation 10%: $100 margin
+    assert m.plan.ok and m.plan.margin == pytest.approx(100, rel=0.01)
+    assert isinstance(tgtrade.parse_open(["BTC", "long"]), str) and isinstance(tgtrade.parse_open(["BTC", "long", "abc"]), str)
+
+
 def test_signal_numbers_come_from_the_command_or_the_card_replied_to() -> None:
     assert tgtrade.signal_from(["#012"]) == 12 and tgtrade.signal_from(["7"]) == 7
     assert tgtrade.signal_from([], "🟢 $SOL LONG · #012\n\n🎯 Entry 99 – 101") == 12
