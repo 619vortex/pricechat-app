@@ -3,7 +3,7 @@
 # Needs a read-only fine-grained token in the user env var KIWI_GH_TOKEN (repo KIWIVPN only: Actions read, Contents read).
 # The token is read from the environment and never printed.
 #   powershell -ExecutionPolicy Bypass -File windows-client\ci-fetch.ps1 [-Run <id>] [-NoDownload]
-param([long]$Run = 0, [switch]$NoDownload, [string]$Repo = "619vortex/KIWIVPN", [string]$Out = "C:\AI\pc-wt\kiwi-release\ci")
+param([long]$Run = 0, [switch]$NoDownload, [switch]$EvenIfTestsFailed, [string]$Repo = "619vortex/KIWIVPN", [string]$Out = "C:\AI\pc-wt\kiwi-release\ci")
 $ErrorActionPreference = "Stop"
 $Token = [Environment]::GetEnvironmentVariable("KIWI_GH_TOKEN", "User")
 if (-not $Token) { $Token = $env:KIWI_GH_TOKEN }
@@ -22,7 +22,8 @@ foreach ($j in (Get-Api "/actions/runs/$($r.id)/jobs").jobs) {
     Write-Host ("  job {0}: {1} / {2}" -f $j.name, $j.status, $j.conclusion)
     foreach ($s in $j.steps) { if ($s.conclusion -ne "success" -and $s.conclusion -ne "skipped") { Write-Host ("    step {0}: {1} / {2}" -f $s.name, $s.status, $s.conclusion) } }
 }
-if ($r.conclusion -ne "success" -or $NoDownload) { exit 0 }
+if ($NoDownload -or ($r.conclusion -ne "success" -and -not $EvenIfTestsFailed)) { exit 0 }
+if ($r.conclusion -ne "success") { Write-Host "NOTE: downloading from a run whose tests did not all pass (-EvenIfTestsFailed)" }
 
 $art = (Get-Api "/actions/runs/$($r.id)/artifacts").artifacts | Where-Object { $_.name -like "KiwiVPN-Windows-*" -and -not $_.expired } | Select-Object -First 1
 if (-not $art) { throw "The run has no installer artifact (or it expired)." }
