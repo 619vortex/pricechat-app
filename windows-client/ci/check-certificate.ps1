@@ -51,12 +51,25 @@ $info = Cst @("credential_info", "-username=$env:ES_USERNAME", "-password=$env:E
 $shown = ($info -split "`r?`n" | Where-Object { $_ -notmatch "^[A-Za-z0-9+/=]{60,}$" }) -join "`n"
 Write-Host "Credential info:`n$shown"
 
-# the certificate: a PEM block, or a long base64 DER line, in what SSL.com returned
-$b64 = $null
-if ($info -match "(?s)-----BEGIN CERTIFICATE-----(.+?)-----END CERTIFICATE-----") { $b64 = ($Matches[1] -replace "\s", "") }
-elseif ($info -match "(MII[A-Za-z0-9+/=]{500,})") { $b64 = $Matches[1] }
-if (-not $b64) { Say $false "certificate found in SSL.com's answer (see the output above)"; exit 1 }
-$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 (, [Convert]::FromBase64String($b64))
+# The certificate itself: CodeSignTool only prints a summary, so ask SSL.com's eSigner (CSC) API directly, the same sign-in
+# CodeSignTool uses (its own client ID, from its settings file). credentials/info only reads; it signs nothing.
+$props = @{}
+Get-Content (Join-Path $Tool "conf\code_sign_tool.properties") | ForEach-Object { if ($_ -match "^\s*([A-Z_]+)\s*=\s*(.+?)\s*$") { $props[$Matches[1]] = $Matches[2] } }
+$tok = Invoke-RestMethod -Method Post -Uri $props["OAUTH2_ENDPOINT"] -ContentType "application/json" -Body (@{
+    client_id = $props["CLIENT_ID"]; grant_type = "password"; username = $env:ES_USERNAME; password = $env:ES_PASSWORD } | ConvertTo-Json)
+Write-Host "::add-mask::$($tok.access_token)"
+$csc = Invoke-RestMethod -Method Post -Uri "$($props['CSC_API_ENDPOINT'])/csc/v0/credentials/info" -ContentType "application/json" `
+  -Headers @{ Authorization = "Bearer $($tok.access_token)" } -Body (@{ credentialID = $env:ES_CREDENTIAL_ID; certificates = "chain" } | ConvertTo-Json)
+$pems = @($csc.cert.certificates)
+Say ($pems.Count -ge 1) "certificate downloaded from SSL.com's eSigner API ($($pems.Count) in the chain it sent)"
+if ($pems.Count -lt 1) { exit 1 }
+function ToCert($s) { New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 (, [Convert]::FromBase64String(($s -replace "-----[A-Z ]+-----", "" -replace "\s", ""))) }
+$cert = ToCert $pems[0]
+$extra = @($pems | Select-Object -Skip 1 | ForEach-Object { ToCert $_ })
+$tsa = $props["TSA_URL"]
+try { $t = Invoke-WebRequest -UseBasicParsing -Method Post -Uri $tsa -ContentType "application/timestamp-query" -Body ([byte[]]@(0x30)) -TimeoutSec 20; $tsOk = $true }
+catch { $tsOk = $null -ne $_.Exception.Response } # any HTTP answer to a junk request means the timestamp server is reachable
+Say $tsOk "timestamp server $tsa reachable (RFC 3161; every signature gets a timestamp so it outlives the certificate)"
 $alg = $cert.PublicKey.Oid.FriendlyName
 $bits = if ($alg -eq "RSA") { $cert.PublicKey.Key.KeySize } else { "?" }
 Write-Host "subject    $($cert.Subject)"
@@ -73,6 +86,7 @@ Say ($cert.NotBefore -le $now -and $cert.NotAfter -gt $now.AddDays(30)) "valid n
 $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
 $chain.ChainPolicy.RevocationMode = "Online"
 $chain.ChainPolicy.ApplicationPolicy.Add((New-Object System.Security.Cryptography.Oid "1.3.6.1.5.5.7.3.3")) | Out-Null
+foreach ($x in $extra) { $chain.ChainPolicy.ExtraStore.Add($x) | Out-Null }
 $built = $chain.Build($cert)
 $path = ($chain.ChainElements | ForEach-Object { $_.Certificate.GetNameInfo("SimpleName", $false) }) -join " > "
 $why = ($chain.ChainStatus | ForEach-Object { $_.StatusInformation.Trim() }) -join "; "
