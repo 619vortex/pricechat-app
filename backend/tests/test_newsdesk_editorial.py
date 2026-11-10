@@ -269,3 +269,20 @@ def test_a_strong_story_keeps_its_strength_while_it_waits_for_the_next_slot_but_
     assert events.held_score(ev, SLOT, p) == 49.0  # it had a whole slot interval: now freshness counts
     move = NdEvent(key="move:x", kind="market", virality=58.0, facts={"peak": 70.0})
     assert events.held_score(move, SLOT, p) == 58.0  # a price move is only ever as good as now
+
+
+async def test_a_slot_left_empty_on_purpose_is_skipped_not_missed_and_never_alerts(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    told: list[str] = []
+
+    async def notify(db: Session, key: str, text: str, **kw: Any) -> bool:
+        told.append(key)
+        return True
+
+    monkeypatch.setattr("app.alerts.notify_owner", notify)
+    p = events.policy({})
+    events.slots_since(db, SLOT - timedelta(hours=1))
+    assert await decide(db, SLOT + timedelta(minutes=1), oil(SLOT, -3.0)) is None  # nothing new and worthwhile
+    later = SLOT + timedelta(hours=2)
+    row = next(s for s in events.schedule(db, later, p)["slots"] if s["at"] == SLOT.isoformat())
+    assert row["state"] == "skipped"
+    assert await events.alert_slots(db, later, p) == 0 and told == []

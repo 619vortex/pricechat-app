@@ -346,6 +346,8 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     db.commit()
     if released is None and sched(p) == "slots":
         released = await fill_with_recap(db, now, p, quotes, market)
+        if released is None:
+            note_skip(db, now, p)
     out["released"] = released.id if released is not None else None
     db.commit()
     return out
@@ -759,6 +761,31 @@ async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[st
 
 
 FAILED = ("missed", "failed", "skipped", "uncertain")
+SKIP_REASON = "nothing new and worthwhile: no verified story cleared the bar, no exceptional market move the channel hasn't already shown"
+
+
+def note_skip(db: Session, now: datetime, p: Policy) -> None:
+    """An open slot the desk looked at and chose to leave empty (owner, 2026-11-10: skip rather than repeat or fill). Recorded in the desk's
+    state, so the schedule shows it as skipped, not missed, and the owner isn't alerted as if the server were down."""
+    from app.models.newsdesk import NdSettings
+
+    slot = current_slot(now, p)
+    row = db.get(NdSettings, 1)
+    if slot is None or row is None or slot_filled(db, slot, p) is not None:
+        return
+    skips = dict((row.state or {}).get("skipped_slots") or {})
+    if slot.isoformat() in skips:
+        return
+    skips[slot.isoformat()] = SKIP_REASON
+    row.state = {**(row.state or {}), "skipped_slots": dict(sorted(skips.items())[-24:])}
+    db.commit()
+
+
+def skipped_slots(db: Session) -> dict[str, str]:
+    from app.models.newsdesk import NdSettings
+
+    row = db.get(NdSettings, 1)
+    return dict((row.state or {}).get("skipped_slots") or {}) if row is not None else {}
 ALERT_HOURS = 6
 _alerted: dict[str, datetime] = {}  # this process: each alert key handled once per ALERT_HOURS, even while the owner chat is unset (no log spam)
 
@@ -817,11 +844,14 @@ def schedule(db: Session, now: datetime, p: Policy) -> dict[str, Any]:
     the last delivery per platform."""
     slots = []
     since = slots_since(db)
+    skips = skipped_slots(db)
     for t in slot_times(now, p):
         if t > now:
             continue
         ev = slot_filled(db, t, p)
         state = "filled" if ev is not None else ("open" if now - t <= p.slot_catch_up else "missed")
+        if ev is None and t.isoformat() in skips and state == "missed":
+            state = "skipped"  # the desk looked and found nothing worth posting: by design, not a fault
         if ev is None and since is not None and t < since - p.slot_catch_up:
             state = "before"  # the schedule wasn't running yet
         slots.append({"at": t.isoformat(), "dubai": slot_label(t), "state": state, "event": ev.id if ev else None, "kind": ev.kind if ev else None,

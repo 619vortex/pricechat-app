@@ -20,13 +20,13 @@ export type Desk = { settings: DeskSettings; blocked: string | null; last_run: (
   queue: DeskPost[]; published: DeskPost[]; problems: DeskPost[];
   feed_health?: { at?: string; feeds?: Record<string, { name: string; tier: number; items: number; new?: number; newest: string | null; problem: string | null }> };
   desk?: { schedule?: Schedule } };
-export type SlotRow = { at: string; dubai: string; state: "filled" | "open" | "missed" | "before"; event: number | null; kind: string | null; headline: string | null; x: string | null; telegram: string | null;
+export type SlotRow = { at: string; dubai: string; state: "filled" | "open" | "missed" | "skipped" | "before"; event: number | null; kind: string | null; headline: string | null; x: string | null; telegram: string | null;
   telegram_message_id: number | null };
 export type Schedule = { schedule: string; slot_hours_dubai: number[]; next_slot: string; next_slot_dubai: string; slots: SlotRow[];
   last_telegram: { event: number; at: string | null; message_id: number | null } | null; last_x: { event: number; at: string | null; status: string } | null;
   failures: { event: number; dubai: string; x: string | null; telegram: string | null }[] };
 
-const SLOT_TONE: Record<string, Tone> = { filled: "good", open: "info", missed: "bad" };
+const SLOT_TONE: Record<string, Tone> = { filled: "good", open: "info", missed: "bad", skipped: "neutral" }; // skipped: nothing new worth posting (by design)
 
 /** The six Dubai slots: what filled each, each platform's delivery, and the feeds' health (2026-11-09). */
 export function SchedulePanel({ schedule, feeds }: { schedule: Schedule; feeds?: Desk["feed_health"] }) {
