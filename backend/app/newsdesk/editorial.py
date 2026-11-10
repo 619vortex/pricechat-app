@@ -264,7 +264,8 @@ RULE = ("One story is posted once, on Telegram and on X alike. The same asset or
         "(hacks, failures, scams) or 48 hours (other news) unless something materially new happens: a move at least twice the size "
         "already posted AND into a major severity tier, a verified cause for a move shown only as a number, or a "
         "material development (an arrest, charges, the FBI or DOJ, withdrawals halted or resumed, funds recovered, a resignation, an "
-        "official confirmation, a bigger figure).")
+        "official confirmation, a bigger figure). A development must be a fact the outlet reports, new against everything already "
+        "told about the story: never a maybe (\"could\", \"reportedly\", \"set to\", a question).")
 
 
 def repeat_verdict(ev: Any, covered: list[Covered], now: datetime) -> Verdict:
@@ -367,6 +368,12 @@ def history(db: Any, now: datetime, hours: int = 72) -> list[dict[str, Any]]:
     return out
 
 
+def _sources_mod() -> Any:
+    from app.newsdesk import sources
+
+    return sources
+
+
 STATUS_WORD = {"released": "selected", "superseded": "merged (repeat)", "rejected": "rejected", "missed": "expired", "candidate": "waiting"}
 
 
@@ -383,6 +390,10 @@ def decisions(db: Any, now: datetime, hours: int = 24, limit: int = 150) -> list
         out.append({"event": e.id, "at": (e.released_at or e.updated_at or e.created_at).isoformat() if (e.released_at or e.updated_at or e.created_at) else None,
                     "decision": STATUS_WORD.get(e.status, e.status), "kind": e.kind, "desk": desk_of(e), "headline": e.headline or e.title or "",
                     "score": float(e.virality or 0), "evidence": e.evidence or "", "sources": len(e.sources or []),
+                    "outlets": sorted({str(x.get("name") or "") for x in e.sources or []} - {""}),
+                    "via_worldmonitor": sorted({str(x.get("name") or "") for x in e.sources or []
+                                                if _sources_mod().via(str(x.get("name") or ""))}),
+                    "development": f.get("development_source") or None,
                     "why": e.why or "", "new_because": f.get("new_because") or "", "telegram": e.tg_status, "x": e.x_status})
     return out
 
@@ -588,6 +599,39 @@ STRONG_DEVELOPMENT = re.compile(r"\b(arrest\w*|charged|indict\w*|sentenc\w*|guil
                                 r"steps? down|stepped down|resign\w*|ousted|fired|depeg\w*|confirms?|confirmed|fbi|doj|justice department|criminal)\b", re.I)
 
 
+# Breaking between slots (owner, 2026-11-10): clear financial, market or major geopolitical significance only. A hard geopolitical event
+# (strikes, invasion, a ceasefire, a blockade, sanctions), never talk about one; and never routine political controversy.
+GEO_HARD = _rx(r"\b(missiles?|air ?strikes?|strikes? on|struck|attack(?:s|ed)? on|invasion|invade\w*|ceasefire|truce|peace deal (?:signed|agreed|reached)|"
+               r"declares? war|war (?:breaks out|begins)|nuclear (?:test|strike|attack)|troops (?:enter|cross|deploy\w*)|shot down|blockade|embargo|"
+               r"coup|annex\w*|closes? the strait|strait of hormuz)\b")
+POLITICAL_ROUTINE = _rx(r"\b(impeach\w*|decr(?:y|ies|ied)|defends?|defended|slams?|blasts?|criticis\w*|criticiz\w*|rebuk\w*|feud|spat|row over|mocks?|"
+                        r"lashes out|hits back|fires back|campaign\w*|poll\w*|rally|hearing|testif\w*|approval rating|opinion|analysis|"
+                        r"explainer|what to know)\b")
+# talk about a geopolitical event, not the event: "Trump says Iran war to end 'fairly soon'", "Ukraine talks face an uphill battle"
+TALK = _rx(r"\b(says?|said|calls? for|urges?|vows?|hopes?|sees|faces?|questions remain|uphill|warns?|threatens?|signals?|weighs?)\b")
+FINANCIAL_KINDS = {"corporate", "flows", "structure", "macro", "regulation"}
+FINANCIAL_TOPICS = {"hack", "failure", "scam", "etf", "flows", "macro"}
+
+
+def breaking_worthy(title: str, topic: str = "", importance: dict[str, Any] | None = None) -> tuple[bool, str]:
+    """May this story break between slots? (True, what makes it) or (False, why not)."""
+    t = title or ""
+    if POLITICAL_ROUTINE.search(t) or topic == "controversy":
+        return False, "routine political controversy or commentary"
+    kind = str((importance or {}).get("kind") or "")
+    if kind == "geopolitics" or topic == "geopolitics":
+        if (GEO_HARD.search(t) or (SANCTIONS.search(t) and countries_in(t))) and not TALK.search(t):
+            return True, "major geopolitical event"
+        return False, "geopolitics, but no hard event (talk, positions, reactions)"
+    if kind == "corporate":
+        return (True, "major corporate shock") if CORP_BIG.search(t) else (False, "corporate news, not a shock")
+    if kind in FINANCIAL_KINDS or topic in FINANCIAL_TOPICS:
+        return True, "financial or market significance"
+    if topic in ("hack", "failure", "scam", "structure", "regulation", "corporate"):
+        return True, "financial or market significance"
+    return False, "no clear financial, market or major geopolitical significance"
+
+
 def material_development(development: str) -> bool:
     """An update's development (events.development) is material: a bigger figure, an official source, or a strong event word."""
     d = development or ""
@@ -598,5 +642,5 @@ def escalation_note(before: float, after: float) -> str:
     return f"{before:g}% -> {after:g}% (x{after / before:.2f})" if before else f"{after:g}%"
 
 
-__all__ = ["Covered", "Significance", "Verdict", "admissible", "canon", "corroborating", "coverage", "exceptional", "exceptional_pct", "importance_score",
+__all__ = ["Covered", "Significance", "Verdict", "admissible", "breaking_worthy", "canon", "corroborating", "coverage", "exceptional", "exceptional_pct", "importance_score",
            "desk_of", "diversity", "judge", "rank_bonus", "signature", "significance", "stamp", "tier"]

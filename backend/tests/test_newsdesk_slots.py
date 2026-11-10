@@ -46,6 +46,7 @@ HL = FakeHL({"BTC": (95120.0, 94000.0), "ETH": (3410.0, 3440.0), "HYPE": (38.2, 
 def _slots(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "slots")
     monkeypatch.setattr(sources, "EXTRA_FEEDS", [])
+    monkeypatch.setattr(sources, "WORLDMONITOR_FEEDS", [])
     events._alerted.clear()
     program(db).updates_channel = "@Pricechatupdates"
     db.commit()
@@ -253,6 +254,7 @@ async def test_a_recap_that_crashes_never_stops_the_desk(db: Session, monkeypatc
 def test_the_tiered_feeds_are_added_to_the_stored_ones_unless_turned_off(monkeypatch: pytest.MonkeyPatch) -> None:
     extra = [{"name": "CoinDesk", "url": "https://coindesk.test/rss", "tier": 2, "category": "crypto"}]
     monkeypatch.setattr(sources, "EXTRA_FEEDS", extra)
+    monkeypatch.setattr(sources, "WORLDMONITOR_FEEDS", [])
     stored = [{"name": "Decrypt", "url": "https://decrypt.test/feed", "tier": 2, "category": "crypto"}]
     assert [f["name"] for f in sources.feeds_for(stored, {})] == ["Decrypt", "CoinDesk"]
     assert [f["name"] for f in sources.feeds_for(stored + extra, {})] == ["Decrypt", "CoinDesk"]

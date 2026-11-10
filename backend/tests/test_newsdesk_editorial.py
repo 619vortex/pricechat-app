@@ -40,6 +40,7 @@ class QuietHL:
 def _desk(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "slots")
     monkeypatch.setattr(sources, "EXTRA_FEEDS", [])
+    monkeypatch.setattr(sources, "WORLDMONITOR_FEEDS", [])
     monkeypatch.setattr(lane, "FORMAT", "visual")
     monkeypatch.setattr(recap, "VISUAL", True)
     events._alerted.clear()

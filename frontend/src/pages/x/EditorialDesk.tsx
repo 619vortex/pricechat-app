@@ -17,7 +17,8 @@ export type Story = { subjects: string[]; type: string; direction: string; topic
   posts: StoryPost[]; merged_or_skipped: Merged[] };
 
 export type Decision = { event: number; at: string | null; decision: string; kind: string; desk: string; headline: string; score: number; evidence: string;
-  sources: number; why: string; new_because: string; telegram: string | null; x: string | null };
+  sources: number; why: string; new_because: string; telegram: string | null; x: string | null;
+  outlets?: string[]; via_worldmonitor?: string[]; development?: { outlet?: string; url?: string; headline?: string; since?: string } | null };
 
 const GATE_NAME: Record<string, string> = { dedup: "Not a repeat", diversity: "Feed diversity", evidence: "Evidence", bar: "Score", numbers: "Numbers check", headline: "Headline rules", owner: "Owner" };
 const json = (value: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(value), headers: { "Content-Type": "application/json" } });
@@ -93,8 +94,10 @@ export function EditorialDesk() {
                 <tr key={d.event}>
                   <td>{d.at ? relativeTime(d.at) : "-"}</td>
                   <td><Badge tone={d.decision === "selected" ? "good" : d.decision === "waiting" ? "neutral" : "bad"}>{d.decision}</Badge></td>
-                  <td>{d.desk}</td><td>{d.headline}</td><td>{d.score}</td><td>{d.evidence || "-"}{d.sources ? ` (${d.sources})` : ""}</td>
-                  <td>{d.why}{d.new_because ? ` · new because ${d.new_because}` : ""}</td>
+                  <td>{d.desk}</td><td>{d.headline}</td><td>{d.score}</td><td>{d.evidence || "-"}{d.sources ? ` (${d.sources})` : ""}
+                    {d.outlets && d.outlets.length > 0 && <div className="muted">{d.outlets.map((o) => d.via_worldmonitor?.includes(o) ? `${o} (via World Monitor catalog)` : o).join(", ")}</div>}</td>
+                  <td>{d.why}{d.new_because ? ` · new because ${d.new_because}` : ""}
+                    {d.development?.url && <div className="muted">New fact from <a className="link" href={d.development.url} target="_blank" rel="noopener noreferrer">{d.development.outlet}</a>, against what was already told: {d.development.since}</div>}</td>
                 </tr>
               ))}
             </tbody>

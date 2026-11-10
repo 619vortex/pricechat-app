@@ -90,6 +90,39 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "Bank of England", "url": "https://www.bankofengland.co.uk/rss/news", "tier": 0, "category": "economics"},
     {"name": "Bank of Japan", "url": "https://www.boj.or.jp/en/rss/whatsnew.xml", "tier": 0, "category": "economics"},
 ]
+# World Monitor (owner, 2026-11-10: "integrate World Monitor as an additional global intelligence source"). World Monitor's code is
+# AGPL-3.0 and its hosted API's terms forbid public redistribution below the $299.99/month Business plan, so neither is used. Its source
+# catalog was used only to find publishers we lacked; each feed below is that publisher's own public RSS, fetched directly, checked live
+# 2026-11-10 (fresh, dated, parseable). Google News copies, mirrors, proxies, bot-blocked sites and press-release wires were left out.
+# "via" credits the catalog in Admin; posts credit the publisher, as for every other feed. state.worldmonitor_feeds = false turns them off.
+WORLDMONITOR_VIA = "World Monitor catalog"
+WORLDMONITOR_FEEDS: list[dict[str, Any]] = [{**f, "via": WORLDMONITOR_VIA} for f in [
+    # world and geopolitics: more independent outlets, so more major stories reach two-outlet verification
+    {"name": "DW", "url": "https://rss.dw.com/xml/rss-en-all", "tier": 1, "category": "politics"},
+    {"name": "Euronews", "url": "https://www.euronews.com/rss?format=xml", "tier": 1, "category": "politics"},
+    {"name": "Le Monde", "url": "https://www.lemonde.fr/en/rss/une.xml", "tier": 1, "category": "politics"},
+    {"name": "CNA", "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml", "tier": 1, "category": None},
+    {"name": "ABC Australia", "url": "https://www.abc.net.au/news/feed/2942460/rss.xml", "tier": 1, "category": "politics"},
+    {"name": "NBC News", "url": "https://feeds.nbcnews.com/nbcnews/public/news", "tier": 1, "category": "politics"},
+    {"name": "CBS News", "url": "https://www.cbsnews.com/latest/rss/main", "tier": 1, "category": "politics"},
+    {"name": "Axios", "url": "https://api.axios.com/feed/", "tier": 1, "category": None},
+    {"name": "Politico", "url": "https://rss.politico.com/politics-news.xml", "tier": 1, "category": "politics"},
+    {"name": "The National", "url": "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml", "tier": 1, "category": None},
+    {"name": "UN News", "url": "https://news.un.org/feed/subscribe/en/news/all/rss.xml", "tier": 0, "category": "politics"},
+    # conflicts, defence and shipping
+    {"name": "The War Zone", "url": "https://www.twz.com/feed", "tier": 2, "category": "politics"},
+    {"name": "Breaking Defense", "url": "https://breakingdefense.com/feed/", "tier": 2, "category": "politics"},
+    {"name": "Defense One", "url": "https://www.defenseone.com/rss/all/", "tier": 2, "category": "politics"},
+    {"name": "gCaptain", "url": "https://gcaptain.com/feed/", "tier": 2, "category": "commodities"},
+    {"name": "Meduza", "url": "https://meduza.io/rss/en/all", "tier": 2, "category": "politics"},
+    {"name": "Moscow Times", "url": "https://www.themoscowtimes.com/rss/news", "tier": 2, "category": "politics"},
+    # markets and crypto
+    {"name": "Fox Business", "url": "https://moxie.foxbusiness.com/google-publisher/latest.xml", "tier": 1, "category": None},
+    {"name": "Seeking Alpha", "url": "https://seekingalpha.com/market_currents.xml", "tier": 2, "category": "stocks"},
+    {"name": "Unchained", "url": "https://unchainedcrypto.com/feed/", "tier": 2, "category": "crypto"},
+]]
+WORLDMONITOR_NAMES = {f["name"].lower() for f in WORLDMONITOR_FEEDS}
+
 # feeds that died: dropped even when stored in Admin (MarketWatch's market pulse has had nothing new since 3 Jul 2025)
 RETIRED_FEEDS = {"https://feeds.content.dowjones.io/public/rss/mw_marketpulse"}
 STALE_AFTER = timedelta(days=7)  # a feed whose newest item is older than this is broken, whatever its HTTP status says
@@ -101,7 +134,13 @@ def feeds_for(stored: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[
     if state.get("extra_feeds") is False:
         return list(stored)
     have = {f.get("url") for f in stored}
-    return [*stored, *[f for f in EXTRA_FEEDS if f["url"] not in have]]
+    extra = [*EXTRA_FEEDS, *(WORLDMONITOR_FEEDS if state.get("worldmonitor_feeds") is not False else [])]
+    return [*stored, *[f for f in extra if f["url"] not in have]]
+
+
+def via(name: str) -> str | None:
+    """Where the desk found this outlet's feed, when it wasn't our own pick (Admin attribution)."""
+    return WORLDMONITOR_VIA if (name or "").strip().lower() in WORLDMONITOR_NAMES else None
 
 
 # percent moves at sensitivity "medium"

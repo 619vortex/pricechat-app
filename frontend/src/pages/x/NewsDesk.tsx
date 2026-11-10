@@ -19,7 +19,7 @@ export type Desk = { settings: DeskSettings; blocked: string | null; last_run: (
   x: { configured: boolean; can_write: boolean; status: string; account: string | null; blocked_until: string | null }; writer: "model" | "headlines";
   today: { published: number; breaking: number; target: number }; cost: { per_post_usd: number; posted_30d: number; estimate_30d_usd: number; budget: { daily_usd: number; monthly_usd: number }; x_spend_today_usd: number; x_spend_month_usd: number };
   queue: DeskPost[]; published: DeskPost[]; problems: DeskPost[];
-  feed_health?: { at?: string; feeds?: Record<string, { name: string; tier: number; items: number; new?: number; newest: string | null; problem: string | null }> };
+  feed_health?: { at?: string; feeds?: Record<string, { name: string; tier: number; items: number; new?: number; newest: string | null; problem: string | null; via?: string | null; fails?: number; last_ok?: string | null }> };
   desk?: { schedule?: Schedule }; x_lane?: XLane };
 export type SlotRow = { at: string; dubai: string; state: "filled" | "open" | "missed" | "skipped" | "before"; event: number | null; kind: string | null; headline: string | null; x: string | null; telegram: string | null;
   telegram_message_id: number | null };
@@ -49,8 +49,12 @@ export function SchedulePanel({ schedule, feeds }: { schedule: Schedule; feeds?:
           <tr key={r.at}><td>{r.dubai}</td><td><Badge tone={SLOT_TONE[r.state] ?? "neutral"}>{r.state}</Badge></td><td>{r.kind === "recap" ? "Market check" : r.headline ?? "-"}</td>
             <td>{r.telegram ?? "-"}{r.telegram_message_id ? ` #${r.telegram_message_id}` : ""}</td><td>{r.x ?? "-"}</td></tr>))}</tbody></table>
       {rows.length > 0 && <details><summary>Feed health ({rows.filter(([, f]) => f.problem).length} with problems of {rows.length})</summary>
-        <table className="table small"><thead><tr><th>Feed</th><th>Tier</th><th>Items</th><th>New</th><th>Newest</th><th>Problem</th></tr></thead>
-          <tbody>{rows.map(([u, f]) => <tr key={u}><td>{f.name}</td><td>{f.tier}</td><td>{f.items}</td><td>{f.new ?? 0}</td><td>{f.newest ? new Date(f.newest).toLocaleString() : "-"}</td><td>{f.problem ?? ""}</td></tr>)}</tbody></table></details>}
+        {rows.some(([, f]) => f.via) && <p className="small muted">{rows.filter(([, f]) => f.via).length} feeds were found through the World Monitor catalog; each is read directly from its publisher, and posts credit the publisher.</p>}
+        <table className="table small"><thead><tr><th>Feed</th><th>Found via</th><th>Tier</th><th>Items</th><th>New</th><th>Newest</th><th>Problem</th><th>Failing for</th><th>Last OK</th></tr></thead>
+          <tbody>{rows.map(([u, f]) => <tr key={u}><td>{f.name}</td><td>{f.via ? <Badge tone="info">{f.via}</Badge> : "-"}</td><td>{f.tier}</td><td>{f.items}</td><td>{f.new ?? 0}</td>
+            <td>{f.newest ? new Date(f.newest).toLocaleString() : "-"}</td><td>{f.problem ?? ""}</td>
+            <td>{f.fails ? <Badge tone={f.fails >= 6 ? "bad" : "warn"}>{f.fails} {f.fails === 1 ? "check" : "checks"}</Badge> : ""}</td>
+            <td>{f.last_ok ? new Date(f.last_ok).toLocaleString() : "-"}</td></tr>)}</tbody></table></details>}
     </Card>
   );
 }

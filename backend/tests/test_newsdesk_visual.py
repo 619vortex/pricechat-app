@@ -71,6 +71,7 @@ QUIET = FakeHL({"BTC": (75100.0, 75000.0), "ETH": (2240.0, 2236.0), "HYPE": (75.
 def _visual(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "slots")
     monkeypatch.setattr(sources, "EXTRA_FEEDS", [])
+    monkeypatch.setattr(sources, "WORLDMONITOR_FEEDS", [])
     monkeypatch.setattr(lane, "FORMAT", "visual")
     monkeypatch.setattr(engine, "X_FORMAT", "visual")
     monkeypatch.setattr(recap, "VISUAL", True)

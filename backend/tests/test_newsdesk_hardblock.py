@@ -18,6 +18,7 @@ from tests.test_newsdesk_editorial import SLOT, decide, oil, sig
 def _desk(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "DEFAULT_SCHEDULE", "slots")
     monkeypatch.setattr(sources, "EXTRA_FEEDS", [])
+    monkeypatch.setattr(sources, "WORLDMONITOR_FEEDS", [])
     monkeypatch.setattr(lane, "FORMAT", "visual")
     monkeypatch.setattr(recap, "VISUAL", True)
     events._alerted.clear()
@@ -208,3 +209,76 @@ def test_breaking_never_repeats_a_story_already_out(db: Session) -> None:
     db.commit()
     _news(db, "b6", "Missile strike hits Saudi oil terminal, Saudi Aramco says", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
     assert events.release(db, BETWEEN, events.policy({})) is None
+
+
+# --- breaking at 70, financial / market / major geopolitical only; developments are new sourced facts (owner, 2026-11-10) -------------
+
+
+def test_breaking_needs_seventy_now() -> None:
+    assert events.policy({}).breaking_bar == 70
+
+
+def test_69_does_not_break(db: Session) -> None:
+    _news(db, "b7", "Missile strike hits Saudi oil terminal", 69, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    assert events.release(db, BETWEEN, events.policy({})) is None
+
+
+@pytest.mark.parametrize("title", [
+    "Pete Hegseth decries impeachment push, defends Iran war handling",  # broke at 67 in the 48 h replay
+    "Trump says Iran war to end 'fairly soon'",
+    "Ukraine peace talks face an uphill battle as winter approaches",
+    "Senate hearing on Iran war turns into partisan row over troops",
+])
+def test_routine_political_controversy_or_talk_never_breaks(db: Session, title: str) -> None:
+    _news(db, "b8", title, 75, ["Financial Times", "Bloomberg", "Reuters"], age_min=20, now=BETWEEN)
+    assert events.release(db, BETWEEN, events.policy({})) is None
+    assert not editorial.breaking_worthy(title, "geopolitics", {"kind": "geopolitics"})[0]
+
+
+@pytest.mark.parametrize(("title", "topic"), [
+    ("Missile strike hits Saudi oil terminal", "geopolitics"),
+    ("US imposes sweeping sanctions on Russian oil exports", "geopolitics"),
+    ("Binance halts withdrawals after $400 million hack", "hack"),
+    ("US inflation jumps to 4.1%, highest in two years", "macro"),
+])
+def test_financial_market_or_hard_geopolitical_news_breaks(db: Session, title: str, topic: str) -> None:
+    ev = _news(db, "b9", title, 74, ["Financial Times", "Bloomberg"], age_min=20, now=BETWEEN, topic=topic)
+    got = events.release(db, BETWEEN, events.policy({}))
+    assert got is not None and got.id == ev.id and got.slot == "breaking", title
+    assert got.why.startswith("breaking (")
+
+
+def _story(title: str, tier: int = 1, source: str = "Reuters") -> Any:
+    from types import SimpleNamespace
+    return SimpleNamespace(title=title, tier=tier, source=source, link="https://example.org/" + title[:20])
+
+
+def _parent(title: str, evidence: str = "two outlets") -> NdEvent:
+    return NdEvent(key="p", kind="news", title=title, evidence=evidence, facts={"told": title})
+
+
+def test_a_development_is_a_new_reported_fact() -> None:
+    parent = _parent("Nvidia board investigates Jensen Huang after spy report")
+    assert events.development(_story("FBI investigating Nvidia boss over alleged Chinese spy"), parent) == "new: fbi"
+    # a maybe is not a fact
+    assert events.development(_story("FBI could investigate Nvidia boss, sources say"), parent) == ""
+    assert events.development(_story("Will the FBI investigate Nvidia's Jensen Huang?"), parent) == ""
+    assert events.development(_story("Nvidia boss reportedly set to be charged"), parent) == ""
+    # "confirms" from an outlet repeating the story is not new; from an official source it is
+    assert events.development(_story("Nvidia confirms board review of Jensen Huang"), parent) == ""
+    assert events.development(_story("Nvidia confirms board review of Jensen Huang", tier=0, source="SEC"), parent) != ""
+
+
+def test_a_development_already_told_in_an_earlier_update_is_not_new() -> None:
+    parent = _parent("Nvidia board investigates Jensen Huang after spy report")
+    story = _story("FBI widens investigation into Nvidia boss")
+    assert events.development(story, parent) == "new: fbi"
+    assert events.development(story, parent, ["Trump says FBI investigating Nvidia boss"]) == ""
+
+
+def test_an_allowed_development_names_its_source_and_new_fact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(editorial, "repeat_verdict", lambda *a, **k: editorial.Verdict(True, "a development of a story already out"))
+    ev = NdEvent(key="u", kind="update", title="FBI investigating Nvidia boss", topic="corporate",
+                 facts={"development": "new: fbi", "development_source": {"outlet": "Reuters", "headline": "FBI investigating Nvidia boss"}})
+    assert events._repeat(ev, [], BETWEEN) is False
+    assert ev.facts["new_because"] == 'a development of a story already out (new: fbi, reported by Reuters: "FBI investigating Nvidia boss")'

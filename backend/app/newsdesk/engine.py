@@ -95,6 +95,7 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     db.commit()  # the purge on its own, before any insert
     seen = set(db.scalars(select(NdStory.link)))  # every stored link (the table keeps a week), not just the last few days
     health: dict[str, Any] = {}
+    before_health = ((s.state or {}).get("feed_health") or {}).get("feeds") or {}  # the last tick's, for failure streaks
     feeds = sources.feeds_for(s.feeds or [], s.state or {})
     gate = asyncio.Semaphore(8)  # fetched in parallel (35+ feeds; one slow site never holds up the tick), stored in list order below
 
@@ -112,7 +113,10 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
         if problem:
             problems[feed["url"]] = problem
         before = fresh
-        health[feed["url"]] = {"name": feed["name"], "tier": feed.get("tier", 2), "items": len(items), "newest": newest.isoformat() if newest else None, "problem": problem}
+        prev = before_health.get(feed["url"]) or {}
+        health[feed["url"]] = {"name": feed["name"], "tier": feed.get("tier", 2), "items": len(items), "newest": newest.isoformat() if newest else None, "problem": problem,
+                               "via": feed.get("via"), "fails": int(prev.get("fails") or 0) + 1 if problem else 0,
+                               "last_ok": now.isoformat() if not problem else prev.get("last_ok")}
         for it in sources.recent(items, now):
             if it["link"] in seen:
                 continue

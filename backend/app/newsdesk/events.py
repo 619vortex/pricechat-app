@@ -48,7 +48,9 @@ class Policy:
     hold_hours: timedelta = timedelta(hours=10)
     hold_decay: float = 1.0
     # major breaking news, confirmed by two or more independent credible outlets, goes at once instead of waiting for a slot
-    breaking_bar: int = 66  # its score now (fresh), not a remembered best
+    # owner, 2026-11-10: 70, and only clear financial, market or major geopolitical significance (editorial.breaking_worthy); routine
+    # political controversy never breaks ("Pete Hegseth decries impeachment push" broke at 67 in the replay)
+    breaking_bar: int = 70  # its score now (fresh), not a remembered best
     breaking_max_age: timedelta = timedelta(minutes=90)  # from first publication: breaking means it just happened
     breaking_per_day: int = 2
     breaking_gap: timedelta = timedelta(minutes=90)  # since the last post of any kind
@@ -335,13 +337,26 @@ def _same(ev: NdEvent, story: NdStory, links: set[str]) -> bool:
     return len(shared) >= 2 or (bool(shared) and near >= 0.15)
 
 
-def development(story: NdStory, parent: NdEvent) -> str:
-    """What's materially new in this story against the event already out, or "" if it's the same news again."""
-    told = str((parent.facts or {}).get("told") or parent.title)
-    new_usd, old_usd = brief._amount_usd(story.title or ""), brief._amount_usd(told)
+# A development must be a reported fact, not a maybe (owner, 2026-11-10: "allowed story developments contain genuinely new sourced facts").
+HEDGED = re.compile(r"\b(could|may|might|would|reportedly|rumou?r\w*|sources? say|people familiar|considering|weighs?|weighing|mulls?|eyes|"
+                    r"set to|expected to|poised to|likely|speculat\w*|unconfirmed)\b|\?\s*$", re.I)
+CONFIRM = {"confirm", "confirms", "confirmed"}
+
+
+def development(story: NdStory, parent: NdEvent, told_before: list[str] | tuple[str, ...] = ()) -> str:
+    """What's materially new in this story against everything already told about it (the event out and its updates), or "" if it's the
+    same news again. Only a fact the outlet reports: a hedged headline ("could", "reportedly", "set to", a question) is no development,
+    and a bare "confirms" counts only from an official source."""
+    title = story.title or ""
+    if HEDGED.search(title):
+        return ""
+    told = " | ".join([str((parent.facts or {}).get("told") or parent.title), str(parent.title or ""), *told_before])
+    new_usd, old_usd = brief._amount_usd(title), max((brief._amount_usd(t) for t in told.split(" | ")), default=0)
     if new_usd and old_usd and new_usd >= old_usd * 1.25:
         return "a bigger figure"
-    words = {w.lower() for w in ESCALATE.findall(story.title or "")} - {w.lower() for w in ESCALATE.findall(told)}
+    words = {w.lower() for w in ESCALATE.findall(title)} - {w.lower() for w in ESCALATE.findall(told)}
+    if story.tier != 0:
+        words -= CONFIRM
     if words:
         return f"new: {sorted(words)[0]}"
     if story.tier == 0 and parent.evidence != "official":
@@ -459,13 +474,14 @@ def _offer_story(db: Session, v: chaos.Verdict, recent: list[NdEvent], quotes: d
     if match is not None:
         if any(story.link == str(x.get("url")) for e in recent if e.id == match.id or e.parent_id == match.id for x in e.sources or []):
             return 0
-        what = development(story, match)
         kids = list(db.scalars(select(NdEvent).where(NdEvent.parent_id == match.id, NdEvent.status.in_(("candidate", RELEASED)))))
+        what = development(story, match, [str(k.title or "") for k in kids])
         if not what or len(kids) >= p.updates_per_story or any(story.link == str(x.get("url")) for k in kids for x in k.sources or []):
             return 0
         ev = NdEvent(key=f"update:{story.link}"[:200], kind="update", parent_id=match.id, first_seen=now, expires_at=now + p.news_ttl / 2, status="candidate")
         _fill(ev, v, score, facts, head, now)
-        ev.facts = {**ev.facts, "development": what, "assets": []}
+        ev.facts = {**ev.facts, "development": what, "assets": [],
+                    "development_source": {"outlet": story.source, "url": story.link, "headline": story.title, "since": parent_told(match)}}
         ev.topic = match.topic or ev.topic
         _inherit_magnitude(ev, match)
         return 1 if _insert(db, recent, ev) else 0
@@ -785,6 +801,9 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
         if ev.kind not in ("news", "update") or ev.virality < p.breaking_bar or not verified_important(ev):
             continue
+        worthy, because = editorial.breaking_worthy(ev.title or "", ev.topic or "", (ev.facts or {}).get("importance"))
+        if not worthy:
+            continue
         if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
             continue
         if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1]:
@@ -802,7 +821,7 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         ev.status, ev.slot, ev.released_at, ev.label = RELEASED, "breaking", now, label
         editorial.stamp(ev, now)
         n = len(outlets_of(ev))
-        ev.why = (f"breaking: scores {ev.virality:g} ({virality.describe(ev.parts or {})}), confirmed by {n} outlets, {int(_age(ev, now))} min old; "
+        ev.why = (f"breaking ({because}): scores {ev.virality:g} ({virality.describe(ev.parts or {})}), confirmed by {n} outlets, {int(_age(ev, now))} min old; "
                   f"posted now instead of waiting for the {slot_label(next_slot(now, p))} Dubai slot"
                   + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
         ev.x_status = ev.tg_status = "pending"
@@ -811,12 +830,21 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     return None
 
 
+def parent_told(parent: NdEvent) -> str:
+    return str((parent.facts or {}).get("told") or parent.title or "")[:200]
+
+
 def _repeat(ev: NdEvent, covered: list[editorial.Covered], now: datetime) -> bool:
     """The same story as one already out, with nothing materially new: folded away for good (status superseded), with the reason."""
     v = editorial.repeat_verdict(ev, covered, now)
     if v.ok:
         if v.reason:
-            ev.facts = {**(ev.facts or {}), "new_because": v.reason}
+            f = ev.facts or {}
+            src = f.get("development_source") or {}
+            reason = v.reason
+            if ev.kind == "update" and f.get("development"):
+                reason += f" ({f['development']}" + (f", reported by {src.get('outlet')}: \"{str(src.get('headline') or '')[:120]}\"" if src else "") + ")"
+            ev.facts = {**f, "new_because": reason}
         return False
     ev.status, ev.why = "superseded", v.reason
     ev.facts = {**(ev.facts or {}), "merged_into": v.same_as}
