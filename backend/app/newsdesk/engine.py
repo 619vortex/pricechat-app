@@ -426,6 +426,8 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             events.mark(ev, "x", "skipped", "the X text failed the checks")
             db.commit()
             continue
+        events.mark(ev, "x", "queued", post_id=post.id)  # tied to its post first: if a send dies midway, the next tick never writes a second one
+        db.commit()
         result = await publish(db, s, post, settings, runtime, agent_id, now)
         db.refresh(post)
         _sync(ev, post)
@@ -484,15 +486,40 @@ def _claim(db: Session, post: NdPost) -> bool:
     return done.rowcount == 1
 
 
-async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime) -> str:
-    """Send one post, or record what a dry run would have sent. Returns its final status."""
+HTTP_OF = {"x_auth": "401", "x_forbidden": "403", "x_not_found": "404", "x_bad_request": "400", "x_rate_limited": "429", "x_usage_capped": "429", "x_no_credit": "402",
+           "x_unavailable": "5xx/network", "x_budget": "local budget", "x_not_configured": "not connected"}
+STAGE_TEXT = {"permit": "the safety guard", "image": "making the picture", "upload": "the picture upload", "post": "the post"}
+
+
+def _x_error(stage: str, e: Exception) -> str:
+    """What Admin shows: where it failed, X's status and error code, and X's own words."""
+    code = str(getattr(e, "code", "") or "")
+    http = HTTP_OF.get(code)
+    where = STAGE_TEXT.get(stage, stage)
+    return (f"X {http} {code} at {where}: {e}" if http else f"{type(e).__name__} at {where}: {e}")[:300]
+
+
+def _note_x(s: NdSettings, post: NdPost, now: datetime, *, ok: bool, outcome: str, message: str = "", stage: str = "") -> None:
+    """The health line in Admin: the last post X confirmed and the last thing that went wrong, kept in the desk's state."""
+    state = dict(s.state or {})
+    entry = {"at": now.isoformat(), "post_id": post.id, "event_id": (post.facts or {}).get("event_id"), "outcome": outcome}
+    if ok:
+        state["x_last_ok"] = {**entry, "x_id": post.x_id}
+    else:
+        state["x_last_error"] = {**entry, "stage": stage, "message": message[:300]}
+    s.state = state
+
+
+async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime, *, force_live: bool = False) -> str:
+    """Send one post, or record what a dry run would have sent. Returns its final status. One post's failure never raises: it is recorded on the
+    post (and in the desk's x_last_error) so the next tick goes on. force_live: the owner's one test post, sent even while the desk is in dry run."""
     from app.social.guard import ActionRequest, SocialActionGuard
     from app.models.enums import Platform, SocialAction
 
     if not _claim(db, post):
         return "already claimed"
     db.refresh(post)
-    if s.mode != "live":
+    if s.mode != "live" and not force_live:
         post.status, post.published_at = "dry_run", now
         db.commit()
         logger.info("newsdesk DRY RUN [%s/%s score %.1f]: %s", post.priority, post.category, post.score, post.text.replace("\n", " / "))
@@ -503,56 +530,79 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     if problem:
         post.status, post.error = "queued", problem
         s.paused_until, s.pause_reason = now + timedelta(minutes=30), f"X guard: {problem}"
+        _note_x(s, post, now, ok=False, outcome="blocked", message=problem, stage="permit")
         db.commit()
         return "blocked"
     from app.social.x_service import make_x_client
 
     client = make_x_client(db, settings, runtime)  # type: ignore[arg-type]
+    stage = "permit"
+    media = None
     try:
-        permit = guard.issue_news_permit(req)
-        media = None
         event_id = (post.facts or {}).get("event_id")
         if X_FORMAT == "visual" and event_id:
             from app.newsdesk import visual
 
             ev = db.get(NdEvent, event_id)
             if ev is not None:
+                stage = "image"
                 image, meta = await visual.for_event(ev)
                 ev.facts = {**(ev.facts or {}), "visual": meta}
-                media = [await client.upload_image(image, permit=permit)]
+                stage = "permit"
+                upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
+                stage = "upload"
+                media = [await client.upload_image(image, permit=upload_permit)]
+        stage = "permit"
+        permit = guard.issue_news_permit(req)
+        stage = "post"
         data = await client.create_post(post.text, permit=permit, media_ids=media)
     except XUnavailableError as e:
-        if "in time" in str(e):
+        if "in time" in str(e) and stage == "post":
             post.status, post.error = "uncertain", "X didn't answer in time: it may have posted. Check X before resending."
         else:
-            _retry(post, str(e), now)
+            _retry(post, _x_error(stage, e), now)
+        _note_x(s, post, now, ok=False, outcome=post.status, message=_x_error(stage, e), stage=stage)
         db.commit()
         return post.status
     except (XCreditsError, XAuthError, XForbiddenError) as e:
-        post.status, post.error = "queued", str(e)[:300]
-        s.paused_until, s.pause_reason = now + timedelta(hours=6), f"X refused the desk: {str(e)[:200]}"
+        post.status, post.error = "queued", _x_error(stage, e)
+        s.paused_until, s.pause_reason = now + timedelta(hours=6), f"X refused the desk: {_x_error(stage, e)[:200]}"
+        _note_x(s, post, now, ok=False, outcome="paused", message=_x_error(stage, e), stage=stage)
         db.commit()
-        logger.warning("newsdesk: paused: X refused it (%s)", type(e).__name__)
+        logger.warning("newsdesk: paused: X refused it at %s (%s): %s", stage, type(e).__name__, str(e)[:200])
         return "paused"
     except XRateLimitError as e:
-        _retry(post, str(e), now, minutes=30)
+        _retry(post, _x_error(stage, e), now, minutes=30)
+        _note_x(s, post, now, ok=False, outcome=post.status, message=_x_error(stage, e), stage=stage)
         db.commit()
         return post.status
     except XError as e:
-        post.status, post.error = "failed", str(e)[:300]
+        post.status, post.error = "failed", _x_error(stage, e)
+        _note_x(s, post, now, ok=False, outcome="failed", message=post.error, stage=stage)
         db.commit()
+        logger.warning("newsdesk: X post %s failed: %s", post.id, post.error)
         return "failed"
+    except Exception as e:  # noqa: BLE001 - a bug or an odd answer must not leave the post "publishing" and fail every tick (2026-11-09/10)
+        sent = stage == "post" and not isinstance(e, PermissionError)  # require_permit refuses before any request is made
+        post.status = "uncertain" if sent else "failed"
+        post.error = (_x_error(stage, e) + (" It may have reached X: check before resending." if sent else " Nothing was posted."))[:300]
+        _note_x(s, post, now, ok=False, outcome=post.status, message=post.error, stage=stage)
+        db.commit()
+        logger.exception("newsdesk: X post %s stopped at %s", post.id, stage)
+        return post.status
     finally:
         await client.aclose()
     x_id = str(data.get("id") or "")
     if not x_id:
         post.status, post.error = "uncertain", "X answered without confirming a post id"
+        _note_x(s, post, now, ok=False, outcome="uncertain", message=post.error, stage="post")
         db.commit()
         return post.status
     post.status, post.x_id, post.published_at, post.error = "published", x_id, now, None
     guard.record_attempt(req, None, None, "news", reason="news desk", external_id=x_id)
+    _note_x(s, post, now, ok=True, outcome="published")
     db.commit()
-    logger.info("newsdesk published %s", x_id)
+    logger.info("newsdesk published %s (post %s, event %s, picture %s)", x_id, post.id, (post.facts or {}).get("event_id"), "yes" if media else "no")
     return "published"
 
 
@@ -669,7 +719,91 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
             "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "headlines",
             "today": {"published": _sent(db, s, day_ago), "breaking": _sent(db, s, day_ago, "breaking"), "target": s.target_per_day},
             "cost": {"per_post_usd": plain, "posted_30d": sent_30, "estimate_30d_usd": round(sent_30 * plain, 2), "budget": budget.limits(), "x_spend_today_usd": budget.today()["cost"], "x_spend_month_usd": budget.month()["cost"]},
-            "queue": rows("queued", limit=30), "published": rows("published", "dry_run", limit=50), "problems": rows("failed", "uncertain", limit=20), "desk": events.overview(db, now, s.state or {})}
+            "queue": rows("queued", limit=30), "published": rows("published", "dry_run", limit=50), "problems": rows("failed", "uncertain", limit=20), "desk": events.overview(db, now, s.state or {}),
+            "x_lane": x_lane(db, s, now)}
+
+
+def _iso(d: datetime | None) -> str | None:
+    return d.isoformat() if d else None
+
+
+def x_lane(db: Session, s: NdSettings, now: datetime) -> dict[str, Any]:
+    """X publishing at a glance: live or dry run, the last post X confirmed, the last error in X's words, and each recent event's X outcome."""
+    last = db.scalars(select(NdPost).where(NdPost.status == "published", NdPost.x_id.is_not(None)).order_by(NdPost.published_at.desc()).limit(1)).first()
+    rows = list(db.scalars(select(NdEvent).where(NdEvent.status == events.RELEASED, NdEvent.released_at >= now - timedelta(hours=48)).order_by(NdEvent.released_at.desc()).limit(12)))
+    by_post = {p.id: p for p in db.scalars(select(NdPost).where(NdPost.id.in_([e.x_post_id for e in rows if e.x_post_id])))} if rows else {}
+    out = []
+    for e in rows:
+        p = by_post.get(e.x_post_id or -1)
+        out.append({"id": e.id, "headline": e.headline, "released_at": _iso(e.released_at), "telegram": e.tg_status, "telegram_message_id": e.tg_message_id,
+                    "x": e.x_status, "note": e.x_note or (p.error if p else "") or "", "post_id": e.x_post_id, "x_id": p.x_id if p else None,
+                    "url": f"https://x.com/i/status/{p.x_id}" if p and p.x_id else None, "post_status": p.status if p else None})
+    err = (s.state or {}).get("x_last_error")
+    return {"mode": s.mode, "live": s.mode == "live", "paused": s.pause_reason if s.paused_until and _utc_naive(s.paused_until, now) > now else None,
+            "last_ok": {"at": _iso(last.published_at), "x_id": last.x_id, "url": f"https://x.com/i/status/{last.x_id}", "post_id": last.id} if last else None,
+            "last_error": err, "events": out}
+
+
+def _utc_naive(d: datetime, now: datetime) -> datetime:
+    return d if d.tzinfo else d.replace(tzinfo=now.tzinfo)
+
+
+# --- the owner's one test post (Admin › News Desk › X publishing) ---------------------------------------------------
+
+
+def _test_event(db: Session, event_id: int | None) -> NdEvent | None:
+    if event_id is not None:
+        return db.get(NdEvent, event_id)
+    return db.scalars(select(NdEvent).where(NdEvent.status == events.RELEASED, NdEvent.tg_status == "delivered").order_by(NdEvent.released_at.desc()).limit(1)).first()
+
+
+def _test_text(ev: NdEvent, now: datetime) -> tuple[str, checks.Result]:
+    """Exactly what the desk would write for this event on X, through the same checks."""
+    from app.newsdesk import visual
+
+    text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
+    b = events.brief_of(ev, now)
+    named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
+    source_text = f"{(ev.facts or {}).get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
+    return text, checks.check_post(text, source_text=source_text, source_names=named, breaking=False)
+
+
+async def test_post_preview(db: Session, event_id: int | None, now: datetime) -> dict[str, Any] | None:
+    """The text and picture a test post would carry. Sends nothing."""
+    import base64
+
+    from app.newsdesk import visual
+
+    ev = _test_event(db, event_id)
+    if ev is None:
+        return None
+    text, result = _test_text(ev, now)
+    image, meta = await visual.for_event(ev)
+    mime = "image/jpeg" if image[:3] == b"\xff\xd8\xff" else "image/png"
+    return {"event_id": ev.id, "headline": ev.headline, "text": text, "ok": result.ok, "reason": result.reason if not result.ok else "", "x_status": ev.x_status,
+            "image": f"data:{mime};base64,{base64.b64encode(image).decode()}", "visual": meta}
+
+
+async def send_test_post(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, event_id: int, now: datetime) -> NdPost:
+    """One real post to X for this event, with its picture, even while the desk is in dry run. Only on the owner's click in Admin."""
+    ev = _test_event(db, event_id)
+    if ev is None:
+        raise ValueError("No such event.")
+    if ev.x_status in ("published", "uncertain"):
+        raise ValueError("This event is already on X (or may be): pick another.")
+    text, result = _test_text(ev, now)
+    if not result.ok:
+        raise ValueError(f"The X text failed the checks: {result.reason}")
+    post = NdPost(kind="news", category=ev.category or "viral", priority="scheduled", status="queued", text=text, key=f"test:{ev.id}:{int(now.timestamp())}", fingerprint=checks.fingerprint(text),
+                  score=0.0, facts={"event_id": ev.id, "test": True, "headline": ev.headline}, sources=ev.sources or [], checks=result.checks, metrics={})
+    db.add(post)
+    db.commit()
+    await publish(db, s, post, settings, runtime, agent_id, now, force_live=True)
+    db.refresh(post)
+    if post.status in ("published", "uncertain"):
+        _sync(ev, post)  # the desk never posts this event to X a second time
+        db.commit()
+    return post
 
 
 def edit_post(db: Session, post: NdPost, text: str) -> checks.Result:

@@ -144,3 +144,31 @@ async def publish_now(post_id: int, db: DbSession, runtime: Runtime) -> dict[str
     await engine.publish(db, s, post, runtime.settings, runtime.x, get_agent_config(db).id, utcnow())
     db.refresh(post)
     return engine.post_out(post)
+
+
+@router.get("/test-post")
+async def test_post_preview(db: DbSession, event_id: int | None = None) -> dict[str, Any]:
+    """What one test post to X would carry (text and picture) for the latest event Telegram delivered, or the one named. Sends nothing."""
+    preview = await engine.test_post_preview(db, event_id, utcnow())
+    if preview is None:
+        raise HTTPException(404, "No event Telegram has delivered yet.")
+    return preview
+
+
+class TestPostInput(StrictInput):
+    event_id: int
+    confirm: Literal[True]
+
+
+@router.post("/test-post")
+async def send_test_post(payload: TestPostInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """The owner's one real test post to X, even in dry run. Every other safety (emergency stop, X kill switch, outbound switch) still applies."""
+    s = engine.settings_row(db)
+    db.commit()
+    if s.kill_switch:
+        raise HTTPException(409, "The emergency stop is on.")
+    try:
+        post = await engine.send_test_post(db, s, runtime.settings, runtime.x, get_agent_config(db).id, payload.event_id, utcnow())
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+    return engine.post_out(post)
