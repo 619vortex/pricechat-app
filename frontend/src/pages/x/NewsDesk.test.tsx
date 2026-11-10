@@ -103,3 +103,37 @@ describe("News Desk: Telegram", () => {
     expect(puts[0]).toMatch(/\/x\/newsdesk\/telegram .*"enabled":false/);
   });
 });
+
+describe("News Desk: X publishing", () => {
+  it("shows X's last error and only sends the test post after a preview and a confirmation", async () => {
+    const lane = { mode: "live", live: true, paused: null, last_ok: null,
+      last_error: { at: "2026-11-10T04:15:02Z", post_id: 7, event_id: 3, outcome: "failed", stage: "post", message: "PermissionError at the post: Write blocked: this permit was already used" },
+      events: [{ id: 3, headline: "Oil falls 6%", released_at: null, telegram: "delivered", telegram_message_id: 154, x: "failed", note: "permit was already used", post_id: 7, x_id: null, url: null, post_status: "failed" }] };
+    const preview = { event_id: 3, headline: "Oil falls 6%", text: "OIL (WTI) DOWN 6.0%\n\nSource: Yahoo Finance", ok: true, reason: "", x_status: "failed", image: "data:image/png;base64,AA==" };
+    const posts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") posts.push(`${input} ${init.body}`);
+      const out = input.includes("/test-post") ? (init?.method === "POST" ? { ...POST, status: "published", url: "https://x.com/i/status/42" } : preview) : input.includes("/telegram") ? { posts: [] } : desk({ mode: "live" }, { x_lane: lane });
+      return new Response(JSON.stringify(out), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    render(<NewsDesk />);
+    await settle();
+    expect(screen.getByText(/Last X error .*permit was already used/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Preview a test post" }));
+    await settle();
+    expect(screen.getByAltText("The picture the test post would carry")).toBeTruthy();
+    expect(posts).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Send this test post to X" }));
+    await settle();
+    expect(ask).toHaveBeenCalled();
+    expect(posts).toHaveLength(0);
+    ask.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send this test post to X" }));
+    await settle();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatch(/\/x\/newsdesk\/test-post .*"event_id":3,"confirm":true/);
+    expect(screen.getByRole("link", { name: "open on X" }).getAttribute("href")).toBe("https://x.com/i/status/42");
+  });
+});

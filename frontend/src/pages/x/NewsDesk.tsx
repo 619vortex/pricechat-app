@@ -20,12 +20,18 @@ export type Desk = { settings: DeskSettings; blocked: string | null; last_run: (
   today: { published: number; breaking: number; target: number }; cost: { per_post_usd: number; posted_30d: number; estimate_30d_usd: number; budget: { daily_usd: number; monthly_usd: number }; x_spend_today_usd: number; x_spend_month_usd: number };
   queue: DeskPost[]; published: DeskPost[]; problems: DeskPost[];
   feed_health?: { at?: string; feeds?: Record<string, { name: string; tier: number; items: number; new?: number; newest: string | null; problem: string | null }> };
-  desk?: { schedule?: Schedule } };
+  desk?: { schedule?: Schedule }; x_lane?: XLane };
 export type SlotRow = { at: string; dubai: string; state: "filled" | "open" | "missed" | "skipped" | "before"; event: number | null; kind: string | null; headline: string | null; x: string | null; telegram: string | null;
   telegram_message_id: number | null };
 export type Schedule = { schedule: string; slot_hours_dubai: number[]; next_slot: string; next_slot_dubai: string; slots: SlotRow[];
   last_telegram: { event: number; at: string | null; message_id: number | null } | null; last_x: { event: number; at: string | null; status: string } | null;
   failures: { event: number; dubai: string; x: string | null; telegram: string | null }[] };
+
+export type XLaneEvent = { id: number; headline: string; released_at: string | null; telegram: string | null; telegram_message_id: number | null; x: string | null; note: string; post_id: number | null;
+  x_id: string | null; url: string | null; post_status: string | null };
+export type XLane = { mode: string; live: boolean; paused: string | null; last_ok: { at: string | null; x_id: string; url: string; post_id: number } | null;
+  last_error: { at: string; post_id: number; event_id: number | null; outcome: string; stage: string; message: string } | null; events: XLaneEvent[] };
+type TestPreview = { event_id: number; headline: string; text: string; ok: boolean; reason: string; x_status: string | null; image: string };
 
 const SLOT_TONE: Record<string, Tone> = { filled: "good", open: "info", missed: "bad", skipped: "neutral" }; // skipped: nothing new worth posting (by design)
 
@@ -53,6 +59,35 @@ const body = (method: string, value: unknown): RequestInit => ({ method, body: J
 const CATEGORY_NAME: Record<string, string> = { crypto: "Crypto", stocks: "Stocks", commodities: "Commodities", politics: "Politics", economics: "Economics", viral: "Viral market stories" };
 const STATUS_TONE: Record<string, Tone> = { published: "good", dry_run: "info", queued: "neutral", failed: "bad", uncertain: "warn" };
 const STATUS_TEXT: Record<string, string> = { dry_run: "Dry run: not sent", uncertain: "Check X", published: "Published", failed: "Failed", queued: "Queued" };
+
+/** X publishing at a glance (2026-11-10): live or not, the last post X confirmed, the last error in X's words, each event's X outcome, and the owner's one test post. */
+export function XPublishing({ lane, busy, act }: { lane: XLane; busy: boolean; act: (fn: () => Promise<unknown>) => Promise<void> }) {
+  const [preview, setPreview] = useState<TestPreview | null>(null);
+  const [sent, setSent] = useState<DeskPost | null>(null);
+  return (
+    <Card title="X publishing">
+      <p className="small"><Badge tone={lane.paused ? "warn" : lane.live ? "good" : "info"}>{lane.paused ? "Paused" : lane.live ? "Live" : "Dry run"}</Badge>{" "}
+        Last post X confirmed: {lane.last_ok ? <a className="link" href={lane.last_ok.url} target="_blank" rel="noopener noreferrer">{lane.last_ok.at ? new Date(lane.last_ok.at).toLocaleString() : lane.last_ok.x_id}</a> : "none yet"}.</p>
+      {lane.paused && <p className="small banner banner-warn" role="status">{lane.paused}</p>}
+      {lane.last_error && <p className="small banner banner-warn" role="alert">Last X error ({new Date(lane.last_error.at).toLocaleString()}, post {lane.last_error.post_id}, {lane.last_error.outcome}): {lane.last_error.message}</p>}
+      {lane.events.length > 0 && <table className="table small"><thead><tr><th>Event</th><th>Telegram</th><th>X</th><th>Note</th></tr></thead>
+        <tbody>{lane.events.map((e) => <tr key={e.id}><td>{e.headline}</td><td>{e.telegram ?? "-"}{e.telegram_message_id ? ` #${e.telegram_message_id}` : ""}</td>
+          <td>{e.url ? <a className="link" href={e.url} target="_blank" rel="noopener noreferrer">{e.x ?? "published"}</a> : e.x ?? "-"}</td><td>{e.note}</td></tr>)}</tbody></table>}
+      <div className="row" style={{ gap: 6, marginTop: 8 }}>
+        <button className="btn btn-sm" disabled={busy} onClick={() => void act(async () => { setSent(null); setPreview(await request<TestPreview>("/x/newsdesk/test-post")); })}>Preview a test post</button>
+      </div>
+      {preview && <div style={{ marginTop: 8 }}>
+        <p className="small muted">Test post for event {preview.event_id} ({preview.headline}). Nothing is sent until you confirm.</p>
+        <p style={{ whiteSpace: "pre-wrap" }}>{preview.text}</p>
+        {preview.image && <img src={preview.image} alt="The picture the test post would carry" style={{ maxWidth: 360, width: "100%" }} />}
+        {!preview.ok && <p className="small" role="alert">The text fails the checks: {preview.reason}</p>}
+        <button className="btn btn-sm btn-primary" disabled={busy || !preview.ok || preview.x_status === "published" || preview.x_status === "uncertain"}
+                onClick={() => { if (window.confirm("Send this one test post to X now, with its picture? It goes out even in dry run.")) void act(async () => { setSent(await request<DeskPost>("/x/newsdesk/test-post", body("POST", { event_id: preview.event_id, confirm: true }))); setPreview(null); }); }}>Send this test post to X</button>
+      </div>}
+      {sent && <p className="small" role="status">Test post: {STATUS_TEXT[sent.status] ?? sent.status}{sent.url ? <> (<a className="link" href={sent.url} target="_blank" rel="noopener noreferrer">open on X</a>)</> : null}{sent.error ? `: ${sent.error}` : ""}</p>}
+    </Card>
+  );
+}
 
 export function NewsDesk() {
   const { data, failure, reload } = useApi(() => request<Desk>("/x/newsdesk"), 30000);
@@ -93,6 +128,8 @@ export function NewsDesk() {
           <Stat label="Last run" value={data.last_run?.at ? relativeTime(data.last_run.at) : "Not yet"} />
         </div>
       </Card>
+
+      {data.x_lane && <XPublishing lane={data.x_lane} busy={busy} act={act} />}
 
       <TelegramLane />
 
