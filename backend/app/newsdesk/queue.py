@@ -29,6 +29,9 @@ def gates(ev: NdEvent, now: datetime, p: events.Policy, covered: list[editorial.
     out: dict[str, dict[str, Any]] = {}
     v = editorial.repeat_verdict(ev, covered, now)
     out["dedup"] = _gate(v.ok, v.reason or "a new story")
+    penalty, held = editorial.diversity(ev, covered, now)
+    out["diversity"] = _gate(not held, held or (f"{editorial.desk_of(ev)}: -{penalty:g} in the ranking for {penalty / editorial.DIVERSITY_PENALTY:g} "
+                                                f"{editorial.desk_of(ev)} post(s) in 24 h" if penalty else f"{editorial.desk_of(ev)}: nothing from this desk in 24 h"))
     strong = ev.evidence in events.STRONG
     out["evidence"] = _gate(strong or ev.evidence == "attributed", {"official": "an official source", "two outlets": "two outlets", "price data": "our own prices",
                                                                     "exchange data": "exchange data", "attributed": "one outlet, naming who says so"}.get(ev.evidence, ev.evidence or "none"))
@@ -65,8 +68,9 @@ def build(db: Session, now: datetime, desk_state: dict[str, Any] | None = None) 
     nxt = events.current_slot(now, p)
     nxt = nxt if nxt is not None and events.slot_filled(db, nxt, p) is None else events.next_slot(now, p)
     waiting = list(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")))
-    waiting.sort(key=lambda e: (-(e.virality + (p.priority_bonus if events.priority(e, p) else 0) + editorial.rank_bonus(e)), e.id))
     covered = editorial.coverage(db, now)
+    waiting.sort(key=lambda e: (-(e.virality + (p.priority_bonus if events.priority(e, p) else 0) + editorial.rank_bonus(e)
+                                  - editorial.diversity(e, covered, now)[0]), e.id))
     tg = db.get(NdTelegramSettings, 1)
     recent = list((tg.state or {}).get("recent_visuals") or []) if tg is not None else []
     cards, chosen = [], False

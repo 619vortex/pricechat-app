@@ -16,12 +16,16 @@ type Merged = { event: number | null; at: string | null; headline: string; why: 
 export type Story = { subjects: string[]; type: string; direction: string; topic: string; first_coverage: string; last_coverage: string; posts_made: number;
   posts: StoryPost[]; merged_or_skipped: Merged[] };
 
-const GATE_NAME: Record<string, string> = { dedup: "Not a repeat", evidence: "Evidence", bar: "Score", numbers: "Numbers check", headline: "Headline rules", owner: "Owner" };
+export type Decision = { event: number; at: string | null; decision: string; kind: string; desk: string; headline: string; score: number; evidence: string;
+  sources: number; why: string; new_because: string; telegram: string | null; x: string | null };
+
+const GATE_NAME: Record<string, string> = { dedup: "Not a repeat", diversity: "Feed diversity", evidence: "Evidence", bar: "Score", numbers: "Numbers check", headline: "Headline rules", owner: "Owner" };
 const json = (value: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(value), headers: { "Content-Type": "application/json" } });
 
 export function EditorialDesk() {
   const queue = useApi(() => request<Queue>("/x/newsdesk/editorial/queue"), 60000);
   const history = useApi(() => request<{ rule: string; stories: Story[] }>("/x/newsdesk/editorial/history"), 120000);
+  const decided = useApi(() => request<{ decisions: Decision[]; skipped_slots: Record<string, string> }>("/x/newsdesk/editorial/decisions"), 120000);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const q = queue.data && Array.isArray(queue.data.candidates) ? queue.data : null;
@@ -76,6 +80,28 @@ export function EditorialDesk() {
               ))}
             </tbody>
           </table>
+        )}
+      </Card>
+      <Card title="Decisions (24 hours): why each story was selected or rejected">
+        {decided.failure ? <ApiErrorBanner error={decided.failure} /> : null}
+        {decided.data && Array.isArray(decided.data.decisions) && decided.data.decisions.length === 0 && <Empty>No candidates in the last 24 hours.</Empty>}
+        {decided.data && Array.isArray(decided.data.decisions) && decided.data.decisions.length > 0 && (
+          <table className="table small">
+            <thead><tr><th>When</th><th>Decision</th><th>Desk</th><th>Headline</th><th>Score</th><th>Evidence</th><th>Why</th></tr></thead>
+            <tbody>
+              {decided.data.decisions.map((d) => (
+                <tr key={d.event}>
+                  <td>{d.at ? relativeTime(d.at) : "-"}</td>
+                  <td><Badge tone={d.decision === "selected" ? "good" : d.decision === "waiting" ? "neutral" : "bad"}>{d.decision}</Badge></td>
+                  <td>{d.desk}</td><td>{d.headline}</td><td>{d.score}</td><td>{d.evidence || "-"}{d.sources ? ` (${d.sources})` : ""}</td>
+                  <td>{d.why}{d.new_because ? ` · new because ${d.new_because}` : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {decided.data && Object.keys(decided.data.skipped_slots || {}).length > 0 && (
+          <p className="muted small">Slots skipped on purpose: {Object.keys(decided.data.skipped_slots).slice(-6).map((t) => new Date(t).toISOString().slice(5, 16).replace("T", " ")).join(", ")} UTC</p>
         )}
       </Card>
     </>

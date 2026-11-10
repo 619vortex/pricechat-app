@@ -38,6 +38,8 @@ from typing import Any, Protocol
 import httpx
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
+from app import price_axis
+
 logger = logging.getLogger(__name__)
 
 W, H = 1600, 900
@@ -260,12 +262,12 @@ def chart(points: list[tuple[int, float]], *, name: str, ticker: str, pct: float
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
     lo, hi = min(ys), max(ys)
-    span = (hi - lo) or hi * 0.01
+    ax = price_axis.axis(lo, hi)  # log when the range is more than phi (1.618x), else linear: never a setting
     left, right, top, bottom = 0, W - 150, 200, H - 110
 
     def at(i: int) -> tuple[float, float]:
         x = left + (xs[i] - xs[0]) / ((xs[-1] - xs[0]) or 1) * (right - left)
-        y = bottom - (ys[i] - lo) / span * (bottom - top)
+        y = bottom - ax.frac(ys[i]) * (bottom - top)
         return x, y
 
     line = [at(i) for i in range(len(points))]

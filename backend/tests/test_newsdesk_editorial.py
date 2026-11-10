@@ -91,18 +91,20 @@ def test_wti_down_4_4_then_6_0_four_hours_later_is_the_same_story() -> None:
 @pytest.mark.parametrize(("before", "after", "ok"), [
     (6.0, 7.0, False),   # same tier, x1.17
     (6.0, 8.0, False),   # a tier up but only x1.33: the window rolling, not news
-    (6.0, 9.0, True),    # x1.5 and into the 7.5% tier: "extends losses to 9%"
+    (6.0, 9.0, False),   # x1.5 and into the 7.5% tier: still the same slide (owner, 2026-11-10: hard block)
+    (4.4, 7.0, False),   # x1.6: the 2026-11-10 channel's kind of repeat
+    (4.4, 9.0, True),    # x2 and into a major tier: oil's crash deepened
     (5.5, 12.0, True),
 ])
-def test_a_move_counts_again_only_when_it_escalates_a_tier_and_by_half_again(before: float, after: float, ok: bool) -> None:
+def test_a_move_counts_again_only_when_it_doubles_into_a_major_tier(before: float, after: float, ok: bool) -> None:
     covered = [editorial.Covered(sig(["OIL"], magnitude=before), SLOT, 1)]
     assert editorial.judge(sig(["OIL"], magnitude=after), covered, SLOT + timedelta(hours=4)).ok is ok
 
 
-def test_a_reversal_a_verified_cause_or_a_new_day_is_new() -> None:
+def test_a_verified_cause_or_a_new_day_is_new_but_a_reversal_is_not() -> None:
     covered = [editorial.Covered(sig(["OIL"], magnitude=6.0), SLOT, 1)]
     later = SLOT + timedelta(hours=4)
-    assert editorial.judge(sig(["OIL"], direction="up", magnitude=5.5), covered, later).ok  # the other way
+    assert not editorial.judge(sig(["OIL"], direction="up", magnitude=5.5), covered, later).ok  # the other way: still oil's 24 h number
     assert editorial.judge(sig(["OIL"], magnitude=6.2, cause=True), covered, later).ok  # "Brent falls 7% on Iran peace hopes"
     assert editorial.judge(sig(["OIL"], magnitude=6.2), covered, SLOT + timedelta(hours=25)).ok  # a day later
     assert editorial.judge(sig(["GOLD"], magnitude=6.2), covered, later).ok  # another subject
@@ -115,8 +117,10 @@ async def test_slots_never_repeat_a_move_and_a_real_escalation_goes_out_once(db:
     t2 = SLOT + timedelta(hours=4, minutes=1)
     assert await decide(db, t2, oil(t2, -6.0)) is None  # the 2026-11-10 repeat: skipped, nothing posted instead
     t3 = SLOT + timedelta(hours=8, minutes=1)
-    third = await decide(db, t3, oil(t3, -9.0))
-    assert third is not None and visual.post_headline(third) == "WTI CRUDE TUMBLES 9.0% IN 24 HOURS"
+    assert await decide(db, t3, oil(t3, -9.0)) is None  # x1.6: still the same story
+    t4 = SLOT + timedelta(hours=12, minutes=1)
+    fourth = await decide(db, t4, oil(t4, -11.5))  # x2.1 into a major tier
+    assert fourth is not None and "11.5% IN 24 HOURS" in visual.post_headline(fourth)
 
 
 async def test_a_post_made_before_this_change_still_counts_as_covered(db: Session) -> None:
@@ -333,7 +337,7 @@ def test_x_never_posts_a_repeat_even_when_telegram_already_did(db: Session) -> N
 
 def test_a_real_escalation_is_delivered_on_both(db: Session) -> None:
     _released(db, "recap:a", "WTI CRUDE FALLS 5.5% IN 24 HOURS", SLOT, -5.5, tg="delivered", x="dry_run")
-    big = _released(db, "recap:b", "WTI CRUDE TUMBLES 9.0% IN 24 HOURS", SLOT + timedelta(hours=8), -9.0)
+    big = _released(db, "recap:b", "WTI CRUDE TUMBLES 11.5% IN 24 HOURS", SLOT + timedelta(hours=8), -11.5)
     now = SLOT + timedelta(hours=8, minutes=5)
     assert [e.id for e in events.pending(db, "telegram", now)] == [big.id]
 
@@ -363,8 +367,8 @@ async def test_the_preview_queue_shows_each_candidate_with_its_gates_and_the_own
     await decide(db, SLOT - timedelta(minutes=50))  # 03:10 Dubai: no slot open, so the story waits as a candidate
     q = pq.build(db, SLOT - timedelta(minutes=45), {})
     card = q["candidates"][0]
-    assert q["next_slot_dubai"] == "04:00" and "1.5 times" in q["rule"] and card["will_post"] is True
-    assert set(card["gates"]) == {"dedup", "evidence", "bar", "numbers", "headline", "owner"} and all(g["ok"] for g in card["gates"].values())
+    assert q["next_slot_dubai"] == "04:00" and "twice the size" in q["rule"] and card["will_post"] is True
+    assert set(card["gates"]) == {"dedup", "diversity", "evidence", "bar", "numbers", "headline", "owner"} and all(g["ok"] for g in card["gates"].values())
     assert card["headline"].startswith("NYSE") and card["credit"].startswith("Source: ") and card["image"].endswith(f"/{card['event']}.jpg")
     pic, meta = await pq.preview(db, card["event"], SLOT)
     assert pic[:3] == b"\xff\xd8\xff" and meta["kind"] in ("photo", "graphic", "artwork")
@@ -377,7 +381,9 @@ async def test_the_preview_queue_shows_each_candidate_with_its_gates_and_the_own
 def test_admin_serves_the_queue_history_and_block(client: Any) -> None:
     assert client.get("/api/x/newsdesk/editorial/queue").status_code == 200
     h = client.get("/api/x/newsdesk/editorial/history").json()
-    assert "1.5 times" in h["rule"] and h["stories"] == []
+    assert "twice the size" in h["rule"] and h["stories"] == []
+    d = client.get("/api/x/newsdesk/editorial/decisions").json()
+    assert d["decisions"] == [] and isinstance(d["skipped_slots"], dict)
     assert client.post("/api/x/newsdesk/editorial/block", json={"event_id": 999, "block": True}).status_code == 404
 
 

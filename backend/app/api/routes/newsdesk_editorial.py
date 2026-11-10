@@ -37,6 +37,13 @@ def history(db: DbSession) -> dict[str, Any]:
     return {"rule": editorial.RULE, "stories": editorial.history(db, utcnow())}
 
 
+@router.get("/decisions")
+def decisions(db: DbSession) -> dict[str, Any]:
+    """Every candidate of the last 24 hours and what the desk did with it, and why: selected, rejected, merged as a repeat, held for
+    diversity, expired; plus the slots left empty on purpose."""
+    return {"decisions": editorial.decisions(db, utcnow()), "skipped_slots": events.skipped_slots(db)}
+
+
 class BlockInput(StrictInput):
     event_id: int
     block: bool

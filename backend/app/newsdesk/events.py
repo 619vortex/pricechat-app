@@ -63,7 +63,7 @@ class Policy:
     schedule: str = ""  # "" = DEFAULT_SCHEDULE
     slot_hours: tuple[int, ...] = (0, 4, 8, 12, 16, 20)  # Dubai (UTC+4, no daylight saving)
     slot_catch_up: timedelta = timedelta(minutes=90)  # a slot not filled by then (the server was down) is missed, never posted late
-    recap: bool = True
+    recap: bool = False  # see RECAP_FALLBACK
     market_bar: int = 70  # a price move or liquidation flush on its own needs this to take a slot: no small "price alert" posts
     priority_bonus: int = 6  # ranking only, never the bar: Bitcoin, Ethereum, Hyperliquid, macro, commodities, geopolitics come first
     priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC"}))
@@ -75,6 +75,9 @@ DEFAULT_SCHEDULE = "slots"
 X_FOLLOWS_TELEGRAM = True
 X_AFTER_TELEGRAM = timedelta(hours=1)  # how long X may still post an event after Telegram delivered it
 TG_WAITING = ("pending", "queued")  # "uncertain": Telegram may well have posted it, so X follows
+# owner, 2026-11-10: a slot with no important story is SKIPPED, never filled with a market check (the four WTI "market check" posts of
+# 2026-11-10 were this fallback). The code stays for tests and a deliberate future decision; nothing in Admin turns it back on.
+RECAP_FALLBACK = False
 POLICY = Policy()
 DUBAI = timezone(timedelta(hours=4), "Dubai")
 PRIORITY_TOPICS = {"macro", "hack", "liquidations", "etf", "failure", "geopolitics", "flows"}
@@ -126,8 +129,7 @@ def policy(desk_state: dict[str, Any] | None = None) -> Policy:
         p.slot_hours = tuple(sorted(set(hours)))
     if isinstance(over.get("slot_catch_up_minutes"), int) and 10 <= over["slot_catch_up_minutes"] <= 230:
         p.slot_catch_up = timedelta(minutes=over["slot_catch_up_minutes"])
-    if over.get("recap") is False:
-        p.recap = False
+    p.recap = RECAP_FALLBACK and over.get("recap") is not False
     return p
 
 
@@ -665,14 +667,19 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             ev.why = f"waiting for the next slot ({nxt} Dubai)" if ev.virality >= p.regular_bar else f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
         return None
 
-    def rank(e: NdEvent) -> tuple[float, int]:
-        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e)), e.id)
-
     covered = editorial.coverage(db, now)
+
+    def rank(e: NdEvent) -> tuple[float, int]:
+        return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e) - editorial.diversity(e, covered, now)[0]), e.id)
+
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
         age = _age(ev, now)
         if _repeat(ev, covered, now) or _blocked(ev):
+            continue
+        held_back = editorial.diversity(ev, covered, now)[1]
+        if held_back:
+            ev.why = held_back
             continue
         f = ev.facts or {}
         if ev.kind == "update":

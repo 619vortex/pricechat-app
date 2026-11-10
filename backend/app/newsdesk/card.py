@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app import price_axis
 from app.newsdesk.brief import ALERT, BREAKING, JUST_IN, UPDATE, Brief
 
 W, H = 1200, 675
@@ -86,9 +87,9 @@ def render(headline: str, brief: Brief, sources: list[str], at: datetime, *, sta
                 fsize -= 8
             d.text((col_x + 300, mid - (40 if len(spark) >= 4 else 0)), stat, font=_anton(fsize), fill=colour, anchor="rm")
         if len(spark) >= 4:
-            lo, hi = min(spark), max(spark)
+            ax = price_axis.axis(min(spark), max(spark))  # log past a phi (1.618x) range, else linear
             top, height = mid + 40 if stat else mid - 60, 110
-            pts = [(col_x + i * 300 / (len(spark) - 1), top + height - (v - lo) / ((hi - lo) or 1) * height) for i, v in enumerate(spark)]
+            pts = [(col_x + i * 300 / (len(spark) - 1), top + height - ax.frac(v) * height) for i, v in enumerate(spark)]
             colour = UP if spark[-1] >= spark[0] else DOWN
             d.line(pts, fill=colour, width=5, joint="curve")
             d.ellipse([pts[-1][0] - 8, pts[-1][1] - 8, pts[-1][0] + 8, pts[-1][1] + 8], fill=colour)

@@ -356,6 +356,13 @@ def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         monkeypatch.setattr(nd_telegram, "FORMAT", "classic")
         monkeypatch.setattr(nd_engine, "X_FORMAT", "classic")
         monkeypatch.setattr(nd_recap, "VISUAL", False)
+    if request.module.__name__.split(".")[-1] in ("test_newsdesk", "test_newsdesk_events", "test_newsdesk_telegram", "test_newsdesk_slots", "test_newsdesk_visual",
+                                                  "test_newsdesk_editorial", "test_x_follows_telegram", "test_newsdesk_x_live"):
+        from app.newsdesk import events as nd_events
+
+        # the market-check fallback is off in production (owner, 2026-11-10: skip, never fill); tests/test_newsdesk_hardblock.py covers that.
+        # The older tests use it to make market posts, so they keep it on.
+        monkeypatch.setattr(nd_events, "RECAP_FALLBACK", True)
     if request.module.__name__.split(".")[-1] != "test_x_follows_telegram":
         from app.newsdesk import events as nd_events
 

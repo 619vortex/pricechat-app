@@ -107,7 +107,8 @@ TIERS: dict[str, tuple[float, ...]] = {
 }
 CLASS = {"BTC": "crypto_major", "ETH": "crypto_major", "CRYPTO": "crypto_major", "SOL": "crypto_alt", "XRP": "crypto_alt", "HYPE": "crypto_alt", "SPX": "index",
          "IXIC": "index", "OIL": "commodity", "GOLD": "commodity", "SILVER": "commodity", "COPPER": "commodity"}
-ESCALATION = 1.5  # a repeat move must be at least this many times the size already reported (and reach a higher tier)
+ESCALATION = 2.0  # a repeat move inside 24 h must be at least twice the size already posted, into a higher tier AND a major one (MAJOR_TIER)
+MAJOR_TIER = 2  # e.g. oil 7.5%+, Bitcoin 12%+, the S&P 4%+ in 24 h (owner, 2026-11-10: stop treating every change in oil's 24h % as a story)
 
 
 def asset_class(subjects: set[str] | list[str]) -> str:
@@ -174,8 +175,10 @@ def signature(ev: Any) -> dict[str, Any]:
     if f.get("direction") in ("up", "down"):
         direction = f["direction"]
     cause = bool(kind in ("news", "update") and typ == "market" and CAUSE.search(ev.title or ""))
-    return {"subjects": sorted(subjects), "type": typ, "direction": direction, "magnitude": round(abs(pct), 2), "class": asset_class(subjects),
-            "cause": cause, "event": ev.id, "headline": (ev.headline or "")[:140]}
+    out = {"subjects": sorted(subjects), "type": typ, "direction": direction, "magnitude": round(abs(pct), 2), "class": asset_class(subjects),
+           "cause": cause, "event": ev.id, "headline": (ev.headline or "")[:140]}
+    out["desk"] = desk_of(ev, out)
+    return out
 
 
 def stamp(ev: Any, now: datetime) -> None:
@@ -235,15 +238,18 @@ def judge(sig: dict[str, Any], covered: list[Covered], now: datetime, *, is_upda
             continue
         shared = ", ".join(sorted(mine & theirs))
         hours = max(1, int(age.total_seconds() // 3600))
+        if a == "market" and b != "market" and age <= WINDOW["market"]:
+            # a bare price move on something the channel covered as news today: the move is that story's echo, not news
+            return Verdict(False, f"{shared} was already covered {hours} h ago (#{c.event_id}, {b}): a price move on it isn't a new story", c.event_id)
         if a == "market" and b == "market":
-            if sig.get("direction") and old.get("direction") and sig["direction"] != old["direction"]:
-                continue  # a reversal is a different story
+            # 24 h hard block (owner, 2026-11-10): a bigger or opposite number on the same asset is the same story. Only a verified cause (a
+            # sourced news story explaining a move shown only as a number) or a major escalation gets through.
             if sig.get("cause") and not old.get("cause"):
                 return Verdict(True, f"a verified cause for the {shared} move shown {hours} h ago")
             new, before = float(sig.get("magnitude") or 0), float(old.get("magnitude") or 0)
             cls = sig.get("class") or "stock"
-            if before and new >= before * ESCALATION and tier(cls, new) > tier(cls, before):
-                return Verdict(True, f"the {shared} move escalated from {before:g}% to {new:g}%")
+            if before and new >= before * ESCALATION and tier(cls, new) > tier(cls, before) and tier(cls, new) >= MAJOR_TIER:
+                return Verdict(True, f"the {shared} move escalated from {before:g}% to {new:g}%, a major move")
             return Verdict(False, f"same story as #{c.event_id} {hours} h ago ({shared} {old.get('direction') or ''} {before:g}%): "
                                   f"{new:g}% is not a material change", c.event_id)
         if a == b or {a, b} <= {"incident", "controversy"}:
@@ -255,8 +261,8 @@ def judge(sig: dict[str, Any], covered: list[Covered], now: datetime, *, is_upda
 
 # The rule as Admin states it (owner, 2026-11-10: "the same asset/event blocked 24 h unless a genuinely major new development").
 RULE = ("One story is posted once, on Telegram and on X alike. The same asset or event is blocked for 24 hours (market moves), 72 hours "
-        "(hacks, failures, scams) or 48 hours (other news) unless something materially new happens: a move at least 1.5 times the size "
-        "already posted AND into a higher severity tier, a move the other way, a verified cause for a move shown only as a number, or a "
+        "(hacks, failures, scams) or 48 hours (other news) unless something materially new happens: a move at least twice the size "
+        "already posted AND into a major severity tier, a verified cause for a move shown only as a number, or a "
         "material development (an arrest, charges, the FBI or DOJ, withdrawals halted or resumed, funds recovered, a resignation, an "
         "official confirmation, a bigger figure).")
 
@@ -358,6 +364,26 @@ def history(db: Any, now: datetime, hours: int = 72) -> list[dict[str, Any]]:
         out.append({"subjects": sig.get("subjects"), "type": sig.get("type"), "direction": sig.get("direction") or "", "topic": g["posts"][0]["headline"][:90],
                     "first_coverage": g["first_at"].isoformat(), "last_coverage": g["last_at"].isoformat(), "posts_made": len(g["posts"]),
                     "posts": g["posts"], "merged_or_skipped": sorted(g["merged"], key=lambda m: m["at"] or "")})
+    return out
+
+
+STATUS_WORD = {"released": "selected", "superseded": "merged (repeat)", "rejected": "rejected", "missed": "expired", "candidate": "waiting"}
+
+
+def decisions(db: Any, now: datetime, hours: int = 24, limit: int = 150) -> list[dict[str, Any]]:
+    """Admin's record of why each candidate was selected or rejected (newest first)."""
+    from sqlalchemy import select
+
+    from app.models.newsdesk import NdEvent
+
+    rows = db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=hours)).order_by(NdEvent.id.desc()).limit(limit))
+    out = []
+    for e in rows:
+        f = e.facts or {}
+        out.append({"event": e.id, "at": (e.released_at or e.updated_at or e.created_at).isoformat() if (e.released_at or e.updated_at or e.created_at) else None,
+                    "decision": STATUS_WORD.get(e.status, e.status), "kind": e.kind, "desk": desk_of(e), "headline": e.headline or e.title or "",
+                    "score": float(e.virality or 0), "evidence": e.evidence or "", "sources": len(e.sources or []),
+                    "why": e.why or "", "new_because": f.get("new_because") or "", "telegram": e.tg_status, "x": e.x_status})
     return out
 
 
@@ -504,6 +530,46 @@ def exceptional(ev: Any) -> tuple[bool, str]:
     return (False, "not a measured move")
 
 
+# --- feed diversity (owner, 2026-11-10: one asset or market must not dominate) --------------------------------------------------------
+DESK = {"crypto_major": "crypto", "crypto_alt": "crypto", "index": "stocks", "commodity": "commodities"}
+TOPIC_DESK = {"macro": "macro", "geopolitics": "geopolitics", "regulation": "crypto", "hack": "crypto", "scam": "crypto", "failure": "crypto",
+              "etf": "crypto", "flows": "crypto", "liquidations": "crypto", "whale": "crypto"}
+CATEGORY_DESK = {"economics": "macro", "politics": "geopolitics", "commodities": "commodities", "stocks": "stocks", "crypto": "crypto"}
+DIVERSITY_PENALTY = 5.0  # ranking points per post from the same desk in the last 24 h
+RUN_LIMIT = 2  # never more than this many posts in a row from one desk
+
+
+def desk_of(ev: Any, sig: dict[str, Any] | None = None) -> str:
+    """Which part of the world a post is about: crypto, stocks, commodities, macro, geopolitics or other."""
+    sig = sig or signature(ev)
+    for s in sig.get("subjects") or []:
+        if s in CLASS:
+            return DESK[CLASS[s]]
+    topic, cat = getattr(ev, "topic", None) or "", getattr(ev, "category", None) or ""
+    return TOPIC_DESK.get(topic) or CATEGORY_DESK.get(cat) or "other"
+
+
+def diversity(ev: Any, covered: list[Covered], now: datetime) -> tuple[float, str]:
+    """(ranking penalty, hard-block reason or ""). covered is newest first. Material updates of a story already out are exempt."""
+    if getattr(ev, "kind", "") == "update":
+        return 0.0, ""
+    desk = desk_of(ev)
+    if desk == "other":
+        return 0.0, ""
+    def desk_c(c: Covered) -> str:
+        return c.sig.get("desk") or next((DESK[CLASS[s]] for s in c.sig.get("subjects") or [] if s in CLASS), "") or "other"
+    day = [c for c in covered if now - c.at <= timedelta(hours=24)]
+    same = sum(1 for c in day if desk_c(c) == desk)
+    run = 0
+    for c in covered:
+        if desk_c(c) != desk:
+            break
+        run += 1
+    if run >= RUN_LIMIT:
+        return same * DIVERSITY_PENALTY, f"the last {run} posts were all {desk}: feed diversity holds a third in a row"
+    return same * DIVERSITY_PENALTY, ""
+
+
 def rank_bonus(ev: Any) -> float:
     """Ranking only (never the bar): verified important news first, then chaos news, then exceptional moves."""
     f = ev.facts or {}
@@ -533,4 +599,4 @@ def escalation_note(before: float, after: float) -> str:
 
 
 __all__ = ["Covered", "Significance", "Verdict", "admissible", "canon", "corroborating", "coverage", "exceptional", "exceptional_pct", "importance_score",
-           "judge", "rank_bonus", "signature", "significance", "stamp", "tier"]
+           "desk_of", "diversity", "judge", "rank_bonus", "signature", "significance", "stamp", "tier"]
