@@ -1,12 +1,58 @@
 {
-  "dnsZone": "pricechat.live",
-  "agentAllow": ["152.55.180.240", "162.220.234.242", "152.55.180.242"],
-  "sshKeyFingerprint": "87:24:d8:e8:44:4e:95:e3:58:19:95:88:ca:5c:1a:b7",
-  "image": "ubuntu-24.04",
-  "nodes": {
-    "hel1": { "managed": false, "server": "ubuntu-2gb-hel1-1", "host": "hel1.vpn.pricechat.live", "country": "FI", "name": "Helsinki", "note": "shared with the owner's wg0/client1: never reinstall, use apply-proxy-ipv6-fix.sh" },
-    "fsn1": { "managed": false, "server": "ubuntu-1gb-fsn1-1", "host": "fsn1.vpn.pricechat.live", "country": "DE", "name": "Germany", "note": "existing; see GERMANY-PROXY.md" },
-    "ash1": { "managed": true, "location": "ash", "serverType": "cpx11", "host": "ash1.vpn.pricechat.live", "country": "US", "name": "United States (Ashburn)", "region": "US East", "capacity": 250 },
-    "sin1": { "managed": true, "location": "sin", "serverType": "cpx02", "host": "sin1.vpn.pricechat.live", "country": "SG", "name": "Singapore", "region": "Asia", "capacity": 150 }
-  }
+    "dnsZone":  "pricechat.live",
+    "agentAllow":  [
+                       "152.55.180.240",
+                       "162.220.234.242",
+                       "152.55.180.242"
+                   ],
+    "sshKeyFingerprint":  "87:24:d8:e8:44:4e:95:e3:58:19:95:88:ca:5c:1a:b7",
+    "image":  "ubuntu-24.04",
+    "nodes":  {
+                  "hel1":  {
+                               "managed":  false,
+                               "server":  "ubuntu-2gb-hel1-1",
+                               "host":  "hel1.vpn.pricechat.live",
+                               "country":  "FI",
+                               "name":  "Helsinki",
+                               "note":  "shared with the owner\u0027s wg0/client1: never reinstall, use apply-proxy-ipv6-fix.sh"
+                           },
+                  "fsn1":  {
+                               "managed":  false,
+                               "server":  "ubuntu-1gb-fsn1-1",
+                               "host":  "fsn1.vpn.pricechat.live",
+                               "country":  "DE",
+                               "name":  "Germany",
+                               "note":  "existing; see GERMANY-PROXY.md"
+                           },
+                  "ash1":  {
+                               "managed":  true,
+                               "location":  "ash",
+                               "serverType":  "cpx11",
+                               "host":  "ash1.vpn.pricechat.live",
+                               "country":  "US",
+                               "name":  "United States (Ashburn)",
+                               "region":  "US East",
+                               "capacity":  250
+                           },
+                  "sin1":  {
+                               "managed":  true,
+                               "location":  "sin",
+                               "serverType":  "cpx02",
+                               "host":  "sin1.vpn.pricechat.live",
+                               "country":  "SG",
+                               "name":  "Singapore",
+                               "region":  "Asia",
+                               "capacity":  150
+                           },
+                  "hil1":  {
+                               "managed":  true,
+                               "location":  "hil",
+                               "serverType":  "cpx11",
+                               "host":  "hil1.vpn.pricechat.live",
+                               "country":  "US",
+                               "name":  "United States (Oregon)",
+                               "region":  "US West",
+                               "capacity":  250
+                           }
+              }
 }
