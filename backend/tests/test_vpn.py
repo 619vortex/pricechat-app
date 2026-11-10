@@ -204,7 +204,9 @@ def test_device_limit_and_offline_server(client: TestClient, db: Session, fake: 
     server.online = False
     db.commit()
     assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": server.id}).status_code == 503
-    assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code == 429  # 5 tries, then slow down
+    tries = int(LIMITS["vpn_device"].burst) - 5  # 5 tries so far, each charged (none of them reused a key)
+    assert [c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code for _ in range(tries)] == [404] * tries
+    assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code == 429  # then slow down
     LIMITS["vpn_device"].clear()
     assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code == 404
     assert c.post("/api/members/vpn/devices", json={"name": "", "server_id": server.id}).status_code == 422
