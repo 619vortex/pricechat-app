@@ -1502,3 +1502,15 @@ html.site-menu-open, html.site-menu-open body { overflow: hidden; }
 .site .pp-burner-phrase small { color: var(--site-soft); margin-right: 4px; }
 .site .pp-burner-remove { align-self: flex-start; color: var(--site-soft); }
 @media (max-width: 520px) { .site .pp-burner-phrase { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Passport: the Hyperliquid sign-up button (our referral link), big and glowing */
+.pp-hl-signup { display: flex; flex-direction: column; gap: 6px; margin: 0 0 22px; padding: 22px 24px; border-radius: 16px; text-decoration: none;
+  color: #04140b; background: linear-gradient(110deg, #4dff9a, #22d3ee 45%, #4dff9a 90%); background-size: 200% 100%;
+  box-shadow: 0 0 0 1px rgba(77,255,154,.5), 0 0 28px rgba(77,255,154,.55), 0 0 60px rgba(34,211,238,.35);
+  animation: pp-hl-glow 2.4s ease-in-out infinite, pp-hl-sheen 6s linear infinite; }
+.pp-hl-signup:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.pp-hl-signup-title { font-size: clamp(20px, 4.5vw, 28px); font-weight: 800; letter-spacing: .01em; }
+.pp-hl-signup-sub { font-size: 14px; font-weight: 600; opacity: .85; }
+@keyframes pp-hl-glow { 50% { box-shadow: 0 0 0 1px rgba(77,255,154,.8), 0 0 42px rgba(77,255,154,.85), 0 0 90px rgba(34,211,238,.5); } }
+@keyframes pp-hl-sheen { to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { .pp-hl-signup { animation: none; } }

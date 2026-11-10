@@ -129,7 +129,7 @@ def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Sessi
     tg = TG()
     kiwi(db, 4, "851")  # no wallet yet: told how to connect, in Price Chat's words
     out = say(db, tg, 851, "/open btc long 20x")
-    assert "made with our sign-up link" in out and "no Hyperliquid account is connected" in out and "Kiwi Passport" in out and "anter" not in out.lower().replace("banter.", "")
+    assert "made with our sign-up link" in out and "has no wallet connected" in out and "Kiwi Passport" in out and "anter" not in out.lower().replace("banter.", "")
     banter(db, "852")
     say(db, tg, 852, "/long btc 3x")  # = /open btc long 3x: a real preview with Confirm, not a pitch
     it = db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first()
@@ -204,7 +204,7 @@ def test_private_keys_and_recovery_phrases_are_recognised() -> None:
 def test_only_the_banter_referral_opens_new_trades(db: Session, md: FakeMD) -> None:
     tg = TG()
     kiwi(db, 4, "801")  # no verified wallet
-    assert "no Hyperliquid account is connected" in say(db, tg, 801, "/open BTC long 50 3x")
+    assert "has no wallet connected" in say(db, tg, 801, "/open BTC long 50 3x")
     banter(db, "802", code="SOMEONE")
     assert "made with our sign-up link" in say(db, tg, 802, "/open BTC long 50 3x")
     banter(db, "803", code="KLGXFMNI")  # the code Hyperliquid records for the same referrer is accepted

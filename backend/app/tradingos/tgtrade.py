@@ -88,13 +88,13 @@ def entry_gate(db: Session, member: Member) -> str | None:
     accepted = codes(s)
     from app.tradingos.bot import tracked_url
 
-    link = tracked_url(db, "gate") or f"{SITE}/earn"
+    link = tracked_url(db, "gate") or f"{SITE}/passport"
     rule = f"Trading here is for Hyperliquid accounts made with our sign-up link: {link} (4% off fees)."
-    if w is None:  # Telegram is linked (this member was found by it); their Passport just has no Hyperliquid account yet
+    if w is None:  # Telegram is linked (this member was found by it); their Passport just has no wallet yet
         who = f" @{member.username}" if getattr(member, "username", None) else ""
-        return (f"Your Telegram is linked to Kiwi Passport{who}, but no Hyperliquid account is connected to it yet. "
-                f"Open {SITE}/earn while signed in as{who or ' that Passport'} → Connect Hyperliquid (your wallet signs a message; "
-                f"no keys are shared), then try again. {rule}")
+        return (f"Your Telegram is linked to Kiwi Passport{who}, and that Passport has no wallet connected yet. "
+                f"Open {SITE}/passport#account-wallet signed in as{who or ' that Passport'} → Ethereum wallet → Connect "
+                f"(the wallet you use on Hyperliquid; it signs a free message, no keys are shared), then try again. {rule}")
     from app.tradingbot import affiliate
 
     if (w.address or "").lower() == affiliate.WALLET.lower():  # the referral's own wallet (the owner): it can't be referred by itself
@@ -103,9 +103,10 @@ def entry_gate(db: Session, member: Member) -> str | None:
     if w.referral_status == "verified" and seen in accepted:
         return None
     if w.referral_status in ("pending", "unverified"):
-        return (f"Hyperliquid hasn't confirmed yet that your account was made with our sign-up link. Recheck at {SITE}/earn, "
-                f"then try again. {rule}")
-    return (f"{rule} Hyperliquid's record shows your account wasn't made with it, so new trades are off. "
+        return (f"Your wallet …{w.address[-4:]} is connected, but Hyperliquid hasn't confirmed yet that it was made with our "
+                f"sign-up link. Open {SITE}/passport and recheck, then try again. {rule}")
+    return (f"{rule} Hyperliquid's record for your wallet …{w.address[-4:]} shows it wasn't made with it, so new trades are off. "
+            "If you have another Hyperliquid wallet made with our link, connect that one in your Passport. "
             "Closing and managing any position you already have still works.")
 
 
@@ -591,7 +592,7 @@ def mainnet_preview(db: Session, member: Member, req: OpenRequest, ex: Any = Non
     acc = execution.account(db, member)
     db.commit()
     if not acc.master_address:
-        return f"Connect your Hyperliquid account at {SITE}/earn first: the preview reads its balance (no key needed)."
+        return f"Connect your Hyperliquid wallet in your Passport first ({SITE}/passport#account-wallet): the preview reads its balance (no key needed)."
     m = market.for_mode("LIVE").market(req.coin)
     req.coin = m.coin
     ex = ex or xch.ReadOnlyExecutor("LIVE", acc.master_address)
@@ -673,7 +674,7 @@ def mainnet_status(db: Session, member: Member) -> str:
     except Exception:  # noqa: BLE001
         out.append("❌ Hyperliquid mainnet unreachable right now")
     if not acc.master_address:
-        out += [f"❌ No Hyperliquid account connected: {SITE}/earn", _switch_line(db)]
+        out += [f"❌ No Hyperliquid wallet connected: {SITE}/passport#account-wallet", _switch_line(db)]
         return "\n".join(out)
     a = acc.master_address
     try:
@@ -735,7 +736,7 @@ def balance_text(db: Session, acc: TrAccount) -> str:
     if acc.mode == "PAPER":
         return f"<b>PAPER balance</b> (simulated): ${execution.paper_equity(db, acc):,.2f}\nOpen positions: {execution.open_count(db, acc)}"
     if not acc.master_address:
-        return f"No Hyperliquid account connected for {acc.mode}. Connect at {SITE}/earn."
+        return f"No Hyperliquid account connected for {acc.mode}. Connect your wallet at {SITE}/passport#account-wallet."
     from app.tradingos import exchange as xch
 
     try:

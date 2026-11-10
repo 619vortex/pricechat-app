@@ -424,6 +424,10 @@ function ConnectedAccounts({ p, act, linkError }: {
   }, [linkError]);
   return (
     <section className="pp-linked" aria-labelledby="linked-title">
+      <a className="pp-hl-signup" href="/api/r/site_passport?src=web" target="_blank" rel="noopener noreferrer">
+        <span className="pp-hl-signup-title">🚀 Sign up on Hyperliquid</span>
+        <span className="pp-hl-signup-sub">With our link: 4% off trading fees, and you can trade from the Price Chat Telegram bot. Then connect that wallet below.</span>
+      </a>
       <h3 className="site-panel-sub" id="linked-title">Connected accounts</h3>
       <ul className="pp-accounts">
         <EmailRow p={p} />
