@@ -33,7 +33,7 @@ DEFAULT_FEEDS: list[dict[str, Any]] = [
     {"name": "NPR", "url": "https://feeds.npr.org/1006/rss.xml", "tier": 1, "category": None},
     {"name": "Al Jazeera", "url": "https://www.aljazeera.com/xml/rss/all.xml", "tier": 1, "category": "politics"},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", "tier": 1, "category": None},
-    {"name": "MarketWatch", "url": "https://feeds.content.dowjones.io/public/rss/mw_marketpulse", "tier": 1, "category": None},
+    {"name": "MarketWatch", "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories", "tier": 1, "category": None},
     {"name": "Cointelegraph", "url": "https://cointelegraph.com/rss", "tier": 2, "category": "crypto"},
     {"name": "Decrypt", "url": "https://decrypt.co/feed", "tier": 2, "category": "crypto"},
     {"name": "The Block", "url": "https://www.theblock.co/rss.xml", "tier": 2, "category": "crypto"},
@@ -66,12 +66,38 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "CNBC", "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html", "tier": 1, "category": "economics"},
     {"name": "OilPrice", "url": "https://oilprice.com/rss/main", "tier": 2, "category": "commodities"},
     {"name": "CFTC", "url": "https://www.cftc.gov/RSS/RSSGP/rssgp.xml", "tier": 0, "category": None},
+    # global markets, macro and world news (owner, 2026-11-10: "repair or replace the broken feeds, improve global market coverage").
+    # Each checked live the same day (fresh items, parseable). Headline feeds only: the desk never copies an article, it credits the outlet.
+    {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/markets/news.rss", "tier": 1, "category": None},
+    {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/economics/news.rss", "tier": 1, "category": "economics"},
+    {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/politics/news.rss", "tier": 1, "category": "politics"},
+    {"name": "Financial Times", "url": "https://www.ft.com/markets?format=rss", "tier": 1, "category": None},
+    {"name": "Financial Times", "url": "https://www.ft.com/world?format=rss", "tier": 1, "category": "politics"},
+    {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "tier": 1, "category": None},
+    {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "tier": 1, "category": "economics"},
+    {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "tier": 1, "category": "politics"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/business/rss", "tier": 1, "category": None},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/business/economics/rss", "tier": 1, "category": "economics"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss", "tier": 1, "category": "politics"},
+    {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069", "tier": 1, "category": None},
+    {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362", "tier": 1, "category": "politics"},
+    {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19836768", "tier": 1, "category": "commodities"},
+    {"name": "MarketWatch", "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories", "tier": 1, "category": None},
+    {"name": "France 24", "url": "https://www.france24.com/en/business/rss", "tier": 1, "category": None},
+    {"name": "Mining.com", "url": "https://www.mining.com/feed/", "tier": 2, "category": "commodities"},
+    # official macro data and central banks (tier 0: their own announcements)
+    {"name": "BLS", "url": "https://www.bls.gov/feed/bls_latest.rss", "tier": 0, "category": "economics"},
+    {"name": "Bank of England", "url": "https://www.bankofengland.co.uk/rss/news", "tier": 0, "category": "economics"},
+    {"name": "Bank of Japan", "url": "https://www.boj.or.jp/en/rss/whatsnew.xml", "tier": 0, "category": "economics"},
 ]
+# feeds that died: dropped even when stored in Admin (MarketWatch's market pulse has had nothing new since 3 Jul 2025)
+RETIRED_FEEDS = {"https://feeds.content.dowjones.io/public/rss/mw_marketpulse"}
 STALE_AFTER = timedelta(days=7)  # a feed whose newest item is older than this is broken, whatever its HTTP status says
 
 
 def feeds_for(stored: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:
     """The stored feeds plus the tiered additions not already there (by address)."""
+    stored = [f for f in stored if f.get("url") not in RETIRED_FEEDS]
     if state.get("extra_feeds") is False:
         return list(stored)
     have = {f.get("url") for f in stored}

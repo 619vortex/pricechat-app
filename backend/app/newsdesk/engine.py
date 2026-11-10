@@ -4,6 +4,7 @@ Publishing: a post is claimed by one conditional UPDATE before X is called, so t
 marked uncertain and never retried on its own. Rate limits and server errors retry with a wait. Refused credentials or no X credit pause the desk.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
@@ -94,8 +95,15 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     db.commit()  # the purge on its own, before any insert
     seen = set(db.scalars(select(NdStory.link)))  # every stored link (the table keeps a week), not just the last few days
     health: dict[str, Any] = {}
-    for feed in sources.feeds_for(s.feeds or [], s.state or {}):
-        items, problem = await sources.fetch_feed(client, feed)
+    feeds = sources.feeds_for(s.feeds or [], s.state or {})
+    gate = asyncio.Semaphore(8)  # fetched in parallel (35+ feeds; one slow site never holds up the tick), stored in list order below
+
+    async def fetch(feed: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
+        async with gate:
+            return await sources.fetch_feed(client, feed)
+
+    fetched = await asyncio.gather(*(fetch(f) for f in feeds))
+    for feed, (items, problem) in zip(feeds, fetched):
         newest = max((it["at"] for it in items if it.get("at")), default=None)
         if not problem and newest is not None and now - (newest if newest.tzinfo else newest.replace(tzinfo=now.tzinfo)) > sources.STALE_AFTER:
             problem = f"stale: newest item {newest:%d %b %Y}"
