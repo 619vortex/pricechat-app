@@ -185,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         handlers=[logging.StreamHandler(), logging.FileHandler(ROOT / "newsdesk_images.log", encoding="utf-8")])
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # a poll every few seconds: only problems are worth a line
     if not a.token:
         print("No worker token (PRICECHAT_WORKER_TOKEN in worker.env, or --token)", file=sys.stderr)
         return 2
