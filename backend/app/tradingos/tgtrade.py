@@ -284,6 +284,8 @@ def parse_open(args: list[str]) -> OpenRequest | str:
     words = [a.strip() for a in args if a.strip()]
     if len(words) < 3:
         return OPEN_USAGE
+    if words[0].lower() in ("long", "buy", "short", "sell") and words[1].lower() not in ("long", "buy", "short", "sell"):
+        words[0], words[1] = words[1], words[0]  # "/open long btc 10 5x" = "/open btc long 10 5x"
     coin = words[0].lstrip("$").upper()
     if not re.fullmatch(r"[A-Z0-9]{1,15}", coin):
         return OPEN_USAGE
