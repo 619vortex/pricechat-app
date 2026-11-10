@@ -482,3 +482,30 @@ def admin_stop(acc_id: int, request: Request, db: DbSession) -> dict[str, Any]:
     signals.audit(db, _actor(db, request), "admin_stop_account", None, account=acc_id)
     db.commit()
     return admin_execution(db)
+
+
+# ---------------------------------------------------------------- admin: Telegram trading (tgtrade.py)
+@router.get("/tradingos/admin/telegram-trading")
+def admin_telegram_trading(db: DbSession, hours: int = Query(24, ge=1, le=24 * 30)) -> dict[str, Any]:
+    """The Telegram trading switches (mainnet execution, emergency stop), the referral codes, activity and failures, and the
+    latest Telegram trading events."""
+    from app.tradingos import tgtrade
+
+    return tgtrade.admin_status(db, hours)
+
+
+class TelegramSwitchIn(StrictInput):
+    kill: bool | None = None  # the emergency stop: no new Telegram trades or confirmations, no mainnet action from Telegram
+    live: bool | None = None  # mainnet execution from Telegram (on only with `phrase`)
+    phrase: str = Field("", max_length=64)
+
+
+@router.put("/tradingos/admin/telegram-trading")
+def admin_telegram_switch(payload: TelegramSwitchIn, request: Request, db: DbSession) -> dict[str, Any]:
+    from app.tradingos import tgtrade
+
+    try:
+        return tgtrade.set_switches(db, _actor(db, request), kill=payload.kill, live=payload.live, phrase=payload.phrase)
+    except tgtrade.SwitchError as e:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e

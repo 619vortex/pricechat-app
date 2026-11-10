@@ -569,6 +569,8 @@ class TelegramIngestor:
             try:
                 if str(cq.get("data") or "").startswith("fc:") and await bot.fc_button_throttled(self.client, cq):
                     continue
+                if await bot.trade_button_throttled(self.client, cq):  # trading buttons: per-user limit
+                    continue
                 await bot.handle_callback(self.db, self.client, cq)
             except Exception as exc:  # noqa: BLE001
                 self.db.rollback()

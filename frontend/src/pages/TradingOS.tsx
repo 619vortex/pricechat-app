@@ -2,6 +2,7 @@ import { useState } from "react";
 import { request } from "../api/client";
 import { useApi } from "../api/useApi";
 import { Advanced, ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, Tabs, relativeTime, type Tone } from "../components/ui";
+import { TelegramTradingCard } from "./TelegramTradingCard";
 
 /** Admin → Trading OS (Phase 1-2): real Hyperliquid market data, the deterministic scanner, signal review and publishing
  *  to the Telegram signal group, model performance, execution (accounts, positions, orders, the LIVE allowlist) and the audit log. */
@@ -433,6 +434,7 @@ function Execution() {
                 hint={`${d.results[m].trades} closed${d.results[m].win_rate != null ? ` · ${d.results[m].win_rate}% wins` : ""}`} />
         ))}
       </div>
+      <TelegramTradingCard />
       <Card title="LIVE allowlist">
         <p className="muted small">Kiwi Passport usernames allowed to authorize a mainnet API wallet and, after passing the pre-live checks, enable LIVE themselves.
           Everyone else stays in PAPER or TESTNET.</p>

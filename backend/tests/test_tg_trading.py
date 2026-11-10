@@ -27,10 +27,42 @@ def md(monkeypatch: pytest.MonkeyPatch) -> FakeMD:
     return f
 
 
+class FakeReader:
+    """TEST FIXTURE: stands in for exchange.ReadOnlyExecutor (the key-less mainnet reader): a balance, no positions, and every
+    order-shaped call refused exactly like the real one."""
+
+    read_only = True
+    built: list[str] = []
+
+    def __init__(self, mode: str, master: str, transport: Any = None) -> None:
+        self.mode, self.master = mode, master
+        FakeReader.built.append(mode)
+
+    def equity(self) -> float:
+        return 1000.0
+
+    def state(self) -> dict[str, Any]:
+        return {"assetPositions": []}
+
+    def mid_px(self, coin: str) -> float:
+        return 100.0
+
+    def _refuse(self, *a: Any, **k: Any) -> Any:
+        raise xch.MainnetBlocked(xch.MAINNET_BLOCKED)
+
+    set_leverage = market = trigger = cancel = cancel_by_cloid = _refuse
+
+
 @pytest.fixture(autouse=True)
 def _no_hyperliquid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TEST FIXTURE: the referral recheck would ask Hyperliquid; tests never call the real API."""
+    """TEST FIXTURE: the referral recheck, mainnet reads (balance, fee rate, API wallet listing) would ask Hyperliquid; tests
+    never call the real API."""
     monkeypatch.setattr(tgtrade, "recheck_referral", lambda db, m: None)
+    FakeReader.built = []
+    monkeypatch.setattr(xch, "ReadOnlyExecutor", FakeReader)
+    monkeypatch.setattr(xch, "user_fees", lambda mode, a, transport=None: {"taker": 0.00045, "maker": 0.00015, "referral_discount": 0.04})
+    monkeypatch.setattr(xch, "agent_record", lambda mode, master, agent, transport=None: {"address": agent, "validUntil": None})
+    monkeypatch.setattr(xch, "balances", lambda mode, a, transport=None: {"perps": 1000.0, "spot_usdc": 0.0, "unified": False, "trading": 1000.0})
 
 
 class TG(FakeTG):
@@ -245,7 +277,8 @@ def test_mainnet_orders_from_telegram_stay_off_until_the_owner_turns_them_on(db:
     acc.mode = "LIVE"
     db.commit()
     tg = TG()
-    assert "aren't switched on" in say(db, tg, 871, "/open BTC long 50 3x")
+    out = say(db, tg, 871, "/open BTC long 50 3x")  # a LIVE account: a read-only mainnet preview, never a Confirm
+    assert "MAINNET PREVIEW" in out and "OFF until" in out and tg.buttons[-1] is None
     assert db.scalar(select(TrIntent)) is None
     s = signals.settings(db)
     s.strategies = {**(s.strategies or {}), "telegram_trading": {"live": True}}
@@ -573,14 +606,22 @@ def test_default_settings_keep_every_new_telegram_entry_off_mainnet(db: Session,
     monkeypatch.setattr(execution, "executor", guard)
     monkeypatch.setattr(execution, "check_live_permission", lambda *a, **k: None)  # only the Telegram switch stands in the way
     monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
+    monkeypatch.undo()  # the real executor(): inside Telegram it hands out the key-less reader for LIVE
+    monkeypatch.setattr(tgtrade, "recheck_referral", lambda db, m: None)
+    monkeypatch.setattr(xch, "ReadOnlyExecutor", FakeReader)
+    monkeypatch.setattr(xch, "user_fees", lambda mode, a, transport=None: {"taker": 0.00045, "maker": 0.00015, "referral_discount": 0})
+    monkeypatch.setattr(xch, "agent_record", lambda mode, master, agent, transport=None: {"address": agent, "validUntil": None})
+    monkeypatch.setattr(market, "_shared", md)
+    monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
     tg = TG()
-    assert "aren't switched on" in say(db, tg, 1001, "/open BTC long 50 3x")
-    assert "aren't switched on" in say(db, tg, 1001, f"/enter #{sig.number:03d}")
+    assert "MAINNET PREVIEW" in say(db, tg, 1001, "/open BTC long 50 3x") and tg.buttons[-1] is None
+    assert "MAINNET PREVIEW" in say(db, tg, 1001, f"/enter #{sig.number:03d}") and tg.buttons[-1] is None
     asyncio.run(bot.handle_command(db, tg, -100, 1001, f"/enter #{sig.number}", group=True, reply_to=5))
-    assert "aren't switched on" in tg.sent[-2][2] and tg.sent[-2][1] == 1001  # the group /enter: the refusal goes privately
+    assert "MAINNET PREVIEW" in tg.sent[-2][2] and tg.sent[-2][1] == 1001  # the group /enter: the preview goes privately
     for token in ("mo:" + "0" * 16, "cf:" + "0" * 16):  # forged confirms find nothing to send
         press(db, tg, 1001, token)
-    assert not db.scalars(select(TrIntent)).all() and not ex.orders and "LIVE" not in asked
+    assert not db.scalars(select(TrIntent)).all() and not ex.orders and not asked
+    assert FakeReader.built and set(FakeReader.built) == {"LIVE"}  # mainnet was only ever read, without a key
     assert not db.scalars(select(TrPosition)).all()
 
 
@@ -600,7 +641,8 @@ def test_no_telegram_path_reaches_mainnet_until_the_owner_switches_it_on(db: Ses
     monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
     tg = TG()
     off = "aren't switched on"
-    assert off in press(db, tg, 1002, f"sig:{sig.id}:enter")  # the existing ENTER button on a signal card
+    press(db, tg, 1002, f"sig:{sig.id}:enter")  # the existing ENTER button on a signal card: a read-only preview, privately
+    assert "MAINNET PREVIEW" in tg.sent[-2][2] and tg.sent[-2][1] == 1002 and tg.buttons[-1] is None
     for data in ("cf:" + "1" * 16, "cl:77", "mo:" + "2" * 16, f"ca:all:{tgtrade._stamp()}", f"pr:{tgtrade._stamp()}:77:s:60000"):
         assert off in press(db, tg, 1002, data), data
     for text in ("/close 77", "/closeall", "/sl 77 60000", "/tp 77 70000", "/cancel 12345"):
@@ -610,7 +652,8 @@ def test_no_telegram_path_reaches_mainnet_until_the_owner_switches_it_on(db: Ses
     st = signals.settings(db)
     st.strategies = {**(st.strategies or {}), "telegram_trading": {"live": True}}
     db.commit()
-    assert off not in press(db, tg, 1002, f"sig:{sig.id}:enter")
+    press(db, tg, 1002, f"sig:{sig.id}:enter")
+    assert not any("MAINNET PREVIEW" in x[2] or off in x[2] for x in tg.sent[-2:])
     # TESTNET is untouched
     st.strategies = {**(st.strategies or {}), "telegram_trading": {}}
     acc.mode = "TESTNET"

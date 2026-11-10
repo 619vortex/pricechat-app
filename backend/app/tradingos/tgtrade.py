@@ -30,11 +30,13 @@ that never got a position and has no live preview is reused by their next previe
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import re
 import secrets
+from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -47,17 +49,20 @@ from app.models.members import Member
 from app.models.trading import TrAccount, TrIntent, TrOrder, TrPosition
 from app.models.tradingos import TsSignal
 from app.tradingos import execution, market, risk, signals
+from app.tradingos import exchange as xch
 
 SITE = "https://pricechat.live"
 MANUAL = "MANUAL"
 INTENT_TTL = timedelta(minutes=5)
 MIN_NOTIONAL = 10.0  # Hyperliquid's minimum order value
 LIQ_BUFFER = 0.003  # a stop must trigger at least 0.3% before the estimated liquidation price
-COMMANDS = {"/market", "/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings"}
+LIMIT_MAX_AWAY = 0.05  # a limit (worst accepted fill) more than 5% from the price is refused as a probable typo
+COMMANDS = {"/market", "/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet"}
 HELP = ("<b>Trading (private chat, Banter group)</b>\n"
         "/market BTC: price, funding, open interest, max leverage\n"
-        "/open BTC long 100 5x [sl 60000] [tp 70000]: $100 margin at 5x, previewed first\n"
+        "/open BTC long 100 5x [sl 60000] [tp 70000] [limit 64500]: $100 margin at 5x, previewed first\n"
         "/enter: reply to a Price Chat signal to trade it\n"
+        "/preview BTC long 100 5x: a mainnet order preview (read-only) · /mainnet: your mainnet readiness\n"
         "/positions · /pnl · /balance · /orders\n"
         "/sl 12 61000 · /tp 12 64000 [66000]: move a stop or targets\n"
         "/close 12 · /closeall · /cancel (previews or a target order)\n"
@@ -78,17 +83,19 @@ def entry_gate(db: Session, member: Member) -> str | None:
     (checked when the wallet was verified and on every recheck); a link click or anything the member says never does."""
     from app.tradingbot.service import codes, settings as earn_settings, wallet_of
 
+    s = earn_settings(db)
     w = wallet_of(db, member)
-    accepted = codes(earn_settings(db))
+    accepted = codes(s)
+    join = f" New to Hyperliquid? Sign up with the Banter link: {s.referral_url}" if s.referral_url else ""
     if w is None:
         return (f"Trading from Telegram is for the Banter group. Connect and verify your Hyperliquid wallet at {SITE}/earn first "
-                f"(your wallet signs a message; no keys are ever shared).")
+                f"(your wallet signs a message; no keys are ever shared).{join}")
     seen = (w.referral_code_seen or "").upper()
     if w.referral_status == "verified" and seen in accepted:
         return None
     if w.referral_status in ("pending", "unverified"):
         return (f"Hyperliquid hasn't confirmed your wallet's referral code yet. Recheck it at {SITE}/earn, then try again. "
-                f"Trading from Telegram is for accounts that joined with the Banter code ({accepted[0]}).")
+                f"Trading from Telegram is for accounts that joined with the Banter code ({accepted[0]}).{join}")
     return (f"Trading from Telegram is only for Hyperliquid accounts that joined with the Banter group's referral code "
             f"({accepted[0]}). Hyperliquid's record for your wallet shows {seen or 'no referral code'}, so new trades are off. "
             f"Closing and managing any position you already have still works.")
@@ -106,10 +113,47 @@ def recheck_referral(db: Session, member: Member) -> None:
         db.rollback()
 
 
-def telegram_live(db: Session) -> bool:
-    """Manual mainnet orders from Telegram: off unless the owner turns them on."""
+def _cfg(db: Session) -> dict[str, Any]:
     cfg = (signals.settings(db).strategies or {}).get("telegram_trading") or {}
-    return bool(cfg.get("live")) if isinstance(cfg, dict) else False
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def telegram_live(db: Session) -> bool:
+    """Mainnet execution from Telegram: off unless the owner turns it on (strategies.telegram_trading.live, Admin → Trading
+    signals → Settings → Telegram trading, behind a typed confirmation)."""
+    return _cfg(db).get("live") is True
+
+
+def killed(db: Session) -> bool:
+    """The owner's emergency switch (strategies.telegram_trading.kill): no new Telegram trade on any network, no Confirm of a
+    waiting preview, and no signed mainnet action from Telegram at all. Exchange-side stops stay; the website still closes."""
+    return bool(_cfg(db).get("kill"))
+
+
+def mainnet_allowed(db: Session) -> bool:
+    return telegram_live(db) and not killed(db)
+
+
+@contextlib.contextmanager
+def telegram_surface(db: Session) -> Iterator[None]:
+    """Every Telegram handler runs inside this: with mainnet execution off (or the emergency switch on), exchange.py refuses
+    any signed mainnet action from this request and execution.executor hands out a key-less read-only reader instead. The
+    gates below say no first, with a clear message; this is the backstop if any path is ever missed."""
+    try:
+        ok = mainnet_allowed(db)
+    except Exception:  # noqa: BLE001 - settings unreadable: fail closed
+        db.rollback()
+        ok = False
+    with xch.surface("telegram", ok):
+        yield
+
+
+KILLED = ("🛑 Telegram trading is paused by Price Chat right now (emergency stop). No new trades or confirmations; nothing was "
+          "sent. Your open positions keep their exchange-side stop-loss, and you can manage them at pricechat.live/earn.")
+
+
+def entry_off(db: Session) -> str | None:
+    return KILLED if killed(db) else None
 
 
 def gate_signal_enter(db: Session) -> bool:
@@ -127,7 +171,10 @@ LIVE_OFF = ("Real-money (mainnet) orders from Telegram aren't switched on. Nothi
 def live_off(db: Session, mode: str | None) -> str | None:
     """The owner's rule (2026-11-09): NO mainnet execution from Telegram until they approve live trading (telegram_trading.live).
     Every Telegram path that could reach the exchange on mainnet (open, enter, the ENTER button, confirm, close, close all,
-    stop/target changes, order cancels) asks this first. PAPER and TESTNET are untouched."""
+    stop/target changes, order cancels) asks this first. PAPER and TESTNET are untouched. The emergency switch also stops
+    every mainnet action from Telegram."""
+    if mode == "LIVE" and killed(db):
+        return KILLED
     return LIVE_OFF if mode == "LIVE" and not telegram_live(db) else None
 
 
@@ -198,9 +245,11 @@ class OpenRequest:
     leverage: int
     stop: float | None = None
     tp: float | None = None
+    limit: float | None = None  # worst fill price for the immediate entry (None: market)
 
 
-OPEN_USAGE = "Usage: /open BTC long 100 5x [sl 60000] [tp 70000]  (coin, long or short, margin in USD, leverage)"
+OPEN_USAGE = ("Usage: /open BTC long 100 5x [sl 60000] [tp 70000] [limit 64500]  (coin, long or short, margin in USD, leverage; "
+              "limit = the worst price you accept, filled now or not at all)")
 
 
 def _num(s: str) -> float | None:
@@ -232,10 +281,12 @@ def parse_open(args: list[str]) -> OpenRequest | str:
     rest = words[4:]
     while rest:
         key = rest[0].lower()
-        if key not in ("sl", "stop", "tp", "target") or len(rest) < 2 or _num(rest[1]) is None:
-            return "After the leverage only sl PRICE and tp PRICE are understood. " + OPEN_USAGE
+        if key not in ("sl", "stop", "tp", "target", "limit", "lmt") or len(rest) < 2 or _num(rest[1]) is None:
+            return "After the leverage only sl PRICE, tp PRICE and limit PRICE are understood. " + OPEN_USAGE
         if key in ("sl", "stop"):
             req.stop = _num(rest[1])
+        elif key in ("limit", "lmt"):
+            req.limit = _num(rest[1])
         else:
             req.tp = _num(rest[1])
         rest = rest[2:]
@@ -262,7 +313,8 @@ class Manual:
 def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decimals: int, funding_h: float, equity: float,
                 acc_max_leverage: int, max_loss_usd: float, max_allocation_pct: float, max_positions: int, open_positions: int,
                 daily_pnl: float, daily_loss_limit: float, paused: bool, global_paused: bool, allowed: list[str] | None = None,
-                trades_today: int = 0, max_trades_today: int = risk.HARD_MAX_TRADES_PER_DAY, cooldown_left_min: float = 0.0) -> Manual:
+                trades_today: int = 0, max_trades_today: int = risk.HARD_MAX_TRADES_PER_DAY, cooldown_left_min: float = 0.0,
+                taker_fee: float = risk.TAKER_FEE) -> Manual:
     """The member's own sizing (margin x leverage), held to their limits and the system's: leverage, margin as a share of
     equity, loss at the stop, positions, daily loss, Hyperliquid's minimum, and a stop that triggers before liquidation.
     Without a stop given, it goes where the loss reaches the member's max loss per trade (or just before liquidation)."""
@@ -293,12 +345,20 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
         reasons.append(f"${req.margin:,.2f} margin is over your limit of {max_allocation_pct:g}% of ${equity:,.2f} (${max_margin:,.2f})")
     lev = max(1, min(req.leverage, cap))
     entry = mark
+    if req.limit is not None:
+        if (long and req.limit < mark) or (not long and req.limit > mark):
+            reasons.append(f"a {req.side.lower()} limit at {market.fmt_price(req.limit)} is {'below' if long else 'above'} the price "
+                           f"({market.fmt_price(mark)}): it wouldn't fill now, and resting limit orders aren't available from Telegram yet")
+        elif abs(req.limit - mark) / mark > LIMIT_MAX_AWAY:
+            reasons.append(f"the limit is more than {LIMIT_MAX_AWAY:.0%} from the price ({market.fmt_price(mark)}): set it closer")
+        else:
+            entry = req.limit  # sized and risk-checked as if it fills at the worst price accepted
     notional = req.margin * lev
     size = risk.round_size(notional / entry, sz_decimals) if entry > 0 else 0.0
     if size * entry < MIN_NOTIONAL:
         reasons.append(f"a ${size * entry:,.2f} position is under Hyperliquid's ${MIN_NOTIONAL:.0f} minimum")
     liq = liquidation_price(req.side, entry, lev, market_max_lev)
-    costs = entry * (2 * risk.TAKER_FEE + 2 * risk.SLIPPAGE)  # per unit: fees both ways and slippage
+    costs = entry * (2 * taker_fee + 2 * risk.SLIPPAGE)  # per unit: fees both ways and slippage
     edge = liq * (1 + LIQ_BUFFER) if long else liq * (1 - LIQ_BUFFER)
     if req.stop is not None:
         stop = req.stop
@@ -329,7 +389,8 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     tp2 = risk.round_px(max(risk.tp2_of(entry, tp1), 0.0), sz_decimals)
     p.entry, p.stop, p.tp1, p.tp2, p.size, p.leverage = entry, stop, tp1, tp2, size, lev
     p.notional, p.margin = round(size * entry, 4), round(size * entry / lev, 4)
-    p.max_loss_usd, p.est_fees = round(loss, 4), round(size * entry * 2 * risk.TAKER_FEE, 4)
+    p.max_loss_usd, p.est_fees = round(loss, 4), round(size * entry * 2 * taker_fee, 4)
+    p.limit_px = req.limit if req.limit is not None and entry == req.limit else None
     p.ok = not reasons
     return Manual(p, liq, round(size * entry * funding_h, 4))
 
@@ -403,7 +464,8 @@ def preview_open(db: Session, member: Member, req: OpenRequest, ex: Any = None) 
         raise execution.TradeError(why)
     man, _ = _sizing(db, member, acc, req, ex)
     sig = _anchor(db, member, req, man.plan)
-    req_d = {"coin": req.coin, "side": req.side, "margin": req.margin, "leverage": req.leverage, "stop": req.stop, "tp": req.tp}
+    req_d = {"coin": req.coin, "side": req.side, "margin": req.margin, "leverage": req.leverage, "stop": req.stop, "tp": req.tp,
+             "limit": req.limit}
     it = TrIntent(account_id=acc.id, signal_id=sig.id, token=secrets.token_hex(8), mode=acc.mode,
                   plan=man.plan.as_dict() | {"manual": True, "liq": man.liq, "funding_h_usd": man.funding_h_usd, "request": req_d},
                   expires_at=utcnow() + INTENT_TTL)
@@ -419,7 +481,8 @@ MODE_NOTE = {"PAPER": "PAPER (simulated on real prices)", "TESTNET": "TESTNET (H
 def preview_open_text(it: TrIntent) -> str:
     p, f = it.plan, market.fmt_price
     lines = [f"🧾 <b>{esc(MODE_NOTE.get(it.mode, it.mode))}</b>", f"<b>{esc(p['coin'])} {p['side']}</b> · your own trade, not a signal", "",
-             f"Entry ≈ {f(p['entry'])} (market order)",
+             (f"Entry at {f(p['limit_px'])} or better (limit, filled now or not at all)" if p.get("limit_px")
+              else f"Entry ≈ {f(p['entry'])} (market order)"),
              f"Margin ${p['margin']:,.2f} · {p['leverage']}x isolated → position ${p['notional']:,.2f} ({p['size']:g} {esc(p['coin'])})",
              f"🛑 Stop {f(p['stop'])} · loss at the stop ≈ ${p['max_loss_usd']:,.2f} incl. fees",
              f"✅ TP1 {f(p['tp1'])} (half) · TP2 {f(p['tp2'])}",
@@ -443,15 +506,14 @@ def confirm_open(db: Session, member: Member, token: str, ex: Any = None) -> TrP
         raise execution.TradeError("The preview expired. Send /open again for a fresh one.")
     if it.mode != acc.mode:
         raise execution.TradeError("Your trading mode changed since the preview. Send /open again.")
-    why = mode_gate(db, acc) or entry_gate(db, member)
+    why = entry_off(db) or mode_gate(db, acc) or entry_gate(db, member)
     if why:
         raise execution.TradeError(why)
     if acc.paused or signals.settings(db).paused:
         raise execution.TradeError("New trades are stopped (STOP NEW TRADES). Nothing was sent.")
-    it.status = "CONFIRMED"  # single use, before anything is sent
-    db.commit()
+    execution.claim_intent(db, it)  # single use, before anything is sent (a double tap gets "Already handled")
     rq = (it.plan or {}).get("request") or {}
-    req = OpenRequest(rq["coin"], rq["side"], float(rq["margin"]), int(rq["leverage"]), rq.get("stop"), rq.get("tp"))
+    req = OpenRequest(rq["coin"], rq["side"], float(rq["margin"]), int(rq["leverage"]), rq.get("stop"), rq.get("tp"), rq.get("limit"))
     try:
         man, ex = _sizing(db, member, acc, req, ex)
     except execution.TradeError as e:
@@ -480,6 +542,136 @@ def cancel_previews(db: Session, member: Member) -> int:
         it.status = "CANCELLED"
     db.commit()
     return len(rows)
+
+
+# ---------------------------------------------------------------- mainnet previews and readiness (read-only, never an order)
+PREVIEW_ONLY = "🔍 <b>MAINNET PREVIEW · nothing can be sent</b>"
+
+
+def _switch_line(db: Session) -> str:
+    if killed(db):
+        return "Telegram mainnet execution: OFF (emergency stop is on)"
+    return f"Telegram mainnet execution: {'ON' if telegram_live(db) else 'OFF until Price Chat switches it on'}"
+
+
+def _fees(address: str) -> dict[str, float] | None:
+    try:
+        return xch.user_fees("LIVE", address)
+    except Exception:  # noqa: BLE001 - shown as Price Chat's estimate instead
+        return None
+
+
+def mainnet_preview(db: Session, member: Member, req: OpenRequest, ex: Any = None, fees: dict[str, float] | None = None) -> str:
+    """/preview (and /open on a LIVE account while Telegram mainnet execution is off): the order exactly as it would be sized on
+    mainnet for this member (their real Hyperliquid balance and positions, their limits, their own fee rate), with every reason it
+    would be refused. Read-only: a key-less reader, no intent, no Confirm button, nothing signed."""
+    acc = execution.account(db, member)
+    db.commit()
+    if not acc.master_address:
+        return f"Connect your Hyperliquid account at {SITE}/earn first: the preview reads its balance (no key needed)."
+    m = market.for_mode("LIVE").market(req.coin)
+    req.coin = m.coin
+    ex = ex or xch.ReadOnlyExecutor("LIVE", acc.master_address)
+    try:
+        st = ex.state()
+        equity = ex.equity()
+    except Exception:  # noqa: BLE001
+        return "Couldn't read your mainnet account from Hyperliquid right now. Nothing was sent; try again in a moment."
+    fees = fees if fees is not None else _fees(acc.master_address)
+    taker = fees["taker"] if fees else risk.TAKER_FEE
+    live = acc.mode == "LIVE"
+    live_open = int(db.scalar(select(func.count()).select_from(TrPosition).where(
+        TrPosition.account_id == acc.id, TrPosition.mode == "LIVE", TrPosition.status.in_(execution.HELD_STATES))) or 0)
+    per_day, cooldown = execution.style_limits(acc)
+    man = manual_plan(req, mark=m.mark, market_max_lev=m.max_leverage, sz_decimals=m.sz_decimals, funding_h=m.funding, equity=equity,
+                      acc_max_leverage=acc.max_leverage, max_loss_usd=acc.max_loss_per_trade_usd, max_allocation_pct=acc.max_allocation_pct,
+                      max_positions=acc.max_positions, open_positions=live_open, daily_pnl=execution.day_loss_basis(db, acc) if live else 0.0,
+                      daily_loss_limit=acc.daily_loss_limit_usd, paused=acc.paused, global_paused=signals.settings(db).paused,
+                      allowed=[c.strip().upper() for c in (acc.allowed_coins or "").split(",") if c.strip()],
+                      trades_today=execution.trades_today(db, acc) if live else 0, max_trades_today=per_day,
+                      cooldown_left_min=execution.cooldown_left(db, acc, req.coin, cooldown), taker_fee=taker)
+    p, f = man.plan, market.fmt_price
+    refusals = list(p.reasons)
+    if any(x["position"]["coin"] == req.coin and float(x["position"]["szi"]) != 0 for x in st.get("assetPositions", [])):
+        refusals.append(f"you hold a {req.coin} position on Hyperliquid already (the bot never adds to one)")
+    if not (acc.live_enabled_at and execution.live_allowed(db, member)):
+        refusals.append(f"LIVE isn't enabled for your account (website: {SITE}/earn)")
+    agent, _ = execution.agent_status(acc)
+    if agent != "ACTIVE":
+        refusals.append({"NONE": "no mainnet API wallet approved", "REVOKED": "your mainnet API wallet isn't listed on Hyperliquid (revoked or expired)",
+                         "UNKNOWN": "couldn't confirm your API wallet with Hyperliquid"}.get(agent, f"API wallet {agent}"))
+    gate = entry_gate(db, member)
+    if gate:
+        refusals.append("the Banter referral isn't verified on your wallet")
+    lines = [PREVIEW_ONLY, f"<b>{esc(p.coin)} {p.side}</b> · {acc.master_address[:6]}…{acc.master_address[-4:]} · balance ${equity:,.2f}", ""]
+    if p.size > 0:
+        lines += [(f"Entry at {f(p.limit_px)} or better (limit)" if p.limit_px else f"Entry ≈ {f(p.entry)} (market)"),
+                  f"Margin ${p.margin:,.2f} · {p.leverage}x isolated → position ${p.notional:,.2f} ({p.size:g} {esc(p.coin)})",
+                  f"🛑 Stop {f(p.stop)} · loss at the stop ≈ ${p.max_loss_usd:,.2f} incl. fees",
+                  f"✅ TP1 {f(p.tp1)} (half) · TP2 {f(p.tp2)}",
+                  f"💀 Liquidation ≈ {f(man.liq)} (estimate)",
+                  f"Fees ≈ ${p.est_fees:,.2f} at your taker rate {taker * 100:.4f}%" + ("" if fees else " (Price Chat's estimate)")
+                  + (f" · referral discount {fees['referral_discount'] * 100:g}%" if fees and fees.get("referral_discount") else "")
+                  + f" · funding ≈ ${man.funding_h_usd:+,.4f}/h"]
+    lines += ["", ("Would be refused: " + esc("; ".join(refusals)) + ".") if refusals else "Every check passes.", _switch_line(db)]
+    signals.audit(db, f"m:{member.id}", "tg_mainnet_preview", None, coin=p.coin, side=p.side, margin=req.margin, leverage=req.leverage,
+                  size=p.size, notional=p.notional, refused=refusals[:6], via="telegram")
+    db.commit()
+    return "\n".join(lines)
+
+
+def signal_preview_only(db: Session, member: Member, sig: TsSignal) -> str:
+    """A signal's ENTER on a LIVE account while Telegram mainnet execution is off: the same sizing as a real preview (inside
+    telegram_surface the executor is the key-less reader), shown without a Confirm button and never stored as an intent."""
+    try:
+        plan, _ = execution._plan(db, member, sig)
+    except execution.TradeError as e:
+        db.rollback()
+        return f"{PREVIEW_ONLY}\n#{sig.number:03d} {esc(sig.coin)} {sig.side}: would be refused: {esc(str(e)[:300])}\n{_switch_line(db)}"
+    f = market.fmt_price
+    signals.audit(db, f"m:{member.id}", "tg_mainnet_preview", sig, size=plan.size, notional=plan.notional, via="telegram")
+    db.commit()
+    return "\n".join([PREVIEW_ONLY, f"Signal #{sig.number:03d} <b>{esc(sig.coin)} {sig.side}</b> · LIVE", "",
+                      f"Entry ≈ {f(plan.entry)} (market) · size {plan.size:g} · ${plan.notional:,.2f}",
+                      f"Leverage {plan.leverage}x isolated · margin ${plan.margin:,.2f}", f"Stop {f(plan.stop)} · TP1 {f(plan.tp1)} · TP2 {f(plan.tp2)}",
+                      f"Max planned loss ${plan.max_loss_usd:,.2f} (incl. fees)", "", _switch_line(db),
+                      f"To trade it for real now, use the website: {SITE}/earn"])
+
+
+def mainnet_status(db: Session, member: Member) -> str:
+    """/mainnet: is this member's mainnet setup ready? Connectivity, balance, API wallet, LIVE, referral, fee rate and the
+    switches. Every line is a read; nothing is signed."""
+    acc = execution.account(db, member)
+    db.commit()
+    out = ["<b>Mainnet readiness</b> (read-only)"]
+    try:
+        market.for_mode("LIVE").market("BTC")
+        out.append("✅ Hyperliquid mainnet reachable")
+    except Exception:  # noqa: BLE001
+        out.append("❌ Hyperliquid mainnet unreachable right now")
+    if not acc.master_address:
+        out += [f"❌ No Hyperliquid account connected: {SITE}/earn", _switch_line(db)]
+        return "\n".join(out)
+    a = acc.master_address
+    try:
+        b = xch.balances("LIVE", a)
+        out.append(f"✅ Account {a[:6]}…{a[-4:]} · trading balance ${b['trading']:,.2f}" + (" (unified)" if b.get("unified") else ""))
+    except Exception:  # noqa: BLE001
+        out.append(f"⚠️ Account {a[:6]}…{a[-4:]} · balance unreadable right now")
+    agent, rec = execution.agent_status(acc)
+    out.append({"ACTIVE": "✅ API wallet approved and listed on Hyperliquid", "NONE": f"❌ No mainnet API wallet: {SITE}/earn",
+                "REVOKED": "❌ API wallet not listed on Hyperliquid (revoked or expired)",
+                "UNKNOWN": "⚠️ API wallet: Hyperliquid didn't answer"}.get(agent, agent)
+               + (f" · valid until {datetime.fromtimestamp(int(rec['validUntil']) / 1000, tz=timezone.utc):%Y-%m-%d}" if rec and rec.get("validUntil") else ""))
+    out.append("✅ LIVE enabled on the website" if acc.live_enabled_at else "❌ LIVE not enabled (website, after the pre-live checks)")
+    gate = entry_gate(db, member)
+    out.append("✅ Banter referral verified on Hyperliquid" if gate is None else "❌ Banter referral not verified: /settings shows why")
+    fees = _fees(a)
+    if fees:
+        out.append(f"Fees: taker {fees['taker'] * 100:.4f}% · maker {fees['maker'] * 100:.4f}%"
+                   + (f" · referral discount {fees['referral_discount'] * 100:g}%" if fees.get("referral_discount") else ""))
+    out += [f"Mode in Telegram: {acc.mode}", _switch_line(db), "/preview BTC long 50 3x shows a mainnet order preview."]
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------- reading
@@ -669,9 +861,11 @@ async def send_signal_preview(db: Session, client: Any, chat_id: int, member: Me
     """/enter: the signal's private preview with Confirm / Cancel, exactly as its ENTER button sends it."""
     import asyncio
 
-    if execution.account(db, member).mode == "LIVE" and not telegram_live(db):  # a new Telegram entry path: mainnet off like /open
-        return ("Real-money (mainnet) entries from /enter aren't switched on yet. Switch with /settings mode testnet or "
-                "/settings mode paper, or enter on the website.")
+    why = entry_off(db)
+    if why:
+        return esc(why)
+    if execution.account(db, member).mode == "LIVE" and not mainnet_allowed(db):  # mainnet off: a read-only preview, never a Confirm
+        return await asyncio.to_thread(signal_preview_only, db, member, sig)
     why = await gate_for_entry(db, member) if gate_signal_enter(db) else None
     if why:
         return esc(why)
@@ -718,10 +912,24 @@ async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: s
 
     acc = execution.account(db, member)
     db.commit()
-    if cmd in ("/open", "/enter", "/closeall", "/sl", "/tp") or (cmd == "/cancel" and args):
+    if cmd in ("/open", "/enter") and killed(db):  # the emergency stop: no new trade on any network
+        return esc(KILLED)
+    if cmd == "/open" and acc.mode == "LIVE" and not mainnet_allowed(db):  # mainnet off: the read-only preview instead
+        cmd = "/preview"
+    if cmd in ("/closeall", "/sl", "/tp") or (cmd == "/cancel" and args):
         why = live_off(db, acc.mode)
         if why:
             return esc(why)
+    if cmd == "/preview":
+        req = parse_open(args)
+        if isinstance(req, str):
+            return esc(req.replace("/open", "/preview"))
+        try:
+            return await asyncio.to_thread(mainnet_preview, db, member, req)
+        except (execution.TradeError, market.MarketError) as e:
+            return esc(str(e))
+    if cmd == "/mainnet":
+        return await asyncio.to_thread(mainnet_status, db, member)
     if cmd == "/market":
         if not args:
             return "Usage: /market BTC"
@@ -861,3 +1069,69 @@ async def callback(db: Session, client: Any, member: Member, uid: int, data: str
             return "Couldn't read the market right now. Nothing changed."
         return f"Done: {esc('; '.join(s['changes']))}. Loss at the stop ≈ ${s['loss_at_stop_usd']:,.2f}."
     return "That button is out of date."
+
+
+# ---------------------------------------------------------------- the owner's switches and monitoring (Admin → Trading signals)
+LIVE_PHRASE = "ENABLE TELEGRAM MAINNET"
+TG_ACTIONS = ("manual_preview", "manual_open", "tg_mainnet_preview", "tg_signal_enter", "settings_telegram", "order_cancelled",
+              "telegram_trading_switch")
+FAIL_ACTIONS = ("entry_error", "entry_not_filled", "agent_not_listed", "protection_failed")
+
+
+class SwitchError(Exception):
+    pass
+
+
+def set_switches(db: Session, actor: str, kill: bool | None = None, live: bool | None = None, phrase: str = "") -> dict[str, Any]:
+    """The emergency stop takes effect at once, either way. Mainnet execution from Telegram turns on only with the typed phrase
+    and while the emergency stop is off; turning it off needs nothing. Every change is in the audit log."""
+    s = signals.settings(db)
+    cfg = dict(_cfg(db))
+    if live is True:
+        if (phrase or "").strip().upper() != LIVE_PHRASE:
+            raise SwitchError(f'Type "{LIVE_PHRASE}" to switch on real-money orders from Telegram.')
+        if kill if kill is not None else cfg.get("kill"):
+            raise SwitchError("Turn the emergency stop off first.")
+    if kill is not None:
+        cfg["kill"] = bool(kill)
+        if kill:
+            cfg["killed_at"] = utcnow().isoformat()
+    if live is not None:
+        cfg["live"] = bool(live)
+    s.strategies = {**(s.strategies or {}), "telegram_trading": cfg}
+    signals.audit(db, actor, "telegram_trading_switch", None, **{k: v for k, v in (("kill", kill), ("live", live)) if v is not None})
+    if kill:  # waiting /open previews are dropped (a signal preview's Confirm is refused while the stop is on)
+        for it in db.scalars(select(TrIntent).where(TrIntent.status == "PENDING")):
+            if (it.plan or {}).get("manual"):
+                it.status = "CANCELLED"
+    db.commit()
+    return admin_status(db)
+
+
+def admin_status(db: Session, hours: int = 24) -> dict[str, Any]:
+    """What the owner watches: the switches, the referral codes, Telegram activity and failures in the last `hours`, open
+    Telegram (manual) positions per network, and the latest Telegram trading events. Nothing secret is in any of it."""
+    from app.models.tradingos import TsAudit
+    from app.tradingbot.service import codes, settings as earn_settings
+
+    since = utcnow() - timedelta(hours=hours)
+    es = earn_settings(db)
+
+    def count(actions: tuple[str, ...]) -> dict[str, int]:
+        rows = db.execute(select(TsAudit.action, func.count()).where(TsAudit.action.in_(actions), TsAudit.created_at >= since)
+                          .group_by(TsAudit.action)).all()
+        return {a: int(n) for a, n in rows}
+
+    open_manual = db.execute(select(TrPosition.mode, func.count()).where(TrPosition.via == "manual", TrPosition.status.in_(execution.HELD_STATES))
+                             .group_by(TrPosition.mode)).all()
+    recent = db.scalars(select(TsAudit).where(TsAudit.action.in_(TG_ACTIONS + FAIL_ACTIONS)).order_by(TsAudit.id.desc()).limit(50)).all()
+    cfg = _cfg(db)
+    return {"switches": {"live": telegram_live(db), "kill": killed(db), "killed_at": cfg.get("killed_at"),
+                         "gate_signal_enter": gate_signal_enter(db), "global_paused": signals.settings(db).paused,
+                         "mainnet_execution": mainnet_allowed(db), "live_phrase": LIVE_PHRASE},
+            "referral": {"codes": codes(es), "url": es.referral_url},
+            "window_hours": hours, "activity": count(TG_ACTIONS), "failures": count(FAIL_ACTIONS),
+            "open_positions": {m: int(n) for m, n in open_manual},
+            "pending_previews": int(db.scalar(select(func.count()).select_from(TrIntent).where(
+                TrIntent.status == "PENDING", TrIntent.expires_at > utcnow())) or 0),
+            "recent": [{"at": a.created_at.isoformat(), "actor": a.actor, "action": a.action, "details": a.details} for a in recent]}

@@ -59,6 +59,7 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 /risk · /auto · /pause · /resume · /close
 /market BTC · /open BTC long 100 5x · /enter (reply to a signal) · /balance · /orders
 /sl · /tp · /cancel · /closeall · /settings (Banter group, private chat)
+/preview BTC long 100 5x · /mainnet (mainnet preview and readiness, read-only)
 
 📜 /rules · the group rules (admins: reply /warn 1-5 to mute, /unmute, /strikes)
 
@@ -116,7 +117,9 @@ MARKET_ARGS = {"/fc", "/chart", "/scan", "/signal", "/price", "/indicator", "/co
 COMMITTEE = {"/committee", "/debate", "/research"}  # committeecmd.py (Kiwi AI Investment Committee)
 INDICATOR_WORDS = {"indicator", "indicators", "rsi"}  # "SUI indicator" / "sui rsi" -> /indicator SUI
 PRIVATE = ({"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/auto", "/pause", "/resume", "/close", "/vpn"} | alerts.COMMANDS
-           | {"/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings"})  # DMs only (tgtrade.py)
+           | {"/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet"})  # DMs only (tgtrade.py)
+TRADE_LIMITED = {"/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet", "/close",
+                 "/positions", "/pnl", "/trades"}  # per-user limit (rate_limit "tg_trade"), private chats
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
 # Per-user throttle for the commands that fetch candles and draw or scan ("fc" is /chart): one per THROTTLE_SECONDS per
 # Telegram user (rate_limit "tg_heavy"), so one person can't keep the listener busy for everyone else (TG-3). Only the
@@ -414,6 +417,16 @@ def _whole_lines(text: str, limit: int) -> str:
 
 async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, text: str, group: bool = False, reply_to: int | None = None,
                          chat_username: str | None = None, author: str | None = None, throttle: bool = False) -> None:
+    """Every Telegram command runs inside tgtrade.telegram_surface: with Telegram mainnet execution off (the default) or the
+    emergency stop on, nothing reached from here can sign a mainnet action (exchange.guard_signed is the backstop)."""
+    from app.tradingos import tgtrade
+
+    with tgtrade.telegram_surface(db):
+        await _handle_command(db, client, chat_id, user_id, text, group, reply_to, chat_username, author, throttle)
+
+
+async def _handle_command(db: Session, client: Any, chat_id: int, user_id: int, text: str, group: bool = False, reply_to: int | None = None,
+                          chat_username: str | None = None, author: str | None = None, throttle: bool = False) -> None:
     raw = client
     client = _Footed(client, footer(db))
     db.commit()  # (a first run creates settings rows): no write transaction waits on Telegram or an exchange below
@@ -427,6 +440,8 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
 
         cmd, args = "/chart", (args + ([] if any(_timeframe(a.lower()) for a in args[1:]) else ["4h"]) if args else [])
     if throttle and cmd in THROTTLED and await _throttled(raw, chat_id, user_id, reply_to):
+        return
+    if throttle and cmd in TRADE_LIMITED and not group and await _trade_limited(raw, chat_id, user_id):
         return
     if cmd not in PUBLIC | PRIVATE:
         if not group:  # in groups an unknown command is usually another bot's: stay quiet
@@ -512,6 +527,24 @@ async def _throttled(client: Any, chat_id: int, user_id: int, reply_to: int | No
         await client.send_message(chat_id, THROTTLE_TEXT.format(THROTTLE_SECONDS), reply_to=reply_to)
     except Exception as exc:  # noqa: BLE001 - the command is refused either way
         logger.warning("Throttle notice not sent (%s)", type(exc).__name__)
+    return True
+
+
+TRADE_LIMIT_TEXT = "⏳ Too many trading requests in a row. Nothing was sent: wait a few seconds and try again."
+
+
+async def _trade_limited(client: Any, chat_id: int, user_id: int) -> bool:
+    """Per-user limit on trading commands (rate_limit "tg_trade"): a burst of a few, then one every couple of seconds. Each
+    reads Hyperliquid (whose REST weight limit is per IP, shared by the whole app), so one member can't drain it for everyone."""
+    from app.security.rate_limit import LIMITS
+
+    if LIMITS["tg_trade"].hit(f"tg:{user_id}") is None:
+        return False
+    logger.info("Trading command rate-limited")
+    try:
+        await client.send_message(chat_id, TRADE_LIMIT_TEXT)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Rate-limit notice not sent (%s)", type(exc).__name__)
     return True
 
 
@@ -605,8 +638,11 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
 
         return record.record_table(db)
     if cmd == "/connect":
+        join = tracked_url(db, "start")
         return ("<b>Connect Hyperliquid</b> (2 minutes)\n"
-                f"1. {SITE}/earn → <b>Connect Hyperliquid API</b>\n"
+                + (f"0. New to Hyperliquid? Sign up with the Banter link first: {join} (Telegram trading is for accounts "
+                   "Hyperliquid records with the Banter code; we check Hyperliquid's own record)\n" if join else "")
+                + f"1. {SITE}/earn → <b>Connect Hyperliquid API</b>\n"
                 "2. On Hyperliquid › API, create an API wallet and authorize it\n"
                 "3. Paste its key on the website. You stay in PAPER until you turn on live.\n\n" + SAFETY)
     if cmd == "/signal":  # market analysis only (no account data), so it's answered for anyone, in groups too
@@ -1140,6 +1176,29 @@ async def _enter_from_group(db: Session, client: Any, chat_id: int, user_id: int
 
 
 async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
+    """Button presses run inside tgtrade.telegram_surface too (see handle_command)."""
+    from app.tradingos import tgtrade
+
+    with tgtrade.telegram_surface(db):
+        await _handle_callback(db, client, cq)
+
+
+TRADE_BUTTONS = ("mo:", "ca:", "pr:", "cf:", "cl:", "sig")
+
+
+async def trade_button_throttled(client: Any, cq: dict[str, Any]) -> bool:
+    """Per-user limit on trading buttons (ENTER, Confirm, Close...; rate_limit "tg_trade_button"), checked by the listener
+    like the "fc" buttons. Over it the press gets a short toast and nothing else happens."""
+    from app.security.rate_limit import LIMITS
+
+    uid = int((cq.get("from") or {}).get("id") or 0)
+    if not uid or str(cq.get("data") or "")[:3] not in TRADE_BUTTONS or LIMITS["tg_trade_button"].hit(f"tg:{uid}") is None:
+        return False
+    await _answer(client, cq, uid, "One moment: too many presses in a row. Nothing was sent.", dm=False)
+    return True
+
+
+async def _handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     data = str(cq.get("data") or "")
     uid = int((cq.get("from") or {}).get("id") or 0)
     if data[:3] in ("mo:", "mn:", "ca:", "pr:") and uid:  # Telegram trading's Confirm / Cancel (tgtrade.py)
@@ -1190,6 +1249,18 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
         # the Banter group's referral, from Hyperliquid's own record; owner setting telegram_trading.gate_signal_enter (default on)
         from app.tradingos import execution as _ex
 
+        if tgtrade.killed(db):
+            await _answer(client, cq, uid, tgtrade.KILLED[:195], alert=True)
+            return
+        if _ex.account(db, m).mode == "LIVE" and not tgtrade.mainnet_allowed(db):  # mainnet off: a read-only preview, privately
+            text = await asyncio.to_thread(tgtrade.signal_preview_only, db, m, sig)
+            try:
+                await client.send_message(uid, text, html=True)
+            except Exception:  # noqa: BLE001 - never pressed Start
+                await _answer(client, cq, uid, tgtrade.LIVE_OFF[:195], alert=True, dm=False)
+                return
+            await _answer(client, cq, uid, "Mainnet preview sent privately. Real-money orders from Telegram are off.", dm=False)
+            return
         why = tgtrade.live_off(db, _ex.account(db, m).mode) or (await tgtrade.gate_for_entry(db, m) if tgtrade.gate_signal_enter(db) else None)
         if why:
             await _answer(client, cq, uid, why[:195], alert=True)
@@ -1245,7 +1316,8 @@ async def _trade_callback(db: Session, client: Any, cq: dict[str, Any], uid: int
     kind, arg = data[:2], data[3:]
     from app.tradingos import tgtrade
 
-    why = (tgtrade.live_off_intent(db, m, arg) if kind == "cf" else tgtrade.live_off_position(db, m, int(arg)) if kind == "cl" and arg.isdigit() else None)
+    why = ((tgtrade.entry_off(db) or tgtrade.live_off_intent(db, m, arg)) if kind == "cf"
+           else tgtrade.live_off_position(db, m, int(arg)) if kind == "cl" and arg.isdigit() else None)
     if why:
         await _answer(client, cq, uid, why[:195], alert=True)
         return
@@ -1261,6 +1333,9 @@ async def _trade_callback(db: Session, client: Any, cq: dict[str, Any], uid: int
             return
         await _answer(client, cq, uid, "Sending the order…", dm=False)  # a refused answer never stops the order or its result
         pos = await asyncio.to_thread(execution.confirm, db, m, arg)
+        signals.audit(db, f"m:{m.id}", "tg_signal_enter", db.get(TsSignal, pos.signal_id), position=pos.id, status=pos.status, mode=pos.mode,
+                      via="telegram")
+        db.commit()
     except (execution.TradeError, ValueError) as e:
         await client.send_message(uid, esc(str(e)), html=True)
         return
@@ -1612,6 +1687,7 @@ async def announce(db: Session, client: Any, sig: TsSignal, before: str) -> bool
 
 
 MENU_PRIVATE = [("rules", "The group rules"), ("market", "One perp: price, funding, OI, e.g. /market BTC"), ("open", "Trade: /open BTC long 100 5x (preview first)"),
+                ("preview", "Mainnet order preview (read-only), e.g. /preview BTC long 50 3x"), ("mainnet", "Your mainnet readiness"),
                 ("balance", "Your balance"), ("orders", "Open orders"), ("settings", "Your trading limits and mode"),
                 ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
                 ("indicator", "RSI, MACD, EMAs, e.g. /indicator SUI"), ("scan", "Where a coin trades, e.g. /scan KAS"),

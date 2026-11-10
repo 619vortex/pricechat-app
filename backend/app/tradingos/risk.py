@@ -32,6 +32,7 @@ class Plan:
     note: str = ""  # e.g. "raised to Hyperliquid's $10 minimum" (shown in the preview)
     checks: list[dict[str, Any]] = field(default_factory=list)  # portfolio_checks() results (Engine v2)
     risk_mode: str = ""  # "advisory" | "enforce" for those checks
+    limit_px: float | None = None  # a member's own limit: the worst price the immediate-or-cancel entry may fill at (None: mark ± slippage)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
