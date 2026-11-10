@@ -54,11 +54,11 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 💡 <b>Community ideas</b>
 /idea BTC long tp 72000 inv 64000 why · /ideas (members' views, never traded)
 
-🤖 <b>Trading bot</b> (DM me)
+🤖 <b>Trading bot</b> (here or DM me)
 /status · /connect · /positions · /pnl · /trades
 /risk · /auto · /pause · /resume · /close
 /market BTC · /open BTC long 100 5x · /enter (reply to a signal) · /balance · /orders
-/sl · /tp · /cancel · /closeall · /settings (Banter group, private chat)
+/sl · /tp · /cancel · /closeall · /settings (here or in a DM; buttons work only for whoever asked)
 /preview BTC long 100 5x · /mainnet (mainnet preview and readiness, read-only)
 
 📜 /rules · the group rules (admins: reply /warn 1-5 to mute, /unmute, /strikes)
@@ -120,6 +120,9 @@ PRIVATE = ({"/status", "/positions", "/pnl", "/connect", "/trades", "/risk", "/a
            | {"/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet"})  # DMs only (tgtrade.py)
 TRADE_LIMITED = {"/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet", "/close",
                  "/positions", "/pnl", "/trades"}  # per-user limit (rate_limit "tg_trade"), private chats
+# Trading also works in groups, in public (owner's decision 2026-11-10). Still private only: wallet linking (/connect), Kiwi VPN,
+# price alerts and AUTO. In a group every trade button only works for the member who typed the command (see _not_yours).
+GROUP_TRADING = PRIVATE - {"/connect", "/vpn", "/auto"} - alerts.COMMANDS
 HEAVY = {"/chart"}  # image replies that chart_routing "bot_chat" moves out of the main community chat
 # Per-user throttle for the commands that fetch candles and draw or scan ("fc" is /chart): one per THROTTLE_SECONDS per
 # Telegram user (rate_limit "tg_heavy"), so one person can't keep the listener busy for everyone else (TG-3). Only the
@@ -371,6 +374,33 @@ def with_referral(db: Session, text: str, placement: str = "footer") -> str:
     return f"{text}\n{ref}" if ref else text
 
 
+class _ReplyTo:
+    """A group trading command's client: everything it posts in that group replies to the member's own command, so a trade
+    button under it can tell whose it is (_not_yours)."""
+
+    def __init__(self, client: Any, chat_id: int, reply_to: int) -> None:
+        self._c, self._chat, self._reply = client, chat_id, reply_to
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._c, name)
+
+    async def send_message(self, chat_id: Any, text: str, *args: Any, **kw: Any) -> Any:
+        if str(chat_id) == str(self._chat) and len(args) < 3 and kw.get("reply_to") is None:
+            kw["reply_to"] = self._reply
+        return await self._c.send_message(chat_id, text, *args, **kw)
+
+
+def _not_yours(cq: dict[str, Any], uid: int) -> bool:
+    """A trade button pressed in a group by someone other than the member it was made for. Buttons act on the PRESSER's
+    account, so without this another member pressing "Close all" would close their own positions. Fails closed: a group
+    button with no known owner works for nobody."""
+    msg = cq.get("message") or {}
+    if (msg.get("chat") or {}).get("type", "private") == "private":
+        return False
+    owner = ((msg.get("reply_to_message") or {}).get("from") or {}).get("id")
+    return owner is None or int(owner) != int(uid)
+
+
 class _Footed:
     """The Telegram client for one command: every message and photo caption it sends ends with the footer (bot channel +
     referral link) when it fits Telegram's limit, else it goes without. HTML is never sliced mid-line (a cut tag or entity
@@ -441,7 +471,7 @@ async def _handle_command(db: Session, client: Any, chat_id: int, user_id: int, 
         cmd, args = "/chart", (args + ([] if any(_timeframe(a.lower()) for a in args[1:]) else ["4h"]) if args else [])
     if throttle and cmd in THROTTLED and await _throttled(raw, chat_id, user_id, reply_to):
         return
-    if throttle and cmd in TRADE_LIMITED and not group and await _trade_limited(raw, chat_id, user_id):
+    if throttle and cmd in TRADE_LIMITED and await _trade_limited(raw, chat_id, user_id):
         return
     if cmd not in PUBLIC | PRIVATE:
         if not group:  # in groups an unknown command is usually another bot's: stay quiet
@@ -467,7 +497,7 @@ async def _handle_command(db: Session, client: Any, chat_id: int, user_id: int, 
     if group and cmd == "/enter":  # replying to a signal in the group: the preview goes to the member privately, nothing private here
         await _enter_from_group(db, client, chat_id, user_id, args, reply_to)
         return
-    if group and cmd in PRIVATE and not committee:
+    if group and cmd in PRIVATE and cmd not in GROUP_TRADING and not committee:
         from app.telegram.ingestion import get_bot_state
 
         name = get_bot_state(db).bot_username or "cryptopricechatbot"
@@ -495,6 +525,8 @@ async def _handle_command(db: Session, client: Any, chat_id: int, user_id: int, 
             if reply is None:
                 reply = f"📊 Posted in Bot Chat to keep this chat readable: t.me/{esc(bot_chat.lstrip('@'))}"
         else:
+            if group and cmd in GROUP_TRADING and reply_to:
+                client = _ReplyTo(client, chat_id, reply_to)
             reply = await _command(db, client, chat_id, user_id, cmd, args, reply_to, brief=brief)
     except market.MarketError as e:
         reply = f"Couldn't read the market data right now: {esc(str(e))}"
@@ -1201,6 +1233,9 @@ async def trade_button_throttled(client: Any, cq: dict[str, Any]) -> bool:
 async def _handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     data = str(cq.get("data") or "")
     uid = int((cq.get("from") or {}).get("id") or 0)
+    if data[:3] in ("mo:", "mn:", "ca:", "pr:", "cf:", "cx:", "cl:") and uid and _not_yours(cq, uid):
+        await _answer(client, cq, uid, "This button is for the member who asked. Type the command yourself. Nothing was sent.", alert=True, dm=False)
+        return
     if data[:3] in ("mo:", "mn:", "ca:", "pr:") and uid:  # Telegram trading's Confirm / Cancel (tgtrade.py)
         from app.tradingos import tgtrade
 

@@ -71,9 +71,11 @@ class TG(FakeTG):
     def __init__(self) -> None:
         super().__init__()
         self.buttons: list[Any] = []
+        self.replies: list[Any] = []
 
     async def send_message(self, chat_id: Any, text: str, buttons: Any = None, html: bool = False, reply_to: Any = None) -> dict[str, Any]:
         self.buttons.append(buttons)
+        self.replies.append(reply_to)
         return await super().send_message(chat_id, text, buttons, html, reply_to)
 
 
@@ -179,13 +181,39 @@ def test_only_the_banter_referral_opens_new_trades(db: Session, md: FakeMD) -> N
     assert not db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()
 
 
-def test_trading_commands_stay_out_of_groups(db: Session, md: FakeMD) -> None:
+def gsay(db: Session, tg: TG, uid: int, text: str, msg_id: int) -> str:
+    asyncio.run(bot.handle_command(db, tg, -100, uid, text, group=True, reply_to=msg_id))
+    return tg.sent[-1][2]
+
+
+def gpress(db: Session, tg: TG, uid: int, data: str, owner: int | None) -> str:
+    msg = {"chat": {"id": -100, "type": "supergroup"}, "reply_to_message": {"from": {"id": owner}} if owner else {}}
+    asyncio.run(bot.handle_callback(db, tg, {"id": "x", "data": data, "from": {"id": uid}, "message": msg}))
+    return tg.sent[-1][2] if tg.sent else ""
+
+
+def test_trading_works_in_groups_and_its_buttons_only_for_whoever_asked(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
     banter(db, "811")
+    banter(db, "812")
     tg = TG()
-    assert "privately" in say(db, tg, 811, "/open BTC long 50 3x", group=True)
-    assert "privately" in say(db, tg, 811, "/balance", group=True)
-    assert db.scalar(select(TrIntent)) is None
-    assert "Funding" in say(db, tg, 811, "/market BTC", group=True)  # market numbers are for anyone
+    answered: list[str] = []
+
+    async def note(client: Any, cq: Any, uid: int, text: str, alert: bool = False, dm: bool = True) -> None:
+        answered.append(text)
+    monkeypatch.setattr(bot, "_answer", note)
+    say_ = gsay(db, tg, 811, "/open BTC long 50 3x", msg_id=77)
+    assert "privately" not in say_ and tg.sent[-1][1] == -100  # answered in the group
+    assert tg.replies[-1] == 77, "the preview replies to the member's own command, so its buttons know whose they are"
+    token = last_token(db)
+    n = len(tg.sent)
+    gpress(db, tg, 812, f"mo:{token}", owner=811)  # another member presses 811's Confirm
+    assert answered and "for the member who asked" in answered[-1] and len(tg.sent) == n
+    assert db.scalar(select(TrIntent).where(TrIntent.token == token)).status == "PENDING", "nothing confirmed"
+    gpress(db, tg, 812, "ca:all:1", owner=None)  # a group button with no known owner works for nobody
+    assert "for the member who asked" in answered[-1]
+    assert "privately" not in gsay(db, tg, 811, "/balance", msg_id=78)
+    assert "privately" in gsay(db, tg, 811, "/connect", msg_id=79), "wallet linking stays private"
+    assert "Funding" in gsay(db, tg, 811, "/market BTC", msg_id=80)  # market numbers are for anyone
 
 
 # ---------------------------------------------------------------- /open: preview, confirm, duplicates (paper)
