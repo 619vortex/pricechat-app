@@ -3,6 +3,7 @@ Exceptional market moves get a chart from our own prices, major breaking stories
 governments and countries a real licensed photo of the subject, the rest a branded graphic. No test reaches a real service."""
 
 import io
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -56,7 +57,9 @@ class FakeHL:
     def candles(self, coin: str, interval: str, count: int) -> list[Candle]:
         mark, prev = self.coins[coin]
         t0 = int(SLOT.timestamp() * 1000) - 96 * 900_000
-        return [Candle(t0 + i * 900_000, prev + (mark - prev) * i / 96) for i in range(97)]
+        # real prices wiggle (a straight line is refused as interpolated); the ends are exactly the 24-hour move
+        wig = lambda i: mark * 0.002 * (math.sin(math.pi * i * 7 / 96) + 0.5 * math.sin(math.pi * i * 31 / 96))  # noqa: E731
+        return [Candle(t0 + i * 900_000, prev + (mark - prev) * i / 96 + wig(i)) for i in range(97)]
 
 
 HAMMERED = FakeHL({"BTC": (73900.0, 75900.0), "ETH": (2094.0, 2407.0), "HYPE": (72.5, 75.0), "SOL": (85.6, 88.0)})  # ETH -13.0%: exceptional

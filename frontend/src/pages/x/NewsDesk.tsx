@@ -3,6 +3,7 @@ import { request } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type Tone } from "../../components/ui";
 import { TelegramLane } from "./TelegramLane";
+import { EditorialDesk } from "./EditorialDesk";
 
 /** Admin › X › News Desk: Price Chat's automatic news account. The server decides everything; this page shows it and holds the switches. */
 
@@ -117,6 +118,8 @@ export function NewsDesk() {
       </Card>
 
       {data.desk?.schedule && <SchedulePanel schedule={data.desk.schedule} feeds={data.feed_health} />}
+
+      <EditorialDesk />
 
       <NewPost busy={busy} onAdd={(text) => act(() => request("/x/newsdesk/posts", body("POST", { text })))} />
 

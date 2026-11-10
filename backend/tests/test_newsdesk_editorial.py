@@ -2,6 +2,7 @@
 important news outranks routine price moves; a slot with nothing worthwhile and new stays empty; pictures vary and stay readable on a phone.
 The cases are the channel's own failures of 2026-11-08..10. No test reaches a real service."""
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -59,8 +60,17 @@ async def decide(db: Session, now: datetime, quotes: dict[str, Any] | None = Non
     return db.get(NdEvent, out["released"]) if out["released"] else None
 
 
+def real_quote(symbol: str, start: float, end: float, now: datetime, hours: int = 24) -> sources.Quote:
+    """Five-minute bars from start to end that wiggle like traded prices (a straight line is refused by the numbers gate)."""
+    n = hours * 12
+    t0 = now.timestamp() - hours * 3600
+    wig = lambda i: end * 0.002 * (math.sin(math.pi * i * 7 / n) + 0.5 * math.sin(math.pi * i * 31 / n))  # noqa: E731
+    bars = [(int(t0 + i * 300), start + (end - start) * i / n + wig(i), 1.0) for i in range(n + 1)]
+    return sources.Quote(symbol, end, now, None, None, bars)
+
+
 def oil(now: datetime, pct: float) -> dict[str, sources.Quote]:
-    return {"CL=F": quote("CL=F", 90.0, 90.0 * (1 + pct / 100), now, hours=24)}
+    return {"CL=F": real_quote("CL=F", 90.0, 90.0 * (1 + pct / 100), now)}
 
 
 def sig(subjects: list[str], typ: str = "market", direction: str = "down", magnitude: float = 0.0, cls: str = "commodity", cause: bool = False) -> dict[str, Any]:
@@ -101,7 +111,7 @@ def test_a_reversal_a_verified_cause_or_a_new_day_is_new() -> None:
 async def test_slots_never_repeat_a_move_and_a_real_escalation_goes_out_once(db: Session) -> None:
     first = await decide(db, SLOT + timedelta(minutes=1), oil(SLOT, -5.5))
     assert first is not None and first.kind == "recap" and visual.post_headline(first) == "WTI CRUDE FALLS 5.5% IN 24 HOURS"
-    assert first.facts["story"]["subjects"] == ["OIL"] and first.facts["story"]["magnitude"] == 5.5  # remembered across slots and restarts
+    assert first.facts["story"]["subjects"] == ["OIL"] and abs(first.facts["story"]["magnitude"] - 5.5) < 0.1  # remembered across slots and restarts
     t2 = SLOT + timedelta(hours=4, minutes=1)
     assert await decide(db, t2, oil(t2, -6.0)) is None  # the 2026-11-10 repeat: skipped, nothing posted instead
     t3 = SLOT + timedelta(hours=8, minutes=1)
@@ -286,3 +296,122 @@ async def test_a_slot_left_empty_on_purpose_is_skipped_not_missed_and_never_aler
     row = next(s for s in events.schedule(db, later, p)["slots"] if s["at"] == SLOT.isoformat())
     assert row["state"] == "skipped"
     assert await events.alert_slots(db, later, p) == 0 and told == []
+
+
+# --- across Telegram AND X: the delivery gate -------------------------------------------------------------------------------
+
+
+def _released(db: Session, key: str, headline: str, at: datetime, pct: float, **kw: Any) -> NdEvent:
+    ev = NdEvent(key=key, kind="recap", title=headline, headline=headline, topic="move", evidence="price data", status="released", slot="slot", released_at=at,
+                 tg_status=kw.pop("tg", "pending"), x_status=kw.pop("x", "pending"), facts={"recap": True, "pct": pct, "name": "Oil (WTI)", "recap_assets": ["Oil (WTI)"], **kw})
+    db.add(ev)
+    db.commit()
+    return ev
+
+
+def test_neither_platform_delivers_what_the_story_history_calls_a_repeat(db: Session) -> None:
+    """Three WTI declines in 8 hours: whatever got released, only the first is delivered, on Telegram and on X."""
+    first = _released(db, "recap:a", "WTI CRUDE FALLS 5.5% IN 24 HOURS", SLOT, -5.5, tg="delivered", x="dry_run")
+    second = _released(db, "recap:b", "WTI CRUDE FALLS 6.0% IN 24 HOURS", SLOT + timedelta(hours=4), -6.0)
+    third = _released(db, "recap:c", "WTI CRUDE FALLS 6.6% IN 24 HOURS", SLOT + timedelta(hours=8), -6.6)
+    now = SLOT + timedelta(hours=8, minutes=5)
+    assert events.pending(db, "telegram", now) == [] and events.pending(db, "x", now) == []
+    for ev in (second, third):
+        db.refresh(ev)
+        assert ev.tg_status == ev.x_status == "skipped" and ev.x_note.startswith("repeat: same story as #") and str(first.id) in ev.x_note
+
+
+def test_x_never_posts_a_repeat_even_when_telegram_already_did(db: Session) -> None:
+    _released(db, "recap:a", "WTI CRUDE FALLS 5.5% IN 24 HOURS", SLOT, -5.5, tg="delivered", x="dry_run")
+    leaked = _released(db, "recap:b", "WTI CRUDE FALLS 6.0% IN 24 HOURS", SLOT + timedelta(hours=4), -6.0, tg="delivered")
+    assert events.pending(db, "x", SLOT + timedelta(hours=4, minutes=5)) == []
+    db.refresh(leaked)
+    assert leaked.x_status == "skipped" and "repeat" in leaked.x_note
+
+
+def test_a_real_escalation_is_delivered_on_both(db: Session) -> None:
+    _released(db, "recap:a", "WTI CRUDE FALLS 5.5% IN 24 HOURS", SLOT, -5.5, tg="delivered", x="dry_run")
+    big = _released(db, "recap:b", "WTI CRUDE TUMBLES 9.0% IN 24 HOURS", SLOT + timedelta(hours=8), -9.0)
+    now = SLOT + timedelta(hours=8, minutes=5)
+    assert [e.id for e in events.pending(db, "telegram", now)] == [big.id]
+
+
+# --- story history and the preview queue --------------------------------------------------------------------------------------
+
+
+async def test_the_story_history_shows_posts_and_what_was_merged_or_skipped_with_why(db: Session) -> None:
+    first = await decide(db, SLOT + timedelta(minutes=1), oil(SLOT, -5.5))
+    t2 = SLOT + timedelta(hours=4, minutes=1)
+    assert await decide(db, t2, oil(t2, -6.0)) is None
+    stories = editorial.history(db, SLOT + timedelta(hours=5))
+    oil_story = next(s for s in stories if "OIL" in s["subjects"])
+    assert oil_story["type"] == "market" and oil_story["direction"] == "down" and oil_story["posts_made"] == 1
+    assert oil_story["posts"][0]["event"] == first.id and oil_story["first_coverage"] == oil_story["last_coverage"]
+    assert any("not a material change" in m["why"] for m in oil_story["merged_or_skipped"])
+
+
+async def test_the_preview_queue_shows_each_candidate_with_its_gates_and_the_owner_can_block_it(db: Session) -> None:
+    from app.newsdesk import queue as pq
+
+    for t, src in [("NYSE picks Avalanche to settle tokenized stocks amid Wall Street's blockchain race", "CoinDesk"),
+                   ("NYSE to settle tokenized stocks on Avalanche in planned 24/7 market", "The Block"),
+                   ("NYSE Picks Avalanche for Tokenized Stock Settlement", "The Defiant"),
+                   ("NYSE Taps Avalanche to Settle Its Planned Tokenized Stock Platform", "Decrypt")]:
+        story(db, t, src, now=SLOT - timedelta(minutes=50), hours=0.3)
+    await decide(db, SLOT - timedelta(minutes=50))  # 03:10 Dubai: no slot open, so the story waits as a candidate
+    q = pq.build(db, SLOT - timedelta(minutes=45), {})
+    card = q["candidates"][0]
+    assert q["next_slot_dubai"] == "04:00" and "1.5 times" in q["rule"] and card["will_post"] is True
+    assert set(card["gates"]) == {"dedup", "evidence", "bar", "numbers", "headline", "owner"} and all(g["ok"] for g in card["gates"].values())
+    assert card["headline"].startswith("NYSE") and card["credit"].startswith("Source: ") and card["image"].endswith(f"/{card['event']}.jpg")
+    pic, meta = await pq.preview(db, card["event"], SLOT)
+    assert pic[:3] == b"\xff\xd8\xff" and meta["kind"] in ("photo", "graphic", "artwork")
+    pq.block(db, card["event"], True, "not today", SLOT)
+    q = pq.build(db, SLOT - timedelta(minutes=40), {})
+    assert q["candidates"][0]["will_post"] is False and "blocked" in q["candidates"][0]["status"]
+    assert await decide(db, SLOT + timedelta(minutes=1)) is None  # blocked: the slot skips rather than post it
+
+
+def test_admin_serves_the_queue_history_and_block(client: Any) -> None:
+    assert client.get("/api/x/newsdesk/editorial/queue").status_code == 200
+    h = client.get("/api/x/newsdesk/editorial/history").json()
+    assert "1.5 times" in h["rule"] and h["stories"] == []
+    assert client.post("/api/x/newsdesk/editorial/block", json={"event_id": 999, "block": True}).status_code == 404
+
+
+# --- the numbers gate ----------------------------------------------------------------------------------------------------------
+
+
+def _pts(pct: float, hours: float = 24, n: int = 97, end_age_min: float = 2) -> list[tuple[int, float]]:
+    end = SLOT.timestamp() - end_age_min * 60
+    t0 = end - hours * 3600
+    return [(int(t0 + i * (end - t0) / (n - 1)), 100 + pct * i / (n - 1) + 0.2 * math.sin(math.pi * i * 7 / (n - 1))) for i in range(n)]
+
+
+def test_the_numbers_gate_passes_a_true_chart() -> None:
+    c = visual.verify_series(_pts(-6.0), window="24H", headline="WTI CRUDE FALLS 6.0% IN 24 HOURS", as_of=SLOT, now=SLOT, max_age_minutes=90, second_pct=-6.2, second_name="Yahoo")
+    assert c.ok and abs(c.series_pct + 6.0) < 1e-9
+
+
+@pytest.mark.parametrize(("kw", "why"), [
+    ({"headline": "WTI CRUDE FALLS 6.3% IN 24 HOURS"}, "the chart's own data says 6.00%"),  # the figure isn't the chart's
+    ({"headline": "WTI CRUDE FALLS 6.0% IN 4 HOURS"}, "the headline says 4 h"),  # window words vs the chart
+    ({"points": _pts(-6.0, hours=6)}, "not the 24 h window"),  # a 6-hour chart under a 24-hour headline
+    ({"points": _pts(-6.0, end_age_min=45)}, "older than the post's moment"),  # stale
+    ({"second_pct": -3.0}, "says -3.00%"),  # Yahoo and Hyperliquid disagree
+    ({"points": [(int(SLOT.timestamp()) - 86400 + i * 900, 100 - 0.0625 * i) for i in range(97)]}, "interpolated"),  # a straight line
+])
+def test_the_numbers_gate_refuses_a_chart_that_does_not_prove_its_headline(kw: dict[str, Any], why: str) -> None:
+    args = {"points": _pts(-6.0), "window": "24H", "headline": "WTI CRUDE FALLS 6.0% IN 24 HOURS", "as_of": SLOT, "now": SLOT, "max_age_minutes": 90, **kw}
+    c = visual.verify_series(args.pop("points"), **args)
+    assert not c.ok and any(why in r for r in c.reasons)
+
+
+async def test_a_market_post_whose_numbers_fail_is_never_drawn_or_posted() -> None:
+    bad = NdEvent(key="recap:z", kind="recap", title="t", headline="WTI CRUDE FALLS 9.0% IN 24 HOURS", topic="move", sources=[{"name": "Yahoo Finance"}],
+                  facts={"recap": True, "visual_headline": "WTI CRUDE FALLS 9.0% IN 24 HOURS", "points": [list(p) for p in _pts(-6.0)], "pct": -9.0, "name": "Oil (WTI)",
+                         "coin": "OIL", "window": "24h", "as_of": SLOT.isoformat(), "data_source": "Yahoo Finance"})
+    bad.id = 9
+    with pytest.raises(visual.NumbersRefused):
+        await visual.for_event(bad, now=SLOT)
+    assert bad.facts["number_check"]["ok"] is False

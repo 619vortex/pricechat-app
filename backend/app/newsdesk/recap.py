@@ -180,7 +180,7 @@ def _subject(r: dict[str, Any]) -> str:
     return editorial.canon(r["tag"] if r["source"] == "Hyperliquid" else r["name"])
 
 
-def biggest_move(lines: list[dict[str, Any]], covered: list[Any] | None = None, now: datetime | None = None) -> tuple[dict[str, Any] | None, list[str]]:
+def biggest_move(lines: list[dict[str, Any]], covered: list[Any] | None = None, now: datetime | None = None, repeats: list[dict[str, Any]] | None = None) -> tuple[dict[str, Any] | None, list[str]]:
     """(the move this slot may carry, why each other one can't). Owner, 2026-11-10: only an EXCEPTIONAL move (at or past the desk's 24-hour
     alert line for its class: crypto majors 8%, other crypto 15%, indices 2.5%, commodities 5%), and never one the channel already showed
     unless it has escalated (app/newsdesk/editorial.judge). The old floor (3% crypto, 1.5% macro) posted routine days: Ethereum -6% twice,
@@ -202,6 +202,8 @@ def biggest_move(lines: list[dict[str, Any]], covered: list[Any] | None = None, 
         if v.ok:
             return r, notes
         notes.append(f"{r['name']} {_pct(r['pct'])}: {v.reason}")
+        if repeats is not None:
+            repeats.append({"subject": subj, "headline": f"{r['name']} {_pct(r['pct'])} in 24 hours", "reason": v.reason, "same_as": v.same_as})
     return None, notes
 
 
@@ -210,7 +212,10 @@ async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local
 
     hl = await _hl_markets(market)
     lines = rows(hl, quotes, now)
-    mover, notes = biggest_move(lines, editorial.coverage(db, now), now)
+    repeats: list[dict[str, Any]] = []
+    mover, notes = biggest_move(lines, editorial.coverage(db, now), now, repeats)
+    for x in repeats:  # turned away as a repeat: on the story's record, for both platforms
+        editorial.record_skip(db, now, {**x, "slot": slot_at.isoformat()})
     if mover is None:
         logger.warning("newsdesk recap: the %s slot has no story and no exceptional new market move: nothing posted (%s)", slot_local, "; ".join(notes)[:600] or "no prices")
         return None
@@ -229,12 +234,29 @@ async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local
     if len(points) < 10:
         logger.warning("newsdesk recap: no price history to draw for %s: nothing posted", mover["name"])
         return None
-    head = visual.move_headline(mover["name"], mover["pct"])
-    told = f"{abs(mover['pct']):.1f}% {mover['name']} 24 hours"
+    # the numbers gate: the headline's figure is the chart's own series; the summary figure (Hyperliquid's mark vs its previous day, or
+    # Yahoo's 24-hour change) must agree with it; crypto is also checked against Yahoo when Yahoo has a fresh price
+    series = (points[-1][1] - points[0][1]) / points[0][1] * 100
+    yahoo = next((y for c, _, _, y in CRYPTO if c == coin), None) if coin else None
+    yq = quotes.get(yahoo) if yahoo else None
+    second = yq.change("24h", now) if yq is not None else None
+    second_name = "Yahoo Finance" if second is not None else mover["source"]
+    if second is None:
+        second = mover["pct"]  # the source's own summary figure, from a different call than the series
+    head = visual.move_headline(mover["name"], series)
+    check = visual.verify_series(points, window="24H", headline=head, as_of=now, now=now, max_age_minutes=90, second_pct=second, second_name=second_name)
+    cls = editorial.asset_class({_subject(mover)})
+    if not check.ok or not editorial.exceptional_pct(cls, series):
+        why = "; ".join(check.reasons) or f"the chart's own series says {series:+.2f}%, not exceptional"
+        logger.warning("newsdesk recap: the %s slot's %s chart failed the numbers gate: %s: nothing posted", slot_local, mover["name"], why)
+        return None
+    mover = {**mover, "pct": series}
+    told = f"{abs(series):.1f}% {mover['name']} 24 hours"
     return NdEvent(key=f"recap:{slot_at:%Y-%m-%dT%H:%M}", kind="recap", title=head, headline=head, summary="", topic="move", label="", evidence="price data",
                    category="crypto" if coin else "commodities", virality=0.0, parts={}, sources=[{"name": mover["source"], "url": "https://app.hyperliquid.xyz" if coin else "https://finance.yahoo.com"}],
                    first_seen=now, facts={"recap": True, "slot_at": slot_at.isoformat(), "visual_headline": head, "points": [list(p) for p in points], "pct": mover["pct"],
                                           "name": mover["name"], "coin": coin or mover["name"].split()[0][:4].upper(), "data_source": mover["source"], "told": told,
-                                          "recap_assets": [mover["tag"]], "as_of": now.isoformat(),
+                                          "recap_assets": [mover["tag"]], "as_of": now.isoformat(), "window": "24h",
+                                          "number_check": check.out(), "second_pct": second, "second_source": second_name,
                                           "x_text": visual.x_text(head, mover["source"]), "telegram_html": visual.caption_html(head, mover["source"]),
                                           "telegram_plain": f"{head}\n\nSource: {mover['source']}"})

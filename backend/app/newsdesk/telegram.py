@@ -206,7 +206,7 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     used = {u for u, _ in ((s.state or {}).get("used_photos") or []) if u} if s is not None else set()
     recent = list((s.state or {}).get("recent_visuals") or []) if s is not None else []
     try:
-        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent)
+        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now)
     except Exception as e:  # noqa: BLE001 - no picture, no post: the format is the picture
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"

@@ -12,8 +12,10 @@ from app.models.newsdesk import NdPost
 from app.newsdesk import engine, sources
 from app.newsdesk import telegram as telegram_lane
 from app.services.agent_service import get_agent_config
+from app.api.routes.newsdesk_editorial import router as editorial_router  # noqa: E402,I001
 
 router = APIRouter(prefix="/x/newsdesk", tags=["newsdesk"])
+router.include_router(editorial_router)  # story history, preview queue, the owner's block (app/api/routes/newsdesk_editorial)
 
 
 @router.get("")

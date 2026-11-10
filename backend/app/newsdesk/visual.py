@@ -680,6 +680,96 @@ def source_name(ev: Any) -> str:
     return names[0] if names else "Price Chat"
 
 
+# --- the numbers gate: no chart, no figure, unless the data proves it ------------------------------------------------------
+
+FRESH_MINUTES = 20  # the series' last point must be this close to the moment the post speaks for
+SAME_SERIES_PP = 0.1  # the headline's percent against the chart's own first and last points
+CROSS_SOURCE_PP = 0.5  # against a second source (Yahoo vs Hyperliquid): two feeds, two clocks, so a little wider
+WINDOW_SECONDS = {"15M": 900, "1H": 3600, "4H": 14400, "24H": 86400}
+HEADLINE_WINDOW = re.compile(r"\bIN (?:(\d+) HOURS|(AN) HOUR|(\d+) MINUTES)\b", re.I)
+HEADLINE_PCT = re.compile(r"(\d+(?:\.\d+)?)\s?%")
+
+
+@dataclass
+class NumberCheck:
+    ok: bool
+    reasons: list[str]
+    series_pct: float | None = None
+    detail: str = ""
+
+    def out(self) -> dict[str, Any]:
+        return {"ok": self.ok, "reasons": self.reasons, "series_pct": None if self.series_pct is None else round(self.series_pct, 3), "detail": self.detail}
+
+
+def _headline_window(headline: str) -> int | None:
+    m = HEADLINE_WINDOW.search(headline or "")
+    if not m:
+        return None
+    if m.group(1):
+        return int(m.group(1)) * 3600
+    if m.group(2):
+        return 3600
+    return int(m.group(3)) * 60
+
+
+def looks_synthetic(points: list[tuple[int, float]]) -> str:
+    """Why a series isn't real market data, or "": timestamps out of order or repeated, or a run that is a straight line point after point
+    (interpolated or made up: real prices wiggle)."""
+    ts = [p[0] for p in points]
+    if any(b <= a for a, b in zip(ts, ts[1:])):
+        return "timestamps repeat or go backwards"
+    ys = [float(p[1]) for p in points]
+    flat = sum(1 for i in range(1, len(ys) - 1) if abs(ys[i + 1] - 2 * ys[i] + ys[i - 1]) <= 1e-9 * max(1.0, abs(ys[i])))
+    if flat >= 0.5 * (len(ys) - 2):
+        return f"{flat} of {len(ys) - 2} points lie on straight lines: interpolated, not traded prices"
+    return ""
+
+
+def verify_series(points: list[tuple[int, float]], *, window: str, headline: str, as_of: Any, now: Any, max_age_minutes: float,
+                  second_pct: float | None = None, second_name: str = "", synthetic: bool = False) -> NumberCheck:
+    """The gate every chart and every measured figure passes before any post (owner, 2026-11-10). The chart's data window must be the
+    headline's window; the headline's percent must equal the percent of the very series the chart draws (within SAME_SERIES_PP) and a
+    second source's (within CROSS_SOURCE_PP) when there is one; the last point must be fresh; the data must be real, never interpolated."""
+    reasons: list[str] = []
+    pts = [(int(t), float(c)) for t, c in points]
+    if len(pts) < 10:
+        return NumberCheck(False, [f"only {len(pts)} price points"])
+    if synthetic:
+        reasons.append("the series is marked synthetic")
+    fake = looks_synthetic(pts)
+    if fake:
+        reasons.append(f"not real data: {fake}")
+    want = WINDOW_SECONDS.get(str(window).upper())
+    span = pts[-1][0] - pts[0][0]
+    if want is None:
+        reasons.append(f"unknown window {window!r}")
+    else:
+        if not 0.9 * want <= span <= 1.1 * want + 900:
+            reasons.append(f"the chart covers {span / 3600:.1f} h, not the {want / 3600:g} h window")
+        said = _headline_window(headline)
+        if said is not None and said != want:
+            reasons.append(f"the headline says {said / 3600:g} h, the chart shows {want / 3600:g} h")
+    series = (pts[-1][1] - pts[0][1]) / pts[0][1] * 100
+    m = HEADLINE_PCT.search(headline or "")
+    if m and abs(float(m.group(1)) - abs(series)) > SAME_SERIES_PP:
+        reasons.append(f"the headline says {m.group(1)}%, the chart's own data says {abs(series):.2f}%")
+    if second_pct is not None:
+        if (second_pct > 0) != (series > 0) or abs(second_pct - series) > CROSS_SOURCE_PP:
+            reasons.append(f"{second_name or 'the second source'} says {second_pct:+.2f}%, the chart's data {series:+.2f}%")
+    if as_of is not None:
+        last_age = (as_of.timestamp() - pts[-1][0]) / 60
+        if last_age > FRESH_MINUTES:
+            reasons.append(f"the last price is {last_age:.0f} min older than the post's moment")
+        if now is not None and (now - as_of).total_seconds() / 60 > max_age_minutes:
+            reasons.append(f"the data is {(now - as_of).total_seconds() / 60:.0f} min old")
+    detail = f"{len(pts)} points over {span / 3600:.1f} h, {series:+.2f}%" + (f"; {second_name} {second_pct:+.2f}%" if second_pct is not None else "; no second source")
+    return NumberCheck(not reasons, reasons, series, detail)
+
+
+class NumbersRefused(ValueError):
+    """A chart the numbers gate refused: the post goes without it, or not at all."""
+
+
 # --- choosing the picture for an event --------------------------------------------------------------------------------
 
 USED_DAYS = 14
@@ -817,7 +907,7 @@ def _stat(ev: Any) -> str:
     return s if re.match(r"^[$+-]?\d", s) and len(s) <= 7 else ""
 
 
-async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any) -> tuple[bytes, dict[str, Any]] | None:
+async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any, now: Any = None) -> tuple[bytes, dict[str, Any]] | None:
     f = ev.facts or {}
     points = [tuple(p) for p in f.get("points") or []]
     coin = str(f.get("coin") or (f.get("tickers") or [""])[0] or "").lstrip("$").upper()
@@ -826,18 +916,31 @@ async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any) -> tuple[byte
             points = await candles_for(coin, market)
         except Exception as e:  # noqa: BLE001
             logger.info("newsdesk visual: no candles for %s (%s)", coin, type(e).__name__)
-    pct = f.get("pct")
-    if pct is None and len(points) >= 2:
-        pct = (points[-1][1] - points[0][1]) / points[0][1] * 100
-    if len(points) < 10 or pct is None:
+    if len(points) < 10:
+        return None
+    from datetime import datetime, timezone
+
+    window = str(f.get("window") or "24h").upper()
+    stamp = f.get("as_of") or f.get("published_at")
+    as_of = datetime.fromisoformat(stamp) if stamp else (now or datetime.now(timezone.utc))
+    as_of = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)  # now None (X re-rendering what Telegram checked): no age limit
+    check = verify_series(points, window=window, headline=post_headline(ev), as_of=as_of, now=now,
+                          max_age_minutes=90 if ev.kind in ("recap", "market") else 360, second_pct=f.get("second_pct"), second_name=str(f.get("second_source") or ""),
+                          synthetic=bool(f.get("synthetic")))
+    ev.facts = {**f, "number_check": check.out()}
+    if not check.ok:
+        logger.warning("newsdesk visual: no chart for event %s: %s", getattr(ev, "id", None), "; ".join(check.reasons))
+        if ev.kind in ("recap", "market"):
+            raise NumbersRefused("; ".join(check.reasons))  # a market post IS its numbers: unverified, it doesn't go
         return None
     name = DISPLAY.get(str(f.get("name") or coin), str(f.get("name") or coin))
-    window = str(f.get("window") or "24h").upper()
-    data = chart(points, name=name, ticker=coin or name[:4], pct=float(pct), window=window, source=str(f.get("data_source") or "Hyperliquid"), tone=chosen.get("tone", "ink"))
-    return data, {**chosen, "kind": "chart", "coin": coin}
+    data = chart(points, name=name, ticker=coin or name[:4], pct=float(check.series_pct or 0), window=window, source=str(f.get("data_source") or "Hyperliquid"),
+                 tone=chosen.get("tone", "ink"))
+    return data, {**chosen, "kind": "chart", "coin": coin, "number_check": check.out()}
 
 
-async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None) -> tuple[bytes, dict[str, Any]]:
+async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None,
+                    now: Any = None) -> tuple[bytes, dict[str, Any]]:
     """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed)."""
     f = ev.facts or {}
     used = used or set()
@@ -848,7 +951,7 @@ async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = N
         order = [chosen["kind"]]  # already shown on Telegram: the same picture
     for kind in order:
         if kind == "chart":
-            got = await _chart_for(ev, chosen, market)
+            got = await _chart_for(ev, chosen, market, now)
             if got:
                 return got
             continue

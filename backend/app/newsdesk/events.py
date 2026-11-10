@@ -463,7 +463,8 @@ def _fill(ev: NdEvent, v: chaos.Verdict, score: virality.Score, facts: dict[str,
     # what the story is worth before freshness fades it, the best yet: the slot bar is judged on this (slots are 4 h apart; news_ttl caps age)
     fresh = float((score.parts or {}).get("freshness") or 1.0)
     peak = max(float((ev.facts or {}).get("peak") or 0), round(float(score.total) / max(fresh, 0.55)))
-    ev.virality, ev.parts, ev.facts, ev.sources = float(score.total), score.parts, {**facts, "peak": peak}, _sources(v)
+    kept = {k: (ev.facts or {})[k] for k in ("blocked",) if k in (ev.facts or {})}  # the owner's block survives a re-scoring
+    ev.virality, ev.parts, ev.facts, ev.sources = float(score.total), score.parts, {**facts, "peak": peak, **kept}, _sources(v)
 
 
 async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy, second_opinion: Any, market: Any) -> int:
@@ -590,7 +591,7 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
     for ev in waiting:
         f = ev.facts or {}
         age = _age(ev, now)
-        if _repeat(ev, covered, now):
+        if _repeat(ev, covered, now) or _blocked(ev):
             continue
         f = ev.facts or {}
         if ev.kind == "update":
@@ -671,7 +672,7 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
         age = _age(ev, now)
-        if _repeat(ev, covered, now):
+        if _repeat(ev, covered, now) or _blocked(ev):
             continue
         f = ev.facts or {}
         if ev.kind == "update":
@@ -720,14 +721,23 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
 
 def _repeat(ev: NdEvent, covered: list[editorial.Covered], now: datetime) -> bool:
     """The same story as one already out, with nothing materially new: folded away for good (status superseded), with the reason."""
-    material = ev.kind == "update" and editorial.material_development(str((ev.facts or {}).get("development") or ""))
-    v = editorial.judge(editorial.signature(ev), covered, now, is_update=material)
+    v = editorial.repeat_verdict(ev, covered, now)
     if v.ok:
         if v.reason:
             ev.facts = {**(ev.facts or {}), "new_because": v.reason}
         return False
     ev.status, ev.why = "superseded", v.reason
+    ev.facts = {**(ev.facts or {}), "merged_into": v.same_as}
     return True
+
+
+def _blocked(ev: NdEvent) -> bool:
+    """The owner blocked this candidate from Admin's preview queue: it waits, never released, until unblocked."""
+    b = (ev.facts or {}).get("blocked") or {}
+    if b.get("on"):
+        ev.why = "blocked by the owner" + (f": {b.get('reason')}" if b.get("reason") else "")
+        return True
+    return False
 
 
 async def fill_with_recap(db: Session, now: datetime, p: Policy, quotes: dict[str, sources.Quote], market: Any = None) -> NdEvent | None:
@@ -913,6 +923,11 @@ def pending(db: Session, platform: str, now: datetime) -> list[NdEvent]:
         limit = POLICY.deliver_market if ev.kind == "market" or (ev.facts or {}).get("symbol") else POLICY.deliver_news
         if platform == "x" and X_FOLLOWS_TELEGRAM and ev.tg_status in ("delivered", "uncertain"):
             limit += X_AFTER_TELEGRAM  # Telegram posted it near the end of its window: X still follows
+        problem = editorial.delivery_gate(db, ev, now)  # the story history and the owner's block, on every platform, every time
+        if problem:
+            mark(ev, platform, "skipped", problem)
+            logger.info("newsdesk events: %s won't deliver #%s: %s", platform, ev.id, problem)
+            continue
         if now - _utc(ev.released_at, now) > limit and getattr(ev, f"{'x' if platform == 'x' else 'tg'}_status") == "pending":
             mark(ev, platform, "missed", "not delivered in time")
             continue

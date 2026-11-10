@@ -199,9 +199,14 @@ def coverage(db: Any, now: datetime, hours: int = 72) -> list[Covered]:
     rows = db.scalars(select(NdEvent).where(NdEvent.status == "released", NdEvent.released_at >= now - timedelta(hours=hours)).order_by(NdEvent.released_at.desc()))
     out = []
     for e in rows:
+        if e.tg_status in NOT_OUT and e.x_status in NOT_OUT:
+            continue  # released but never went out anywhere (refused as a repeat, blocked, missed): it covered nothing
         at = e.released_at if e.released_at.tzinfo else e.released_at.replace(tzinfo=now.tzinfo)
         out.append(Covered(signature(e), at, e.id))
     return out
+
+
+NOT_OUT = ("skipped", "missed", "failed")
 
 
 @dataclass
@@ -246,6 +251,114 @@ def judge(sig: dict[str, Any], covered: list[Covered], now: datetime, *, is_upda
                 return Verdict(True, "a development of a story already out")
             return Verdict(False, f"same story as #{c.event_id} {hours} h ago ({shared}, {b})", c.event_id)
     return Verdict(True)
+
+
+# The rule as Admin states it (owner, 2026-11-10: "the same asset/event blocked 24 h unless a genuinely major new development").
+RULE = ("One story is posted once, on Telegram and on X alike. The same asset or event is blocked for 24 hours (market moves), 72 hours "
+        "(hacks, failures, scams) or 48 hours (other news) unless something materially new happens: a move at least 1.5 times the size "
+        "already posted AND into a higher severity tier, a move the other way, a verified cause for a move shown only as a number, or a "
+        "material development (an arrest, charges, the FBI or DOJ, withdrawals halted or resumed, funds recovered, a resignation, an "
+        "official confirmation, a bigger figure).")
+
+
+def repeat_verdict(ev: Any, covered: list[Covered], now: datetime) -> Verdict:
+    """judge() for an event, without changing it. An update counts as new only with a material development."""
+    material = ev.kind == "update" and material_development(str((ev.facts or {}).get("development") or ""))
+    return judge(signature(ev), covered, now, is_update=material)
+
+
+def covered_before(db: Any, ev: Any, now: datetime, hours: int = 72) -> list[Covered]:
+    """What was out before this event was released (an event is never its own repeat, nor one of a later post's)."""
+    at = ev.released_at
+    at = at if at is None or at.tzinfo else at.replace(tzinfo=now.tzinfo)
+    return [c for c in coverage(db, now, hours) if c.event_id != ev.id and (at is None or c.at < at)]
+
+
+def delivery_gate(db: Any, ev: Any, now: datetime) -> str:
+    """Asked by each platform before it delivers a released event: "" to go ahead, or why not. The owner's block, and the story history:
+    X follows Telegram, but never posts what the history says is a repeat, whatever Telegram did."""
+    f = ev.facts or {}
+    if (f.get("blocked") or {}).get("on"):
+        return f"blocked by the owner{': ' + str(f['blocked'].get('reason')) if f['blocked'].get('reason') else ''}"
+    v = repeat_verdict(ev, covered_before(db, ev, now), now)
+    return "" if v.ok else f"repeat: {v.reason}"
+
+
+def record_skip(db: Any, now: datetime, entry: dict[str, Any]) -> None:
+    """A candidate the desk turned away as a repeat without making an event of it (the no-story market check): kept in the desk's state
+    (last 100) for the story history, so both platforms' record shows it."""
+    from app.models.newsdesk import NdSettings
+
+    row = db.get(NdSettings, 1)
+    if row is None:
+        return
+    skips = list((row.state or {}).get("story_skips") or [])
+    key = (entry.get("slot"), entry.get("subject"))
+    if any((x.get("slot"), x.get("subject")) == key for x in skips):
+        return
+    row.state = {**(row.state or {}), "story_skips": [*skips, {**entry, "at": now.isoformat()}][-100:]}
+
+
+def related(sig: dict[str, Any], old: dict[str, Any], age: timedelta) -> bool:
+    """The same story for the history view (whether or not it was allowed out again)."""
+    if not set(sig.get("subjects") or []) & set(old.get("subjects") or []):
+        return False
+    a, b = sig.get("type"), old.get("type")
+    if not (a == b or {a, b} <= {"incident", "controversy"}):
+        return False
+    return age <= (WINDOW.get(a, NEWS_WINDOW) if a == b else NEWS_WINDOW)
+
+
+def history(db: Any, now: datetime, hours: int = 72) -> list[dict[str, Any]]:
+    """Every story of the last `hours`: what it is about, first and last coverage, the posts made (with each platform's delivery), and the
+    later candidates merged into it or skipped, with why. Newest story first."""
+    from sqlalchemy import select
+
+    from app.models.newsdesk import NdEvent, NdSettings
+
+    def aware(at: Any) -> datetime:
+        return at if at.tzinfo else at.replace(tzinfo=now.tzinfo)
+
+    rows = list(db.scalars(select(NdEvent).where(NdEvent.status.in_(("released", "superseded")), NdEvent.created_at >= now - timedelta(hours=hours + 24))))
+    released = sorted((e for e in rows if e.status == "released" and e.released_at and aware(e.released_at) >= now - timedelta(hours=hours)),
+                      key=lambda e: aware(e.released_at))
+    groups: list[dict[str, Any]] = []
+    by_event: dict[int, dict[str, Any]] = {}
+    for e in released:
+        sig, at = signature(e), aware(e.released_at)
+        g = next((g for g in reversed(groups) if related(sig, g["sig"], at - g["last_at"])), None)
+        if g is None:
+            g = {"sig": sig, "first_at": at, "last_at": at, "posts": [], "merged": []}
+            groups.append(g)
+        g["last_at"] = at
+        g["posts"].append({"event": e.id, "at": at.isoformat(), "kind": e.kind, "headline": e.headline, "telegram": e.tg_status, "x": e.x_status,
+                           "why": (e.facts or {}).get("new_because") or ("first post" if len(g["posts"]) == 0 else "")})
+        by_event[e.id] = g
+    for e in rows:
+        if e.status != "superseded":
+            continue
+        g = by_event.get(int((e.facts or {}).get("merged_into") or 0))
+        if g is None:
+            sig = signature(e)
+            g = next((g for g in groups if related(sig, g["sig"], abs(aware(e.created_at) - g["last_at"]))), None)
+        if g is not None:
+            g["merged"].append({"event": e.id, "at": aware(e.updated_at or e.created_at).isoformat(), "headline": e.headline, "why": e.why})
+    row = db.get(NdSettings, 1)
+    for x in ((row.state or {}).get("story_skips") or []) if row is not None else []:
+        g = by_event.get(int(x.get("same_as") or 0))
+        if g is not None:
+            g["merged"].append({"event": None, "at": x.get("at"), "headline": x.get("headline", ""), "why": x.get("reason", "")})
+    for e in released:  # each platform's own refusals (the delivery gate) are part of the record too
+        for platform, status, note in (("Telegram", e.tg_status, e.tg_note), ("X", e.x_status, e.x_note)):
+            if status == "skipped" and note and (note.startswith("repeat") or note.startswith("blocked")):
+                by_event[e.id]["merged"].append({"event": e.id, "at": None, "headline": e.headline, "why": f"{platform}: {note}"})
+    out = []
+    for g in reversed(groups):
+        sig = g["sig"]
+        out.append({"subjects": sig.get("subjects"), "type": sig.get("type"), "direction": sig.get("direction") or "", "topic": g["posts"][0]["headline"][:90],
+                    "first_coverage": g["first_at"].isoformat(), "last_coverage": g["last_at"].isoformat(), "posts_made": len(g["posts"]),
+                    "posts": g["posts"], "merged_or_skipped": sorted(g["merged"], key=lambda m: m["at"] or "")})
+    return out
 
 
 # --- importance ----------------------------------------------------------------------------------------------------
