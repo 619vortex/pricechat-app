@@ -347,6 +347,10 @@ PERMISSIONS = ["Place, cancel and change orders on your Hyperliquid account", "S
 
 
 def _referral_state(w: Any) -> str:
+    from app.tradingbot import affiliate
+
+    if w is not None and (w.address or "").lower() == affiliate.WALLET.lower():  # the referral's own wallet (the owner): can't be referred by itself
+        return "VERIFIED"
     if w is None or w.referral_status in ("pending", "unverified") or w.checked_at is None:
         return "PENDING"
     if w.referral_status == "verified":
