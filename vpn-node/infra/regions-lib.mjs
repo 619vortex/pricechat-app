@@ -62,7 +62,9 @@ export function stepsFor(key, r) {
     order,
     `provider firewall (or the node's nftables only, if the provider has none): 22/tcp, 51820/udp, 80+443/tcp, ICMP; 8443/tcp only from Railway's static IPs`,
     `DNS: A (and AAAA) ${host} -> the new server (Vercel DNS, owner approval)`,
-    `install: install.sh (QUIET_SECRETS=1 WITH_PROXY=1 AGENT_ALLOW=<Railway IPs>) then install-proxy.sh (PROXY_HOST=${host}), from committed files with checked hashes`,
+    AUTOMATED.has(r.provider)
+      ? `install: the owner runs \`kiwi-infra.mjs install ${key}\` (committed files, hashes checked on the server, install.sh + install-proxy.sh)`
+      : `install: the same committed files and order as \`kiwi-infra.mjs install\` (install.sh with QUIET_SECRETS=1 WITH_PROXY=1 AGENT_ALLOW=<Railway IPs>, then install-proxy.sh PROXY_HOST=${host}); kiwi-infra.mjs only finds Hetzner servers today, so a --host option is the next tool change`,
     `node self-test on the server: vpn-node/infra/node-selftest.sh (exit, DNS, IPv6 refused, isolation, port 25)`,
     `register in Admin > VPN as Testers only, traffic allowance ${Math.round((r.includedTB ?? 0) * 1000)} GB, capacity ${r.capacity ?? 150}`,
     `client test through the tunnel: node vpn-node/infra/region-verify.mjs --host ${host} --country ${r.country} (exit IP, country, DNS, IPv6, connectivity); CI e2e on the Windows runner`,

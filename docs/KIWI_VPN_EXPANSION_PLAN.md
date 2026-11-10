@@ -10,8 +10,8 @@ order page shows the final price before anything is bought.
 |---|---|
 | Hetzner Cloud API | **No working credentials on this PC.** The `HCLOUD_TOKEN` user variable (32 chars after trimming) is refused by the API ("the token you have provided is invalid"). Cloud tokens are 64 characters, so this one is probably old or something else. No hcloud CLI config. No Robot credentials. |
 | SSH | Helsinki takes the `kiwi_vpn` key, but this session isn't allowed to run commands there, even read-only ones. Germany refuses the key and **accepts password logins**. |
-| Helsinki 2.29.149.29 (`ubuntu-2gb-hel1-1`, shared with your personal wg0/client1) | 22, 443 and 8443 answer. The proxy gives 407 and the agent 401, both correct. wg1 serves Kiwi customers. The agent port 8443 is **open to the internet**: the allowlist change is prepared but not applied. **The proxy can reach the server's own IPv6** (fix ready, below). |
-| Germany 2.31.133.78 (Falkenstein, yours) | Only 22 answers from outside. The backend reaches its agent. No browser proxy, so it isn't in Chrome. The runbook is ready. |
+| Helsinki <Helsinki IPv4> (`ubuntu-2gb-hel1-1`, shared with your personal wg0/client1) | 22, 443 and 8443 answer. The proxy gives 407 and the agent 401, both correct. wg1 serves Kiwi customers. The agent port 8443 is **open to the internet**: the allowlist change is prepared but not applied. **The proxy can reach the server's own IPv6** (fix ready, below). |
+| Germany <Germany IPv4> (Falkenstein, yours) | Only 22 answers from outside. The backend reaches its agent. No browser proxy, so it isn't in Chrome. The runbook is ready. |
 | DNS | pricechat.live is on Vercel DNS: `hel1.vpn` → Helsinki. No `fsn1.vpn` yet. |
 | Backend | `vpn.sync` reaches both servers. One failed sync used to mark a server offline: fixed on `fix/kiwi-stage0`, not deployed. Alerts go only to logs, because no owner Telegram chat is set. |
 | Earlier risks still open | Per my notes from 2026-11-04, an old root password and Hetzner token that were pasted into chat were still valid. Rotate both. |
