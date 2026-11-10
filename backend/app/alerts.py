@@ -33,6 +33,8 @@ TIKTOK_BAD = ("expired", "revoked", "disconnected")
 from app.vpn.service import OFFLINE_AFTER as VPN_OFFLINE_AFTER  # noqa: E402  (same count as the server going offline)
 VPN_FULL_AT, VPN_FULL_CLEAR = 0.9, 0.8  # "nearly full" once past 90% of capacity, re-armed only below 80%
 VPN_TRAFFIC_WARN, VPN_TRAFFIC_OVER = 0.8, 1.0  # of a server's monthly allowance; both re-arm when a new month starts
+VPN_FLEET_BUSY, VPN_FLEET_CLEAR = 0.8, 0.7  # devices on public servers / their capacity: "add a server", re-armed below 70%
+VPN_MIN_HEALTHY = 2  # public servers that must be healthy while the VPN is open, so one failure still leaves a fallback
 
 
 def settings_row(db: Session) -> OwnerAlertSettings:
@@ -291,6 +293,47 @@ async def check_vpn_servers(db: Session, *, settings: Settings | None = None, tr
                                 f"Consider moving users to another server or raising its plan.\nTime: {_when(now)}")
                         out["vpn_traffic"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
                     break
+    out.update(await _check_vpn_fleet(db, settings=settings, transport=transport, now=now))
+    return out
+
+
+async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport: Any, now: datetime) -> dict[str, int]:
+    """The fleet as a whole (app/vpn/health.py): too few healthy public servers while the VPN is open; public capacity
+    nearly used; a server's traffic on pace to pass its allowance this month (once per server and month)."""
+    from app.vpn import health
+    from app.vpn.service import settings as vpn_settings
+
+    rows = health.server_rows(db, now)
+    f = health.fleet(rows)
+    out = {"vpn_fleet": 0}
+    key = "vpn:fleet:redundancy"
+    if vpn_settings(db).enabled and f["public_servers"] and f["public_healthy"] < VPN_MIN_HEALTHY:
+        if not _is_open(db, key):
+            text = (f"Price Chat alert: Kiwi VPN has {f['public_healthy']} healthy public server(s)\n"
+                    f"{f['public_up']} of {f['public_servers']} public servers are up. If one more fails, members have nowhere to fail over to.\n"
+                    f"Check Admin › Kiwi VPN › Health.\nTime: {_when(now)}")
+            out["vpn_fleet"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
+    else:
+        _close(db, key)
+    key = "vpn:fleet:capacity"
+    util = f["utilization"]
+    if util is not None and util >= VPN_FLEET_BUSY:
+        if not _is_open(db, key):
+            text = (f"Price Chat alert: Kiwi VPN capacity\nDevices fill {util * 100:.0f}% of the public servers' capacity "
+                    f"({f['devices']} of {f['capacity']}).\nAdd a server (vpn-node/infra/regions.mjs plan) or raise capacities.\nTime: {_when(now)}")
+            out["vpn_fleet"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
+    elif util is None or util < VPN_FLEET_CLEAR:
+        _close(db, key)
+    month = now.strftime("%Y-%m")
+    for r in rows:
+        share = r["traffic_projected_share"]
+        if r["enabled"] and share is not None and share >= 1:
+            key = f"vpn:traffic:{r['id']}:{month}:pace"
+            if not _is_open(db, key):
+                text = (f"Price Chat alert: Kiwi VPN traffic forecast\nServer: {r['name']} is on pace for {r['traffic_projected_gb']:.0f} GB "
+                        f"this month, {share * 100:.0f}% of its {r['traffic_included_gb']} GB allowance ({r['traffic_month_gb']:.0f} GB so far).\n"
+                        f"Traffic over the allowance is billed by the provider.\nTime: {_when(now)}")
+                out["vpn_fleet"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
     return out
 
 

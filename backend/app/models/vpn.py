@@ -7,7 +7,7 @@ and this month's bytes. The client's private key is generated, put in the config
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, false, true
+from sqlalchemy import JSON, BigInteger, Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, IdMixin, TimestampMixin, UTCDateTime
@@ -58,6 +58,22 @@ class VpnServer(IdMixin, TimestampMixin, Base):
     fail_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # syncs in a row that couldn't reach it
     proxy_host: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)  # its browser proxy's public name; "" = none
     proxy_port: Mapped[int] = mapped_column(Integer, default=443, server_default="443", nullable=False)
+
+
+class VpnServerCheck(IdMixin, Base):
+    """One health check of a server by the 5-minute sync: did its agent answer, how fast, how many tunnels were live.
+    Kept 14 days (app/vpn/health.py) for uptime, latency and capacity figures. Nothing about any customer."""
+
+    __tablename__ = "vpn_server_checks"
+    __table_args__ = (Index("ix_vpn_server_checks_server_at", "server_id", "at"),)
+
+    server_id: Mapped[int] = mapped_column(ForeignKey("vpn_servers.id", ondelete="CASCADE"), nullable=False)
+    at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    ms: Mapped[int | None] = mapped_column(Integer)  # the agent's status call, round trip from the backend; None = no answer
+    peers: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # WireGuard peers on the node
+    live: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # of them, a handshake in the last 10 min
+    error: Mapped[str | None] = mapped_column(String(120))  # first line of the error, for Admin
 
 
 class VpnAccount(IdMixin, TimestampMixin, Base):

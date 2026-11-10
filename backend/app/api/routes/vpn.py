@@ -317,6 +317,14 @@ def admin_overview(db: DbSession) -> dict[str, Any]:
     return service.admin_overview(db)
 
 
+@router.get("/vpn/admin/health")
+def admin_health(db: DbSession) -> dict[str, Any]:
+    """Per-server uptime, latency, load and traffic projection, and the fleet's capacity (app/vpn/health.py)."""
+    from app.vpn import health
+
+    return health.report(db)
+
+
 class SettingsUpdate(StrictInput):
     enabled: bool | None = None
     payments_enabled: bool | None = None

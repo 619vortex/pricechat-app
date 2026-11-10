@@ -153,7 +153,7 @@ def test_closed_and_paid_access_only(client: TestClient, db: Session, fake: Fake
     r = client.get("/api/members/vpn").json()
     assert r["eligible"] and r["reason"] is None and "required_rank" not in r
     assert r["servers"] == [{"id": server.id, "name": "Frankfurt", "region": "Europe", "country_code": "DE", "online": True, "load": 0.0,
-                            "live_load": 0.0, "adblock": False, "recommended": True, "browser": False, "proxy_host": None}]
+                            "live_load": 0.0, "adblock": False, "recommended": True, "browser": False, "proxy_host": None, "health": "ok"}]
     assert r["usage"]["used_bytes"] == 0 and r["usage"]["cap_bytes"] == 0 and r["usage"]["paused_until"] is None
     r = signed_in(client, db, unpaid).get("/api/members/vpn").json()
     assert not r["eligible"] and "$9.99 for 30 days" in r["reason"] and "ank" not in r["reason"]
@@ -625,10 +625,12 @@ def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Sess
 # --- owner alerts for servers ---------------------------------------------------------------------------------------
 
 
-async def test_owner_alerts_offline_recovered_and_nearly_full(db: Session, fake: FakeNode) -> None:
+async def test_owner_alerts_offline_recovered_and_nearly_full(db: Session, fake: FakeNode, monkeypatch: pytest.MonkeyPatch) -> None:
     from app import alerts
     from tests.test_owner_alerts import SETTINGS, Bot
 
+    monkeypatch.setattr(alerts, "VPN_MIN_HEALTHY", 0)  # fleet alerts have their own tests (test_vpn_health.py); one server here
+    monkeypatch.setattr(alerts, "VPN_FLEET_BUSY", 2.0)
     tg = Bot()
     alerts.settings_row(db).telegram_chat = "424242"
     db.commit()
@@ -637,7 +639,7 @@ async def test_owner_alerts_offline_recovered_and_nearly_full(db: Session, fake:
     run = lambda: alerts.check_vpn_servers(db, settings=SETTINGS, transport=tg.transport)  # noqa: E731
     fake.fail = True
     await asyncio.to_thread(vpn.sync_all, db)
-    assert await run() == {"vpn_offline": 0, "vpn_recovered": 0, "vpn_full": 0, "vpn_traffic": 0}  # one failed sync: could be a blip
+    assert await run() == {"vpn_offline": 0, "vpn_recovered": 0, "vpn_full": 0, "vpn_traffic": 0, "vpn_fleet": 0}  # one failed sync: could be a blip
     for _ in range(3):  # two in a row: one message, however long it stays down
         await asyncio.to_thread(vpn.sync_all, db)
         await run()

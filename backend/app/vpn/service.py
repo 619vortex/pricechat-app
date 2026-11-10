@@ -13,6 +13,7 @@ import hashlib
 import ipaddress
 import logging
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -27,7 +28,7 @@ from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
 from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
-from app.vpn import billing, keys, node, reviewer
+from app.vpn import billing, health, keys, node, reviewer
 
 OFFLINE_AFTER = 2  # checks in a row that couldn't reach a server's agent before it's marked offline (one could be a blip)
 
@@ -448,12 +449,13 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
         servers = [v for v in servers if v.name == reviewer.SERVER]
     best = recommended_id(servers, counts)
     live = live_counts(db)
+    state_of = health.member_health(db, servers)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
     open_here = s.enabled or preview or review or is_tester(acct)
     out = {"enabled": open_here, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "live_load": _load(v, live.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best,
-                        "browser": bool(v.proxy_host), "proxy_host": v.proxy_host or None} for v in servers],
+                        "browser": bool(v.proxy_host), "proxy_host": v.proxy_host or None, "health": state_of.get(v.id, "ok")} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
            "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": bill}
     state = access(db, acct)
@@ -1152,12 +1154,17 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
     now = now or utcnow()
     out = {"server": server.id, "online": False, "updated": 0, "readded": 0, "removed": 0, "revoked": 0, "suspended": 0, "errors": 0}
     s = settings(db)
+    ms: int | None = None
+    peer_count = live = 0
     try:
         with node.client_for(server) as agent:
+            t0 = time.monotonic()
             st = agent.status()
+            ms = int((time.monotonic() - t0) * 1000)
             _check_pool(st["address"])
             _apply_status(server, st, now)
             out["online"] = True
+            peer_count, live = len(st["peers"]), health.live_peers(st["peers"], now)
             peers = {p["public_key"]: p for p in st["peers"]}
             month = now.strftime("%Y-%m")
             ours: set[str] = set()
@@ -1231,6 +1238,7 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
     except node.NodeError as e:
         _unreachable(server, e)
         out["error"] = str(e)
+    health.record(db, server, ok="error" not in out, ms=ms, peers=peer_count, live=live, error=out.get("error"), now=now)
     db.commit()
     return out
 
@@ -1288,6 +1296,8 @@ def sync_all(db: Session, now: datetime | None = None) -> dict[str, Any]:
     results = [sync_server(db, v, now) for v in list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.id)))]
     caps = enforce_caps(db, now)
     billing.scrub(db, now)
+    health.prune(db, now)
+    db.commit()
     return {"servers": len(results), "online": sum(r["online"] for r in results),
             **{k: sum(r[k] for r in results) for k in ("updated", "readded", "removed", "revoked", "suspended")},
             "errors": sum(r["errors"] for r in results) + caps["errors"], "paused": caps["paused"], "resumed": caps["resumed"]}
