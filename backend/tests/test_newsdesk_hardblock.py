@@ -105,3 +105,78 @@ async def test_the_decisions_record_says_why_each_candidate_went_or_did_not(db: 
     got = {d["headline"]: d for d in editorial.decisions(db, SLOT + timedelta(hours=1))}
     assert got["A"]["decision"] == "selected" and got["OIL (WTI) SLIDES"]["decision"] == "merged (repeat)" and got["C"]["decision"] == "waiting"
     assert "same story" in got["OIL (WTI) SLIDES"]["why"] and "under the bar" in got["C"]["why"]
+
+
+# --- the lower bar for verified important news (owner, 2026-11-10: 52 for important stories confirmed by 2+ credible outlets, else 56) --
+
+
+def _news(db: Session, key: str, title: str, score: float, outlets: list[str], *, evidence: str = "two outlets", topic: str = "geopolitics",
+          importance: bool = True, kind: str = "news") -> NdEvent:
+    facts: dict[str, Any] = {"told": title, "published_at": (SLOT - timedelta(minutes=20)).isoformat()}
+    if importance:
+        facts["importance"] = {"kind": topic, "why": "test"}
+    ev = NdEvent(key=key, kind=kind, title=title, headline=title.upper(), summary="", topic=topic, evidence=evidence, category="politics",
+                 virality=score, parts={"significance": 20}, status="candidate", first_seen=SLOT - timedelta(minutes=20),
+                 expires_at=SLOT + timedelta(hours=4), facts=facts, sources=[{"name": o, "url": f"https://example.org/{o}/{key}"} for o in outlets])
+    db.add(ev)
+    db.commit()
+    return ev
+
+
+def test_which_stories_get_the_lower_bar() -> None:
+    p = events.policy({})
+    assert (p.regular_bar, p.verified_bar) == (56, 52)
+
+    def mk(**kw: Any) -> NdEvent:
+        base = {"kind": "news", "evidence": "two outlets", "topic": "geopolitics", "sources": [{"name": "BBC"}, {"name": "Financial Times"}],
+                "facts": {"importance": {"kind": "geopolitics"}}}
+        base.update(kw)
+        return NdEvent(key="k", title="t", headline="T", **base)
+
+    assert events.slot_bar(mk(), p) == 52
+    assert events.slot_bar(mk(facts={}, topic="hack"), p) == 52  # a chaos topic, confirmed twice
+    assert events.slot_bar(mk(sources=[{"name": "BBC"}]), p) == 56  # one outlet
+    assert events.slot_bar(mk(sources=[{"name": "BBC"}, {"name": "bbc"}]), p) == 56  # one outlet through two of its feeds
+    assert events.slot_bar(mk(evidence="attributed"), p) == 56
+    assert events.slot_bar(mk(facts={}, topic="move"), p) == 56  # only a price moving: not "important"
+    assert events.slot_bar(mk(kind="market", evidence="price data"), p) == 56
+    assert events.slot_bar(mk(kind="recap", evidence="price data"), p) == 56
+
+
+def test_a_verified_important_story_at_53_takes_the_slot(db: Session) -> None:
+    ev = _news(db, "a", "Saudi Arabia's east-west pipeline struck in attack", 53, ["Financial Times", "OilPrice"])
+    got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
+    assert got is not None and got.id == ev.id
+
+
+@pytest.mark.parametrize(("outlets", "evidence", "importance", "topic"), [
+    (["Financial Times"], "attributed", True, "geopolitics"),  # one outlet
+    (["Financial Times", "OilPrice"], "two outlets", False, "move"),  # a price story
+])
+def test_the_same_score_without_independent_confirmation_or_importance_waits(db: Session, outlets: list[str], evidence: str, importance: bool,
+                                                                             topic: str) -> None:
+    ev = _news(db, "b", "Oil falls as traders weigh supply", 53, outlets, evidence=evidence, importance=importance, topic=topic)
+    assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
+    assert "under the bar of 56" in (ev.why or "")
+
+
+def test_under_52_still_waits_even_when_verified(db: Session) -> None:
+    ev = _news(db, "c", "Poland's lower house backs sanctions bill covering crypto freezes", 51, ["Cointelegraph", "The Defiant"])
+    assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
+    assert "under the bar of 52 (verified important news)" in (ev.why or "")
+
+
+def test_the_lower_bar_never_lets_a_repeat_or_a_third_in_a_row_through(db: Session) -> None:
+    for i, (title, subj) in enumerate((("Bitcoin ETF outflows hit record", "BTC"), ("Ethereum foundation sued", "ETH"))):
+        db.add(NdEvent(key=f"old{i}", kind="news", title=title, headline=title.upper(), topic="etf", evidence="two outlets", status="released",
+                       slot="slot", released_at=SLOT - timedelta(hours=4 * (i + 1)), facts={"assets": [subj]}))
+    db.commit()
+    for e in db.query(NdEvent).filter(NdEvent.status == "released"):
+        from app.newsdesk import editorial as ed
+        ed.stamp(e, e.released_at)
+    db.commit()
+    ev = _news(db, "d", "Bitcoin treasury firm halts withdrawals", 54, ["CoinDesk", "The Block"], topic="failure", importance=False)
+    ev.facts = {**ev.facts, "assets": ["BTC"]}
+    db.commit()
+    assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None  # crypto twice in a row: diversity holds the third
+    assert "feed diversity" in (ev.why or "")

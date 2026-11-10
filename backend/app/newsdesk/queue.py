@@ -36,8 +36,10 @@ def gates(ev: NdEvent, now: datetime, p: events.Policy, covered: list[editorial.
     out["evidence"] = _gate(strong or ev.evidence == "attributed", {"official": "an official source", "two outlets": "two outlets", "price data": "our own prices",
                                                                     "exchange data": "exchange data", "attributed": "one outlet, naming who says so"}.get(ev.evidence, ev.evidence or "none"))
     held = events.held_score(ev, now, p)
-    bar_ok = held >= p.regular_bar
-    detail = f"scores {ev.virality:g}" + (f" (best {held:g})" if held > ev.virality else "") + f", bar {p.regular_bar}"
+    need = events.slot_bar(ev, p)
+    bar_ok = held >= need
+    detail = (f"scores {ev.virality:g}" + (f" (best {held:g})" if held > ev.virality else "") + f", bar {need}"
+              + (" (important, confirmed by 2+ outlets)" if need < p.regular_bar else ""))
     if ev.kind == "market":
         big, why = editorial.exceptional(ev)
         bar_ok = bar_ok and ev.virality >= p.market_bar and big

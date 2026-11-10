@@ -42,6 +42,7 @@ class Policy:
     window_hours: int = 6
     regular_gap: timedelta = timedelta(hours=3)
     regular_bar: int = 56  # the lowest a regular post may score, reached late in its window
+    verified_bar: int = 52  # owner, 2026-11-10: the slot bar for important news confirmed by two or more distinct credible outlets (verified_important)
     opening_bar: int = 64  # what a regular post must score at the start of a window: early on, something better may still come
     extra_bar: int = 80
     extra_per_day: int = 3
@@ -89,6 +90,28 @@ STRONG = ("official", "two outlets", "price data", "exchange data")
 # a news story is judged by its best score before freshness (facts["peak"]) until it has waited one full slot interval: a strong story at
 # 22:10 is still strong at 00:00, and one that more outlets picked up since counts them. Older than that, it had its slot: freshness counts.
 # Freshness always decides between candidates.
+
+
+CREDIBLE = ("official", "two outlets")
+# what counts as an important story for the lower bar: verified significance (geopolitics, regulation, mega-cap corporate, institutions,
+# flows, macro data) or a chaos topic. A news item that is only about a price moving, or a whale, keeps the standard bar.
+IMPORTANT_TOPICS = {"hack", "scam", "failure", "controversy", "macro", "etf", "flows", "geopolitics", "regulation", "corporate", "structure"}
+
+
+def verified_important(ev: NdEvent) -> bool:
+    """An important news story independently confirmed by at least two different credible outlets (the desk's curated feeds; one outlet
+    seen through two of its feeds counts once). Price moves, recaps and single-source stories never qualify."""
+    if ev.kind not in ("news", "update") or ev.evidence not in CREDIBLE:
+        return False
+    outlets = {str(s.get("name") or "").strip().lower() for s in ev.sources or []} - {""}
+    if len(outlets) < 2:
+        return False
+    return bool((ev.facts or {}).get("importance")) or (ev.topic or "") in IMPORTANT_TOPICS
+
+
+def slot_bar(ev: NdEvent, p: Policy) -> int:
+    """The score a candidate needs to take a slot: verified_bar for verified important news, regular_bar for everything else."""
+    return min(p.verified_bar, p.regular_bar) if verified_important(ev) else p.regular_bar
 
 
 def held_score(ev: NdEvent, now: datetime, p: Policy) -> float:
@@ -664,7 +687,8 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
     if slot is None or slot_filled(db, slot, p) is not None:
         nxt = slot_label(next_slot(now, p))
         for ev in waiting:
-            ev.why = f"waiting for the next slot ({nxt} Dubai)" if ev.virality >= p.regular_bar else f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
+            need = slot_bar(ev, p)
+            ev.why = f"waiting for the next slot ({nxt} Dubai)" if held_score(ev, now, p) >= need else f"scores {ev.virality:g}, under the bar of {need}"
         return None
 
     covered = editorial.coverage(db, now)
@@ -691,9 +715,9 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         if ev.kind != "update" and assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
             ev.why = "this asset's move went out within six hours"
             continue
-        standing = held_score(ev, now, p)
-        if standing < p.regular_bar:
-            ev.why = f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
+        standing, need = held_score(ev, now, p), slot_bar(ev, p)
+        if standing < need:
+            ev.why = f"scores {ev.virality:g}, under the bar of {need}" + (" (verified important news)" if need < p.regular_bar else "")
             continue
         if ev.kind == "market" and ev.virality < p.market_bar:
             ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot"
