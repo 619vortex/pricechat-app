@@ -356,6 +356,11 @@ jobs:
       run:
         shell: powershell
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: windows-client/ci/fixtures
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: KiwiVPN-Windows-${{ github.sha }}
@@ -364,9 +369,9 @@ jobs:
       - name: Upgrade from the public 0.1.1
         run: |
           $ErrorActionPreference = "Stop"
-          $Old = "$env:RUNNER_TEMP\KiwiVPN-0.1.1-Setup.exe"
-          Invoke-WebRequest -UseBasicParsing -Uri https://pricechat.live/downloads/KiwiVPN-Setup.exe -OutFile $Old
-          if ((Get-FileHash $Old -Algorithm SHA256).Hash -ne "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598") { throw "The public download isn't 0.1.1 any more: update this check" }
+          # the exact 0.1.1 that was public (pricechat.live serves 2.x once it's released), kept in the repo
+          $Old = "windows-client\ci\fixtures\KiwiVPN-0.1.1-Setup.exe"
+          if ((Get-FileHash $Old -Algorithm SHA256).Hash -ne "077AE0F651C5BE3F8DB6FDD2FDBA4C94344A7F963CDBADBAC3D1747829F40598") { throw "The 0.1.1 test file isn't the published 0.1.1" }
           $p = Start-Process $Old -ArgumentList "/S" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "0.1.1 didn't install ($($p.ExitCode))" }
           Start-Sleep 5
