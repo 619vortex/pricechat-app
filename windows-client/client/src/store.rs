@@ -107,6 +107,26 @@ impl Vault for FileVault {
         let _ = std::fs::remove_dir_all(&self.dir);
         let _ = std::fs::create_dir_all(&self.dir);
     }
+
+    fn device_id(&self, server_id: i64) -> Option<i64> {
+        // only a device whose key is also here counts, but the key isn't opened just to know that
+        if !self.dir.join(Self::key_name(server_id)).is_file() {
+            return None;
+        }
+        std::fs::read_to_string(self.dir.join(format!("device-{server_id}.id"))).ok()?.trim().parse().ok()
+    }
+
+    fn endpoint(&self, server_id: i64) -> Option<String> {
+        let host = std::fs::read_to_string(self.dir.join(format!("endpoint-{server_id}.txt"))).ok()?;
+        let host = host.trim();
+        crate::measure::valid_endpoint_host(host).then(|| host.to_string())
+    }
+
+    fn save_endpoint(&self, server_id: i64, host: &str) {
+        if crate::measure::valid_endpoint_host(host) {
+            let _ = std::fs::write(self.dir.join(format!("endpoint-{server_id}.txt")), host);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -134,6 +154,23 @@ mod tests {
         }
         v.forget_all();
         assert!(v.session().is_none() && v.device(2).is_none());
+        let _ = std::fs::remove_dir_all(&v.dir);
+    }
+
+    #[test]
+    fn device_ids_and_endpoints_read_back_without_opening_keys() {
+        let v = temp();
+        v.save_device(2, 77, "PRIVATE-KEY-TEXT").unwrap();
+        assert_eq!(v.device_id(2), Some(77));
+        assert_eq!(v.device_id(3), None);
+        std::fs::remove_file(v.dir.join("device-2.key")).unwrap();
+        assert_eq!(v.device_id(2), None, "an id without its key is no use");
+        v.save_endpoint(2, "2.31.133.78");
+        assert_eq!(v.endpoint(2).as_deref(), Some("2.31.133.78"));
+        v.save_endpoint(4, "evil/../path");
+        assert_eq!(v.endpoint(4), None, "only a plain address or host name is kept");
+        std::fs::write(v.dir.join("endpoint-5.txt"), "x y").unwrap();
+        assert_eq!(v.endpoint(5), None, "and only such a one is read back");
         let _ = std::fs::remove_dir_all(&v.dir);
     }
 

@@ -139,6 +139,19 @@ pub fn dns_of(config: &str) -> Vec<String> {
     }).flatten().collect()
 }
 
+/// The tunnel's own IPv4 address (the first in the config's Address line), which the liveness probe sends from.
+pub fn address_v4_of(config: &str) -> Option<std::net::Ipv4Addr> {
+    config.lines().filter_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        k.trim().eq_ignore_ascii_case("address").then(|| v.to_string())
+    }).flat_map(|v| v.split(',').map(|x| x.trim().to_string()).collect::<Vec<_>>()).find_map(|a| a.split('/').next()?.trim().parse().ok())
+}
+
+/// The config's IPv4 resolvers, which the liveness probe asks (they're always inside the tunnel: split tunneling can't exclude them).
+pub fn dns_v4_of(config: &str) -> Vec<std::net::Ipv4Addr> {
+    dns_of(config).iter().filter_map(|d| d.parse().ok()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +183,17 @@ mod tests {
         let out = apply(&no_dns, &[], Some(&QUAD9)).unwrap();
         assert!(out.find("DNS = 9.9.9.9").unwrap() < out.find("[Peer]").unwrap());
         assert_eq!(dns_of(CFG), vec!["10.66.0.1"]);
+    }
+
+    #[test]
+    fn the_probe_knows_the_tunnel_address_and_its_resolvers() {
+        assert_eq!(address_v4_of(CFG), Some(std::net::Ipv4Addr::new(10, 66, 0, 5)));
+        let both = CFG.replace("Address = 10.66.0.5/32", "Address = fd66::5/128, 10.66.0.9/32");
+        assert_eq!(address_v4_of(&both), Some(std::net::Ipv4Addr::new(10, 66, 0, 9)));
+        assert_eq!(address_v4_of("[Interface]\nPrivateKey = x\n"), None);
+        assert_eq!(dns_v4_of(CFG), vec![std::net::Ipv4Addr::new(10, 66, 0, 1)]);
+        let quad9 = apply(CFG, &[], Some(&QUAD9)).unwrap();
+        assert_eq!(dns_v4_of(&quad9).len(), 2);
     }
 
     #[test]

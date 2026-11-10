@@ -7,7 +7,7 @@ use kiwiclient::api::{Account, Backend, Http, BASE};
 use kiwiclient::flow::{self, Vault};
 use kiwiclient::store::FileVault;
 use kiwiclient::settings::{self, Settings};
-use kiwiclient::{applog, auth, measure, opener, tune};
+use kiwiclient::{applog, auth, measure, opener, support, tune};
 use kiwivpn::protocol::{Protect, Request, State, Status};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -19,8 +19,22 @@ use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 
 static CANCEL_SIGN_IN: AtomicBool = AtomicBool::new(false);
-/// The last tunnel asked for: the server's address and the DNS its config uses, for the leak check. Nothing secret.
-static LAST_TUNNEL: std::sync::Mutex<Option<(Option<String>, Vec<String>)>> = std::sync::Mutex::new(None);
+/// The last tunnel this app asked for: the server's address and the DNS its config uses (for the leak check), and the tunnel's own
+/// address (the liveness probe sends from it). Nothing secret.
+#[derive(Clone)]
+struct LastTunnel {
+    server_ip: Option<String>,
+    dns: Vec<String>,
+    address: Option<std::net::Ipv4Addr>,
+    resolvers: Vec<std::net::Ipv4Addr>,
+}
+static LAST_TUNNEL: std::sync::Mutex<Option<LastTunnel>> = std::sync::Mutex::new(None);
+
+fn forget_tunnel() {
+    if let Ok(mut last) = LAST_TUNNEL.lock() {
+        *last = None;
+    }
+}
 
 /// What the window is told. `service` is false when the service can't be reached, and then there's no tunnel state to report: the window never guesses one.
 #[derive(Serialize)]
@@ -149,20 +163,25 @@ fn vpn_status() -> Answer {
 #[tauri::command(async)]
 fn vpn_disconnect() -> Answer {
     note("disconnect: pressed");
+    forget_tunnel();
     let done = answer(ipc::ask(&Request::Disconnect));
     note_answer("disconnect", &done);
     done
 }
 
 /// Everything is decided here, not in the page: the page names a server, and the key and the config never reach it.
+/// `pause_first`: failover's switch (2.1). The liveness probe found the server gone while the service still reads Connected (the
+/// handshake isn't old enough yet), so the tunnel is paused whatever the service's state says.
 #[tauri::command(async)]
-fn vpn_connect(server_id: i64) -> Result<Answer, String> {
+fn vpn_connect(server_id: i64, pause_first: Option<bool>) -> Result<Answer, String> {
     let computer = std::env::var("COMPUTERNAME").unwrap_or_default();
-    note(&format!("connect: pressed, server {server_id}"));
+    note(&format!("connect: pressed, server {server_id}{}", if pause_first == Some(true) { " (failover)" } else { "" }));
     // a tunnel that's up but not answering still has this PC's routes, so Price Chat can't be reached through it: the service closes it
     // first (keeping the kill switch on), and the next server's settings are fetched directly
-    if matches!(ipc::ask(&Request::Status), Ok(s) if s.state == State::Connecting) {
+    let state = ipc::ask(&Request::Status).map(|s| s.state);
+    if matches!(state, Ok(State::Connecting)) || (pause_first == Some(true) && matches!(state, Ok(State::Connected | State::Connecting | State::Failed))) {
         note("connect: the current tunnel isn't answering, pausing it to switch");
+        forget_tunnel();
         let _ = ipc::ask(&Request::Pause);
     }
     let config = flow::config_with_retry(&backend()?, &FileVault::open()?, &computer, server_id, &|| {
@@ -182,7 +201,7 @@ fn vpn_connect(server_id: i64) -> Result<Answer, String> {
     let config = tune::apply(&config, &exclude, dns)?;
     let server_ip = config.lines().find_map(|l| l.trim().strip_prefix("Endpoint = ")).and_then(|e| e.rsplit_once(':')).map(|(h, _)| h.trim_matches(['[', ']']).to_string());
     if let Ok(mut last) = LAST_TUNNEL.lock() {
-        *last = Some((server_ip, tune::dns_of(&config)));
+        *last = Some(LastTunnel { server_ip, dns: tune::dns_of(&config), address: tune::address_v4_of(&config), resolvers: tune::dns_v4_of(&config) });
     }
     note(&format!("connect: config ready (split ranges {}, malware DNS {}), asking the service", exclude.len(), prefs.block_malware));
     // the kill switch and what it lets through: the service checks the ranges again and enforces it
@@ -220,6 +239,8 @@ struct AccountView {
     suggested: Option<i64>,
     last_server: Option<i64>,
     error: Option<String>,
+    /// 2.1: servers this PC already has a working device for (failover tries them first). Ids only.
+    known_servers: Vec<i64>,
 }
 
 #[tauri::command(async)]
@@ -229,12 +250,13 @@ fn account_state() -> Result<AccountView, String> {
     if let Ok(http) = backend() {
         flow::refresh_if_due(&http, &vault, SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs());
     }
-    let empty = |signed_in, error| AccountView { signed_in, account: None, suggested: None, last_server, error };
+    let empty = |signed_in, error| AccountView { signed_in, account: None, suggested: None, last_server, error, known_servers: Vec::new() };
     let Some(token) = vault.session() else { return Ok(empty(false, None)) };
     match flow::account_starting_trial(&backend()?, &token) {
         Ok(account) => {
             let suggested = flow::suggested(&account.servers, last_server);
-            Ok(AccountView { signed_in: true, account: Some(account), suggested, last_server, error: None })
+            let known_servers = flow::known_servers(&account, &vault);
+            Ok(AccountView { signed_in: true, account: Some(account), suggested, last_server, error: None, known_servers })
         }
         Err(e) if e.signed_out() => {
             vault.forget_all();
@@ -244,14 +266,45 @@ fn account_state() -> Result<AccountView, String> {
     }
 }
 
-/// Smart Connect's timings: each online server's proxy, 3 requests each, all servers at once. Run while disconnected.
+/// Smart Connect's timings, all servers at once, run while disconnected: each online server's proxy (3 HTTPS requests) when the backend
+/// names one, else its endpoint (3 TCP connections to the proxy port) when this PC has had a config for it. A server this PC has a
+/// device for but whose endpoint it hasn't seen yet has it looked up (reading a device's settings creates nothing). The rest go by load.
 #[tauri::command(async)]
 fn probe_servers() -> Result<std::collections::HashMap<i64, Option<f64>>, String> {
     let vault = FileVault::open()?;
     let token = vault.session().ok_or("Sign in first.")?;
-    let account = backend()?.account(&token).map_err(|e| e.message)?;
-    let hosts: Vec<(i64, String)> = account.servers.iter().filter(|s| s.online).filter_map(|s| s.proxy_host.clone().map(|h| (s.id, h))).collect();
-    Ok(measure::probe(&hosts).into_iter().collect())
+    let http = backend()?;
+    let account = http.account(&token).map_err(|e| e.message)?;
+    let mut targets: Vec<(i64, measure::Target)> = Vec::new();
+    for s in account.servers.iter().filter(|s| s.online) {
+        let mut endpoint = vault.endpoint(s.id);
+        if s.proxy_host.is_none() && endpoint.is_none() {
+            if let Some(id) = vault.device_id(s.id).filter(|id| account.devices.iter().any(|d| d.id == *id)) {
+                if let Ok(peer) = http.peer(&token, id) {
+                    vault.save_endpoint(s.id, &peer.endpoint_host);
+                    endpoint = vault.endpoint(s.id);
+                }
+            }
+        }
+        targets.push((s.id, measure::Target { proxy: s.proxy_host.clone(), endpoint }));
+    }
+    Ok(measure::probe_targets(&targets).into_iter().collect())
+}
+
+/// One liveness probe through the tunnel this app started (see measure::tunnel_answers). None when it can't tell: no tunnel started
+/// by this run of the app, or a config without an IPv4 address or resolver. The window never counts None as a failure.
+#[tauri::command(async)]
+fn probe_tunnel() -> Option<bool> {
+    let last = LAST_TUNNEL.lock().ok().and_then(|l| l.clone())?;
+    let address = last.address?;
+    if last.resolvers.is_empty() {
+        return None;
+    }
+    let alive = measure::tunnel_answers(address, &last.resolvers);
+    if !alive {
+        note("liveness: no answer through the tunnel");
+    }
+    Some(alive)
 }
 
 #[tauri::command(async)]
@@ -262,7 +315,7 @@ fn speed_test() -> Result<measure::SpeedReport, String> {
 
 #[tauri::command(async)]
 fn leak_check() -> Result<measure::LeakReport, String> {
-    let (server_ip, dns) = LAST_TUNNEL.lock().ok().and_then(|l| l.clone()).unwrap_or((None, Vec::new()));
+    let (server_ip, dns) = LAST_TUNNEL.lock().ok().and_then(|l| l.clone()).map(|t| (t.server_ip, t.dns)).unwrap_or((None, Vec::new()));
     measure::leak_check(server_ip, &dns)
 }
 
@@ -285,6 +338,7 @@ fn cancel_sign_in() {
 /// Closes the tunnel, ends the session on the server, and forgets everything on this PC. The device stays listed under My Devices until the next sign-in replaces it.
 #[tauri::command(async)]
 fn sign_out() -> Result<(), String> {
+    forget_tunnel();
     if let Ok(status) = ipc::ask(&Request::Status) {
         if status.state != State::Disconnected {
             let _ = ipc::ask(&Request::Disconnect);
@@ -311,12 +365,64 @@ fn my_ip() -> Result<String, String> {
     backend()?.my_ip().map_err(|e| e.message)
 }
 
-/// Only these two pages: the window can't send the browser anywhere else.
+/// Tools › Support (2.1): a bug report or feedback to Price Chat, with this app's session. The page sends only the kind, the message and
+/// whether to include diagnostics; the diagnostics are put together and stripped here (kiwiclient::support), so the page can't add to them.
+#[tauri::command(async)]
+fn send_support(kind: String, message: String, include_diagnostics: bool) -> Result<(), String> {
+    support::check(&kind, &message)?;
+    let vault = FileVault::open()?;
+    let token = vault.session().ok_or("Sign in to send a report.")?;
+    let http = backend()?;
+    let diagnostics = include_diagnostics.then(|| {
+        let prefs = current_settings();
+        let options = [("Smart Connect", prefs.smart_connect), ("Failover", prefs.failover), ("Kill switch", prefs.kill_switch), ("Allow local network", prefs.allow_lan),
+                       ("Block malware", prefs.block_malware), ("Launch at startup", prefs.launch_at_startup), ("Auto-connect", prefs.auto_connect), ("Notifications", prefs.notifications)];
+        let mut facts = support::Facts {
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            options: options.iter().map(|(n, on)| (n.to_string(), *on)).collect(),
+            split_ranges: prefs.split_exclude.len(),
+            signed_in: true,
+            last_server: vault.last_server(),
+            log: settings_path().ok().and_then(|p| std::fs::read_to_string(p.with_file_name("kiwivpn.log")).ok()).unwrap_or_default(),
+            ..support::Facts::default()
+        };
+        match ipc::ask(&Request::Status) {
+            Ok(s) => {
+                facts.service = "Running".into();
+                facts.tunnel = format!("{:?}", s.state);
+                facts.handshake_age_seconds = s.handshake_age_seconds;
+                facts.tunnel_error = s.error.clone();
+                facts.kill_switch_active = s.kill_switch;
+                facts.features = s.features.clone();
+            }
+            Err(e) => {
+                facts.service = e;
+                facts.tunnel = "Unknown".into();
+            }
+        }
+        if let Ok(account) = http.account(&token) {
+            facts.known_servers = flow::known_servers(&account, &vault);
+        }
+        support::report(&facts)
+    });
+    note(&format!("support: sending a {kind} report (diagnostics {})", if include_diagnostics { "included" } else { "not included" }));
+    http.support(&token, &kind, &message, env!("CARGO_PKG_VERSION"), diagnostics.as_deref()).map_err(|e| {
+        note(&format!("support: not sent ({})", e.status));
+        if e.signed_out() {
+            flow::SIGNED_OUT.to_string()
+        } else {
+            e.message
+        }
+    })
+}
+
+/// Only these pages: the window can't send the browser anywhere else.
 #[tauri::command]
 fn open_site(page: String) -> Result<(), String> {
     match page.as_str() {
         "plans" => opener::open_in_browser(&format!("{BASE}/vpn#vpn-plans")),
         "devices" => opener::open_in_browser(&format!("{BASE}/vpn/devices")),
+        "contact" => opener::open_in_browser(&format!("{BASE}/contact")),
         _ => Err("Unknown page.".into()),
     }
 }
@@ -329,9 +435,9 @@ fn main() {
     // Opening the app again brings up the one that's running, so there's never a second window asking the service for different things.
     let builder = tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app))).plugin(tauri_plugin_notification::init());
     #[cfg(feature = "test-config")]
-    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, speed_test, leak_check]);
+    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
     #[cfg(not(feature = "test-config"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, speed_test, leak_check]);
+    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
     builder
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Kiwi VPN", true, None::<&str>)?;

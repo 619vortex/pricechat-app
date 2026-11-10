@@ -21,6 +21,16 @@ pub trait Vault {
     fn refreshed_at(&self) -> Option<u64>;
     fn save_refreshed_at(&self, seconds: u64);
     fn forget_all(&self);
+    /// The device id saved for a server, without opening its key. 2.1: lets failover know which servers need no new device.
+    fn device_id(&self, server_id: i64) -> Option<i64> {
+        self.device(server_id).map(|d| d.device_id)
+    }
+    /// A server's WireGuard endpoint host, as its last config gave it (not secret: every config for that server carries it).
+    /// Smart Connect times it when the backend gives no proxy name for the server.
+    fn endpoint(&self, _server_id: i64) -> Option<String> {
+        None
+    }
+    fn save_endpoint(&self, _server_id: i64, _host: &str) {}
 }
 
 pub const SIGNED_OUT: &str = "Please sign in again.";
@@ -75,6 +85,7 @@ pub fn config_for(backend: &dyn Backend, vault: &dyn Vault, computer: &str, serv
     if let Some(saved) = vault.device(server_id) {
         if account.devices.iter().any(|d| d.id == saved.device_id) {
             let peer = backend.peer(&token, saved.device_id).map_err(friendly)?;
+            vault.save_endpoint(server_id, &peer.endpoint_host);
             vault.save_last_server(server_id);
             return Ok(render_config(&saved.private_b64, &peer));
         }
@@ -88,6 +99,7 @@ pub fn config_for(backend: &dyn Backend, vault: &dyn Vault, computer: &str, serv
     let pair = keys::generate()?;
     let added = backend.add_device(&token, &name, server_id, &pair.public_b64).map_err(friendly)?;
     vault.save_device(server_id, added.device.id, &pair.private_b64)?;
+    vault.save_endpoint(server_id, &added.peer.endpoint_host);
     vault.save_last_server(server_id);
     Ok(render_config(&pair.private_b64, &added.peer))
 }
@@ -139,6 +151,12 @@ pub fn account_starting_trial(backend: &dyn Backend, token: &str) -> Result<Acco
     }
 }
 
+/// Online servers this PC already holds a working device for: a key saved here AND the device still listed on the account (one
+/// removed on the website no longer works). Connecting to one of these creates no device, so the device limit can't refuse it.
+pub fn known_servers(account: &Account, vault: &dyn Vault) -> Vec<i64> {
+    account.servers.iter().filter(|s| s.online).filter(|s| vault.device_id(s.id).is_some_and(|id| account.devices.iter().any(|d| d.id == id && d.server_id == s.id))).map(|s| s.id).collect()
+}
+
 /// The server to offer first: the last one used if it's still online, else the backend's recommendation, else any online one.
 pub fn suggested(servers: &[Server], last: Option<i64>) -> Option<i64> {
     let online = |id: i64| servers.iter().any(|s| s.id == id && s.online);
@@ -158,6 +176,7 @@ mod tests {
         devices: RefCell<HashMap<i64, (i64, String)>>,
         last: RefCell<Option<i64>>,
         refreshed: RefCell<Option<u64>>,
+        endpoints: RefCell<HashMap<i64, String>>,
     }
 
     impl Vault for FakeVault {
@@ -193,6 +212,12 @@ mod tests {
         fn forget_all(&self) {
             *self.session.borrow_mut() = None;
             self.devices.borrow_mut().clear();
+        }
+        fn endpoint(&self, s: i64) -> Option<String> {
+            self.endpoints.borrow().get(&s).cloned()
+        }
+        fn save_endpoint(&self, s: i64, host: &str) {
+            self.endpoints.borrow_mut().insert(s, host.into());
         }
     }
 
@@ -246,6 +271,10 @@ mod tests {
         }
         fn my_ip(&self) -> Result<String, ApiError> {
             Ok("1.2.3.4".into())
+        }
+        fn support(&self, _: &str, kind: &str, _: &str, _: &str, _: Option<&str>) -> Result<(), ApiError> {
+            self.calls.borrow_mut().push(format!("support {kind}"));
+            Ok(())
         }
     }
 
@@ -467,6 +496,34 @@ mod tests {
         assert_eq!(device_name("DESKTOP-F6OQ1KH", &s), "DESKTOP-F6OQ1KH (12)");
         assert!(device_name(&"X".repeat(200), &s).len() <= 32);
         assert_eq!(device_name("  !!", &s), "Windows PC (12)");
+    }
+
+    #[test]
+    fn known_servers_are_the_ones_with_a_saved_key_and_a_device_still_on_the_account() {
+        let mut a = account(vec![Device { id: 50, name: "PC (2)".into(), server_id: 2 }, Device { id: 60, name: "Pixel".into(), server_id: 4 }]);
+        a.servers.push(server(4, true, false));
+        a.servers.push(server(5, true, false));
+        let v = signed_in();
+        v.save_device(2, 50, "KEY2").unwrap(); // saved here and listed: known
+        v.save_device(5, 77, "KEY5").unwrap(); // saved here but removed on the website: not known
+        v.save_device(3, 51, "KEY3").unwrap(); // offline server
+        assert_eq!(known_servers(&a, &v), vec![2], "server 4's device is someone else's (the phone): no key here");
+        assert!(known_servers(&a, &FakeVault::default()).is_empty());
+    }
+
+    #[test]
+    fn connecting_to_a_known_server_creates_no_device_and_remembers_the_endpoint() {
+        let a = account(vec![Device { id: 50, name: "PC (2)".into(), server_id: 2 }]);
+        let (b, v) = (backend(Ok(a.clone())), signed_in());
+        v.save_device(2, 50, "SAVEDKEY").unwrap();
+        assert_eq!(known_servers(&a, &v), vec![2]);
+        config_with_retry(&b, &v, "PC", 2, &|| {}).unwrap();
+        assert!(!b.calls.borrow().iter().any(|c| c.starts_with("add ") || c.starts_with("delete ")), "{:?}", b.calls.borrow());
+        assert_eq!(v.endpoint(2).as_deref(), Some("2.31.133.78"));
+        // and a new device's endpoint is remembered too
+        let (b, v) = (backend(Ok(account(vec![]))), signed_in());
+        config_for(&b, &v, "PC", 2).unwrap();
+        assert_eq!(v.endpoint(2).as_deref(), Some("2.31.133.78"));
     }
 
     #[test]

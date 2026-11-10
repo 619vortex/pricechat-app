@@ -373,10 +373,18 @@ fn run(out: &str) -> Result<Report, String> {
     }
 
     kill_switch(&mut r, &cfg, &home4);
-    // the window's tests (Smart Connect, then a failover) may need two servers this run didn't keep: every slot goes back to them
     let _ = disconnect();
-    let removed = remove_own_devices(&http, &v, &token);
-    r.add("test devices given back for the window tests", "INFO", format!("{removed}"));
+
+    // 2.1 Smart Connect without proxy names: every server this run had a config for is timed by its endpoint (TCP to the proxy port)
+    let endpoint_ms: Vec<String> = servers.iter().filter_map(|s| v.endpoint(s.id).map(|e| (s, e))).map(|(s, e)| format!("#{} {e}: {}", s.id, measure::time_endpoint(&e).map(|m| format!("{m:.0} ms")).unwrap_or("no answer on 443".into()))).collect();
+    r.add("Smart Connect endpoint timings (2.1)", "INFO", if endpoint_ms.is_empty() { "no endpoint seen".into() } else { endpoint_ms.join(", ") });
+
+    // The window's tests (Smart Connect, then a failover) need up to two devices. One device this run made is KEPT, with its key in
+    // the app's store (same Windows user): failover prefers a server this PC already has a device for, so the window's switch can
+    // land on it without creating one (2.1). The other slot stays free for Smart Connect's pick. The clean-up step removes it after.
+    let keep = kept.last().map(|(k, _)| k.id);
+    let removed = remove_own_devices_except(&http, &v, &token, keep);
+    r.add("test devices given back for the window tests", "INFO", format!("{removed} removed, kept for the window's failover: {}", keep.map(|id| format!("server #{id}")).unwrap_or("none".into())));
 
     let _ = std::fs::write(out, serde_json::to_string_pretty(&r.checks).unwrap_or_default());
     Ok(r)
@@ -460,10 +468,16 @@ fn give_back(http: &Http, v: &FileVault, token: &str, server_id: i64) {
 
 /// Deletes every device named after this machine. Returns how many.
 fn remove_own_devices(http: &Http, v: &FileVault, token: &str) -> usize {
+    remove_own_devices_except(http, v, token, None)
+}
+
+/// The same, keeping this machine's device (and its saved key) for one server.
+fn remove_own_devices_except(http: &Http, v: &FileVault, token: &str, keep_server: Option<i64>) -> usize {
     let Ok(account) = http.account(token) else { return 0 };
     let me = computer();
     let mut removed = 0;
-    for d in account.devices.iter().filter(|d| !me.is_empty() && d.name.starts_with(&me)) {
+    let keep_device = keep_server.and_then(|s| v.device_id(s));
+    for d in account.devices.iter().filter(|d| !me.is_empty() && d.name.starts_with(&me) && Some(d.id) != keep_device) {
         if http.delete_device(token, d.id).is_ok() {
             v.forget_device(d.server_id);
             removed += 1;
