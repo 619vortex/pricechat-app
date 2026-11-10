@@ -72,7 +72,7 @@ export function TelegramTradingCard() {
         </form>
       )}
       <p className="muted small">Referral: {d.referral.codes.join(", ")} · <a href={d.referral.url} target="_blank" rel="noreferrer">{d.referral.url}</a>
-        {" "}· Banter gate on signal ENTER: {s.gate_signal_enter ? "on" : "off"}{s.global_paused ? " · all new signals stopped" : ""} · previews waiting: {d.pending_previews}</p>
+        {" "}· Referral gate on signal ENTER: {s.gate_signal_enter ? "on" : "off"}{s.global_paused ? " · all new signals stopped" : ""} · previews waiting: {d.pending_previews}</p>
       <div className="small">{Object.entries({ ...d.activity, ...d.failures }).map(([k, n]) => (
         <Badge key={k} tone={k in d.failures ? "warn" : "neutral"}>{LABEL[k] ?? k}: {n}</Badge>
       ))}</div>

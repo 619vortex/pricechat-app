@@ -1,4 +1,4 @@
-"""Trading on Hyperliquid from Telegram, for the Banter group: /market, /open, /enter, /positions, /pnl, /close, /closeall,
+"""Trading on Hyperliquid from Telegram, for Price Chat members: /market, /open, /enter, /positions, /pnl, /close, /closeall,
 /sl, /tp, /orders, /cancel, /balance and /settings. bot.py routes the commands here; the trading itself is execution.py's,
 with every one of its safety rules (one position per coin, deterministic order ids, fills only as the exchange reports them,
 an exchange-side stop on every position or an immediate close, STOP NEW TRADES).
@@ -6,7 +6,7 @@ an exchange-side stop on every position or an immediate close, STOP NEW TRADES).
 Rules added for Telegram:
   · who: new exposure (/open, and while `telegram_trading.gate_signal_enter` is on, its default, also /enter and a signal's
     ENTER button) only for members whose verified wallet Hyperliquid records as
-    referred with the Banter group's code (tradingbot.service.codes). Closing, moving a stop closer, cancelling a target,
+    referred with Price Chat's Hyperliquid referral code (tradingbot.service.codes). Closing, moving a stop closer, cancelling a target,
     pausing and reading their own account always work, so nobody can be left unable to get out of a position;
   · where: account commands only in the member's private chat with the bot. In a group the bot says so and sends nothing
     private there;
@@ -58,7 +58,7 @@ MIN_NOTIONAL = 10.0  # Hyperliquid's minimum order value
 LIQ_BUFFER = 0.003  # a stop must trigger at least 0.3% before the estimated liquidation price
 LIMIT_MAX_AWAY = 0.05  # a limit (worst accepted fill) more than 5% from the price is refused as a probable typo
 COMMANDS = {"/market", "/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet"}
-HELP = ("<b>Trading (private chat, Banter group)</b>\n"
+HELP = ("<b>Trading on Hyperliquid (here or in a DM)</b>\n"
         "/market BTC: price, funding, open interest, max leverage\n"
         "/open BTC long 5x: market order, your full margin limit · /open BTC long 100 5x tp 79k sl 60k: $100 margin, with targets\n"
         "/enter: reply to a Price Chat signal to trade it\n"
@@ -86,17 +86,21 @@ def entry_gate(db: Session, member: Member) -> str | None:
     s = earn_settings(db)
     w = wallet_of(db, member)
     accepted = codes(s)
-    join = f" New to Hyperliquid? Sign up with the Banter link: {s.referral_url}" if s.referral_url else ""
+    join = f" New to Hyperliquid? Sign up with Price Chat's link (4% off fees): {s.referral_url}" if s.referral_url else ""
     if w is None:
-        return (f"Trading from Telegram is for the Banter group. Connect and verify your Hyperliquid wallet at {SITE}/earn first "
+        return (f"To trade from Telegram, first connect and verify your Hyperliquid wallet at {SITE}/earn "
                 f"(your wallet signs a message; no keys are ever shared).{join}")
+    from app.tradingbot import affiliate
+
+    if (w.address or "").lower() == affiliate.WALLET.lower():  # the referral's own wallet (the owner): it can't be referred by itself
+        return None
     seen = (w.referral_code_seen or "").upper()
     if w.referral_status == "verified" and seen in accepted:
         return None
     if w.referral_status in ("pending", "unverified"):
         return (f"Hyperliquid hasn't confirmed your wallet's referral code yet. Recheck it at {SITE}/earn, then try again. "
-                f"Trading from Telegram is for accounts that joined with the Banter code ({accepted[0]}).{join}")
-    return (f"Trading from Telegram is only for Hyperliquid accounts that joined with the Banter group's referral code "
+                f"Trading from Telegram is for Hyperliquid accounts that joined with Price Chat's referral code ({accepted[0]}).{join}")
+    return (f"Trading from Telegram is only for Hyperliquid accounts that joined with Price Chat's referral code "
             f"({accepted[0]}). Hyperliquid's record for your wallet shows {seen or 'no referral code'}, so new trades are off. "
             f"Closing and managing any position you already have still works.")
 
@@ -157,7 +161,7 @@ def entry_off(db: Session) -> str | None:
 
 
 def gate_signal_enter(db: Session) -> bool:
-    """Does the Banter referral gate also apply to signal entries from Telegram (a signal's ENTER button and /enter)? On unless
+    """Does the Price Chat referral gate also apply to signal entries from Telegram (a signal's ENTER button and /enter)? On unless
     the owner sets `telegram_trading.gate_signal_enter: false` (Admin → Trading OS, strategies JSON). The website's ENTER is
     never gated. Manual /open is always gated."""
     cfg = (signals.settings(db).strategies or {}).get("telegram_trading") or {}
@@ -617,7 +621,7 @@ def mainnet_preview(db: Session, member: Member, req: OpenRequest, ex: Any = Non
                          "UNKNOWN": "couldn't confirm your API wallet with Hyperliquid"}.get(agent, f"API wallet {agent}"))
     gate = entry_gate(db, member)
     if gate:
-        refusals.append("the Banter referral isn't verified on your wallet")
+        refusals.append("Price Chat's Hyperliquid referral isn't verified on your wallet")
     lines = [PREVIEW_ONLY, f"<b>{esc(p.coin)} {p.side}</b> · {acc.master_address[:6]}…{acc.master_address[-4:]} · balance ${equity:,.2f}", ""]
     if p.size > 0:
         lines += [(f"Entry at {f(p.limit_px)} or better (limit)" if p.limit_px else f"Entry ≈ {f(p.entry)} (market)"),
@@ -680,7 +684,7 @@ def mainnet_status(db: Session, member: Member) -> str:
                + (f" · valid until {datetime.fromtimestamp(int(rec['validUntil']) / 1000, tz=timezone.utc):%Y-%m-%d}" if rec and rec.get("validUntil") else ""))
     out.append("✅ LIVE enabled on the website" if acc.live_enabled_at else "❌ LIVE not enabled (website, after the pre-live checks)")
     gate = entry_gate(db, member)
-    out.append("✅ Banter referral verified on Hyperliquid" if gate is None else "❌ Banter referral not verified: /settings shows why")
+    out.append("✅ Price Chat referral verified on Hyperliquid" if gate is None else "❌ Price Chat referral not verified: /settings shows why")
     fees = _fees(a)
     if fees:
         out.append(f"Fees: taker {fees['taker'] * 100:.4f}% · maker {fees['maker'] * 100:.4f}%"
@@ -799,7 +803,7 @@ def settings_text(db: Session, member: Member, acc: TrAccount) -> str:
                       f"Daily loss limit ${acc.daily_loss_limit_usd:,.2f} · /settings dailyloss 20",
                       "Mode: /settings mode paper · /settings mode testnet (live is switched on at the website)",
                       f"New trades: {'STOPPED (/resume)' if acc.paused else 'on (/pause)'}",
-                      f"Telegram trading: {'open (Banter referral verified)' if gate is None else 'not available: ' + esc(gate)}",
+                      f"Telegram trading: {'open (Price Chat referral verified)' if gate is None else 'not available: ' + esc(gate)}",
                       f"Mainnet orders from /open: {'on' if telegram_live(db) else 'off (owner approval)'}"])
 
 

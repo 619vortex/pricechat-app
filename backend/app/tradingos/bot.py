@@ -57,7 +57,7 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 🤖 <b>Trading bot</b> (here or DM me)
 /status · /connect · /positions · /pnl · /trades
 /risk · /auto · /pause · /resume · /close
-/market BTC · /open BTC long 100 5x · /enter (reply to a signal) · /balance · /orders
+/market BTC · /open BTC long 5x · /long BTC 5x · /short ETH 100 3x tp 3k · /enter (reply to a signal) · /balance · /orders
 /sl · /tp · /cancel · /closeall · /settings (here or in a DM; buttons work only for whoever asked)
 /preview BTC long 100 5x · /mainnet (mainnet preview and readiness, read-only)
 
@@ -462,6 +462,9 @@ async def _handle_command(db: Session, client: Any, chat_id: int, user_id: int, 
     db.commit()  # (a first run creates settings rows): no write transaction waits on Telegram or an exchange below
     parts = text.strip().split()
     cmd = parts[0].split("@")[0].lower()
+    if cmd in ("/long", "/short", "/buy", "/sell") and len(parts) > 1:  # "/long btc 20x" = "/open btc long 20x"
+        parts = ["/open", parts[1], "long" if cmd in ("/long", "/buy") else "short", *parts[2:]]
+        cmd = "/open"
     # market commands keep the words as typed (a Solana contract address is case-sensitive); the parsers ignore case
     args = parts[1:] if cmd in MARKET_ARGS else [p.upper() for p in parts[1:]]
     brief = cmd == "/fc"  # "fc sui": the chart and its read, no signal (that's /signal sui)
@@ -672,8 +675,8 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
     if cmd == "/connect":
         join = tracked_url(db, "start")
         return ("<b>Connect Hyperliquid</b> (2 minutes)\n"
-                + (f"0. New to Hyperliquid? Sign up with the Banter link first: {join} (Telegram trading is for accounts "
-                   "Hyperliquid records with the Banter code; we check Hyperliquid's own record)\n" if join else "")
+                + (f"0. New to Hyperliquid? Sign up with Price Chat's link first (4% off fees): {join} (Telegram trading is for "
+                   "accounts Hyperliquid records with Price Chat's referral code; we check Hyperliquid's own record)\n" if join else "")
                 + f"1. {SITE}/earn → <b>Connect Hyperliquid API</b>\n"
                 "2. On Hyperliquid › API, create an API wallet and authorize it\n"
                 "3. Paste its key on the website. You stay in PAPER until you turn on live.\n\n" + SAFETY)
@@ -1281,7 +1284,7 @@ async def _handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None
     if action == "enter":
         from app.tradingos import tgtrade
 
-        # the Banter group's referral, from Hyperliquid's own record; owner setting telegram_trading.gate_signal_enter (default on)
+        # Price Chat's referral, from Hyperliquid's own record; owner setting telegram_trading.gate_signal_enter (default on)
         from app.tradingos import execution as _ex
 
         if tgtrade.killed(db):

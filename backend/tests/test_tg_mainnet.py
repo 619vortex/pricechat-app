@@ -143,14 +143,14 @@ def test_preview_lists_every_missing_mainnet_step(db: Session, md: FakeMD, monke
     acc.master_address = db.scalar(select(TbWallet.address).where(TbWallet.member_id == m.id))
     db.commit()
     out = say(db, TG(), 2003, "/preview SOL short 50 2x")
-    assert "LIVE isn't enabled" in out and "no mainnet API wallet" in out and "Banter referral isn't verified" in out
+    assert "LIVE isn't enabled" in out and "no mainnet API wallet" in out and "Price Chat's Hyperliquid referral isn't verified" in out
 
 
 def test_mainnet_readiness_reads_everything_and_signs_nothing(db: Session, md: FakeMD) -> None:
     live_member(db, "2004")
     out = say(db, TG(), 2004, "/mainnet")
     for line in ("Hyperliquid mainnet reachable", "trading balance $1,000.00", "API wallet approved and listed", "LIVE enabled",
-                 "Banter referral verified", "taker 0.0450%", "Telegram mainnet execution: OFF"):
+                 "Price Chat referral verified", "taker 0.0450%", "Telegram mainnet execution: OFF"):
         assert line in out, line
     assert set(FakeReader.built) <= {"LIVE"}
 

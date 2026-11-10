@@ -123,6 +123,28 @@ def test_open_without_an_amount_is_a_market_order_at_the_full_margin_limit_and_p
     assert isinstance(tgtrade.parse_open(["BTC", "long"]), str) and isinstance(tgtrade.parse_open(["BTC", "long", "abc"]), str)
 
 
+def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Session, md: FakeMD) -> None:
+    from app.tradingbot import affiliate
+
+    tg = TG()
+    kiwi(db, 4, "851")  # no wallet yet: told how to connect, in Price Chat's words
+    out = say(db, tg, 851, "/open btc long 20x")
+    assert "connect and verify your Hyperliquid wallet" in out and "Banter" not in out
+    banter(db, "852")
+    say(db, tg, 852, "/long btc 3x")  # = /open btc long 3x: a real preview with Confirm, not a pitch
+    it = db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first()
+    assert it is not None and it.plan["side"] == "LONG" and it.plan["request"]["margin"] is not None
+    assert any(b and "Confirm" in str(b) for b in tg.buttons[-2:])
+    say(db, tg, 852, "/short eth 50 2x")
+    assert db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first().plan["side"] == "SHORT"
+    owner = kiwi(db, 4, "853")  # the referral's own wallet can't be "referred" by itself: the owner trades too
+    db.add(TbWallet(member_id=owner.id, address=affiliate.WALLET, verified_at=utcnow(), referral_status="unverified", referral_code_seen=None))
+    db.commit()
+    assert tgtrade.entry_gate(db, owner) is None
+    for text in (tgtrade.HELP, bot.HELP_TEXT if hasattr(bot, "HELP_TEXT") else ""):
+        assert "Banter group" not in text
+
+
 def test_signal_numbers_come_from_the_command_or_the_card_replied_to() -> None:
     assert tgtrade.signal_from(["#012"]) == 12 and tgtrade.signal_from(["7"]) == 7
     assert tgtrade.signal_from([], "🟢 $SOL LONG · #012\n\n🎯 Entry 99 – 101") == 12
@@ -184,7 +206,7 @@ def test_only_the_banter_referral_opens_new_trades(db: Session, md: FakeMD) -> N
     kiwi(db, 4, "801")  # no verified wallet
     assert "verify your Hyperliquid wallet" in say(db, tg, 801, "/open BTC long 50 3x")
     banter(db, "802", code="SOMEONE")
-    assert "Banter group's referral code" in say(db, tg, 802, "/open BTC long 50 3x")
+    assert "Price Chat's referral code" in say(db, tg, 802, "/open BTC long 50 3x")
     banter(db, "803", code="KLGXFMNI")  # the code Hyperliquid records for the same referrer is accepted
     say(db, tg, 803, "/open BTC long 50 3x")
     assert db.scalar(select(TrIntent)) is not None
@@ -594,7 +616,7 @@ def test_TR5_the_banter_gate_on_signal_enter_is_an_owner_setting_on_by_default(d
     db.commit()
     press(db, tg, 997, f"sig:{sig.id}:enter")
     assert db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()  # ENTER works as before the branch
-    assert "Banter group's referral code" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
+    assert "Price Chat's referral code" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
 
 
 def test_TR16_a_different_account_key_is_refused_while_testnet_positions_are_open(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
