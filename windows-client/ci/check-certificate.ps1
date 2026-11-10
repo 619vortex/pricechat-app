@@ -54,7 +54,7 @@ Write-Host "Credential info:`n$shown"
 # The certificate itself: CodeSignTool only prints a summary, so ask SSL.com's eSigner (CSC) API directly, the same sign-in
 # CodeSignTool uses (its own client ID, from its settings file). credentials/info only reads; it signs nothing.
 $props = @{}
-Get-Content (Join-Path $Tool "conf\code_sign_tool.properties") | ForEach-Object { if ($_ -match "^\s*([A-Z_]+)\s*=\s*(.+?)\s*$") { $props[$Matches[1]] = $Matches[2] } }
+Get-Content (Join-Path $Tool "conf\code_sign_tool.properties") | ForEach-Object { if ($_ -match "^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$") { $props[$Matches[1]] = $Matches[2] } }
 $tok = Invoke-RestMethod -Method Post -Uri $props["OAUTH2_ENDPOINT"] -ContentType "application/json" -Body (@{
     client_id = $props["CLIENT_ID"]; grant_type = "password"; username = $env:ES_USERNAME; password = $env:ES_PASSWORD } | ConvertTo-Json)
 Write-Host "::add-mask::$($tok.access_token)"
