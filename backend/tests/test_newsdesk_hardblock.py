@@ -105,3 +105,106 @@ async def test_the_decisions_record_says_why_each_candidate_went_or_did_not(db: 
     got = {d["headline"]: d for d in editorial.decisions(db, SLOT + timedelta(hours=1))}
     assert got["A"]["decision"] == "selected" and got["OIL (WTI) SLIDES"]["decision"] == "merged (repeat)" and got["C"]["decision"] == "waiting"
     assert "same story" in got["OIL (WTI) SLIDES"]["why"] and "under the bar" in got["C"]["why"]
+
+
+# --- held eligibility and breaking news (owner, 2026-11-10: important stories were losing their scores while they waited for a slot) --
+
+
+def _news(db: Session, key: str, title: str, score: float, outlets: list[str], *, age_min: float = 20, now: Any = None, peak: float | None = None,
+          evidence: str = "two outlets", topic: str = "geopolitics", importance: bool = True) -> NdEvent:
+    now = now or SLOT
+    facts: dict[str, Any] = {"told": title, "published_at": (now - timedelta(minutes=age_min)).isoformat(), "peak": peak or score}
+    if importance:
+        facts["importance"] = {"kind": topic, "why": "test"}
+    ev = NdEvent(key=key, kind="news", title=title, headline=title.upper(), summary="", topic=topic, evidence=evidence, category="politics",
+                 virality=score, parts={"significance": 20}, status="candidate", first_seen=now - timedelta(minutes=age_min),
+                 expires_at=now + timedelta(hours=4), facts=facts, sources=[{"name": o, "url": f"https://example.org/{o}/{key}"} for o in outlets])
+    db.add(ev)
+    db.commit()
+    return ev
+
+
+def test_a_verified_important_story_keeps_its_best_score_fading_a_point_an_hour() -> None:
+    p = events.policy({})
+    ev = NdEvent(key="h", kind="news", topic="geopolitics", evidence="two outlets", virality=43, title="Ukraine peace talks resume",
+                 sources=[{"name": "CNBC"}, {"name": "Bloomberg"}], facts={"importance": {"kind": "geopolitics"}, "peak": 67,
+                                                                            "published_at": (SLOT - timedelta(hours=7)).isoformat()})
+    assert events.held_score(ev, SLOT, p) == pytest.approx(64)  # 67, three hours past the first 4 h interval
+    ev.facts = {**ev.facts, "published_at": (SLOT - timedelta(hours=11)).isoformat()}
+    assert events.held_score(ev, SLOT, p) == 43  # past the 10 h hold: its own current score
+    ev.facts = {**ev.facts, "published_at": (SLOT - timedelta(hours=7)).isoformat()}
+    ev.sources = [{"name": "CNBC"}]
+    assert events.held_score(ev, SLOT, p) == 43  # one outlet: not held
+
+
+def test_a_held_story_is_not_expired_at_six_hours(db: Session) -> None:
+    ev = _news(db, "x", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=7 * 60, peak=67)
+    ev.expires_at = SLOT - timedelta(hours=1)  # its 6 h news window is over
+    db.commit()
+    events._expire(db, [ev], SLOT, events.policy({}))
+    assert ev.status == "candidate" and ev.expires_at > SLOT
+    single = _news(db, "y", "Something reported once", 43, ["CNBC"], age_min=7 * 60, peak=67, evidence="attributed")
+    single.expires_at = SLOT - timedelta(hours=1)
+    events._expire(db, [single], SLOT, events.policy({}))
+    assert single.status == "missed"
+
+
+def test_the_held_story_takes_the_slot_it_would_have_missed(db: Session) -> None:
+    ev = _news(db, "z", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=7 * 60, peak=67)
+    got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
+    assert got is not None and got.id == ev.id
+
+
+BETWEEN = SLOT + timedelta(hours=2)  # 06:00 Dubai: no slot open, the next is two hours away
+
+
+def test_major_breaking_news_confirmed_twice_goes_at_once(db: Session) -> None:
+    ev = _news(db, "b1", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    got = events.release(db, BETWEEN, events.policy({}))
+    assert got is not None and got.id == ev.id and got.slot == "breaking" and "confirmed by 2 outlets" in got.why
+
+
+@pytest.mark.parametrize(("why", "kw"), [
+    ("one outlet", {"outlets": ["Financial Times"], "evidence": "attributed"}),
+    ("not major", {"score": 60}),
+    ("not breaking any more", {"age_min": 120}),
+    ("only a price story", {"importance": False, "topic": "move"}),
+])
+def test_breaking_needs_two_outlets_a_major_score_freshness_and_importance(db: Session, why: str, kw: dict[str, Any]) -> None:
+    args = {"outlets": ["Financial Times", "Bloomberg"], "score": 72, "age_min": 25, "evidence": "two outlets", "importance": True, "topic": "geopolitics"}
+    args.update(kw)
+    _news(db, "b2", "Missile strike hits Saudi oil terminal", args.pop("score"), args.pop("outlets"), now=BETWEEN, **args)
+    assert events.release(db, BETWEEN, events.policy({})) is None, why
+
+
+def test_breaking_waits_for_the_slot_when_one_is_near_and_never_crowds_another_post(db: Session) -> None:
+    near = SLOT + timedelta(hours=3, minutes=30)  # 30 minutes before the next slot: the slot takes it
+    _news(db, "b3", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=near)
+    assert events.release(db, near, events.policy({})) is None
+    db.query(NdEvent).delete()
+    db.add(NdEvent(key="prev", kind="news", title="Fed holds rates", headline="FED HOLDS RATES", topic="macro", evidence="official", status="released",
+                   slot="slot", released_at=BETWEEN - timedelta(minutes=60), facts={}))
+    db.commit()
+    _news(db, "b4", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    assert events.release(db, BETWEEN, events.policy({})) is None  # 60 minutes after the last post: under the 90-minute gap
+
+
+def test_at_most_two_breaking_posts_a_day(db: Session) -> None:
+    for i in range(2):
+        db.add(NdEvent(key=f"br{i}", kind="news", title=f"Earlier breaking {i}", headline=f"EARLIER BREAKING {i}", topic="hack", evidence="two outlets",
+                       status="released", slot="breaking", released_at=BETWEEN - timedelta(hours=3 + i * 3), facts={}))
+    db.commit()
+    _news(db, "b5", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    assert events.release(db, BETWEEN, events.policy({})) is None
+
+
+def test_breaking_never_repeats_a_story_already_out(db: Session) -> None:
+    old = NdEvent(key="o", kind="news", title="Missile strike hits Saudi oil terminal at Ras Tanura", headline="MISSILE STRIKE HITS SAUDI OIL TERMINAL",
+                  topic="geopolitics", evidence="two outlets", status="released", slot="slot", released_at=BETWEEN - timedelta(hours=3), facts={})
+    db.add(old)
+    db.commit()
+    from app.newsdesk import editorial as ed
+    ed.stamp(old, old.released_at)
+    db.commit()
+    _news(db, "b6", "Missile strike hits Saudi oil terminal, Saudi Aramco says", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    assert events.release(db, BETWEEN, events.policy({})) is None

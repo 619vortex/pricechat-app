@@ -125,13 +125,13 @@ async def test_a_coin_the_two_price_sources_disagree_on_is_left_out_and_thin_dat
     assert released(db) == []  # nothing made up to fill the slot
 
 
-async def test_a_story_under_the_bar_never_goes_out_and_the_slot_falls_back_to_the_market_check(db: Session) -> None:
+async def test_a_verified_important_story_held_five_hours_still_takes_the_slot_instead_of_a_market_check(db: Session) -> None:
+    # owner, 2026-11-10: important stories were fading below the bar while they waited. A hack confirmed by two outlets, five hours old,
+    # keeps its best score (less a point an hour past the first slot interval) and goes, where it used to lose the slot to a market check.
     verified(db, "Bybaz exchange says hackers drained $40 million from its hot wallet", now=SLOT, hours=5)
     await decide(db, SLOT + timedelta(minutes=1))
     out = released(db)
-    assert [e.kind for e in out] == ["recap"]
-    cand = db.scalar(select(NdEvent).where(NdEvent.kind == "news"))
-    assert cand is not None and cand.status == "candidate" and "under the bar of 56" in cand.why
+    assert [e.kind for e in out] == ["news"] and "Bybaz" in out[0].title
 
 
 def test_the_brief_says_what_the_market_did_and_explains_negative_funding() -> None:

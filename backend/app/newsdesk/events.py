@@ -42,6 +42,17 @@ class Policy:
     window_hours: int = 6
     regular_gap: timedelta = timedelta(hours=3)
     regular_bar: int = 56  # the lowest a regular post may score, reached late in its window
+    # owner, 2026-11-10: important stories were losing their scores while they waited for a slot (Ukraine talks 67 -> 43, Saudi pipeline
+    # 56 -> 31). Verified important news (verified_important) keeps its eligibility up to hold_hours, its best score fading hold_decay a
+    # point an hour after the first slot interval, and is rechecked (significance, repeats, diversity, the checks) when its slot comes.
+    hold_hours: timedelta = timedelta(hours=10)
+    hold_decay: float = 1.0
+    # major breaking news, confirmed by two or more independent credible outlets, goes at once instead of waiting for a slot
+    breaking_bar: int = 66  # its score now (fresh), not a remembered best
+    breaking_max_age: timedelta = timedelta(minutes=90)  # from first publication: breaking means it just happened
+    breaking_per_day: int = 2
+    breaking_gap: timedelta = timedelta(minutes=90)  # since the last post of any kind
+    breaking_before_slot: timedelta = timedelta(minutes=45)  # this close to a slot, the slot takes it
     opening_bar: int = 64  # what a regular post must score at the start of a window: early on, something better may still come
     extra_bar: int = 80
     extra_per_day: int = 3
@@ -91,12 +102,37 @@ STRONG = ("official", "two outlets", "price data", "exchange data")
 # Freshness always decides between candidates.
 
 
+CREDIBLE = ("official", "two outlets")
+# important enough to be held for a later slot or to break between slots: verified significance (geopolitics, regulation, mega-cap
+# corporate, institutions, flows, macro data) or a chaos topic. A story only about a price moving, or a whale, is not.
+IMPORTANT_TOPICS = {"hack", "scam", "failure", "controversy", "macro", "etf", "flows", "geopolitics", "regulation", "corporate", "structure"}
+
+
+def outlets_of(ev: NdEvent) -> set[str]:
+    """Distinct outlets reporting it (one outlet seen through two of its feeds counts once)."""
+    return {str(s.get("name") or "").strip().lower() for s in ev.sources or []} - {""}
+
+
+def verified_important(ev: NdEvent) -> bool:
+    """An important news story independently confirmed by at least two different credible outlets (the desk's curated feeds)."""
+    if ev.kind not in ("news", "update") or ev.evidence not in CREDIBLE or len(outlets_of(ev)) < 2:
+        return False
+    return bool((ev.facts or {}).get("importance")) or (ev.topic or "") in IMPORTANT_TOPICS
+
+
 def held_score(ev: NdEvent, now: datetime, p: Policy) -> float:
+    """What a candidate stands at for the bar. A story's best score counts for one slot interval; verified important news keeps it up
+    to hold_hours, fading hold_decay a point per hour after that interval. Freshness always decides the ranking between candidates."""
     if ev.kind == "market":
         return float(ev.virality)
     interval = 24 * 60 / max(1, len(p.slot_hours))
     peak = float((ev.facts or {}).get("peak") or 0)
-    return max(float(ev.virality), peak) if _age(ev, now) <= interval else float(ev.virality)
+    age = _age(ev, now)
+    if age <= interval:
+        return max(float(ev.virality), peak)
+    if verified_important(ev) and age <= p.hold_hours.total_seconds() / 60:
+        return max(float(ev.virality), peak - p.hold_decay * (age - interval) / 60)
+    return float(ev.virality)
 RELEASED = "released"
 FAMILIES = ({"hack", "scam", "failure"}, {"controversy"})  # Bybaz hacked, then Bybaz halts withdrawals: one story
 ESCALATE = re.compile(r"\b(lazarus|north korea\w*|behind the|blamed?|attribut\w+|(?:reopen|resum)\w* withdrawals|outflows|refund\w*|arrest\w*|charged|indict\w*|bankrupt\w*|insolven\w*|(?:halt|paus|suspend|freez)\w* (?:all )?withdrawals|seiz\w+|frozen|confirms?|confirmed|"
@@ -323,7 +359,7 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     adj = engagement.adjustments(db, now)
     recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=72))))
     out = {"stories": 0, "markets": 0, "updates": 0, "released": None}
-    _expire(db, recent, now)
+    _expire(db, recent, now, p)
     # stories
     rows = list(db.scalars(select(NdStory).where(NdStory.created_at >= now - timedelta(hours=36))))
     ready, held = chaos.candidates(rows, quotes, now, max_age=p.news_ttl, categories=categories)
@@ -377,9 +413,12 @@ def important(held: list[chaos.Verdict], rows: list[NdStory], now: datetime) -> 
     return out
 
 
-def _expire(db: Session, recent: list[NdEvent], now: datetime) -> None:
+def _expire(db: Session, recent: list[NdEvent], now: datetime, p: Policy = POLICY) -> None:
     for e in recent:
         if e.status == "candidate" and e.expires_at is not None and _utc(e.expires_at, now) <= now:
+            if verified_important(e) and _age(e, now) < p.hold_hours.total_seconds() / 60:
+                e.expires_at = now + p.hold_hours - timedelta(minutes=_age(e, now))  # held: eligible until hold_hours after it broke
+                continue
             e.status = "missed"
             e.why = e.why or "no slot before it went stale"
 
@@ -664,8 +703,8 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
     if slot is None or slot_filled(db, slot, p) is not None:
         nxt = slot_label(next_slot(now, p))
         for ev in waiting:
-            ev.why = f"waiting for the next slot ({nxt} Dubai)" if ev.virality >= p.regular_bar else f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
-        return None
+            ev.why = f"waiting for the next slot ({nxt} Dubai)" if held_score(ev, now, p) >= p.regular_bar else f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
+        return _release_breaking(db, now, p, out, waiting)
 
     covered = editorial.coverage(db, now)
 
@@ -695,6 +734,10 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         if standing < p.regular_bar:
             ev.why = f"scores {ev.virality:g}, under the bar of {p.regular_bar}"
             continue
+        if _age(ev, now) > 24 * 60 / max(1, len(p.slot_hours)) and ev.kind == "news" and not (ev.facts or {}).get("importance") \
+                and (ev.topic or "") not in IMPORTANT_TOPICS and editorial.significance(ev.title or "", ev.summary or "") is None:
+            ev.why = "held past one slot interval, but no longer reads as important"  # the recheck before a held story goes
+            continue
         if ev.kind == "market" and ev.virality < p.market_bar:
             ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot"
             continue
@@ -722,6 +765,48 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
                   + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
         ev.x_status = ev.tg_status = "pending"
         logger.info("newsdesk events: released #%s for the %s Dubai slot [%s %s]: %s", ev.id, slot_label(slot), int(ev.virality), ev.evidence, ev.headline[:100])
+        return ev
+    return None
+
+
+def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent], waiting: list[NdEvent]) -> NdEvent | None:
+    """Between slots: major breaking news goes at once. Verified important (two or more independent credible outlets), first published
+    within breaking_max_age, scoring breaking_bar now, and every rule a slot post meets (repeats, diversity, the checks). At most
+    breaking_per_day, never within breaking_gap of another post, and never just before a slot (the slot takes it)."""
+    if next_slot(now, p) - now < p.breaking_before_slot:
+        return None
+    day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
+    if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
+        return None
+    last = max((_utc(e.released_at, now) for e in day), default=None)
+    if last is not None and now - last < p.breaking_gap:
+        return None
+    covered = editorial.coverage(db, now)
+    for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
+        if ev.kind not in ("news", "update") or ev.virality < p.breaking_bar or not verified_important(ev):
+            continue
+        if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
+            continue
+        if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1]:
+            continue
+        if ev.kind == "update":
+            parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
+            if parent is None or parent.status != RELEASED:
+                continue
+        f = ev.facts or {}
+        label = brief.UPDATE if ev.kind == "update" else virality.label_for(int(ev.virality), topic=ev.topic, strong=True, age_minutes=_age(ev, now), risk=bool(f.get("risk")))
+        problem = preflight(ev, label, now)
+        if problem:
+            ev.status, ev.why = "rejected", f"failed the checks: {problem}"
+            continue
+        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, "breaking", now, label
+        editorial.stamp(ev, now)
+        n = len(outlets_of(ev))
+        ev.why = (f"breaking: scores {ev.virality:g} ({virality.describe(ev.parts or {})}), confirmed by {n} outlets, {int(_age(ev, now))} min old; "
+                  f"posted now instead of waiting for the {slot_label(next_slot(now, p))} Dubai slot"
+                  + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
+        ev.x_status = ev.tg_status = "pending"
+        logger.info("newsdesk events: released #%s as BREAKING [%s %s, %d outlets]: %s", ev.id, int(ev.virality), ev.evidence, n, ev.headline[:100])
         return ev
     return None
 
