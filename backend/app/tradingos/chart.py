@@ -8,6 +8,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app import price_axis
 from app.tradingos.indicators import ema
 from app.tradingos.market import Candle, fmt_price
 
@@ -33,18 +34,19 @@ def render(candles: list[Candle], title: str, entry: tuple[float, float] | None 
     levels = [x for x in (stop, target, *(entry or ())) if x]
     lo = min(min(c.l for c in candles), *levels) if levels else min(c.l for c in candles)
     hi = max(max(c.h for c in candles), *levels) if levels else max(c.h for c in candles)
-    span = (hi - lo) or hi * 0.01
-    lo, hi = lo - span * 0.05, hi + span * 0.05
+    ax = price_axis.axis(lo, hi, pad=0.05)  # log past a phi (1.618x) range, else linear: never a setting
+    lo, hi = ax.lo, ax.hi
     x0, x1, y0, y1 = PAD_L, W - PAD_R, PAD_T, H - PAD_B
-    y = lambda p: y1 - (p - lo) / (hi - lo) * (y1 - y0)  # noqa: E731
+    y = lambda p: y1 - ax.frac(p) * (y1 - y0)  # noqa: E731
     step = (x1 - x0) / len(candles)
 
     # grid + price axis
-    for i in range(6):
-        p = lo + (hi - lo) * i / 5
+    for p in ax.ticks(6):
         yy = y(p)
         d.line([(x0, yy), (x1, yy)], fill=GRID)
         d.text((x1 + 8, yy - 8), fmt_price(p), fill=MUTED, font=_font(15))
+    if ax.log:
+        d.text((x1 + 8, y0 - 30), "LOG SCALE", fill=MUTED, font=_font(13))
 
     # entry zone / stop / target
     if entry:
@@ -194,15 +196,16 @@ def render_study(candles: list[Candle], title: str, subtitle: str, *, show: int,
             lo, hi = min(lo, b[2]), max(hi, b[1])
     if plan is not None:  # the whole plan stays in view
         lo, hi = min(lo, plan.stop, plan.target, *plan.entry), max(hi, plan.stop, plan.target, *plan.entry)
-    span = (hi - lo) or hi * 0.01
-    lo, hi = lo - span * 0.04, hi + span * 0.04
+    ax = price_axis.axis(lo, hi, pad=0.04)  # log past a phi (1.618x) range, else linear: never a setting
+    lo, hi = ax.lo, ax.hi
     py0, py1 = top_pad, top_pad + price_h
 
     def y(p: float) -> float:
-        return py1 - (p - lo) / (hi - lo) * (py1 - py0)
+        return py1 - ax.frac(p) * (py1 - py0)
 
-    for i in range(6):
-        p = lo + (hi - lo) * i / 5
+    if ax.log:
+        d.text((w - PAD_R + 8, py0 - 30), "LOG SCALE", fill=MUTED, font=_font(14))
+    for p in ax.ticks(6):
         d.line([(x0, y(p)), (xr + depth_w, y(p))], fill=GRID)
         d.text((w - PAD_R + 8, y(p) - 9), fmt_price(p), fill=MUTED, font=_font(17))
     if heat:  # recorded resting liquidity: each snapshot paints its bins until the next one (at most 6 minutes)
