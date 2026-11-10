@@ -67,7 +67,10 @@ export const cancelSignIn = () => invoke<void>("cancel_sign_in");
 export const signOut = () => invoke<void>("sign_out");
 export const startTrial = () => invoke<void>("start_trial");
 export const myIp = () => invoke<string>("my_ip");
-export const openSite = (page: "plans" | "devices") => invoke<void>("open_site", { page });
+export const openSite = (page: "plans" | "devices" | "contact") => invoke<void>("open_site", { page });
+export type SupportKind = "bug" | "feedback";
+/** Tools › Support (2.1). The Rust side builds and strips the diagnostics; the page only says whether to include them. */
+export const sendSupport = (kind: SupportKind, message: string, includeDiagnostics: boolean) => invoke<void>("send_support", { kind, message, includeDiagnostics });
 
 /** "Falkenstein, Germany" from whatever Admin typed: "Germany" + "Falkenstein, Germany", or "Helsinki 1" + "Finland". */
 export function serverPlace(s: Pick<Server, "name" | "region" | "country_code">): string {

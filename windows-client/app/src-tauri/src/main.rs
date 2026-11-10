@@ -7,7 +7,7 @@ use kiwiclient::api::{Account, Backend, Http, BASE};
 use kiwiclient::flow::{self, Vault};
 use kiwiclient::store::FileVault;
 use kiwiclient::settings::{self, Settings};
-use kiwiclient::{applog, auth, measure, opener, tune};
+use kiwiclient::{applog, auth, measure, opener, support, tune};
 use kiwivpn::protocol::{Protect, Request, State, Status};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -365,12 +365,64 @@ fn my_ip() -> Result<String, String> {
     backend()?.my_ip().map_err(|e| e.message)
 }
 
-/// Only these two pages: the window can't send the browser anywhere else.
+/// Tools › Support (2.1): a bug report or feedback to Price Chat, with this app's session. The page sends only the kind, the message and
+/// whether to include diagnostics; the diagnostics are put together and stripped here (kiwiclient::support), so the page can't add to them.
+#[tauri::command(async)]
+fn send_support(kind: String, message: String, include_diagnostics: bool) -> Result<(), String> {
+    support::check(&kind, &message)?;
+    let vault = FileVault::open()?;
+    let token = vault.session().ok_or("Sign in to send a report.")?;
+    let http = backend()?;
+    let diagnostics = include_diagnostics.then(|| {
+        let prefs = current_settings();
+        let options = [("Smart Connect", prefs.smart_connect), ("Failover", prefs.failover), ("Kill switch", prefs.kill_switch), ("Allow local network", prefs.allow_lan),
+                       ("Block malware", prefs.block_malware), ("Launch at startup", prefs.launch_at_startup), ("Auto-connect", prefs.auto_connect), ("Notifications", prefs.notifications)];
+        let mut facts = support::Facts {
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
+            options: options.iter().map(|(n, on)| (n.to_string(), *on)).collect(),
+            split_ranges: prefs.split_exclude.len(),
+            signed_in: true,
+            last_server: vault.last_server(),
+            log: settings_path().ok().and_then(|p| std::fs::read_to_string(p.with_file_name("kiwivpn.log")).ok()).unwrap_or_default(),
+            ..support::Facts::default()
+        };
+        match ipc::ask(&Request::Status) {
+            Ok(s) => {
+                facts.service = "Running".into();
+                facts.tunnel = format!("{:?}", s.state);
+                facts.handshake_age_seconds = s.handshake_age_seconds;
+                facts.tunnel_error = s.error.clone();
+                facts.kill_switch_active = s.kill_switch;
+                facts.features = s.features.clone();
+            }
+            Err(e) => {
+                facts.service = e;
+                facts.tunnel = "Unknown".into();
+            }
+        }
+        if let Ok(account) = http.account(&token) {
+            facts.known_servers = flow::known_servers(&account, &vault);
+        }
+        support::report(&facts)
+    });
+    note(&format!("support: sending a {kind} report (diagnostics {})", if include_diagnostics { "included" } else { "not included" }));
+    http.support(&token, &kind, &message, env!("CARGO_PKG_VERSION"), diagnostics.as_deref()).map_err(|e| {
+        note(&format!("support: not sent ({})", e.status));
+        if e.signed_out() {
+            flow::SIGNED_OUT.to_string()
+        } else {
+            e.message
+        }
+    })
+}
+
+/// Only these pages: the window can't send the browser anywhere else.
 #[tauri::command]
 fn open_site(page: String) -> Result<(), String> {
     match page.as_str() {
         "plans" => opener::open_in_browser(&format!("{BASE}/vpn#vpn-plans")),
         "devices" => opener::open_in_browser(&format!("{BASE}/vpn/devices")),
+        "contact" => opener::open_in_browser(&format!("{BASE}/contact")),
         _ => Err("Unknown page.".into()),
     }
 }
@@ -383,9 +435,9 @@ fn main() {
     // Opening the app again brings up the one that's running, so there's never a second window asking the service for different things.
     let builder = tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app))).plugin(tauri_plugin_notification::init());
     #[cfg(feature = "test-config")]
-    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check]);
+    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
     #[cfg(not(feature = "test-config"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check]);
+    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
     builder
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Kiwi VPN", true, None::<&str>)?;

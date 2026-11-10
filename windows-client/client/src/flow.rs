@@ -272,6 +272,10 @@ mod tests {
         fn my_ip(&self) -> Result<String, ApiError> {
             Ok("1.2.3.4".into())
         }
+        fn support(&self, _: &str, kind: &str, _: &str, _: &str, _: Option<&str>) -> Result<(), ApiError> {
+            self.calls.borrow_mut().push(format!("support {kind}"));
+            Ok(())
+        }
     }
 
     fn server(id: i64, online: bool, recommended: bool) -> Server {

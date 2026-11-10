@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useExit } from "./exit";
 import { DEFAULT_FAILOVER, DEFAULT_LIVENESS, type FailoverState, type LivenessState, failoverOrder, freshFailover, freshLiveness, nextFailoverStep, observeRx, probeResult, rankServers } from "./smart";
+import { Support } from "./support";
 import { ConnectionSettings, Tools } from "./tools";
 import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, probeServers, probeTunnel, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
 
@@ -307,6 +308,7 @@ export function App() {
           <button type="button" className="link" onClick={() => setTools(false)}>Back</button>
         </header>
         <Tools connected={reported === "on"} normalIp={phase === "off" ? ip ?? null : null} />
+        <Support signedIn={!!view?.signed_in} />
       </main>
     );
   }

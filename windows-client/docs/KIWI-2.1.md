@@ -55,11 +55,23 @@ Backend change on its own branch (`fix/vpn-device-limit`); see its commit. Not d
 
 Design only: `docs/AUTO-UPDATE.md`.
 
+## 6. Support (Tools > Support)
+
+A signed-in person sends a bug report or feedback to Price Chat from the Tools page: Bug / Feedback, a message (up to 4000
+characters), and "Include diagnostics" (on by default for bugs). The page sends only those three things to the `send_support`
+command; the diagnostics are built in Rust (`client/src/support.rs`: version, service and tunnel state, which options are on, the
+number of split-tunnel ranges but not the ranges, server ids, the last 60 lines of the app log) and stripped of WireGuard key lines,
+anything shaped like a WireGuard key, every IPv4/IPv6 address and the Windows user name in paths, then capped at 16 000 characters.
+It goes to `POST /api/members/vpn/support` with the app's desktop session (allowed by `desktop_scope`: it's under
+`/api/members/vpn/`). Signed out, the section says to sign in and opens https://pricechat.live/contact. The backend endpoint
+(branch `feat/vpn-support`, migration 0110) must be live before this app ships; until then Send shows Price Chat's 404/405 message.
+
 ## Tests
 
 - vitest: `smart21.test.ts` (liveness, dead-server switching, known-first order, load fallback) and `App21.test.tsx` (window:
   dead server left in under 30 s with pause; idle link not switched; busy link not probed; no probe info, no switch; known server
-  preferred; refused server skipped at once; nothing after Disconnect).
+  preferred; refused server skipped at once; nothing after Disconnect), `support.test.tsx` (send, error, signed out, on the Tools page).
 - Rust: `measure` (DNS probe format, fake resolver answers / silent / wrong id / no address, TCP timing, public-only),
   `tune` (tunnel address and resolvers), `flow` (known servers, endpoint saved, no device created for a known server), `store`
-  (device ids without opening keys, endpoint validation).
+  (device ids without opening keys, endpoint validation), `support` (key lines, 44-character keys, addresses, user paths, report
+  tail and cap, request body), `api` (support call shape against a local stand-in: path, cookie, JSON body, refusal message).
