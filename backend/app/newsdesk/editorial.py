@@ -382,6 +382,14 @@ RAILS = _rx(r"\b(tokeni[sz]\w*|bitcoin|crypto\w*|blockchain|stablecoins?|on-?cha
 FLOWS = _rx(r"\betfs?\b.*\b(outflows?|inflows?|shed|pulled|withdrew|record)\b|\b(outflows?|inflows?)\b.*\betfs?\b")
 
 
+# official economic data that moves every market, when the headline says it moved: "China's imports grow at the fastest pace in five years"
+MACRO_DATA = _rx(r"\b(inflation|cpi|ppi|consumer prices|wholesale (?:prices|inflation)|producer prices|jobs report|payrolls|unemployment|jobless|gdp|"
+                 r"imports|exports|trade (?:surplus|deficit)|retail sales|industrial output|factory (?:activity|output)|pmi)\b")
+MACRO_MOVE = _rx(r"\b(highest|lowest|fastest|slowest|biggest|record|surg\w+|jump\w*|plung\w+|soar\w*|slump\w*|tops?|crosses|unexpected\w*|"
+                 r"hotter|cooler|beats?|miss(?:es|ed)?|contract\w*|shr[ia]nk\w*)\b")
+BIG_ECONOMY = _rx(r"\b(u\.?s\.?|us|american|euro ?zone|german\w*|britain|uk|japan\w*)\b")
+
+
 @dataclass
 class Significance:
     kind: str  # geopolitics | corporate | regulation | structure | flows
@@ -411,6 +419,8 @@ def significance(title: str, summary: str = "") -> Significance | None:
         return Significance("flows", 28.0 if usd >= 1e9 else 24.0, f"ETF flows of ${usd / 1e9:.1f}B")
     if INSTITUTION.search(t) and RAILS.search(t):
         return Significance("structure", 24.0, f"{INSTITUTION.search(t).group(0)} on crypto rails")
+    if MACRO_DATA.search(t) and (countries_in(t) or BIG_ECONOMY.search(t)) and MACRO_MOVE.search(t):
+        return Significance("macro", 24.0, f"macro data: {MACRO_DATA.search(t).group(0).lower()}")
     if REG_BODY.search(t) and REG_EVENT.search(t) and FIN_CONTEXT.search(t):
         return Significance("regulation", 24.0, f"{REG_BODY.search(t).group(0)}: {REG_EVENT.search(t).group(0).lower()}")
     return None

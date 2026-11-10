@@ -176,6 +176,8 @@ async def test_a_retelling_of_a_story_already_out_is_skipped_but_a_real_developm
     ("NYSE picks Avalanche to settle tokenized stocks", "structure"),
     ("Coinbase Joins Circle, Ripple With Final OCC Approval for Federal Trust Bank Charter", "regulation"),
     ("Bitcoin ETFs shed $1.3B in biggest weekly outflow since late June", "flows"),
+    ("China's monthly imports grow at fastest pace in five years as surplus crosses $1 trillion in 2026", "macro"),
+    ("A key report for where inflation stood in October comes out Tuesday. Here's what to expect", None),  # a preview, not data
     ("Iran war live: Iran demands US 'surrender' to its conditions", None),  # a live blog's rolling headline
     ("Doing these things now will help you save money at Christmas", None),
 ])

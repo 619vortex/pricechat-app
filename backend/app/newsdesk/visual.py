@@ -71,6 +71,7 @@ STYLE: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "structure": (("ridges", "beams"), ("cobalt", "emerald", "ice", "gold")),
     "corporate": (("beams", "pulse", "ridges"), ("violet", "cobalt", "ice", "emerald")),
     "flows": (("ridges", "beams"), ("emerald", "crimson", "gold", "cobalt")),
+    "macro": (("ridges", "pulse", "beams"), ("gold", "ice", "cobalt", "emerald")),
     "news": (MOTIFS, tuple(PALETTES)),
 }
 RECENT = 6  # how many past pictures variety looks at
@@ -518,6 +519,7 @@ def graphic(headline: str, *, palette: str, layout: str, seed: int, stat: str = 
         size = 300 if len(mark) <= 6 else 220
         ImageDraw.Draw(wm).text((W - 50, 40), mark.upper(), font=_anton(size), fill=0, anchor="ra", stroke_width=3, stroke_fill=255)
         img = _glow(img, wm.point(lambda v: int(v * 0.5)), pal["b"], radii=(12,), strength=0.8)
+    if stat:
         wm = Image.new("L", (W, H), 0)
         ImageDraw.Draw(wm).text((W - 60, 330), stat, font=_anton(330), fill=255, anchor="rm")
         img = _glow(img, wm.point(lambda v: int(v * 0.16)), pal["b"], radii=(30,), strength=1.0)
@@ -780,14 +782,6 @@ SUBJECTS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\b(sec|securities and exchange commission|gensler|atkins)\b", re.I), "Securities and Exchange Commission headquarters", "securities|sec "),
     (re.compile(r"\b(cftc)\b", re.I), "Commodity Futures Trading Commission", "commodity futures"),
     (re.compile(r"\b(occ|comptroller of the currency)\b", re.I), "Office of the Comptroller of the Currency", "comptroller"),
-    (re.compile(r"\b(white house|trump|president)\b", re.I), "White House north facade", "white house"),
-    (re.compile(r"\b(congress|senate|senator|house of representatives|impeach\w*)\b", re.I), "United States Capitol west front", "capitol"),
-    (re.compile(r"\b(pentagon|hegseth|defen[cs]e secretary)\b", re.I), "The Pentagon aerial", "pentagon"),
-    (re.compile(r"\b(nyse|new york stock exchange|wall street)\b", re.I), "New York Stock Exchange facade", "stock exchange|wall street"),
-    (re.compile(r"\b(nasdaq)\b(?![- ]listed)", re.I), "Nasdaq MarketSite Times Square", "nasdaq"),
-    (re.compile(r"\b(ecb|european central bank|lagarde)\b", re.I), "European Central Bank Frankfurt", "european central bank"),
-    (re.compile(r"\b(bank of england)\b", re.I), "Bank of England building", "bank of england"),
-    (re.compile(r"\b(bank of japan|boj)\b", re.I), "Bank of Japan head office", "bank of japan"),
     (re.compile(r"\b(iran\w*|tehran)\b", re.I), "Tehran skyline Milad Tower", "tehran"),
     (re.compile(r"\b(israel\w*|knesset)\b", re.I), "Knesset building Jerusalem", "knesset"),
     (re.compile(r"\b(russia\w*|kremlin|putin)\b", re.I), "Moscow Kremlin view", "kremlin"),
@@ -797,6 +791,14 @@ SUBJECTS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\b(uae|dubai|abu dhabi|emirati)\b", re.I), "Dubai skyline Burj Khalifa", "dubai"),
     (re.compile(r"\b(china|beijing|chinese)\b", re.I), "Beijing CBD skyline", "beijing"),
     (re.compile(r"\b(japan\w*|tokyo)\b", re.I), "Tokyo skyline", "tokyo"),
+    (re.compile(r"\b(white house|trump|president)\b", re.I), "White House north facade", "white house"),
+    (re.compile(r"\b(congress|senate|senator|house of representatives|impeach\w*)\b", re.I), "United States Capitol west front", "capitol"),
+    (re.compile(r"\b(pentagon|hegseth|defen[cs]e secretary)\b", re.I), "The Pentagon aerial", "pentagon"),
+    (re.compile(r"\b(nyse|new york stock exchange|wall street)\b", re.I), "New York Stock Exchange facade", "stock exchange|wall street"),
+    (re.compile(r"\b(nasdaq)\b(?![- ]listed)", re.I), "Nasdaq MarketSite Times Square", "nasdaq"),
+    (re.compile(r"\b(ecb|european central bank|lagarde)\b", re.I), "European Central Bank Frankfurt", "european central bank"),
+    (re.compile(r"\b(bank of england)\b", re.I), "Bank of England building", "bank of england"),
+    (re.compile(r"\b(bank of japan|boj)\b", re.I), "Bank of Japan head office", "bank of japan"),
     (re.compile(r"\b(european union|european commission|brussels)\b", re.I), "Berlaymont building Brussels", "berlaymont"),
     (re.compile(r"\b(court|judge|lawsuit|indict\w*|charged|guilty|sentenced)\b", re.I), "United States courthouse", "court"),
 ]

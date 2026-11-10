@@ -75,7 +75,8 @@ def build(db: Session, now: datetime, desk_state: dict[str, Any] | None = None) 
         passes = all(x["ok"] for x in g.values())
         will = passes and not chosen
         chosen = chosen or will
-        plan = (ev.facts or {}).get("visual") or visual.plan(ev, recent)
+        shown = next((m for (i, _), (_, m) in _images.items() if i == ev.id), None)  # the picture Admin last rendered for it
+        plan = (ev.facts or {}).get("visual") or shown or visual.plan(ev, recent)
         cards.append({"event": ev.id, "kind": ev.kind, "headline": visual.post_headline(ev), "credit": f"Source: {visual.source_name(ev)}", "score": ev.virality,
                       "held_score": events.held_score(ev, now, p), "topic": ev.topic, "picture": plan.get("kind"), "gates": g, "will_post": will,
                       "status": "will post at the next slot" if will else ("passes, but another candidate ranks first" if passes else "won't post: " + "; ".join(
