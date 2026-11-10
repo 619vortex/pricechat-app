@@ -182,7 +182,8 @@ def test_the_members_own_size_within_every_limit_with_a_stop_at_their_max_loss()
     assert p.max_loss_usd == pytest.approx(5.0, abs=0.05) and p.stop < 100  # default stop: the loss reaches the max per trade
     assert p.tp1 == pytest.approx(100 + 2 * (100 - p.stop), rel=0.001) and p.tp2 > p.tp1  # twice the risk, then 1.5x further
     assert m.liq < p.stop and p.est_fees == pytest.approx(300 * 2 * risk.TAKER_FEE, rel=0.01)
-    cases = [(dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 5)), "over your limit of 3x"),
+    cases = [(dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 25), market_max_lev=40), "over Price Chat's cap of 20x"),
+             (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 15), market_max_lev=10), "over BTC's maximum on Hyperliquid of 10x"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 150.0, 3)), "over your limit of 10%"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 2.0, 3)), "minimum"),
              (dict(open_positions=2), "positions open"), (dict(daily_pnl=-15.0), "daily loss"), (dict(paused=True), "STOP NEW TRADES"),
@@ -316,7 +317,7 @@ def test_someone_elses_confirmation_does_nothing(db: Session, md: FakeMD) -> Non
 def test_limits_refuse_before_any_preview(db: Session, md: FakeMD) -> None:
     banter(db, "851")
     tg = TG()
-    assert "over your limit of 3x" in say(db, tg, 851, "/open BTC long 50 10x")
+    assert "over Price Chat's cap of 20x" in say(db, tg, 851, "/open BTC long 50 25x")
     assert "over your limit of 10%" in say(db, tg, 851, "/open BTC long 500 3x")
     assert "Usage" in say(db, tg, 851, "/open BTC long")
     assert "isn't a Hyperliquid perpetual" in say(db, tg, 851, "/open NOPE long 50 3x")
@@ -373,7 +374,7 @@ def test_positions_orders_balance_and_settings(db: Session, md: FakeMD) -> None:
     assert "PAPER balance" in say(db, tg, 881, "/balance")
     assert "Bot results" in say(db, tg, 881, "/pnl")
     assert "Max leverage 3x" in say(db, tg, 881, "/settings")
-    assert "capped at" in say(db, tg, 881, "/settings leverage 9")
+    assert "capped at 20x" in say(db, tg, 881, "/settings leverage 25")
     assert "Saved" in say(db, tg, 881, "/settings leverage 2") and "Max leverage 2x" in tg.sent[-1][2]
     assert "testnet API wallet" in say(db, tg, 881, "/settings mode testnet") or "Close your open" in tg.sent[-1][2]
     assert "Live is switched on at the website" in say(db, tg, 881, "/settings mode live")
@@ -545,7 +546,7 @@ def test_TR6_testnet_trades_are_priced_and_sized_from_testnets_own_market(db: Se
     m = banter(db, "992")
     on_testnet(db, m)
     ex = FakeExchange(mark=test_px)
-    with pytest.raises(execution.TradeError, match="BTC's maximum of 2x"):  # testnet's max leverage, not mainnet's 20x
+    with pytest.raises(execution.TradeError, match="BTC's maximum on Hyperliquid of 2x"):  # testnet's max leverage, not mainnet's 20x
         tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3), ex)
     it = tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 2), ex)
     assert it.plan["entry"] == pytest.approx(test_px) and it.plan["entry"] != pytest.approx(main_px)

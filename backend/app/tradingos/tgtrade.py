@@ -345,7 +345,9 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     p = risk.Plan(ok=False, coin=req.coin, side=req.side)
     reasons = p.reasons
     long = req.side == "LONG"
-    cap = min(acc_max_leverage, market_max_lev, risk.HARD_MAX_LEVERAGE)
+    # a typed /open names its own leverage: that's the member's choice, held to the coin's Hyperliquid maximum and Price Chat's cap
+    # (owner, 2026-11-10). Their saved max_leverage still governs signal trades; every other limit below still applies here.
+    cap = min(market_max_lev, risk.HARD_MAX_LEVERAGE)
     if paused:
         reasons.append("STOP NEW TRADES is on (/resume)")
     if global_paused:
@@ -358,8 +360,8 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     if cooldown_left_min > 0:
         reasons.append(f"cooling down on {req.coin}: {cooldown_left_min:.0f} min left since your last {req.coin} trade closed")
     if req.leverage > cap:
-        why = ("your limit" if cap == acc_max_leverage else "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{req.coin}'s maximum")
-        reasons.append(f"{req.leverage}x is over {why} of {cap}x (/settings leverage)")
+        why = "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{req.coin}'s maximum on Hyperliquid"
+        reasons.append(f"{req.leverage}x is over {why} of {cap}x")
     if open_positions >= min(max_positions, risk.HARD_MAX_POSITIONS):
         reasons.append(f"{open_positions} positions open already (your limit)")
     if daily_pnl <= -abs(daily_loss_limit):

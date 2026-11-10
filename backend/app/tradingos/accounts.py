@@ -23,7 +23,7 @@ CHECKS_VALID = timedelta(hours=1)
 INFO_ONLY = ("balance", "sizing")  # pre-live checks shown to the member but not required to connect
 LIMIT_CAPS = {"max_leverage": (1, risk.HARD_MAX_LEVERAGE), "max_loss_per_trade_usd": (1.0, 500.0), "max_allocation_pct": (1.0, 50.0),
               "max_positions": (1, risk.HARD_MAX_POSITIONS), "daily_loss_limit_usd": (1.0, 2000.0)}
-LIVE_ROLLOUT_MAX_LEVERAGE = 3
+LIVE_ROLLOUT_MAX_LEVERAGE = risk.HARD_MAX_LEVERAGE  # owner, 2026-11-10: the same 20x as everywhere
 
 AUTO_MAX_HOURS = 24 * 180  # AUTO runs for a set time (up to 180 days) or, with auto_hours = 0, until the member turns it off
 
