@@ -11,8 +11,20 @@
 //   node windows-client\ci\session-tool\ci-session.mjs --probe    (only check the token can store secrets)
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { execFileSync, spawn } from "node:child_process";
-import sodium from "libsodium-wrappers";
+import { execFileSync, execSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// libsodium-wrappers (GitHub's required secret sealing) is this tool's only dependency, pinned with integrity hashes in
+// package-lock.json next to this file. A clean checkout doesn't have it yet, so install exactly that, here, once
+// (npm ci: lockfile only, no install scripts).
+const HERE = dirname(fileURLToPath(import.meta.url));
+if (!existsSync(join(HERE, "node_modules", "libsodium-wrappers", "package.json"))) {
+  console.log("First run: installing this tool's one dependency (libsodium-wrappers, pinned in package-lock.json)...");
+  execSync("npm ci --no-audit --no-fund --ignore-scripts", { cwd: HERE, stdio: "inherit" }); // fixed command, no user input
+}
+const { default: sodium } = await import("libsodium-wrappers");
 
 const SITE = "https://pricechat.live";
 const REPO = "619vortex/KIWIVPN";
@@ -71,6 +83,17 @@ async function signIn() {
   const { token } = await r.json();
   if (!token || !token.startsWith("kd.")) throw new Error("Price Chat didn't return an app session.");
   return token;
+}
+
+if (process.argv.includes("--check")) {
+  // offline self-test: the dependency loads and seals/opens like GitHub's secret encryption. No network, no token, no secret.
+  await sodium.ready;
+  const kp = sodium.crypto_box_keypair();
+  const sealed = sodium.crypto_box_seal(sodium.from_string("check"), kp.publicKey);
+  const opened = sodium.to_string(sodium.crypto_box_seal_open(sealed, kp.publicKey, kp.privateKey));
+  if (opened !== "check") throw new Error("libsodium sealing self-test failed");
+  console.log("OK: session tool ready (libsodium-wrappers loaded, sealing works). Nothing was sent or stored.");
+  process.exit(0);
 }
 
 const token = ghToken();
