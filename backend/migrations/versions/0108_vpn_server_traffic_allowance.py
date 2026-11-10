@@ -1,7 +1,7 @@
 """A Kiwi VPN server's monthly traffic allowance, for bandwidth alerts. 0 = no alert.
 
-Revision ID: 0106_vpn_server_traffic_allowance
-Revises: 0105_vpn_server_testers_only
+Revision ID: 0108_vpn_server_traffic_allowance
+Revises: 0107_vpn_payment_recovery
 """
 
 from collections.abc import Sequence
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = '0106_vpn_server_traffic_allowance'
-down_revision: str | None = '0105_vpn_server_testers_only'
+revision: str = '0108_vpn_server_traffic_allowance'
+down_revision: str | None = '0107_vpn_payment_recovery'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
