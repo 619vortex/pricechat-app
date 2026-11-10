@@ -299,3 +299,37 @@ describe("VPN admin", () => {
     expect(screen.getByText(/No servers yet/)).toBeTruthy();
   });
 });
+
+describe("VPN admin: support reports", () => {
+  const REPORT = { id: 7, kind: "bug", source: "desktop", member: "kiwi", member_id: 1, created_at: new Date().toISOString(), app_version: "2.1.0",
+    message: "Failover didn't move me", diagnostics: "service: running\nPrivateKey = [redacted]", done: false, done_at: null };
+  it("lists reports with kind, member, version, message and expandable diagnostics, and marks one done", async () => {
+    let items = [REPORT, { ...REPORT, id: 6, kind: "feedback", source: "web", app_version: null, message: "Nice app", diagnostics: null }];
+    serve((key, body) => {
+      if (key === "GET /api/vpn/admin/support") return [200, { items }];
+      if (key === "POST /api/vpn/admin/support/7/done") { items = items.map((x) => x.id === 7 ? { ...x, done: JSON.parse(body!).done } : x); return [200, items[0]]; }
+      return [200, overview()];
+    });
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    await open(/Support/);
+    expect(container.textContent).toMatch(/Bug.*kiwi.*app 2\.1\.0/);
+    expect(container.textContent).toMatch(/Feedback.*kiwi.*website/);
+    expect(screen.getByText("Failover didn't move me")).toBeTruthy();
+    expect(container.querySelectorAll("details")).toHaveLength(1);
+    expect(screen.getByText("Diagnostics")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Done: report 7"));
+    await flush();
+    expect(calls).toContain('POST /api/vpn/admin/support/7/done {"done":true}');
+    fireEvent.click(screen.getByLabelText(/Hide done/));
+    expect(screen.queryByText("Failover didn't move me")).toBeNull();
+  });
+
+  it("says when there are none", async () => {
+    serve((key) => key === "GET /api/vpn/admin/support" ? [200, { items: [] }] : [200, overview()]);
+    render(<VpnAdminPage />);
+    await flush();
+    await open(/Support/);
+    expect(screen.getByText(/No reports yet/)).toBeTruthy();
+  });
+});

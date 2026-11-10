@@ -6,19 +6,21 @@ the key is never logged or stored, only its hash. Payment webhooks prove themsel
 calls are in app.vpn.service, not here. A device's config (with its private key) is returned once and never stored.
 """
 
-from typing import Any
+import json
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
-from pydantic import Field
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response, status
+from pydantic import Field, field_validator
 
 from app.api.deps import DbSession
 from app.api.routes.members import SessionToken, _require
 from app.api.schemas import StrictInput
+from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.vpn import VpnAccount
 from app.security import admin_auth, client_ip, rate_limit
 from app.security import rate_limit
 from app.security.rate_limit import LIMITS
-from app.vpn import billing, service
+from app.vpn import billing, service, support
 from app.vpn.billing import BillingError
 from app.vpn.service import VpnError
 
@@ -148,6 +150,44 @@ def delete_browser(username: str, db: DbSession, pc_session: SessionToken = None
     except VpnError as e:
         raise _fail(e) from e
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- support -------------------------------------------------------------------------------------------------------
+
+
+class SupportInput(StrictInput):
+    kind: Literal["bug", "feedback"]
+    message: str = Field(min_length=1, max_length=support.MAX_MESSAGE)
+    app_version: str | None = Field(default=None, max_length=32)
+    diagnostics: str | dict[str, Any] | None = Field(default=None)  # the app's own diagnostics; redacted and cut to support.MAX_DIAGNOSTICS
+
+    @field_validator("message")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Please write a message.")
+        return v
+
+    @field_validator("diagnostics")
+    @classmethod
+    def _bounded(cls, v: str | dict[str, Any] | None) -> str | dict[str, Any] | None:
+        size = len(v) if isinstance(v, str) else len(json.dumps(v, default=str)) if v is not None else 0
+        if size > support.MAX_DIAGNOSTICS * 4:  # a little over the limit is cut when stored; far over it is refused
+            raise ValueError("Diagnostics are too large.")
+        return v
+
+
+@router.post("/members/vpn/support", status_code=status.HTTP_201_CREATED)
+def send_support(payload: SupportInput, background: BackgroundTasks, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    """A bug report or feedback from the Kiwi VPN app (its desktop session may reach this) or the website. 5 an hour per member."""
+    member = _require(db, pc_session)
+    wait = LIMITS["vpn_support"].hit(str(member.id))
+    if wait is not None:
+        raise HTTPException(429, "You've sent several reports already. Please try again later.", headers={"Retry-After": str(wait)})
+    source = "desktop" if (pc_session or "").startswith(DESKTOP_TOKEN_PREFIX) else "web"
+    row = support.create(db, member, payload.kind, payload.message, payload.app_version, payload.diagnostics, source)
+    background.add_task(support.notify, support.alert_text(member, row))
+    return {"ok": True, "id": row.id}
 
 
 # --- paying --------------------------------------------------------------------------------------------------------
@@ -347,6 +387,24 @@ def admin_tester(payload: TesterInput, db: DbSession) -> dict[str, Any]:
         return service.set_tester(db, payload.username, payload.days)
     except VpnError as e:
         raise _fail(e) from e
+
+
+@router.get("/vpn/admin/support")
+def admin_support(db: DbSession) -> dict[str, Any]:
+    """Members' bug reports and feedback, newest first (already redacted when stored)."""
+    return {"items": support.admin_list(db)}
+
+
+class SupportDone(StrictInput):
+    done: bool
+
+
+@router.post("/vpn/admin/support/{report_id}/done")
+def admin_support_done(report_id: int, payload: SupportDone, db: DbSession) -> dict[str, Any]:
+    row = support.set_done(db, report_id, payload.done)
+    if row is None:
+        raise HTTPException(404, "Report not found.")
+    return row
 
 
 @router.get("/vpn/admin/customers")

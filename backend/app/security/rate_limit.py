@@ -67,6 +67,7 @@ LIMITS = {
     "referral": Bucket(burst=10, every=6, shared_burst=300, shared_every=0.2),  # over it: still redirected, click not counted
     "earn": Bucket(burst=30, every=1, shared_burst=600, shared_every=0.02),
     "vpn_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),  # Kiwi VPN device creation, per member
+    "vpn_support": Bucket(burst=5, every=720, shared_burst=60, shared_every=10),  # Kiwi VPN bug reports / feedback, per member: 5 an hour
     "vpn_key": Bucket(burst=30, every=5, shared_burst=600, shared_every=0.1),  # anonymous key requests, per client
     "vpn_new": Bucket(burst=5, every=600, shared_burst=120, shared_every=5),  # new anonymous keys, per client
     "vpn_reviewer": Bucket(burst=5, every=120, shared_burst=60, shared_every=5),  # the store-review password sign-in, per client
