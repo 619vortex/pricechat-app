@@ -1,5 +1,12 @@
 ; Kiwi VPN installer hooks. Setup runs as administrator once, so the person never touches a service, a command line or a separate WireGuard install.
 
+; Signed builds only (the workflow sets SIGN=yes in the windows-signing environment): Tauri's signCommand covers KiwiVPN.exe,
+; the NSIS plugins and the installer, but not the uninstaller that makensis writes inside the installer. This signs it as it's
+; written (NSIS 3.08+), and a failed signature stops the build.
+!if "$%SIGN%" == "yes"
+  !uninstfinalize 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$%GITHUB_WORKSPACE%\windows-client\ci\sign.ps1" "%1"' = 0
+!endif
+
 !macro KIWI_REMOVE_SERVICE
   ${If} ${FileExists} "$INSTDIR\kiwivpn-service.exe"
     nsExec::ExecToLog '"$INSTDIR\kiwivpn-service.exe" uninstall'
