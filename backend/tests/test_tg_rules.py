@@ -37,8 +37,9 @@ class FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_admin_cache() -> None:
+def _fresh_admin_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     mod._admins.clear()
+    monkeypatch.setattr(mod, "NO_MUTES", False)  # the old ladder, kept behind the switch; tests/test_tg_no_mutes.py covers today's rule
 
 
 def run(coro: Any) -> Any:
@@ -54,7 +55,7 @@ def warn(db: Session, c: FakeClient, words: list[str], target: int | None = MEMB
 def test_the_rules_say_what_the_owner_wrote() -> None:
     t = mod.RULES_TEXT
     for part in ("advertisements or promotions without admin permission", "sexual, porn or disturbing images",
-                 "political discussion, harassment or abuse", "12 hour mute, then 24 hours, then a permanent mute", "@jacktheblack",
+                 "political discussion, harassment or abuse", "Messages that break the rules are removed", "@jacktheblack",
                  "No links or scams. English only"):
         assert part in t, part
 

@@ -84,6 +84,8 @@ def get_bot_state(db: Session) -> TelegramBotState:
 
 
 class TelegramIngestor:
+    _mutes_lifted = False  # see _moderate
+
     def __init__(self, db: Session, client: TelegramBotClient, runtime: TelegramRuntime) -> None:
         self.db = db
         self.client = client
@@ -402,6 +404,13 @@ class TelegramIngestor:
         """The group rules: admins' /warn, /unmute, /strikes, and messages with links (app/telegram/moderation.py)."""
         from app.telegram import moderation
 
+        if moderation.NO_MUTES and not TelegramIngestor._mutes_lifted:
+            TelegramIngestor._mutes_lifted = True  # once per process: lift every mute the bot gave (owner, 2026-11-10)
+            try:
+                await moderation.lift_all_mutes(self.db, self.client)
+            except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
+                logger.warning("Couldn't lift the group mutes (%s)", type(exc).__name__)
         pending, self._moderation = self._moderation, []
         if not pending:
             return

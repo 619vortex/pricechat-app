@@ -40,7 +40,7 @@ RULES_TEXT = ("📜 <b>Price Chat group rules</b>\n\n"
               "1. No advertisements or promotions without admin permission\n"
               "2. No sexual, porn or disturbing images\n"
               "3. No political discussion, harassment or abuse\n"
-              f"4. Breaking the rules means a 12 hour mute, then 24 hours, then a permanent mute. For disputes, contact {DISPUTE}\n"
+              f"4. Messages that break the rules are removed. For disputes, contact {DISPUTE}\n"
               "5. No links or scams. English only")
 RULE_NAMES = {1: "advertising without admin permission", 2: "sexual, porn or disturbing images", 3: "politics, harassment or abuse",
               4: "the group rules", 5: "links, scams or a language other than English"}
@@ -102,16 +102,54 @@ async def is_admin(client: Any, chat_id: int, user_id: int) -> bool:
     return user_id in hit[1]
 
 
+NO_MUTES = True  # owner, 2026-11-10: the bot never mutes or bans anyone. It only removes the message and records a warning.
+
+
+async def lift_all_mutes(db: Session, client: Any) -> int:
+    """Every mute the bot gave is lifted and its strike cleared (owner, 2026-11-10). Returns how many members were unmuted."""
+    now = utcnow()
+    done: set[tuple[int, int]] = set()
+    for row in list(db.scalars(select(TgStrike).where(TgStrike.cleared.is_(False)))):
+        key = (row.chat_id, row.user_id)
+        active = row.permanent or (row.muted_until is not None and row.muted_until > now)
+        if active and key not in done:
+            try:
+                await client.restrict_member(row.chat_id, row.user_id, 0, can_send=True)
+                done.add(key)
+            except Exception as e:  # noqa: BLE001 - left the group, or no rights: try again next process start
+                logger.warning("rules: couldn't lift the mute of %s in %s (%s)", row.user_id, row.chat_id, type(e).__name__)
+                continue
+        row.cleared = True
+        if active:
+            row.permanent, row.muted_until = False, now
+    db.commit()
+    if done:
+        logger.info("rules: lifted %d mute(s)", len(done))
+    return len(done)
+
+
 async def punish(db: Session, client: Any, chat_id: int, user_id: int, name: str | None, rule: int | None, reason: str, by: str,
                  message_id: int | None) -> str:
-    """Deletes the message, mutes its author one step up the ladder, records the strike. Returns the text for the group.
-    An automatic second offence inside BURST only deletes the message: no new strike, nothing said (an admin's /warn always counts)."""
+    """Deletes the message and records a warning; never a mute while NO_MUTES. Returns the text for the group.
+    An automatic second offence inside BURST only deletes the message: nothing new recorded, nothing said."""
     recent = None if by != "auto" else db.scalar(select(TgStrike.id).where(TgStrike.chat_id == chat_id, TgStrike.user_id == user_id, TgStrike.cleared.is_(False),
                                                  TgStrike.created_at >= utcnow() - BURST).limit(1))
     if recent is not None:
         if message_id:
             await delete_quietly(client, chat_id, message_id)
         return ""
+    if NO_MUTES:
+        if message_id:
+            try:
+                await client.delete_message(chat_id, message_id)
+            except Exception as e:  # noqa: BLE001
+                logger.info("rules: couldn't delete message %s in %s (%s)", message_id, chat_id, type(e).__name__)
+                return NEEDS_RIGHTS
+        db.add(TgStrike(chat_id=chat_id, user_id=user_id, user_name=(name or "")[:128] or None, rule=rule, reason=reason[:500], by=by[:32],
+                        muted_until=None, permanent=False))
+        db.commit()
+        what = f"rule {rule} ({RULE_NAMES.get(rule, 'the group rules')})" if rule else "the group rules"
+        return f"⚠️ A message from {esc(name or 'a member')} was removed for breaking {what}.\nRules: /rules · Disputes: {DISPUTE}"
     before = strikes(db, chat_id, user_id)
     length = ladder_step(before)
     until = utcnow() + length if length else None
@@ -154,6 +192,8 @@ def _target_and_rest(cmd: str, words: list[str], reply_author_id: int | None) ->
 
 
 def _next(n: int) -> str:
+    if NO_MUTES:
+        return "the message is removed (the bot doesn't mute)"
     step = ladder_step(n)
     return "a permanent mute" if step is None else _length(step).replace("for ", "")
 
