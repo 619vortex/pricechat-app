@@ -18,8 +18,9 @@ CHANNEL_BOT, TELEGRAM = 136817688, 777000
 
 
 @pytest.fixture(autouse=True)
-def _fresh() -> None:
+def _fresh(monkeypatch: pytest.MonkeyPatch) -> None:
     mod._admins.clear()
+    monkeypatch.setattr(mod, "NO_MUTES", False)  # the old ladder; tests/test_tg_no_mutes.py covers today's rule
     getattr(mod, "_no_rights_logged", set()).clear()
 
 

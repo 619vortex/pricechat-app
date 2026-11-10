@@ -239,7 +239,9 @@ def test_group_commands_answer_publicly_and_keep_accounts_private(db: Session, m
     assert "market overview" in tg.sent[-1][2] and "Top" in tg.sent[-1][2]  # curated, not a dump
     kiwi(db, 4, "777")
     asyncio.run(bot.handle_command(db, tg, -100, 777, "/positions", group=True, reply_to=6))
-    assert "privately" in tg.sent[-1][2]  # balances never in the group
+    assert "privately" not in tg.sent[-1][2] and tg.sent[-1][1] == -100  # owner's decision (2026-11-10): trading answers in the group
+    asyncio.run(bot.handle_command(db, tg, -100, 777, "/connect", group=True, reply_to=7))
+    assert "privately" in tg.sent[-1][2]  # wallet linking never in a group
     asyncio.run(bot.handle_command(db, tg, 1, 777, "/connect"))
     assert "Never share a private key" in tg.sent[-1][2]
 

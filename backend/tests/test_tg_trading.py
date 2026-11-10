@@ -27,10 +27,42 @@ def md(monkeypatch: pytest.MonkeyPatch) -> FakeMD:
     return f
 
 
+class FakeReader:
+    """TEST FIXTURE: stands in for exchange.ReadOnlyExecutor (the key-less mainnet reader): a balance, no positions, and every
+    order-shaped call refused exactly like the real one."""
+
+    read_only = True
+    built: list[str] = []
+
+    def __init__(self, mode: str, master: str, transport: Any = None) -> None:
+        self.mode, self.master = mode, master
+        FakeReader.built.append(mode)
+
+    def equity(self) -> float:
+        return 1000.0
+
+    def state(self) -> dict[str, Any]:
+        return {"assetPositions": []}
+
+    def mid_px(self, coin: str) -> float:
+        return 100.0
+
+    def _refuse(self, *a: Any, **k: Any) -> Any:
+        raise xch.MainnetBlocked(xch.MAINNET_BLOCKED)
+
+    set_leverage = market = trigger = cancel = cancel_by_cloid = _refuse
+
+
 @pytest.fixture(autouse=True)
 def _no_hyperliquid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TEST FIXTURE: the referral recheck would ask Hyperliquid; tests never call the real API."""
+    """TEST FIXTURE: the referral recheck, mainnet reads (balance, fee rate, API wallet listing) would ask Hyperliquid; tests
+    never call the real API."""
     monkeypatch.setattr(tgtrade, "recheck_referral", lambda db, m: None)
+    FakeReader.built = []
+    monkeypatch.setattr(xch, "ReadOnlyExecutor", FakeReader)
+    monkeypatch.setattr(xch, "user_fees", lambda mode, a, transport=None: {"taker": 0.00045, "maker": 0.00015, "referral_discount": 0.04})
+    monkeypatch.setattr(xch, "agent_record", lambda mode, master, agent, transport=None: {"address": agent, "validUntil": None})
+    monkeypatch.setattr(xch, "balances", lambda mode, a, transport=None: {"perps": 1000.0, "spot_usdc": 0.0, "unified": False, "trading": 1000.0})
 
 
 class TG(FakeTG):
@@ -39,9 +71,11 @@ class TG(FakeTG):
     def __init__(self) -> None:
         super().__init__()
         self.buttons: list[Any] = []
+        self.replies: list[Any] = []
 
     async def send_message(self, chat_id: Any, text: str, buttons: Any = None, html: bool = False, reply_to: Any = None) -> dict[str, Any]:
         self.buttons.append(buttons)
+        self.replies.append(reply_to)
         return await super().send_message(chat_id, text, buttons, html, reply_to)
 
 
@@ -77,6 +111,48 @@ def test_open_reads_coin_side_margin_leverage_and_optional_stop_and_target() -> 
         assert isinstance(tgtrade.parse_open(bad), str), bad
 
 
+def test_open_without_an_amount_is_a_market_order_at_the_full_margin_limit_and_prices_take_k() -> None:
+    r = tgtrade.parse_open(["btc", "long", "20x"])
+    assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage, r.limit) == ("BTC", "LONG", None, 20, None)
+    r = tgtrade.parse_open(["BTC", "LONG", "20X", "TP", "79K", "SL", "15K"])
+    assert (r.margin, r.leverage, r.tp, r.stop) == (None, 20, 79000.0, 15000.0)
+    r = tgtrade.parse_open(["eth", "short", "1.5k", "3x", "limit", "2.4k"])
+    assert (r.margin, r.limit) == (1500.0, 2400.0)
+    m = man(req=tgtrade.OpenRequest("BTC", "LONG", None, 3))  # equity 1000, max allocation 10%: $100 margin
+    assert m.plan.ok and m.plan.margin == pytest.approx(100, rel=0.01)
+    assert isinstance(tgtrade.parse_open(["BTC", "long"]), str) and isinstance(tgtrade.parse_open(["BTC", "long", "abc"]), str)
+
+
+def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Session, md: FakeMD) -> None:
+    from app.tradingbot import affiliate
+
+    tg = TG()
+    kiwi(db, 4, "851")  # no wallet yet: told how to connect, in Price Chat's words
+    out = say(db, tg, 851, "/open btc long 20x")
+    assert "made with our sign-up link" in out and "has no wallet connected" in out and "Kiwi Passport" in out and "anter" not in out.lower().replace("banter.", "")
+    banter(db, "852")
+    say(db, tg, 852, "/long btc 3x")  # = /open btc long 3x: a real preview with Confirm, not a pitch
+    it = db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first()
+    assert it is not None and it.plan["side"] == "LONG" and it.plan["request"]["margin"] is not None
+    assert any(b and "Confirm" in str(b) for b in tg.buttons[-2:])
+    say(db, tg, 852, "/short eth 50 2x")
+    assert db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first().plan["side"] == "SHORT"
+    owner = kiwi(db, 4, "853")  # the referral's own wallet can't be "referred" by itself: the owner trades too
+    db.add(TbWallet(member_id=owner.id, address=affiliate.WALLET, verified_at=utcnow(), referral_status="unverified", referral_code_seen=None))
+    db.commit()
+    assert tgtrade.entry_gate(db, owner) is None
+    for text in (tgtrade.HELP, bot.HELP_TEXT if hasattr(bot, "HELP_TEXT") else ""):
+        assert "Banter group" not in text
+
+
+def test_open_takes_the_side_before_the_coin_too() -> None:
+    for words in (["long", "btc", "10", "5x"], ["LONG", "BTC", "10", "5X"], ["btc", "long", "10", "5x"]):
+        r = tgtrade.parse_open(words)
+        assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage) == ("BTC", "LONG", 10.0, 5), words
+    r = tgtrade.parse_open(["short", "eth", "20", "3x", "tp", "2k"])
+    assert (r.coin, r.side, r.tp) == ("ETH", "SHORT", 2000.0)
+
+
 def test_signal_numbers_come_from_the_command_or_the_card_replied_to() -> None:
     assert tgtrade.signal_from(["#012"]) == 12 and tgtrade.signal_from(["7"]) == 7
     assert tgtrade.signal_from([], "🟢 $SOL LONG · #012\n\n🎯 Entry 99 – 101") == 12
@@ -106,7 +182,8 @@ def test_the_members_own_size_within_every_limit_with_a_stop_at_their_max_loss()
     assert p.max_loss_usd == pytest.approx(5.0, abs=0.05) and p.stop < 100  # default stop: the loss reaches the max per trade
     assert p.tp1 == pytest.approx(100 + 2 * (100 - p.stop), rel=0.001) and p.tp2 > p.tp1  # twice the risk, then 1.5x further
     assert m.liq < p.stop and p.est_fees == pytest.approx(300 * 2 * risk.TAKER_FEE, rel=0.01)
-    cases = [(dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 5)), "over your limit of 3x"),
+    cases = [(dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 25), market_max_lev=40), "over Price Chat's cap of 20x"),
+             (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 15), market_max_lev=10), "over BTC's maximum on Hyperliquid of 10x"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 150.0, 3)), "over your limit of 10%"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 2.0, 3)), "minimum"),
              (dict(open_positions=2), "positions open"), (dict(daily_pnl=-15.0), "daily loss"), (dict(paused=True), "STOP NEW TRADES"),
@@ -136,24 +213,50 @@ def test_private_keys_and_recovery_phrases_are_recognised() -> None:
 def test_only_the_banter_referral_opens_new_trades(db: Session, md: FakeMD) -> None:
     tg = TG()
     kiwi(db, 4, "801")  # no verified wallet
-    assert "verify your Hyperliquid wallet" in say(db, tg, 801, "/open BTC long 50 3x")
+    assert "has no wallet connected" in say(db, tg, 801, "/open BTC long 50 3x")
     banter(db, "802", code="SOMEONE")
-    assert "Banter group's referral code" in say(db, tg, 802, "/open BTC long 50 3x")
+    assert "made with our sign-up link" in say(db, tg, 802, "/open BTC long 50 3x")
     banter(db, "803", code="KLGXFMNI")  # the code Hyperliquid records for the same referrer is accepted
     say(db, tg, 803, "/open BTC long 50 3x")
     assert db.scalar(select(TrIntent)) is not None
     sig = active_signal(db, md)
-    assert "referral" in press(db, tg, 802, f"sig:{sig.id}:enter")  # the signal ENTER button too
+    assert "sign-up link" in press(db, tg, 802, f"sig:{sig.id}:enter")  # the signal ENTER button too
     assert not db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()
 
 
-def test_trading_commands_stay_out_of_groups(db: Session, md: FakeMD) -> None:
+def gsay(db: Session, tg: TG, uid: int, text: str, msg_id: int) -> str:
+    asyncio.run(bot.handle_command(db, tg, -100, uid, text, group=True, reply_to=msg_id))
+    return tg.sent[-1][2]
+
+
+def gpress(db: Session, tg: TG, uid: int, data: str, owner: int | None) -> str:
+    msg = {"chat": {"id": -100, "type": "supergroup"}, "reply_to_message": {"from": {"id": owner}} if owner else {}}
+    asyncio.run(bot.handle_callback(db, tg, {"id": "x", "data": data, "from": {"id": uid}, "message": msg}))
+    return tg.sent[-1][2] if tg.sent else ""
+
+
+def test_trading_works_in_groups_and_its_buttons_only_for_whoever_asked(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
     banter(db, "811")
+    banter(db, "812")
     tg = TG()
-    assert "privately" in say(db, tg, 811, "/open BTC long 50 3x", group=True)
-    assert "privately" in say(db, tg, 811, "/balance", group=True)
-    assert db.scalar(select(TrIntent)) is None
-    assert "Funding" in say(db, tg, 811, "/market BTC", group=True)  # market numbers are for anyone
+    answered: list[str] = []
+
+    async def note(client: Any, cq: Any, uid: int, text: str, alert: bool = False, dm: bool = True) -> None:
+        answered.append(text)
+    monkeypatch.setattr(bot, "_answer", note)
+    say_ = gsay(db, tg, 811, "/open BTC long 50 3x", msg_id=77)
+    assert "privately" not in say_ and tg.sent[-1][1] == -100  # answered in the group
+    assert tg.replies[-1] == 77, "the preview replies to the member's own command, so its buttons know whose they are"
+    token = last_token(db)
+    n = len(tg.sent)
+    gpress(db, tg, 812, f"mo:{token}", owner=811)  # another member presses 811's Confirm
+    assert answered and "for the member who asked" in answered[-1] and len(tg.sent) == n
+    assert db.scalar(select(TrIntent).where(TrIntent.token == token)).status == "PENDING", "nothing confirmed"
+    gpress(db, tg, 812, "ca:all:1", owner=None)  # a group button with no known owner works for nobody
+    assert "for the member who asked" in answered[-1]
+    assert "privately" not in gsay(db, tg, 811, "/balance", msg_id=78)
+    assert "privately" in gsay(db, tg, 811, "/connect", msg_id=79), "wallet linking stays private"
+    assert "Funding" in gsay(db, tg, 811, "/market BTC", msg_id=80)  # market numbers are for anyone
 
 
 # ---------------------------------------------------------------- /open: preview, confirm, duplicates (paper)
@@ -214,7 +317,7 @@ def test_someone_elses_confirmation_does_nothing(db: Session, md: FakeMD) -> Non
 def test_limits_refuse_before_any_preview(db: Session, md: FakeMD) -> None:
     banter(db, "851")
     tg = TG()
-    assert "over your limit of 3x" in say(db, tg, 851, "/open BTC long 50 10x")
+    assert "over Price Chat's cap of 20x" in say(db, tg, 851, "/open BTC long 50 25x")
     assert "over your limit of 10%" in say(db, tg, 851, "/open BTC long 500 3x")
     assert "Usage" in say(db, tg, 851, "/open BTC long")
     assert "isn't a Hyperliquid perpetual" in say(db, tg, 851, "/open NOPE long 50 3x")
@@ -245,7 +348,8 @@ def test_mainnet_orders_from_telegram_stay_off_until_the_owner_turns_them_on(db:
     acc.mode = "LIVE"
     db.commit()
     tg = TG()
-    assert "aren't switched on" in say(db, tg, 871, "/open BTC long 50 3x")
+    out = say(db, tg, 871, "/open BTC long 50 3x")  # a LIVE account: a read-only mainnet preview, never a Confirm
+    assert "MAINNET PREVIEW" in out and "OFF until" in out and tg.buttons[-1] is None
     assert db.scalar(select(TrIntent)) is None
     s = signals.settings(db)
     s.strategies = {**(s.strategies or {}), "telegram_trading": {"live": True}}
@@ -270,7 +374,7 @@ def test_positions_orders_balance_and_settings(db: Session, md: FakeMD) -> None:
     assert "PAPER balance" in say(db, tg, 881, "/balance")
     assert "Bot results" in say(db, tg, 881, "/pnl")
     assert "Max leverage 3x" in say(db, tg, 881, "/settings")
-    assert "capped at" in say(db, tg, 881, "/settings leverage 9")
+    assert "capped at 20x" in say(db, tg, 881, "/settings leverage 25")
     assert "Saved" in say(db, tg, 881, "/settings leverage 2") and "Max leverage 2x" in tg.sent[-1][2]
     assert "testnet API wallet" in say(db, tg, 881, "/settings mode testnet") or "Close your open" in tg.sent[-1][2]
     assert "Live is switched on at the website" in say(db, tg, 881, "/settings mode live")
@@ -332,7 +436,7 @@ def test_closing_works_even_without_the_referral(db: Session, md: FakeMD) -> Non
     w = db.scalar(select(TbWallet).where(TbWallet.member_id == m.id))
     w.referral_status, w.referral_code_seen = "not_referred", None  # e.g. the record changed later
     db.commit()
-    assert "referral" in say(db, tg, 921, "/open ETH long 50 3x")
+    assert "sign-up link" in say(db, tg, 921, "/open ETH long 50 3x")
     say(db, tg, 921, f"/close {pos.id}")
     assert db.get(TrPosition, pos.id).status == "CLOSED"
 
@@ -442,7 +546,7 @@ def test_TR6_testnet_trades_are_priced_and_sized_from_testnets_own_market(db: Se
     m = banter(db, "992")
     on_testnet(db, m)
     ex = FakeExchange(mark=test_px)
-    with pytest.raises(execution.TradeError, match="BTC's maximum of 2x"):  # testnet's max leverage, not mainnet's 20x
+    with pytest.raises(execution.TradeError, match="BTC's maximum on Hyperliquid of 2x"):  # testnet's max leverage, not mainnet's 20x
         tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3), ex)
     it = tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 2), ex)
     assert it.plan["entry"] == pytest.approx(test_px) and it.plan["entry"] != pytest.approx(main_px)
@@ -515,13 +619,13 @@ def test_TR5_the_banter_gate_on_signal_enter_is_an_owner_setting_on_by_default(d
     sig = active_signal(db, md)
     banter(db, "997", code="SOMEONE")
     tg = TG()
-    assert tgtrade.gate_signal_enter(db) and "referral" in press(db, tg, 997, f"sig:{sig.id}:enter")
+    assert tgtrade.gate_signal_enter(db) and "sign-up link" in press(db, tg, 997, f"sig:{sig.id}:enter")
     s = signals.settings(db)
     s.strategies = {**(s.strategies or {}), "telegram_trading": {"gate_signal_enter": False}}
     db.commit()
     press(db, tg, 997, f"sig:{sig.id}:enter")
     assert db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()  # ENTER works as before the branch
-    assert "Banter group's referral code" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
+    assert "made with our sign-up link" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
 
 
 def test_TR16_a_different_account_key_is_refused_while_testnet_positions_are_open(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -573,14 +677,22 @@ def test_default_settings_keep_every_new_telegram_entry_off_mainnet(db: Session,
     monkeypatch.setattr(execution, "executor", guard)
     monkeypatch.setattr(execution, "check_live_permission", lambda *a, **k: None)  # only the Telegram switch stands in the way
     monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
+    monkeypatch.undo()  # the real executor(): inside Telegram it hands out the key-less reader for LIVE
+    monkeypatch.setattr(tgtrade, "recheck_referral", lambda db, m: None)
+    monkeypatch.setattr(xch, "ReadOnlyExecutor", FakeReader)
+    monkeypatch.setattr(xch, "user_fees", lambda mode, a, transport=None: {"taker": 0.00045, "maker": 0.00015, "referral_discount": 0})
+    monkeypatch.setattr(xch, "agent_record", lambda mode, master, agent, transport=None: {"address": agent, "validUntil": None})
+    monkeypatch.setattr(market, "_shared", md)
+    monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
     tg = TG()
-    assert "aren't switched on" in say(db, tg, 1001, "/open BTC long 50 3x")
-    assert "aren't switched on" in say(db, tg, 1001, f"/enter #{sig.number:03d}")
+    assert "MAINNET PREVIEW" in say(db, tg, 1001, "/open BTC long 50 3x") and tg.buttons[-1] is None
+    assert "MAINNET PREVIEW" in say(db, tg, 1001, f"/enter #{sig.number:03d}") and tg.buttons[-1] is None
     asyncio.run(bot.handle_command(db, tg, -100, 1001, f"/enter #{sig.number}", group=True, reply_to=5))
-    assert "aren't switched on" in tg.sent[-2][2] and tg.sent[-2][1] == 1001  # the group /enter: the refusal goes privately
+    assert "MAINNET PREVIEW" in tg.sent[-2][2] and tg.sent[-2][1] == 1001  # the group /enter: the preview goes privately
     for token in ("mo:" + "0" * 16, "cf:" + "0" * 16):  # forged confirms find nothing to send
         press(db, tg, 1001, token)
-    assert not db.scalars(select(TrIntent)).all() and not ex.orders and "LIVE" not in asked
+    assert not db.scalars(select(TrIntent)).all() and not ex.orders and not asked
+    assert FakeReader.built and set(FakeReader.built) == {"LIVE"}  # mainnet was only ever read, without a key
     assert not db.scalars(select(TrPosition)).all()
 
 
@@ -600,7 +712,8 @@ def test_no_telegram_path_reaches_mainnet_until_the_owner_switches_it_on(db: Ses
     monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
     tg = TG()
     off = "aren't switched on"
-    assert off in press(db, tg, 1002, f"sig:{sig.id}:enter")  # the existing ENTER button on a signal card
+    press(db, tg, 1002, f"sig:{sig.id}:enter")  # the existing ENTER button on a signal card: a read-only preview, privately
+    assert "MAINNET PREVIEW" in tg.sent[-2][2] and tg.sent[-2][1] == 1002 and tg.buttons[-1] is None
     for data in ("cf:" + "1" * 16, "cl:77", "mo:" + "2" * 16, f"ca:all:{tgtrade._stamp()}", f"pr:{tgtrade._stamp()}:77:s:60000"):
         assert off in press(db, tg, 1002, data), data
     for text in ("/close 77", "/closeall", "/sl 77 60000", "/tp 77 70000", "/cancel 12345"):
@@ -610,7 +723,8 @@ def test_no_telegram_path_reaches_mainnet_until_the_owner_switches_it_on(db: Ses
     st = signals.settings(db)
     st.strategies = {**(st.strategies or {}), "telegram_trading": {"live": True}}
     db.commit()
-    assert off not in press(db, tg, 1002, f"sig:{sig.id}:enter")
+    press(db, tg, 1002, f"sig:{sig.id}:enter")
+    assert not any("MAINNET PREVIEW" in x[2] or off in x[2] for x in tg.sent[-2:])
     # TESTNET is untouched
     st.strategies = {**(st.strategies or {}), "telegram_trading": {}}
     acc.mode = "TESTNET"

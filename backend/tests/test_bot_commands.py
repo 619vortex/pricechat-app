@@ -117,7 +117,9 @@ def test_signal_is_answered_in_groups(db: Session, md: StudyMD) -> None:
     assert tg.sent[-1][0] == "photo" and "not a published signal" in tg.sent[-1][2]
     assert db.scalar(select(TsSignal)) is None  # analysis only: nothing is published or traded
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/positions", group=True, reply_to=5))
-    assert "privately" in tg.sent[-1][2]  # account commands still never answer in groups
+    assert "privately" not in tg.sent[-1][2]  # owner's decision (2026-11-10): trading commands answer in groups too
+    asyncio.run(bot.handle_command(db, tg, -5, 9, "/alerts", group=True, reply_to=6))
+    assert "privately" in tg.sent[-1][2]  # alerts, wallet linking and VPN still never in a group
 
 
 def test_help_is_organised_and_unknown_commands_are_handled(db: Session, md: StudyMD) -> None:

@@ -138,6 +138,10 @@ def executor(db: Session, acc: TrAccount, coin: str, mode: str | None = None) ->
     mode = mode or acc.mode
     if mode == "PAPER":
         return xch.PaperExecutor(paper_equity(db, acc), market.data().market(coin).mark)
+    if xch.mainnet_blocked(mode):  # Telegram with mainnet execution off: reads only, the key is never even decrypted
+        if not acc.master_address:
+            raise TradeError("No Hyperliquid account connected: connect it on the website first.")
+        return xch.ReadOnlyExecutor(mode, acc.master_address)
     key = acc.testnet_agent_key if mode == "TESTNET" else acc.mainnet_agent_key
     if not (key and acc.master_address):
         raise TradeError(f"No approved {mode.lower()} API wallet: connect it on the website first.")
@@ -378,8 +382,7 @@ def confirm(db: Session, member: Member, token: str, ex: Any = None) -> TrPositi
     sig = db.get(TsSignal, it.signal_id)
     assert sig is not None
     _still_allowed(db, acc, sig)
-    it.status = "CONFIRMED"  # single use, before anything is sent
-    db.commit()
+    claim_intent(db, it)  # single use, before anything is sent
     # the preview's price can be 5 minutes old: size and price the IOC entry at the current mark (same checks as the preview)
     try:
         plan, ex = _plan(db, member, sig, ex)
@@ -391,6 +394,16 @@ def confirm(db: Session, member: Member, token: str, ex: Any = None) -> TrPositi
         plan.size, plan.notional, plan.margin = seen, plan.notional * k, plan.margin * k
         plan.max_loss_usd, plan.est_fees = plan.max_loss_usd * k, plan.est_fees * k
     return open_position(db, acc, sig, plan, "enter", ex)
+
+
+def claim_intent(db: Session, it: TrIntent) -> None:
+    """PENDING → CONFIRMED in one conditional UPDATE, committed before anything is sent: of two presses of the same Confirm
+    (a double tap, two devices, a retried callback) exactly one gets to place the order."""
+    if db.execute(update(TrIntent).where(TrIntent.id == it.id, TrIntent.status == "PENDING").values(status="CONFIRMED")).rowcount != 1:
+        db.rollback()
+        raise TradeError("Already handled.")
+    db.commit()
+    db.refresh(it)
 
 
 def _still_allowed(db: Session, acc: TrAccount, sig: TsSignal) -> None:
@@ -483,7 +496,9 @@ def open_position(db: Session, acc: TrAccount, sig: TsSignal, plan: risk.Plan, v
         raise TradeError("You're already in this signal.") from e
     try:
         ex.set_leverage(sig.coin, plan.leverage)
-        limit_px = risk.round_px(plan.entry * (1 + 2 * risk.SLIPPAGE if long else 1 - 2 * risk.SLIPPAGE), m.sz_decimals)
+        # a member's own limit price (Telegram "/open ... limit PRICE") is the worst price the IOC entry may fill at
+        limit_px = (risk.round_px(plan.limit_px, m.sz_decimals) if plan.limit_px else
+                    risk.round_px(plan.entry * (1 + 2 * risk.SLIPPAGE if long else 1 - 2 * risk.SLIPPAGE), m.sz_decimals))
         # a fresh client order id per attempt (Hyperliquid refuses a reused one); the first attempt keeps the original id
         cl = xch.cloid_for(acc.id, sig.id, "entry", *([f"a{attempt}"] if attempt else []))
         res = ex.market(sig.coin, long, plan.size, limit_px, cl)

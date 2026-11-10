@@ -5,7 +5,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-HARD_MAX_LEVERAGE = 5  # system cap whatever the user sets (3x by default for the first live rollout)
+HARD_MAX_LEVERAGE = 20  # system cap whatever the user sets (owner, 2026-11-10); each coin's own Hyperliquid maximum also applies
 HARD_MAX_POSITIONS = 3
 HARD_MAX_TRADES_PER_DAY = 12  # new entries per account per UTC day, whatever the member sets
 MIN_NOTIONAL = 10.0  # Hyperliquid's minimum order value (USD)
@@ -32,6 +32,7 @@ class Plan:
     note: str = ""  # e.g. "raised to Hyperliquid's $10 minimum" (shown in the preview)
     checks: list[dict[str, Any]] = field(default_factory=list)  # portfolio_checks() results (Engine v2)
     risk_mode: str = ""  # "advisory" | "enforce" for those checks
+    limit_px: float | None = None  # a member's own limit: the worst price the immediate-or-cancel entry may fill at (None: mark ± slippage)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

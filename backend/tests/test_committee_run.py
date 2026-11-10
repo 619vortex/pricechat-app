@@ -126,12 +126,12 @@ def test_kill_switch_rejects_and_the_ai_cannot_override_it(db: Session) -> None:
 
 
 def test_leverage_over_the_cap_is_rejected(db: Session) -> None:
-    db.add(TsSettings(strategies={"committee": {"reference": {"leverage": 10, "max_leverage": 10}}}))
+    db.add(TsSettings(strategies={"committee": {"reference": {"leverage": 25, "max_leverage": 25}}}))
     db.commit()
     ex = run(db, btc(), FakeLLM())["execution"]
     assert ex["status"] == "REJECTED"
     lev = next(c for c in ex["checks"] if c["name"] == "leverage within caps")
-    assert lev["ok"] is False and lev["value"] == "10x" and lev["limit"].startswith("5x")
+    assert lev["ok"] is False and lev["value"] == "25x" and lev["limit"].startswith("20x")
 
 
 def test_risk_team_veto_rejects(db: Session, monkeypatch: Any) -> None:

@@ -438,7 +438,7 @@ def test_unknown_run_or_button(db: Session, tg: TG, world: list[str]) -> None:
 
 # ---------------------------------------------------------------- routing and status
 def test_group_and_private_routing(db: Session, tg: TG, world: list[str]) -> None:
-    say(db, tg, "/risk")  # the account command stays private in groups
+    say(db, tg, "/connect")  # wallet linking stays private in groups (trading commands answer there since 2026-11-10)
     assert "Account commands work privately" in tg.of("send")[0]["text"] and world == []
     tg.sent.clear()
     say(db, tg, "/risk BTC")  # the committee's risk review is public

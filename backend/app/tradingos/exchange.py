@@ -11,9 +11,12 @@ wallet, submits it, and confirms on Hyperliquid that the agent is listed.
 """
 
 import base64
+import contextvars
 import hashlib
 import secrets
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -47,6 +50,45 @@ FILLS_MAX_PAGES = 10
 
 class ExchangeError(Exception):
     pass
+
+
+class MainnetBlocked(ExchangeError):
+    """A signed mainnet action (order, cancel, leverage) from a surface where mainnet execution is switched off. Raised before
+    anything is signed or sent."""
+
+
+# ---------------------------------------------------------------- the surface a request comes from (defence in depth)
+# Telegram handlers run inside surface("telegram", allowed): while the owner hasn't switched Telegram mainnet execution on (or
+# the emergency switch is on), no signed mainnet action can leave this process from that request, whatever path it took. The
+# website, AUTO and reconciliation run outside it and are untouched. asyncio.to_thread copies the context, so worker threads
+# started by a Telegram handler carry the same rule.
+_SURFACE: contextvars.ContextVar[str] = contextvars.ContextVar("pc_trading_surface", default="")
+_MAINNET_OK: contextvars.ContextVar[bool] = contextvars.ContextVar("pc_trading_mainnet_ok", default=True)
+MAINNET_BLOCKED = "Real-money (mainnet) execution from Telegram is switched off. Nothing was signed or sent."
+
+
+@contextmanager
+def surface(name: str, mainnet_allowed: bool) -> Iterator[None]:
+    t1, t2 = _SURFACE.set(name), _MAINNET_OK.set(bool(mainnet_allowed))
+    try:
+        yield
+    finally:
+        _SURFACE.reset(t1)
+        _MAINNET_OK.reset(t2)
+
+
+def current_surface() -> str:
+    return _SURFACE.get()
+
+
+def mainnet_blocked(mode: str) -> bool:
+    """True when a signed action on `mode` must not leave this request (LIVE, from a surface whose mainnet switch is off)."""
+    return mode == "LIVE" and bool(_SURFACE.get()) and not _MAINNET_OK.get()
+
+
+def guard_signed(mode: str) -> None:
+    if mainnet_blocked(mode):
+        raise MainnetBlocked(MAINNET_BLOCKED)
 
 
 @dataclass
@@ -126,6 +168,8 @@ class PaperExecutor:
 
     def market(self, coin: str, is_buy: bool, size: float, limit_px: float, cloid: str, reduce_only: bool = False) -> Result:
         px = self._mark * (1 + risk.SLIPPAGE if is_buy else 1 - risk.SLIPPAGE)
+        if limit_px:  # never worse than the order's limit (an IOC fills at the limit or better, or not at all)
+            px = min(px, limit_px) if is_buy else max(px, limit_px)
         return Result("FILLED", size, px, raw={"paper": True})
 
     def trigger(self, coin: str, is_buy: bool, size: float, trigger_px: float, kind: str, cloid: str) -> Result:
@@ -158,6 +202,7 @@ class HyperliquidExecutor:
         return self.info.user_state(self.master)
 
     def set_leverage(self, coin: str, lev: int) -> None:
+        guard_signed(self.mode)
         r = self.ex.update_leverage(lev, coin, is_cross=False)  # isolated margin
         if not isinstance(r, dict) or r.get("status") != "ok":
             raise ExchangeError(f"Hyperliquid refused the leverage change: {str(r)[:200]}")
@@ -165,6 +210,7 @@ class HyperliquidExecutor:
     def market(self, coin: str, is_buy: bool, size: float, limit_px: float, cloid: str, reduce_only: bool = False) -> Result:
         from hyperliquid.utils.types import Cloid
 
+        guard_signed(self.mode)
         r = self.ex.order(coin, is_buy, size, limit_px, {"limit": {"tif": "Ioc"}}, reduce_only=reduce_only, cloid=Cloid.from_str(cloid))
         res = parse_status(r)
         if res.status == "FILLED" and res.filled + 1e-12 < size:
@@ -174,18 +220,21 @@ class HyperliquidExecutor:
     def trigger(self, coin: str, is_buy: bool, size: float, trigger_px: float, kind: str, cloid: str) -> Result:
         from hyperliquid.utils.types import Cloid
 
-        order_type = {"trigger": {"triggerPx": trigger_px, "isMarket": True, "tpsl": "sl" if kind == "sl" else "tp"}}
+        guard_signed(self.mode)
+        order_type ={"trigger": {"triggerPx": trigger_px, "isMarket": True, "tpsl": "sl" if kind == "sl" else "tp"}}
         return parse_status(self.ex.order(coin, is_buy, size, trigger_px, order_type, reduce_only=True, cloid=Cloid.from_str(cloid)))
 
     def cancel(self, coin: str, oid: int | None) -> None:
         """Raises ExchangeError when Hyperliquid refuses: a protective order that is still resting must never be booked as
         cancelled. "Already cancelled or filled" counts as gone."""
+        guard_signed(self.mode)
         if oid is not None:
             check_cancel(self.ex.cancel(coin, oid))
 
     def cancel_by_cloid(self, coin: str, cloid: str) -> None:
         from hyperliquid.utils.types import Cloid
 
+        guard_signed(self.mode)
         check_cancel(self.ex.cancel_by_cloid(coin, Cloid.from_str(cloid)))
 
     def fills_since(self, start_ms: int) -> list[dict[str, Any]]:
@@ -212,6 +261,52 @@ class HyperliquidExecutor:
 
     def mid_px(self, coin: str) -> float:
         return float(self.info.all_mids()[coin])
+
+
+class ReadOnlyExecutor:
+    """Reads a Hyperliquid account from the public info endpoint by its address: no key is loaded, nothing can be signed, and
+    every order-shaped method raises MainnetBlocked before anything happens. Mainnet previews from Telegram use it while mainnet
+    execution is off, so a preview shows the member's real balance and positions and can never become an order."""
+
+    read_only = True
+
+    def __init__(self, mode: str, master: str, transport: httpx.BaseTransport | None = None) -> None:
+        self.mode, self.master, self.url, self._transport = mode, master, URLS[mode], transport
+
+    def _info(self, body: dict[str, Any]) -> Any:
+        with httpx.Client(timeout=15, transport=self._transport) as c:
+            r = c.post(f"{self.url}/info", json=body)
+        if r.status_code != 200:
+            raise ExchangeError(f"Hyperliquid answered {r.status_code}")
+        return r.json()
+
+    def state(self) -> dict[str, Any]:
+        out = self._info({"type": "clearinghouseState", "user": self.master})
+        if not isinstance(out, dict):
+            raise ExchangeError("Unexpected account answer from Hyperliquid.")
+        return out
+
+    def equity(self) -> float:
+        return trading_equity(self.mode, self.master, self.state())
+
+    def mid_px(self, coin: str) -> float:
+        return float(self._info({"type": "allMids"})[coin])
+
+    def _refuse(self, *_: Any, **__: Any) -> Any:
+        raise MainnetBlocked(MAINNET_BLOCKED)
+
+    set_leverage = market = trigger = cancel = cancel_by_cloid = _refuse
+
+
+def user_fees(mode: str, address: str, transport: httpx.BaseTransport | None = None) -> dict[str, float]:
+    """The account's own fee rates from info "userFees" (userCrossRate = taker, userAddRate = maker, as fractions) and its
+    active referral discount. Public and read-only (hyperliquid.gitbook.io → API → Info endpoint → Query a user's fees)."""
+    with httpx.Client(timeout=15, transport=transport) as c:
+        out = c.post(f"{URLS[mode]}/info", json={"type": "userFees", "user": address}).json()
+    if not isinstance(out, dict) or "userCrossRate" not in out:
+        raise ExchangeError("Unexpected fees answer from Hyperliquid.")
+    return {"taker": float(out["userCrossRate"]), "maker": float(out.get("userAddRate") or 0),
+            "referral_discount": float(out.get("activeReferralDiscount") or 0)}
 
 
 def account_snapshot(mode: str, master: str, transport: httpx.BaseTransport | None = None) -> dict[str, Any]:

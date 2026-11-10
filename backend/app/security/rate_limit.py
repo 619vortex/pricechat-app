@@ -83,6 +83,9 @@ LIMITS = {
     # TG-3). The shared bucket is effectively off: a busy group with many people asking is fine; one person flooding is not
     "tg_heavy": Bucket(burst=1, every=10, shared_burst=100_000, shared_every=0.001),
     "tg_fc_button": Bucket(burst=3, every=5, shared_burst=100_000, shared_every=0.001),  # "fc" timeframe buttons: browsing a few is fine
+    # Telegram trading (bot.py), per Telegram user: a burst of commands / button presses, then one every 2 s / 1 s
+    "tg_trade": Bucket(burst=6, every=2, shared_burst=100_000, shared_every=0.001),
+    "tg_trade_button": Bucket(burst=6, every=1, shared_burst=100_000, shared_every=0.001),
     # the public candles under a committee run's chart (cached per market for a minute; a page loads them once per run shown)
     "committee_chart": Bucket(burst=20, every=3, shared_burst=300, shared_every=0.1),
     # visitors' Pokémon Market reads (card pages, charts, tables): a person browsing opens a few a second at most; a crawler

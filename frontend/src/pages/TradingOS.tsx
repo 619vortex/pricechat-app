@@ -433,6 +433,7 @@ function Execution() {
                 hint={`${d.results[m].trades} closed${d.results[m].win_rate != null ? ` · ${d.results[m].win_rate}% wins` : ""}`} />
         ))}
       </div>
+      <p className="muted small">Telegram trading (mainnet switch, emergency stop) is under <b>Telegram → Telegram trading</b> in the sidebar.</p>
       <Card title="LIVE allowlist">
         <p className="muted small">Kiwi Passport usernames allowed to authorize a mainnet API wallet and, after passing the pre-live checks, enable LIVE themselves.
           Everyone else stays in PAPER or TESTNET.</p>

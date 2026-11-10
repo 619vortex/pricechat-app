@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ConnectButton, PIcon, SitePage, TelegramButton, XPRow, when } from "./community";
 import { EmailLogin } from "./emailLogin";
@@ -11,8 +11,6 @@ import { ManagerBadge, ManagerTab, WorkerBadge, WorkerTab } from "./workers";
 import { RealmTab } from "./realm";
 import { signWith, walletError } from "./wallet";
 import { BurnerRow } from "./burner";
-import { PnlCard, type Pnl } from "./pnl";
-import { TierLadder, type Tiers } from "./tiers";
 import { burst } from "./fx";
 import { reducedMotion } from "./motion";
 import { playSound, warmSounds } from "./sound";
@@ -258,8 +256,8 @@ function Passport() {
         {/* 4a'. Kiwi VPN: the same compact line (hidden until the owner opens it) */}
         <VpnStatus />
 
-        {/* 4b. Track record: the member's own Hyperliquid PnL and the bot's (Hyperliquid's numbers, for transparency) */}
-        <TrackRecord />
+        {/* 4b. Trade on Hyperliquid: sign up with our link, connect the API, link Telegram, then trade in the group */}
+        <TradeSetup telegramLinked={!!p.telegram} />
 
         {/* 5. Settings: connected accounts, privacy, XP history (opened when a connect just failed, so the error shows) */}
         <details className="site-details pp-settings-wrap" open={!member.username_chosen || !!linkError}>
@@ -398,19 +396,74 @@ function WalletRow() {
   );
 }
 
-function TrackRecord() {
-  const [d, setD] = useState<{ wallet: string | null; mine: Pnl | null; bot: { username: string; address: string; pnl: Pnl | null } | null; tiers: Tiers } | null>(null);
-  useEffect(() => { void memberApi<NonNullable<typeof d>>("/members/me/pnl").then(setD).catch(() => undefined); }, []);
-  if (!d || (!d.wallet && !d.bot)) return null;
+/** Trade on Hyperliquid (replaces the old Track record): the three things that let a member trade from the Price Chat Telegram
+ *  group, each ticked from the server's own checks: (1) a Hyperliquid account made with our sign-up link (Hyperliquid's record),
+ *  (2) that account connected here with an API key (the existing Connect dialog), (3) Telegram linked, then the group link. */
+interface SetupConn { referral: { status: "VERIFIED" | "NOT_VERIFIED" | "EXISTING_ACCOUNT" | "PENDING" }; authorization: { status: string }; wallet: { address: string } | null }
+interface SetupBot { telegram?: { linked: boolean; username?: string | null }; access?: { group_url: string | null } }
+function TradeSetup({ telegramLinked }: { telegramLinked: boolean }) {
+  const [c, setC] = useState<SetupConn | null>(null);
+  const [b, setB] = useState<SetupBot | null>(null);
+  const [Dialog, setDialog] = useState<null | ((p: { onClose: () => void; onChanged: () => void }) => ReactNode)>(null);
+  const load = useCallback(() => {
+    void memberApi<SetupConn>("/members/trading/connection").then(setC).catch(() => undefined);
+    void memberApi<SetupBot>("/members/trading-bot").then(setB).catch(() => undefined);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  async function openConnect() {
+    const m = await import("./terminal");  // loaded only when needed: the same Connect dialog as the trading terminal
+    setDialog(() => m.ConnectDialog);
+  }
+  const ref = c?.referral.status ?? "PENDING";
+  const signedUp = ref === "VERIFIED";
+  const connected = c?.authorization.status === "ACTIVE" || !!c?.wallet;
+  const tg = telegramLinked || !!b?.telegram?.linked;
+  const ready = signedUp && connected && tg;
+  const group = b?.access?.group_url || "https://t.me/botpricechat";
+  const tick = (ok: boolean) => <span className={`pp-step-tick${ok ? " is-done" : ""}`} aria-hidden>{ok ? "✓" : ""}</span>;
   return (
-    <section className="pp-section site-reveal pp-track" aria-labelledby="track-title">
-      <SectionTitle id="track-title" title="Track record" note="Live from Hyperliquid. Nothing here is self-reported." />
-      {d.wallet && <TierLadder t={d.tiers} />}
-      <div className="pp-track-grid">
-        {d.wallet && <PnlCard title="Your PnL" pnl={d.mine} />}
-        {d.bot && <PnlCard title={`@${d.bot.username}`} pnl={d.bot.pnl}
-                           sub={<a href={`https://app.hyperliquid.xyz/explorer/address/${d.bot.address}`} target="_blank" rel="noopener noreferrer">Verify on-chain ↗</a>} />}
-      </div>
+    <section className="pp-section site-reveal pp-trade" aria-labelledby="trade-title">
+      <SectionTitle id="trade-title" title="Trade on Hyperliquid" note="Three steps, then you trade straight from the Price Chat Telegram group." />
+      {ready ? (
+        <div className="pp-trade-ready" role="status">
+          <strong>✅ You can trade in the group</strong>
+          <span>Type <code>/long btc 3x</code> or <code>/short eth 100 2x tp 3k</code> in the group: you get a preview, then press Confirm.</span>
+          <a className="site-button pp-trade-go" href={group} target="_blank" rel="noopener noreferrer">Open the Telegram group ↗</a>
+        </div>
+      ) : null}
+      <ol className="pp-trade-steps">
+        <li className={signedUp ? "is-done" : ""}>
+          {tick(signedUp)}
+          <div>
+            <b>1. Sign up on Hyperliquid with our link</b>
+            <span>{signedUp ? "Done: Hyperliquid shows your account was made with our link (4% off fees)."
+              : ref === "EXISTING_ACCOUNT" ? "This Hyperliquid account was made with another link, and Hyperliquid doesn't allow changing it. Make a new account with our link."
+                : "4% off trading fees. Only accounts made with this link can trade from the group."}</span>
+            {!signedUp && <a className="pp-hl-signup" href="/api/r/site_passport?src=web" target="_blank" rel="noopener noreferrer">
+              <span className="pp-hl-signup-title">🚀 Sign up on Hyperliquid</span>
+              <span className="pp-hl-signup-sub">Our link · 4% off fees · then come back for step 2</span>
+            </a>}
+          </div>
+        </li>
+        <li className={connected ? "is-done" : ""}>
+          {tick(connected)}
+          <div>
+            <b>2. Connect Hyperliquid with an API key</b>
+            <span>{connected ? `Done: ${c?.wallet ? `account ${c.wallet.address.slice(0, 6)}…${c.wallet.address.slice(-4)}` : "connected"}.`
+              : "On Hyperliquid make an API key (More → API) and paste it here. It can trade, never withdraw. Your main key is never asked for."}</span>
+            <button type="button" className="site-button pp-trade-btn" onClick={() => void openConnect()}>{connected ? "Manage connection" : "Connect Hyperliquid"}</button>
+          </div>
+        </li>
+        <li className={tg ? "is-done" : ""}>
+          {tick(tg)}
+          <div>
+            <b>3. Link Telegram and join the group</b>
+            <span>{tg ? "Telegram is linked to this Passport." : "Link Telegram under Settings → Connected accounts below, so the bot knows it's you."}</span>
+            <a className="site-button pp-trade-btn" href={group} target="_blank" rel="noopener noreferrer">Join the Telegram group ↗</a>
+          </div>
+        </li>
+      </ol>
+      {Dialog && <Dialog onClose={() => { setDialog(null); load(); }} onChanged={load} />}
     </section>
   );
 }
