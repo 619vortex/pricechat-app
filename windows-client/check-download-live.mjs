@@ -42,10 +42,11 @@ const page = JSON.parse((await send("Runtime.evaluate", { returnByValue: true, e
 check("/vpn offers Download for Windows, in the hero and the card", page.hrefs.length === 2 && page.hrefs.every((h) => h === "/downloads/KiwiVPN-Setup.exe") && page.download && page.hero, page.hrefs.join(", "));
 check("the hero's button says Public beta", /Public beta/.test(page.heroText || ""), page.heroText);
 check("the card says Public beta", page.status === "Public beta", page.status);
-check("unsigned is disclosed", /isn't code signed/.test(page.notes));
-check("Smart App Control is disclosed", /Smart App Control/.test(page.notes));
-check("no kill switch is disclosed", /no kill switch/.test(page.notes));
-check("unfinished testing is disclosed", /Connection, security, DNS leak and IPv6 leak testing aren't finished/.test(page.notes));
+check("signed publisher is named", /code signed \(publisher: Avigad Saadia\)/.test(page.notes));
+check("the kill switch is described as optional", /Optional kill switch, in Settings/.test(page.notes) && /off unless you turn it on/.test(page.notes));
+check("the 0.1 upgrade path is stated", /upgrades it in place/.test(page.notes));
+check("it's still called a beta", /still a beta/.test(page.notes));
+check("no stale unsigned / no-kill-switch text", !/isn't code signed|no kill switch/.test(page.notes));
 check("no passed-testing claim", !/passed|audited|verified/i.test(page.notes));
 check("the page shows the same SHA-256", page.notes.includes(WANT));
 proc.kill();

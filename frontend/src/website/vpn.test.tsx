@@ -273,10 +273,13 @@ describe("Free while payments are off", () => {
       const windows = card(view.container, "Windows");
       expect(screen.getByRole("link", { name: /Download for Windows/ }).getAttribute("href")).toBe("/downloads/KiwiVPN-Setup.exe");
       expect(windows.querySelector(".vpn-status")!.textContent).toBe("Public beta");
-      expect(windows.textContent).toMatch(/isn't code signed/);
-      expect(windows.textContent).toMatch(/no kill switch/);
-      expect(windows.textContent).toMatch(/Connection, security, DNS leak and IPv6 leak testing aren't finished/);
-      expect(windows.textContent).toMatch(/Smart App Control turned on will block it/);
+      expect(windows.textContent).toMatch(/code signed \(publisher: Avigad Saadia\)/);
+      expect(windows.textContent).toMatch(/installs on a PC with Smart App Control turned on/);
+      expect(windows.textContent).toMatch(/Optional kill switch, in Settings/);
+      expect(windows.textContent).toMatch(/It's off unless you turn it on/);
+      expect(windows.textContent).toMatch(/upgrades it in place and keeps your settings/);
+      expect(windows.textContent).toMatch(/still a beta/);
+      expect(windows.textContent).not.toMatch(/isn't code signed|no kill switch|will block it/);
       expect(windows.textContent).not.toMatch(/passed|verified|audited/i);
       expect(windows.textContent).toMatch(/sign in, choose a country and connect/);
       expect(windows.textContent).toMatch(/Public beta 0\.1\.0/);
