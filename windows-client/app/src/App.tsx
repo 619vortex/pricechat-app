@@ -214,8 +214,6 @@ export function App() {
   const picked = chosen ?? (smartOn ? SMART : view?.suggested ?? null);
   const shown = servers.find((s) => s.id === (phase === "on" || phase === "connecting" ? view?.last_server ?? fo.current.serverId ?? picked : picked)) ?? null;
 
-  // Failover: while the person wants to be connected and the service says the tunnel isn't healthy, wait, retry once,
-  // then move to the next best server. It never runs after Disconnect, and gives up rather than looping.
   // Liveness (2.1): while connected, watch the bytes coming in; after a quiet spell, probe through the tunnel. Several unanswered
   // probes in a row, with nothing received, mean the server is gone, and failover below moves on at once. Declared before the
   // failover effect, so both see the same reading.
@@ -229,6 +227,9 @@ export function App() {
     }
   }, [answer, now]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Failover: while the person wants to be connected and the service says the tunnel isn't healthy (or the liveness probe found
+  // the server gone), wait, retry once,
+  // then move to the next best server. It never runs after Disconnect, and gives up rather than looping.
   useEffect(() => {
     if (!want.current || prefs?.failover !== true || action !== null || !account) return;
     if (reported === "loading" || reported === "no-service" || reported === "stopping") return;
