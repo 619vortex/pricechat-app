@@ -20,12 +20,20 @@ foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET
   if ($raw -ne $raw.Trim()) { [Environment]::SetEnvironmentVariable($v, $raw.Trim()) } # pasted spaces or line breaks
 }
 $File = (Resolve-Path $Path).Path
+# makensis hands over the uninstaller as nstXXXX.tmp (!uninstfinalize), and CodeSignTool only signs known extensions: sign an .exe
+# copy, then put it back in place.
+$Original = $null
+if ([IO.Path]::GetExtension($File) -notin ".exe", ".dll", ".sys", ".msi", ".cab", ".cat", ".ps1") {
+  $Original = $File
+  $File = Join-Path ([IO.Path]::GetTempPath()) ("kiwi-sign-" + [guid]::NewGuid().ToString("N") + ".exe")
+  Copy-Item $Original $File
+}
 $Tool = $env:CODESIGNTOOL_DIR
 $Java = Join-Path $Tool "jdk-11.0.2\bin\java.exe"
 $Jar = Get-ChildItem (Join-Path $Tool "jar") -Filter "code_sign_tool-*.jar" | Select-Object -First 1
 if (-not (Test-Path $Java) -or -not $Jar) { throw "sign.ps1: CodeSignTool isn't unpacked in $Tool" }
 
-$Name = Split-Path $File -Leaf
+$Name = if ($Original) { "uninstaller ($(Split-Path $Original -Leaf))" } else { Split-Path $File -Leaf }
 $CstArgs = @("-Xmx1024M", "-jar", $Jar.FullName, "sign",
   "-username=$env:ES_USERNAME", "-password=$env:ES_PASSWORD", "-credential_id=$env:ES_CREDENTIAL_ID", "-totp_secret=$env:ES_TOTP_SECRET",
   "-input_file_path=$File", "-override=true")
@@ -51,4 +59,9 @@ if ($env:KIWI_SIGNER_THUMBPRINT -and $cert.Thumbprint -ne $env:KIWI_SIGNER_THUMB
 $alg = $cert.PublicKey.Oid.FriendlyName
 Write-Host ("signed {0}: {1} | {2} key | expires {3:yyyy-MM-dd} | thumbprint {4} | timestamped by {5}" -f $Name, $cert.Subject, $alg, $cert.NotAfter, $cert.Thumbprint, $sig.TimeStamperCertificate.Subject)
 if ($alg -ne "RSA") { Write-Host "::warning::$Name is signed with a $alg key. Smart App Control may not accept non-RSA signatures; check it on a PC with Smart App Control before release." }
+if ($Original) {
+  Copy-Item $File $Original -Force
+  if ((Get-FileHash $Original).Hash -ne (Get-FileHash $File).Hash) { throw "sign.ps1: couldn't put the signed uninstaller back" }
+  Remove-Item $File -Force
+}
 if ($env:GITHUB_STEP_SUMMARY) { "- signed $Name : $($cert.Subject), $alg key, thumbprint $($cert.Thumbprint)" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
