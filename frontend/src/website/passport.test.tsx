@@ -129,7 +129,9 @@ describe("Kiwi Passport V3", () => {
     expect(container.querySelector(".pp-activity")).toBeNull();
     expect(calls).not.toContain("GET /api/members/feed");
     const order = [...container.querySelectorAll(".pp-flow > section")].map((s) => s.getAttribute("aria-labelledby") ?? s.getAttribute("aria-label"));
-    expect(order).toEqual(["Kiwi Passport", "ranks-title"]);
+    expect(order).toEqual(["Kiwi Passport", "ranks-title", "trade-title"]);  // Trade on Hyperliquid replaced the Track record
+    expect(container.querySelector("#trade-title")!.textContent).toContain("Trade on Hyperliquid");
+    expect(container.textContent).not.toContain("Track record");
     // connected accounts and XP history aren't sections of their own: they're inside the Settings panel
     expect(container.querySelector(".pp-settings-wrap #linked-title")).toBeTruthy();
     expect(container.querySelector(".pp-settings-wrap #xp-title")).toBeTruthy();

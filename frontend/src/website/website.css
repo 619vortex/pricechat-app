@@ -1514,3 +1514,18 @@ html.site-menu-open, html.site-menu-open body { overflow: hidden; }
 @keyframes pp-hl-glow { 50% { box-shadow: 0 0 0 1px rgba(77,255,154,.8), 0 0 42px rgba(77,255,154,.85), 0 0 90px rgba(34,211,238,.5); } }
 @keyframes pp-hl-sheen { to { background-position: 200% 0; } }
 @media (prefers-reduced-motion: reduce) { .pp-hl-signup { animation: none; } }
+/* Passport: Trade on Hyperliquid steps */
+.pp-trade-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.pp-trade-steps li { display: flex; gap: 14px; align-items: flex-start; padding: 16px; border: 1px solid var(--site-line-strong); border-radius: 14px; }
+.pp-trade-steps li.is-done { border-color: rgba(77,255,154,.45); }
+.pp-trade-steps li > div { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
+.pp-trade-steps b { font-size: 17px; }
+.pp-trade-steps span { color: var(--site-muted, #9aa); }
+.pp-step-tick { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--site-line-strong); display: grid; place-items: center; font-weight: 800; }
+.pp-step-tick.is-done { background: #4dff9a; border-color: #4dff9a; color: #04140b; }
+.pp-trade-btn { align-self: flex-start; }
+.pp-trade-steps .pp-hl-signup { margin: 4px 0 0; }
+.pp-trade-ready { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; padding: 18px 20px; border-radius: 14px;
+  background: rgba(77,255,154,.12); border: 1px solid rgba(77,255,154,.5); }
+.pp-trade-ready strong { font-size: 20px; }
+.pp-trade-go { align-self: flex-start; }
