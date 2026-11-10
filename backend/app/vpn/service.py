@@ -352,6 +352,30 @@ def _load(server: VpnServer, count: int) -> float:
     return round(min(1.0, count / server.capacity), 4) if server.capacity > 0 else 1.0
 
 
+def server_traffic(db: Session, now: datetime | None = None) -> dict[int, int]:
+    """Bytes each server carried this month (its devices' and browser logins' up + down: roughly what the provider bills
+    as the server's outgoing traffic, since everything a client sends or receives leaves the server once)."""
+    month = _month(now or utcnow())
+    out: dict[int, int] = {}
+    for model in (VpnDevice, VpnBrowser):
+        for sid, n in db.execute(select(model.server_id, func.sum(model.rx_bytes + model.tx_bytes))
+                                 .where(model.usage_month == month).group_by(model.server_id)).all():
+            if sid is not None:
+                out[sid] = out.get(sid, 0) + int(n or 0)
+    return out
+
+
+def live_counts(db: Session, now: datetime | None = None) -> dict[int, int]:
+    """Devices and browser logins in use on each server now (seen in the last sync window): Smart Connect's load signal."""
+    since = (now or utcnow()) - LIVE_WINDOW
+    out: dict[int, int] = {}
+    for sid, n in db.execute(select(VpnDevice.server_id, func.count()).where(VpnDevice.last_handshake >= since).group_by(VpnDevice.server_id)).all():
+        out[sid] = out.get(sid, 0) + int(n)
+    for sid, n in db.execute(select(VpnBrowser.server_id, func.count()).where(VpnBrowser.last_active >= since).group_by(VpnBrowser.server_id)).all():
+        out[sid] = out.get(sid, 0) + int(n)
+    return out
+
+
 def recommended_id(servers: list[VpnServer], counts: dict[int, int]) -> int | None:
     """The best server for a new device: online and not full, the lowest load, ties -> the lowest id."""
     ok = [v for v in servers if v.online and counts.get(v.id, 0) < v.capacity]
@@ -421,11 +445,13 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     if review:
         servers = [v for v in servers if v.name == reviewer.SERVER]
     best = recommended_id(servers, counts)
+    live = live_counts(db)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
     open_here = s.enabled or preview or review or is_tester(acct)
     out = {"enabled": open_here, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
-                        "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers],
+                        "load": _load(v, counts.get(v.id, 0)), "live_load": _load(v, live.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best,
+                        "browser": bool(v.proxy_host), "proxy_host": v.proxy_host or None} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
            "paid_until": _iso(acct.paid_until), "anonymous": acct.member_id is None, "has_card": bool(acct.stripe_customer), "billing": bill}
     state = access(db, acct)
@@ -730,7 +756,7 @@ def add_server(db: Session, data: dict[str, Any]) -> VpnServer:
         raise VpnError(f"Couldn't verify the VPN agent: {e}", 400) from None
     server = VpnServer(name=d["name"], region=d.get("region") or "", country_code=d.get("country_code") or "", agent_url=d["agent_url"],
                        agent_token_enc=enc(token), cert_sha256=d["cert_sha256"], capacity=int(d.get("capacity") or 250), enabled=True,
-                       testers_only=bool(d.get("testers_only", False)))
+                       testers_only=bool(d.get("testers_only", False)), traffic_included_gb=int(d.get("traffic_included_gb") or 0))
     _apply_status(server, st, utcnow())
     db.add(server)
     db.commit()
@@ -742,7 +768,7 @@ def update_server(db: Session, server_id: int, data: dict[str, Any]) -> VpnServe
     if server is None:
         raise VpnError("Server not found.", 404)
     d = _clean_server_fields(data)
-    for k in ("name", "region", "country_code", "capacity", "enabled", "cert_sha256", "testers_only"):
+    for k in ("name", "region", "country_code", "capacity", "enabled", "cert_sha256", "testers_only", "traffic_included_gb"):
         if d.get(k) is not None:
             setattr(server, k, d[k])
     if d.get("agent_token"):
@@ -793,11 +819,13 @@ def admin_overview(db: Session) -> dict[str, Any]:
     s = settings(db)
     since = utcnow() - timedelta(hours=24)
     counts = _device_counts(db)
+    traffic = server_traffic(db)
     active = dict(db.execute(select(VpnDevice.server_id, func.count()).where(VpnDevice.last_handshake >= since)
                              .group_by(VpnDevice.server_id)).all())  # type: ignore[arg-type]
     servers = [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "endpoint_host": v.endpoint_host,
                 "listen_port": v.listen_port, "agent_url": v.agent_url, "capacity": v.capacity, "enabled": v.enabled, "online": v.online,
                 "adblock": v.adblock, "testers_only": v.testers_only,
+                "traffic_month_bytes": traffic.get(v.id, 0), "traffic_included_gb": v.traffic_included_gb,
                 "last_seen": _iso(v.last_seen), "last_error": v.last_error, "devices": counts.get(v.id, 0), "active_24h": active.get(v.id, 0),
                 "proxy_host": v.proxy_host}
                for v in db.scalars(select(VpnServer).order_by(VpnServer.name, VpnServer.id))]

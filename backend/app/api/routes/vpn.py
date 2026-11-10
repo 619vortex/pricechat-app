@@ -460,6 +460,7 @@ class ServerInput(StrictInput):
     cert_sha256: str = Field(min_length=64, max_length=128)
     capacity: int | None = Field(None, ge=1, le=100000)
     testers_only: bool = True  # a new server starts visible to the owner and testers only, until it's switched to everyone
+    traffic_included_gb: int | None = Field(None, ge=0, le=1_000_000)  # the provider's monthly allowance; alerts at 80% and 100%
 
 
 class ServerUpdate(StrictInput):
@@ -469,6 +470,7 @@ class ServerUpdate(StrictInput):
     capacity: int | None = Field(None, ge=1, le=100000)
     enabled: bool | None = None
     testers_only: bool | None = None
+    traffic_included_gb: int | None = Field(None, ge=0, le=1_000_000)
     agent_token: str | None = Field(None, min_length=32, max_length=512)
     cert_sha256: str | None = Field(None, min_length=64, max_length=128)
 

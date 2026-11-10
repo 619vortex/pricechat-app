@@ -12,7 +12,15 @@ export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_e
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string;
-  /** only the owner and testers see it (a new server being tried out) */ testers_only?: boolean };
+  /** only the owner and testers see it (a new server being tried out) */ testers_only?: boolean;
+  /** bytes it carried this month, and the provider's monthly allowance in GB (0 = no alert) */ traffic_month_bytes?: number; traffic_included_gb?: number };
+
+/** "123 GB of 1,024 GB (12%)" or "123 GB this month" when no allowance is set. */
+export function trafficText(bytes = 0, includedGb = 0): string {
+  const gb = bytes / 1e9;
+  const used = gb < 10 ? gb.toFixed(1) : Math.round(gb).toLocaleString("en-US");
+  return includedGb > 0 ? `${used} GB of ${includedGb.toLocaleString("en-US")} GB (${Math.round((gb / includedGb) * 100)}%)` : `${used} GB this month`;
+}
 export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number };
   billing?: { paying: number; anonymous: number; revenue_30d_usd: number; usdt: boolean; card: boolean } };
 
@@ -139,7 +147,7 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
         <br /><span className="muted small mono">{x.endpoint_host ? `${x.endpoint_host}:${x.listen_port ?? ""}` : x.agent_url}</span></td>
       <td><Badge tone={x.online ? "good" : "bad"}>{x.online ? "online" : "offline"}</Badge><br /><span className="muted small">seen {relativeTime(x.last_seen)}</span>
         {x.last_error && <><br /><span className="small" style={{ color: "var(--bad)" }}>{x.last_error}</span></>}</td>
-      <td>{x.devices} / {x.capacity}</td>
+      <td>{x.devices} / {x.capacity}<br /><span className="muted small" title="Traffic this month">{trafficText(x.traffic_month_bytes, x.traffic_included_gb)}</span></td>
       <td>{x.active_24h}</td>
       <td>
         <label className="toggle" title={x.enabled ? "Enabled" : "Disabled"}>
@@ -163,14 +171,14 @@ function ServerRow({ x, reload }: { x: VpnAdminServer; reload: () => Promise<voi
 
 /** Name, region and capacity. The token and certificate only change when a new value is typed; the current ones are never shown. */
 function EditServer({ x, onDone }: { x: VpnAdminServer; onDone: () => Promise<void> }) {
-  const [f, setF] = useState({ name: x.name, region: x.region, capacity: String(x.capacity), agent_token: "", cert_sha256: "" });
+  const [f, setF] = useState({ name: x.name, region: x.region, capacity: String(x.capacity), traffic: String(x.traffic_included_gb ?? 0), agent_token: "", cert_sha256: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setErr(null);
-    const body: Record<string, string | number> = { name: f.name.trim(), region: f.region.trim(), capacity: Number(f.capacity) };
+    const body: Record<string, string | number> = { name: f.name.trim(), region: f.region.trim(), capacity: Number(f.capacity), traffic_included_gb: Math.max(0, Math.round(Number(f.traffic) || 0)) };
     if (f.agent_token.trim()) body.agent_token = f.agent_token.trim();
     if (f.cert_sha256.trim()) body.cert_sha256 = f.cert_sha256.trim().replace(/:/g, "").toLowerCase();
     try { await request(`/vpn/admin/servers/${x.id}`, { method: "PATCH", body: JSON.stringify(body) }); await onDone(); }
@@ -182,6 +190,7 @@ function EditServer({ x, onDone }: { x: VpnAdminServer; onDone: () => Promise<vo
         <Field label="Name"><input className="input" aria-label="Edit name" value={f.name} onChange={set("name")} /></Field>
         <Field label="Region"><input className="input" aria-label="Edit region" value={f.region} onChange={set("region")} /></Field>
         <Field label="Capacity"><input className="input" aria-label="Edit capacity" type="number" min={1} value={f.capacity} onChange={set("capacity")} /></Field>
+        <Field label="Included traffic (GB a month)" hint="Alerts at 80% and 100%; 0 = off"><input className="input" aria-label="Included traffic" type="number" min={0} value={f.traffic} onChange={set("traffic")} /></Field>
         <Field label="New agent token" hint="Empty keeps the current one"><input className="input mono" aria-label="New agent token" type="password" autoComplete="off" value={f.agent_token} onChange={set("agent_token")} /></Field>
         <Field label="New cert SHA-256" hint="Empty keeps the current one"><input className="input mono" aria-label="New cert" value={f.cert_sha256} onChange={set("cert_sha256")} /></Field>
       </div>
