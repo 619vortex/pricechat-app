@@ -44,6 +44,7 @@ const RewardsAdminPage = lazy(() => import("./pages/RewardsAdmin").then((m) => (
 const RealmAdminPage = lazy(() => import("./pages/RealmAdmin").then((m) => ({ default: m.RealmAdminPage })));
 const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ default: m.VpnAdminPage })));
 const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
+const TelegramTradingPage = lazy(() => import("./pages/TelegramTradingPage").then((m) => ({ default: m.TelegramTradingPage })));
 const TradingOSPage = lazy(() => import("./pages/TradingOS").then((m) => ({ default: m.TradingOSPage })));
 const pf = () => import("./pages/pokemon/portfolio");
 const PortfolioPage = lazy(() => pf().then((m) => ({ default: m.PortfolioPage })));
@@ -98,6 +99,7 @@ export function AdminApp() {
             <Route path="pokemon/portfolio/u/:username" element={<PublicPortfolioPage />} />
             <Route path="pokemon/portfolios" element={<ExplorePage />} />
             <Route path="pokemon/portfolio/phone/:token" element={<PhoneLinkPage />} />
+            <Route path="telegram-trading" element={<TelegramTradingPage />} />
             <Route path="telegram" element={<CommunityPage />} />
             <Route path="invite-bot" element={<InviteBotPage />} />
             <Route path="invite-bot/send" element={<InviteQuickPage />} />

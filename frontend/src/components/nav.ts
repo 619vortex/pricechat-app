@@ -27,6 +27,7 @@ export const AREAS: NavArea[] = [
   {
     key: "community", label: "Telegram", icon: "➤", todo: [],
     pages: [
+      { to: "/telegram-trading", label: "Telegram trading", about: "Members trading on Hyperliquid from the Telegram bot: mainnet switch, emergency stop, referral codes." },
       { to: "/telegram", label: "Community", about: "What people are talking about in your Telegram chats.", match: ["/telegram/"] },
       { to: "/invite-bot/send", label: "Send invites", about: "Invite people to the Telegram group." },
       { to: "/invite-bot", label: "Invite bot", about: "How the invite bot works and its limits." },
