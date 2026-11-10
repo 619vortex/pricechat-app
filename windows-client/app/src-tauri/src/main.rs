@@ -7,8 +7,8 @@ use kiwiclient::api::{Account, Backend, Http, BASE};
 use kiwiclient::flow::{self, Vault};
 use kiwiclient::store::FileVault;
 use kiwiclient::settings::{self, Settings};
-use kiwiclient::{applog, auth, opener};
-use kiwivpn::protocol::{Request, State, Status};
+use kiwiclient::{applog, auth, measure, opener, tune};
+use kiwivpn::protocol::{Protect, Request, State, Status};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +19,8 @@ use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 
 static CANCEL_SIGN_IN: AtomicBool = AtomicBool::new(false);
+/// The last tunnel asked for: the server's address and the DNS its config uses, for the leak check. Nothing secret.
+static LAST_TUNNEL: std::sync::Mutex<Option<(Option<String>, Vec<String>)>> = std::sync::Mutex::new(None);
 
 /// What the window is told. `service` is false when the service can't be reached, and then there's no tunnel state to report: the window never guesses one.
 #[derive(Serialize)]
@@ -104,16 +106,22 @@ struct Diagnostics {
     tunnel: String,
     handshake_age_seconds: Option<u64>,
     settings_file: String,
+    /// What this build can really do. "kill_switch" is listed only when the installed service says it enforces it.
+    features: Vec<String>,
 }
 
 /// Nothing secret: no keys, tokens or configs.
 #[tauri::command(async)]
 fn diagnostics() -> Diagnostics {
+    let mut features: Vec<String> = ["smart_connect", "failover", "split_tunnel", "block_malware", "speed_test", "leak_check"].iter().map(|f| f.to_string()).collect();
     let (service, tunnel, handshake_age_seconds) = match ipc::ask(&Request::Status) {
-        Ok(s) => ("Running".to_string(), format!("{:?}", s.state), s.handshake_age_seconds),
+        Ok(s) => {
+            features.extend(s.features.iter().cloned());
+            ("Running".to_string(), format!("{:?}", s.state), s.handshake_age_seconds)
+        }
         Err(e) => (e, "Unknown".to_string(), None),
     };
-    Diagnostics { version: env!("CARGO_PKG_VERSION"), service, tunnel, handshake_age_seconds, settings_file: settings_path().map(|p| p.display().to_string()).unwrap_or_default() }
+    Diagnostics { version: env!("CARGO_PKG_VERSION"), service, tunnel, handshake_age_seconds, settings_file: settings_path().map(|p| p.display().to_string()).unwrap_or_default(), features }
 }
 
 /// A fixed set of messages, so the page can't use this to show anything else.
@@ -151,6 +159,12 @@ fn vpn_disconnect() -> Answer {
 fn vpn_connect(server_id: i64) -> Result<Answer, String> {
     let computer = std::env::var("COMPUTERNAME").unwrap_or_default();
     note(&format!("connect: pressed, server {server_id}"));
+    // a tunnel that's up but not answering still has this PC's routes, so Price Chat can't be reached through it: the service closes it
+    // first (keeping the kill switch on), and the next server's settings are fetched directly
+    if matches!(ipc::ask(&Request::Status), Ok(s) if s.state == State::Connecting) {
+        note("connect: the current tunnel isn't answering, pausing it to switch");
+        let _ = ipc::ask(&Request::Pause);
+    }
     let config = flow::config_with_retry(&backend()?, &FileVault::open()?, &computer, server_id, &|| {
         note("connect: Price Chat unreachable, trying again");
         std::thread::sleep(Duration::from_millis(1500));
@@ -159,8 +173,25 @@ fn vpn_connect(server_id: i64) -> Result<Answer, String> {
         note(&format!("connect: no config: {e}"));
         e
     })?;
-    note("connect: config ready, asking the service");
-    let done = answer(ipc::ask(&Request::Connect { config: config.to_string() }));
+    // 2.0 options: split tunneling and the DNS choice, checked again here (the page checked them too).
+    let prefs = current_settings();
+    let dns: Option<&[&str]> = if prefs.block_malware { Some(&tune::QUAD9) } else { None };
+    let mut keep: Vec<tune::Cidr> = tune::dns_of(&config).iter().filter_map(|d| tune::parse_cidr(d)).collect();
+    keep.extend(tune::QUAD9.iter().filter_map(|d| tune::parse_cidr(d)));
+    let exclude = tune::checked_exclusions(&prefs.split_exclude, &keep)?;
+    let config = tune::apply(&config, &exclude, dns)?;
+    let server_ip = config.lines().find_map(|l| l.trim().strip_prefix("Endpoint = ")).and_then(|e| e.rsplit_once(':')).map(|(h, _)| h.trim_matches(['[', ']']).to_string());
+    if let Ok(mut last) = LAST_TUNNEL.lock() {
+        *last = Some((server_ip, tune::dns_of(&config)));
+    }
+    note(&format!("connect: config ready (split ranges {}, malware DNS {}), asking the service", exclude.len(), prefs.block_malware));
+    // the kill switch and what it lets through: the service checks the ranges again and enforces it
+    let protect = Protect {
+        kill_switch: prefs.kill_switch,
+        allow_lan: prefs.allow_lan,
+        allow: exclude.iter().map(|c| format!("{}/{}", std::net::Ipv4Addr::from(c.ip), c.bits)).collect(),
+    };
+    let done = answer(ipc::ask(&Request::Connect { config: config.to_string(), protect }));
     note_answer("connect", &done);
     Ok(done)
 }
@@ -173,7 +204,7 @@ fn vpn_connect_test_file(app: tauri::AppHandle) -> Result<Option<Answer>, String
     let Some(picked) = app.dialog().file().add_filter("WireGuard config", &["conf"]).blocking_pick_file() else { return Ok(None) };
     let path = picked.into_path().map_err(|e| e.to_string())?;
     let config = std::fs::read_to_string(&path).map_err(|e| format!("Can't read that file: {e}"))?;
-    Ok(Some(answer(ipc::ask(&Request::Connect { config }))))
+    Ok(Some(answer(ipc::ask(&Request::connect(config)))))
 }
 
 /// True in a build that has the config file option, so Advanced Settings can show it.
@@ -211,6 +242,28 @@ fn account_state() -> Result<AccountView, String> {
         }
         Err(e) => Ok(empty(true, Some(e.message))),
     }
+}
+
+/// Smart Connect's timings: each online server's proxy, 3 requests each, all servers at once. Run while disconnected.
+#[tauri::command(async)]
+fn probe_servers() -> Result<std::collections::HashMap<i64, Option<f64>>, String> {
+    let vault = FileVault::open()?;
+    let token = vault.session().ok_or("Sign in first.")?;
+    let account = backend()?.account(&token).map_err(|e| e.message)?;
+    let hosts: Vec<(i64, String)> = account.servers.iter().filter(|s| s.online).filter_map(|s| s.proxy_host.clone().map(|h| (s.id, h))).collect();
+    Ok(measure::probe(&hosts).into_iter().collect())
+}
+
+#[tauri::command(async)]
+fn speed_test() -> Result<measure::SpeedReport, String> {
+    note("speed test: started");
+    measure::speed_test()
+}
+
+#[tauri::command(async)]
+fn leak_check() -> Result<measure::LeakReport, String> {
+    let (server_ip, dns) = LAST_TUNNEL.lock().ok().and_then(|l| l.clone()).unwrap_or((None, Vec::new()));
+    measure::leak_check(server_ip, &dns)
 }
 
 #[tauri::command(async)]
@@ -276,9 +329,9 @@ fn main() {
     // Opening the app again brings up the one that's running, so there's never a second window asking the service for different things.
     let builder = tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app))).plugin(tauri_plugin_notification::init());
     #[cfg(feature = "test-config")]
-    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify]);
+    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, speed_test, leak_check]);
     #[cfg(not(feature = "test-config"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify]);
+    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, speed_test, leak_check]);
     builder
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Kiwi VPN", true, None::<&str>)?;

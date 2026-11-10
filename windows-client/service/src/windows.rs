@@ -1,13 +1,15 @@
 //! Everything that touches Windows: the tunnel service, the driver's statistics, and the named pipe the app talks through.
 
 use crate::config;
+use crate::firewall::Guard;
+use crate::guard::{self, Plan, Protect};
 use crate::protocol::{self, Caller, Request, ServiceState, Status, PIPE_NAME};
 use std::ffi::c_void;
 use std::io::Write;
 use std::mem::{size_of, zeroed};
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -54,6 +56,15 @@ fn exe_dir() -> Result<PathBuf, String> {
 /// when the service starts, hence the tries. Pressing Disconnect at any point ends them, because the config is gone.
 fn resume_after_restart(tunnel: Arc<Tunnel>) {
     tunnel.resuming.store(true, Ordering::SeqCst);
+    if conf_path().map(|p| p.exists()).unwrap_or(false) {
+        *tunnel.resumed_at.lock().unwrap() = Some(now_seconds());
+        // the kill switch comes back before the tunnel does, so nothing leaks while the network comes up
+        if let Some(plan) = saved_plan() {
+            if let Err(e) = tunnel.engage(&plan) {
+                log_event(&format!("guard: couldn't restore after the restart: {e}"));
+            }
+        }
+    }
     for _ in 0..30 {
         if tunnel.try_resume() {
             break;
@@ -70,6 +81,59 @@ fn tunnels_dir() -> Result<PathBuf, String> {
 
 fn conf_path() -> Result<PathBuf, String> {
     Ok(tunnels_dir()?.join(format!("{TUNNEL_NAME}.conf")))
+}
+
+/// What the kill switch was asked to do for the wanted tunnel, so it comes back with it after a restart. Deleted with the config.
+fn guard_path() -> Result<PathBuf, String> {
+    Ok(tunnels_dir()?.join(format!("{TUNNEL_NAME}.guard")))
+}
+
+/// Kiwi's two programs, which the kill switch lets through: this one (it also runs the tunnel) and the app beside it.
+fn app_paths() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        out.push(exe);
+    }
+    if let Ok(dir) = exe_dir() {
+        out.push(dir.join(APP_EXE));
+    }
+    out
+}
+
+fn plan_of(protect: &Protect, allow: Vec<guard::Net>, addresses: &[String]) -> Plan {
+    Plan { kill_switch: protect.kill_switch, allow_lan: protect.allow_lan, tunnel: guard::tunnel_nets(addresses), allow, apps: 2 }
+}
+
+fn save_plan(protect: &Protect, addresses: &[String]) {
+    let Ok(path) = guard_path() else { return };
+    let text = serde_json::json!({ "protect": protect, "addresses": addresses }).to_string();
+    if std::fs::write(path, text).is_err() {
+        log_event("guard: couldn't save the kill switch's settings for a restart");
+    }
+}
+
+fn saved_plan() -> Option<Plan> {
+    let text = std::fs::read_to_string(guard_path().ok()?).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let protect: Protect = serde_json::from_value(v.get("protect")?.clone()).ok()?;
+    let addresses: Vec<String> = serde_json::from_value(v.get("addresses")?.clone()).ok()?;
+    let allow = protect.check().ok()?;
+    Some(plan_of(&protect, allow, &addresses))
+}
+
+/// A host name endpoint is looked up now, before the kill switch is on: once it is, DNS only works inside the tunnel.
+fn resolved(endpoint: &str) -> String {
+    use std::net::{SocketAddr, ToSocketAddrs};
+    if endpoint.parse::<SocketAddr>().is_ok() {
+        return endpoint.to_string();
+    }
+    match endpoint.to_socket_addrs() {
+        Ok(found) => {
+            let found: Vec<SocketAddr> = found.collect();
+            found.iter().find(|a| a.is_ipv4()).or(found.first()).map(ToString::to_string).unwrap_or_else(|| endpoint.to_string())
+        }
+        Err(_) => endpoint.to_string(),
+    }
 }
 
 struct Descriptor(PSECURITY_DESCRIPTOR);
@@ -133,24 +197,23 @@ fn service_state(service: &Sc) -> ServiceState {
 fn stop_and_delete(name: &str) -> Result<(), String> {
     let scm = manager()?;
     let Some(service) = open_service(&scm, name) else { return Ok(()) };
-    let mut s: SERVICE_STATUS = unsafe { zeroed() };
-    unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
-    let start = Instant::now();
-    while service_state(&service) != ServiceState::Stopped && service_state(&service) != ServiceState::Missing && start.elapsed() < Duration::from_secs(20) {
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    stop_and_wait(&service, Duration::from_secs(20));
     unsafe { DeleteService(service.0) };
     Ok(())
 }
 
-/// Asks the tunnel to stop, and waits. True once it has stopped, or there's nothing left to stop.
+/// Asks the tunnel to stop, and waits. True once it has stopped, or there's nothing left to stop. The stop is asked for again on every look:
+/// Windows refuses it while a service is still starting, and a tunnel asked only then would finish starting and keep the PC's routes.
 fn stop_and_wait(service: &Sc, limit: Duration) -> bool {
-    let mut s: SERVICE_STATUS = unsafe { zeroed() };
-    unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
     let start = Instant::now();
     loop {
-        if matches!(service_state(service), ServiceState::Stopped | ServiceState::Missing) {
-            return true;
+        match service_state(service) {
+            ServiceState::Stopped | ServiceState::Missing => return true,
+            ServiceState::Running | ServiceState::Starting => {
+                let mut s: SERVICE_STATUS = unsafe { zeroed() };
+                unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut s) };
+            }
+            ServiceState::Stopping => {}
         }
         if start.elapsed() >= limit {
             return false;
@@ -217,6 +280,65 @@ fn create_tunnel_service(scm: &Sc, command: &[u16]) -> Result<Sc, String> {
     Ok(Sc(h))
 }
 
+/// Makes the tunnel's adapter the one Windows prefers (interface metric 0, IPv4 and IPv6), so its DNS server is asked first. WireGuard
+/// only does this itself when AllowedIPs holds a default route, which Kiwi sends as two halves (see `guard::without_default_routes`):
+/// without it, Windows kept asking the regular network's DNS first, which the DNS guard blocks, and names took 13 s to resolve after
+/// every connect. True once the adapter exists and is set.
+fn prefer_tunnel() -> bool {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{GetIpInterfaceEntry, InitializeIpInterfaceEntry, SetIpInterfaceEntry, MIB_IPINTERFACE_ROW};
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+    type Open = unsafe extern "system" fn(*const u16) -> *mut c_void;
+    type Close = unsafe extern "system" fn(*mut c_void);
+    type GetLuid = unsafe extern "system" fn(*mut c_void, *mut u64);
+    let Ok(dir) = exe_dir() else { return false };
+    let dll = wide(&dir.join("wireguard.dll").display().to_string());
+    unsafe {
+        let lib = LoadLibraryW(dll.as_ptr());
+        if lib.is_null() {
+            return false;
+        }
+        let (Some(open), Some(close), Some(luid_of)) = (
+            GetProcAddress(lib, c"WireGuardOpenAdapter".as_ptr() as *const u8),
+            GetProcAddress(lib, c"WireGuardCloseAdapter".as_ptr() as *const u8),
+            GetProcAddress(lib, c"WireGuardGetAdapterLUID".as_ptr() as *const u8),
+        ) else {
+            return false;
+        };
+        let open: Open = std::mem::transmute(open);
+        let close: Close = std::mem::transmute(close);
+        let luid_of: GetLuid = std::mem::transmute(luid_of);
+        let adapter = open(wide(TUNNEL_NAME).as_ptr());
+        if adapter.is_null() {
+            return false;
+        }
+        let mut luid = 0u64;
+        luid_of(adapter, &mut luid);
+        close(adapter);
+        let mut set_any = false;
+        for family in [AF_INET, AF_INET6] {
+            let mut row: MIB_IPINTERFACE_ROW = zeroed();
+            InitializeIpInterfaceEntry(&mut row);
+            row.Family = family;
+            row.InterfaceLuid.Value = luid;
+            if GetIpInterfaceEntry(&mut row) != 0 {
+                continue; // that family isn't on the adapter (yet)
+            }
+            set_any = true;
+            if row.UseAutomaticMetric == 0 && row.Metric == 0 {
+                continue;
+            }
+            row.UseAutomaticMetric = 0;
+            row.Metric = 0;
+            if family == AF_INET {
+                row.SitePrefixLength = 0; // Windows requires it unset when changing an IPv4 interface
+            }
+            let done = SetIpInterfaceEntry(&mut row);
+            log_event(&format!("tunnel: interface metric set to 0 for {} ({})", if family == AF_INET { "IPv4" } else { "IPv6" }, if done == 0 { "done".to_string() } else { format!("Windows error {done}") }));
+        }
+        set_any
+    }
+}
+
 /// True while the tunnel's network adapter exists. It goes as the old tunnel exits, and a new one can't take its name until then.
 fn adapter_exists() -> bool {
     type Open = unsafe extern "system" fn(*const u16) -> *mut c_void;
@@ -256,6 +378,15 @@ pub struct Tunnel {
     resuming: AtomicBool,
     /// When the person's latest Connect started the tunnel, for giving up if the server never answers.
     started: Mutex<Option<u64>>,
+    /// The rules in force while a tunnel is wanted (see `guard`). None: nothing is blocked.
+    guard: Mutex<Option<Guard>>,
+    /// Restarts of a tunnel that stopped by itself under the kill switch: how many, and the last one's time.
+    restarts: Mutex<(u32, u64)>,
+    /// When a tunnel was brought back after Windows restarted, until it reaches its server.
+    resumed_at: Mutex<Option<u64>>,
+    ever_connected: AtomicBool,
+    /// When the app paused the tunnel to switch servers, keeping the kill switch on.
+    paused_at: Mutex<Option<u64>>,
 }
 
 fn now_seconds() -> u64 {
@@ -285,28 +416,81 @@ fn remove_conf() {
     if let Ok(path) = conf_path() {
         let _ = std::fs::remove_file(path); // holds the device's private key: never left behind
     }
+    if let Ok(path) = guard_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 impl Tunnel {
     pub fn new() -> Self {
-        Tunnel { error: Mutex::new(None), since: Mutex::new(None), changing: Mutex::new(()), resuming: AtomicBool::new(false), started: Mutex::new(None) }
+        Tunnel {
+            error: Mutex::new(None),
+            since: Mutex::new(None),
+            changing: Mutex::new(()),
+            resuming: AtomicBool::new(false),
+            started: Mutex::new(None),
+            guard: Mutex::new(None),
+            restarts: Mutex::new((0, 0)),
+            resumed_at: Mutex::new(None),
+            ever_connected: AtomicBool::new(false),
+            paused_at: Mutex::new(None),
+        }
     }
 
-    pub fn connect(&self, text: &str) -> Status {
+    /// Puts a plan's rules in force, replacing any before them only once the new ones hold.
+    fn engage(&self, plan: &Plan) -> Result<(), String> {
+        let apps = app_paths();
+        let refs: Vec<&Path> = apps.iter().map(PathBuf::as_path).collect();
+        let guard = Guard::engage(plan, &refs)?;
+        log_event(&format!("guard: on, kill switch {}, local network {}, {} kept off, {} filters", plan.kill_switch, plan.allow_lan, plan.allow.len(), guard.filters()));
+        *self.guard.lock().unwrap() = Some(guard);
+        Ok(())
+    }
+
+    fn release(&self, why: &str) {
+        if self.guard.lock().unwrap().take().is_some() {
+            log_event(&format!("guard: off ({why})"));
+        }
+    }
+
+    fn kill_active(&self) -> bool {
+        self.guard.lock().unwrap().as_ref().is_some_and(Guard::kill_switch)
+    }
+
+    pub fn connect(&self, text: &str, protect: &Protect) -> Status {
         let _one_at_a_time = self.changing.lock().unwrap();
         *self.error.lock().unwrap() = None;
         *self.since.lock().unwrap() = None;
         *self.started.lock().unwrap() = None;
-        log_event("connect: requested");
-        let cfg = match config::parse(text) {
+        *self.restarts.lock().unwrap() = (0, 0);
+        *self.resumed_at.lock().unwrap() = None;
+        *self.paused_at.lock().unwrap() = None;
+        self.ever_connected.store(false, Ordering::SeqCst);
+        log_event(&format!("connect: requested, kill switch {}", protect.kill_switch));
+        let allow = match protect.check() {
+            Ok(a) => a,
+            Err(e) => return self.finish(Status::failed(e)),
+        };
+        let mut cfg = match config::parse(text) {
             Ok(c) => c,
             Err(e) => {
                 log_event("connect: the config was refused");
-                return Status::failed(e);
+                return self.finish(Status::failed(e));
             }
         };
+        cfg.allowed_ips = guard::without_default_routes(&cfg.allowed_ips);
+        cfg.endpoint = resolved(&cfg.endpoint);
+        let plan = plan_of(protect, allow, &cfg.addresses);
+        // on before the old tunnel closes, so switching servers never leaks
+        if let Err(e) = self.engage(&plan) {
+            log_event(&format!("guard: couldn't turn on: {e}"));
+            if protect.kill_switch {
+                return self.finish(Status::failed(format!("The kill switch couldn't be turned on, so nothing was connected. ({e})")));
+            }
+        }
         match self.start(&cfg) {
             Ok(()) => {
+                save_plan(protect, &cfg.addresses);
                 *self.started.lock().unwrap() = Some(now_seconds());
                 log_event("connect: tunnel started, waiting for the server");
                 self.status()
@@ -319,8 +503,85 @@ impl Tunnel {
                         stop_and_wait(&service, Duration::from_secs(5)); // it may be what failed to stop: this was already waited for
                     }
                 }
+                self.release("the connection failed");
                 *self.error.lock().unwrap() = Some(e.clone());
-                Status::failed(e)
+                self.finish(Status::failed(e))
+            }
+        }
+    }
+
+    /// Every answer says what the service can do and whether the kill switch is blocking.
+    pub fn finish(&self, mut status: Status) -> Status {
+        status.kill_switch = self.kill_active();
+        status.features = protocol::FEATURES.iter().map(|f| f.to_string()).collect();
+        status
+    }
+
+    /// Every few seconds: brings back a tunnel that stopped by itself while the kill switch holds, and lets go once it can't be brought
+    /// back. Without a kill switch, the DNS block never outlives the tunnel.
+    fn watch(&self) {
+        let Ok(_one_at_a_time) = self.changing.try_lock() else { return };
+        if self.resuming.load(Ordering::SeqCst) {
+            return;
+        }
+        if !conf_path().map(|p| p.exists()).unwrap_or(false) {
+            let paused = *self.paused_at.lock().unwrap();
+            if self.kill_active() && paused.is_some_and(|at| now_seconds().saturating_sub(at) < protocol::PAUSE_LIMIT_SECONDS) {
+                return; // switching servers: the connect is on its way
+            }
+            if paused.is_some() {
+                log_event("pause: no connect followed");
+            }
+            *self.paused_at.lock().unwrap() = None;
+            // nothing is wanted, so nothing may hold the routes: a tunnel still running here (one that wouldn't stop in time) is stopped
+            if let Ok(scm) = manager() {
+                if let Some(service) = open_service(&scm, TUNNEL_SERVICE) {
+                    if matches!(service_state(&service), ServiceState::Running | ServiceState::Starting) {
+                        log_event("tunnel: running though none is wanted, stopping it");
+                        stop_and_wait(&service, Duration::from_secs(4));
+                    }
+                }
+            }
+            self.release("no tunnel is wanted");
+            return;
+        }
+        let Ok(scm) = manager() else { return };
+        let Some(service) = open_service(&scm, TUNNEL_SERVICE) else { return };
+        let state = service_state(&service);
+        let now = now_seconds();
+        if state == ServiceState::Running {
+            prefer_tunnel(); // a tunnel restarted here or brought back after a reboot gets the same preference
+        }
+        if state == ServiceState::Running && matches!(peer_stats(), Some((Some(age), _, _)) if age <= protocol::HANDSHAKE_FRESH_SECONDS) {
+            self.ever_connected.store(true, Ordering::SeqCst);
+            *self.restarts.lock().unwrap() = (0, 0);
+            *self.resumed_at.lock().unwrap() = None;
+        }
+        let kill = self.kill_active();
+        let restarts = self.restarts.lock().unwrap().0;
+        let resumed_at = *self.resumed_at.lock().unwrap();
+        if kill && protocol::recovery_given_up(restarts, resumed_at, self.ever_connected.load(Ordering::SeqCst), now) {
+            log_event("guard: the tunnel can't be brought back, releasing the kill switch");
+            drop(service);
+            drop(scm);
+            let _ = self.disconnect_inner();
+            *self.started.lock().unwrap() = None;
+            *self.since.lock().unwrap() = None;
+            *self.resumed_at.lock().unwrap() = None;
+            *self.error.lock().unwrap() = Some(protocol::RELEASED.to_string());
+            return;
+        }
+        if state == ServiceState::Stopped {
+            if kill {
+                let mut r = self.restarts.lock().unwrap();
+                if now.saturating_sub(r.1) >= protocol::RESTART_EVERY_SECONDS {
+                    r.0 += 1;
+                    r.1 = now;
+                    log_event(&format!("tunnel: stopped by itself (Windows exit code {}), starting it again under the kill switch, try {}", exit_code(&service), r.0));
+                    unsafe { StartServiceW(service.0, 0, null()) };
+                }
+            } else {
+                self.release("the tunnel stopped");
             }
         }
     }
@@ -374,12 +635,43 @@ impl Tunnel {
         if unsafe { StartServiceW(service.0, 0, null()) } == 0 {
             return Err(format!("Can't start the tunnel: {}", last_error()));
         }
+        // the adapter appears as the tunnel's process starts; it's made Windows' first choice as soon as it's there
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(8) && !prefer_tunnel() {
+            std::thread::sleep(Duration::from_millis(150));
+        }
         Ok(())
     }
 
     /// The private key goes first, so it's gone however long the tunnel takes to close. Only read when a tunnel starts, so the running one doesn't need it. If the tunnel is slow to stop,
     /// the status reads as stopping until it has, and the next Connect waits for it.
     fn disconnect_inner(&self) -> Result<(), String> {
+        self.close_tunnel()?;
+        self.release("the tunnel was closed"); // only once it has stopped, so nothing leaks while it closes
+        Ok(())
+    }
+
+    /// Closes the tunnel, keeping the kill switch on, so the app can fetch another server's settings. See `Request::Pause`.
+    pub fn pause(&self) -> Status {
+        let _one_at_a_time = self.changing.lock().unwrap();
+        *self.error.lock().unwrap() = None;
+        *self.since.lock().unwrap() = None;
+        *self.started.lock().unwrap() = None;
+        let kill = self.kill_active();
+        log_event(&format!("pause: closing the tunnel to switch servers, kill switch {kill}"));
+        if kill {
+            *self.paused_at.lock().unwrap() = Some(now_seconds());
+        }
+        if let Err(e) = self.close_tunnel() {
+            log_event(&format!("pause: failed: {e}"));
+        }
+        if !kill {
+            self.release("paused");
+        }
+        self.status()
+    }
+
+    fn close_tunnel(&self) -> Result<(), String> {
         remove_conf();
         let scm = manager()?;
         if let Some(service) = open_service(&scm, TUNNEL_SERVICE) {
@@ -395,6 +687,7 @@ impl Tunnel {
         *self.error.lock().unwrap() = None;
         *self.since.lock().unwrap() = None;
         *self.started.lock().unwrap() = None;
+        *self.paused_at.lock().unwrap() = None;
         log_event("disconnect: requested");
         match self.disconnect_inner() {
             Ok(()) => {
@@ -404,12 +697,18 @@ impl Tunnel {
             }
             Err(e) => {
                 log_event(&format!("disconnect: failed: {e}"));
-                Status::failed(e)
+                self.release("disconnect");
+                self.finish(Status::failed(e))
             }
         }
     }
 
     pub fn status(&self) -> Status {
+        let status = self.status_inner();
+        self.finish(status)
+    }
+
+    fn status_inner(&self) -> Status {
         if let Some(e) = self.error.lock().unwrap().clone() {
             return Status::failed(e);
         }
@@ -418,6 +717,10 @@ impl Tunnel {
         let state = service_state(&service);
         let busy = self.changing.try_lock().is_err() || self.resuming.load(Ordering::SeqCst);
         let wanted = conf_path().map(|p| p.exists()).unwrap_or(false);
+        if protocol::tunnel_ended(state, wanted, busy) && self.kill_active() {
+            // the watchdog is bringing it back, with everything blocked meanwhile
+            return protocol::decide(ServiceState::Starting, None, 0, 0);
+        }
         if protocol::tunnel_ended(state, wanted, busy) {
             *self.since.lock().unwrap() = None;
             let code = exit_code(&service);
@@ -614,10 +917,11 @@ fn serve_client(pipe: HANDLE, tunnel: &Tunnel, check_callers: bool) {
         }
     });
     let status = match request {
-        Ok(Request::Connect { config }) => tunnel.connect(&config),
+        Ok(Request::Connect { config, protect }) => tunnel.connect(&config, &protect),
         Ok(Request::Disconnect) => tunnel.disconnect(),
+        Ok(Request::Pause) => tunnel.pause(),
         Ok(Request::Status) => tunnel.status(),
-        Err(e) => Status::failed(e),
+        Err(e) => tunnel.finish(Status::failed(e)),
     };
     if let Ok(mut line) = serde_json::to_vec(&status) {
         line.push(b'\n');
@@ -654,8 +958,13 @@ fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> R
     let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tunnel = Arc::new(Tunnel::new());
     if check_callers {
-        let tunnel = Arc::clone(&tunnel);
-        std::thread::spawn(move || resume_after_restart(tunnel));
+        let resuming = Arc::clone(&tunnel);
+        std::thread::spawn(move || resume_after_restart(resuming));
+        let watched = Arc::clone(&tunnel);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(5));
+            watched.watch();
+        });
     }
     let mut first = FILE_FLAG_FIRST_PIPE_INSTANCE;
     while !stop.load(std::sync::atomic::Ordering::SeqCst) {
@@ -835,6 +1144,10 @@ pub fn install() -> Result<(), String> {
         return Err(format!("Can't install the service: {}", last_error()));
     }
     let service = Sc(h);
+    // if the service ever crashes, Windows starts it again, and it brings the wanted tunnel and its kill switch back
+    let mut actions = [SC_ACTION { Type: SC_ACTION_RESTART, Delay: 3000 }, SC_ACTION { Type: SC_ACTION_RESTART, Delay: 10_000 }, SC_ACTION { Type: SC_ACTION_RESTART, Delay: 30_000 }];
+    let mut failure = SERVICE_FAILURE_ACTIONSW { dwResetPeriod: 86_400, lpRebootMsg: null_mut(), lpCommand: null_mut(), cActions: actions.len() as u32, lpsaActions: actions.as_mut_ptr() };
+    unsafe { ChangeServiceConfig2W(service.0, SERVICE_CONFIG_FAILURE_ACTIONS, &mut failure as *mut _ as *mut c_void) };
     if unsafe { StartServiceW(service.0, 0, null()) } == 0 {
         return Err(format!("Can't start the service: {}", last_error()));
     }

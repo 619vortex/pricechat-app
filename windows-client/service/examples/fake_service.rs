@@ -125,7 +125,7 @@ fn main() {
         ["connect"] => {
             let key = "S0lXSUNBTkFSWUtJV0lDQU5BUllLSVdJQ0FOQVJZIT0=";
             let config = format!("[Interface]\nPrivateKey = {key}\nAddress = 10.66.0.9/32\n\n[Peer]\nPublicKey = {key}\nEndpoint = 192.0.2.1:51821\nAllowedIPs = 0.0.0.0/0\n");
-            refused(kiwivpn::windows::ask_service(&kiwivpn::protocol::Request::Connect { config }));
+            refused(kiwivpn::windows::ask_service(&kiwivpn::protocol::Request::connect(config)));
         }
         ["control"] => {
             let mut pipe = kiwivpn::windows::open_pipe().expect("nothing is listening");

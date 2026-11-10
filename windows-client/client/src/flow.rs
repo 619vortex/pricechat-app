@@ -250,7 +250,7 @@ mod tests {
     }
 
     fn server(id: i64, online: bool, recommended: bool) -> Server {
-        Server { id, name: format!("s{id}"), region: String::new(), country_code: "DE".into(), online, recommended }
+        Server { id, name: format!("s{id}"), region: String::new(), country_code: "DE".into(), online, recommended, load: None, live_load: None, adblock: false, proxy_host: None }
     }
 
     fn account(devices: Vec<Device>) -> Account {

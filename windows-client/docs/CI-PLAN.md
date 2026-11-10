@@ -1,5 +1,9 @@
 # Building installers on GitHub Actions
 
+**Set up 2026-11-07.** The build runs in the private repo `619vortex/KIWIVPN` (the iPhone project is at its root; Windows is in `windows-client/`). Workflow: `ci/kiwi-windows.yml`, copied to `.github/workflows/kiwi-windows.yml`. Push with `sync-ci-repo.ps1` (main PC, compiles nothing). It runs on every push to `main` that touches `windows-client/`, and by hand. It runs the React tests and type check, the service, client and app Rust tests, builds the installer, and keeps it as a private artifact for 14 days (`KiwiVPN-<version>-<commit>-unsigned-Setup.exe` with its SHA-256 and BUILD-INFO). It publishes nothing and uses no secrets. Every action is pinned to a commit; WireGuard's DLLs are checked by hash and signature. The installer is unsigned: Smart App Control blocks it until it's signed.
+
+## Earlier plan (kept for the reasoning)
+
 **It works in principle and would replace the VM for compiling. It wouldn't replace a real connection test or fix the Smart App Control block.** Nothing is set up: the repo has no GitHub remote, and creating one needs the owner's account. The draft workflow is `ci/windows-installer.yml`, and it has never run.
 
 ## What it changes

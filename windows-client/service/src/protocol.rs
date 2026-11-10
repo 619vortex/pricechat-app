@@ -1,5 +1,6 @@
-//! What the app may ask the service: exactly these three things, one JSON line each way. No paths, no commands.
+//! What the app may ask the service: exactly these four things, one JSON line each way. No paths, no commands.
 
+pub use crate::guard::Protect;
 use serde::{Deserialize, Serialize};
 
 pub const PIPE_NAME: &str = r"\\.\pipe\KiwiVPN";
@@ -10,10 +11,30 @@ pub const HANDSHAKE_FRESH_SECONDS: u64 = 180;
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
-    Connect { config: String },
+    Connect {
+        config: String,
+        /// The kill switch and what it lets through. Absent from an older app: then only DNS outside the tunnel is blocked.
+        #[serde(default)]
+        protect: Protect,
+    },
     Disconnect,
+    /// Close the tunnel but keep the kill switch blocking, for a moment: a server that stopped answering still has the PC's routes, so the
+    /// app can't fetch the next server's settings until it's closed. A connect within PAUSE_LIMIT_SECONDS carries on; otherwise the block goes.
+    Pause,
     Status,
 }
+
+/// How long a pause may hold the kill switch without a connect following it.
+pub const PAUSE_LIMIT_SECONDS: u64 = 120;
+
+impl Request {
+    pub fn connect(config: impl Into<String>) -> Self {
+        Request::Connect { config: config.into(), protect: Protect::default() }
+    }
+}
+
+/// What this service enforces, so the app offers only what's real.
+pub const FEATURES: &[&str] = &["kill_switch", "dns_guard"];
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -36,11 +57,17 @@ pub struct Status {
     /// When this tunnel first reached the server, in Unix seconds. Kept by the service, so it outlives the app's window.
     #[serde(default)]
     pub connected_since: Option<u64>,
+    /// True while the kill switch is blocking everything outside the VPN.
+    #[serde(default)]
+    pub kill_switch: bool,
+    /// What this service can do (see FEATURES). Empty from an older service.
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 impl Status {
     pub fn off() -> Self {
-        Status { state: State::Disconnected, handshake_age_seconds: None, rx_bytes: 0, tx_bytes: 0, error: None, connected_since: None }
+        Status { state: State::Disconnected, handshake_age_seconds: None, rx_bytes: 0, tx_bytes: 0, error: None, connected_since: None, kill_switch: false, features: Vec::new() }
     }
     pub fn failed(error: impl Into<String>) -> Self {
         Status { state: State::Failed, error: Some(error.into()), ..Status::off() }
@@ -68,7 +95,7 @@ pub fn decide(service: ServiceState, handshake_age: Option<u64>, rx: u64, tx: u6
             _ => State::Connecting,
         },
     };
-    Status { state, handshake_age_seconds: handshake_age, rx_bytes: rx, tx_bytes: tx, error: None, connected_since: None }
+    Status { state, handshake_age_seconds: handshake_age, rx_bytes: rx, tx_bytes: tx, error: None, connected_since: None, kill_switch: false, features: Vec::new() }
 }
 
 /// Someone wants the tunnel, nothing is changing it, and it isn't running: it stopped by itself, such as failing just after starting. Without this it would read as an ordinary "not connected",
@@ -106,6 +133,19 @@ pub fn session_since(previous: Option<u64>, status: &Status, now: u64) -> Option
     }
 }
 
+/// A tunnel that stopped by itself while the kill switch holds is started again, this many times, this far apart. If it still won't run,
+/// the block is released: being offline indefinitely is worse than the leak the person can now see and act on.
+pub const RESTART_TRIES: u32 = 6;
+pub const RESTART_EVERY_SECONDS: u64 = 15;
+/// After Windows restarts, a tunnel brought back has this long to reach its server before the kill switch lets go.
+pub const RESUME_LIMIT_SECONDS: u64 = 600;
+pub const RELEASED: &str = "The VPN couldn't reconnect, so the kill switch was turned off to keep you online. Connect again when you're ready.";
+
+/// Whether the service should give up bringing the tunnel back and release the block.
+pub fn recovery_given_up(restarts: u32, resumed_at: Option<u64>, ever_connected: bool, now: u64) -> bool {
+    restarts >= RESTART_TRIES || resumed_at.is_some_and(|at| !ever_connected && now.saturating_sub(at) >= RESUME_LIMIT_SECONDS)
+}
+
 /// Who's on the other end of the pipe, as the service worked it out from Windows, never from anything the client said.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Caller {
@@ -137,8 +177,8 @@ pub fn parse_request(line: &str) -> Result<Request, String> {
     let fields = value.as_object().ok_or_else(bad)?;
     // serde lets extra fields through on a tagged enum, so they're refused here: nothing unexpected reaches a service running as SYSTEM
     let allowed: &[&str] = match fields.get("cmd").and_then(|c| c.as_str()) {
-        Some("connect") => &["cmd", "config"],
-        Some("disconnect" | "status") => &["cmd"],
+        Some("connect") => &["cmd", "config", "protect"],
+        Some("disconnect" | "pause" | "status") => &["cmd"],
         _ => return Err(bad()),
     };
     if fields.keys().any(|k| !allowed.contains(&k.as_str())) {
@@ -190,7 +230,7 @@ mod tests {
 
     #[test]
     fn only_the_app_or_an_administrator_may_change_the_tunnel() {
-        let connect = Request::Connect { config: "x".into() };
+        let connect = Request::connect("x");
         for request in [&connect, &Request::Disconnect] {
             assert!(allowed(request, Caller::App));
             assert!(allowed(request, Caller::Elevated));
@@ -224,6 +264,15 @@ mod tests {
     }
 
     #[test]
+    fn the_kill_switch_lets_go_only_when_the_tunnel_can_t_be_brought_back() {
+        assert!(!recovery_given_up(RESTART_TRIES - 1, None, true, 0));
+        assert!(recovery_given_up(RESTART_TRIES, None, true, 0));
+        assert!(!recovery_given_up(0, Some(1000), false, 1000 + RESUME_LIMIT_SECONDS - 1));
+        assert!(recovery_given_up(0, Some(1000), false, 1000 + RESUME_LIMIT_SECONDS));
+        assert!(!recovery_given_up(0, Some(1000), true, 99_999), "it reached the server after the restart: an ordinary interruption from then on");
+    }
+
+    #[test]
     fn an_answer_from_an_older_service_still_reads() {
         let s: Status = serde_json::from_str(r#"{"state":"connected","handshake_age_seconds":3,"rx_bytes":1,"tx_bytes":2,"error":null}"#).unwrap();
         assert_eq!(s.connected_since, None);
@@ -233,7 +282,12 @@ mod tests {
     fn only_the_three_commands_exist() {
         assert_eq!(parse_request(r#"{"cmd":"status"}"#).unwrap(), Request::Status);
         assert_eq!(parse_request(r#"{"cmd":"disconnect"}"#).unwrap(), Request::Disconnect);
-        assert_eq!(parse_request(r#"{"cmd":"connect","config":"x"}"#).unwrap(), Request::Connect { config: "x".into() });
+        assert_eq!(parse_request(r#"{"cmd":"pause"}"#).unwrap(), Request::Pause);
+        assert!(!allowed(&Request::Pause, Caller::Other), "only the app may pause the tunnel");
+        assert_eq!(parse_request(r#"{"cmd":"connect","config":"x"}"#).unwrap(), Request::connect("x"), "an older app's connect still reads");
+        let protected = parse_request(r#"{"cmd":"connect","config":"x","protect":{"kill_switch":true,"allow_lan":true,"allow":["192.168.1.0/24"]}}"#).unwrap();
+        assert!(matches!(protected, Request::Connect { protect: Protect { kill_switch: true, allow_lan: true, .. }, .. }));
+        assert!(parse_request(r#"{"cmd":"connect","config":"x","protect":{"kill_switch":true,"exec":"calc"}}"#).is_err());
         for bad in [r#"{"cmd":"run","path":"calc.exe"}"#, r#"{"cmd":"status","path":"x"}"#, r#"{"cmd":"connect"}"#, "not json", ""] {
             assert!(parse_request(bad).is_err(), "{bad}");
         }
