@@ -10,8 +10,10 @@ Rules added for Telegram:
     pausing and reading their own account always work, so nobody can be left unable to get out of a position;
   · where: account commands only in the member's private chat with the bot. In a group the bot says so and sends nothing
     private there;
-  · how: every order is a preview first (size, margin, leverage, stop, targets, liquidation estimate, fees, funding), sent
-    only after the member presses Confirm within 5 minutes; single use, and never larger than what was previewed;
+  · how: /open, /long, /short (words in any order, see parse_open) show a compact card (price, amount, leverage, size, fees,
+    liquidation, stop); a missing amount or leverage is asked for with buttons, never guessed. The card's Preview makes a
+    preview (size, margin, leverage, stop, targets, liquidation estimate, fees, funding), sent only after the member presses
+    Confirm within 5 minutes; single use, and never larger than what was previewed. Trading replies carry no footer or ad;
   · which network: PAPER (simulated on real prices) and TESTNET (Hyperliquid's testnet, through the member's own approved
     testnet API wallet). Manual orders (/open, /enter) on mainnet stay off until the owner sets `telegram_trading.live` (Admin → Trading OS,
     strategies JSON), and then only through execution.live_gate, the same LIVE checks as every other entry (LIVE enabled
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import math
 import re
 import secrets
 from collections.abc import Iterator
@@ -60,7 +63,9 @@ LIMIT_MAX_AWAY = 0.05  # a limit (worst accepted fill) more than 5% from the pri
 COMMANDS = {"/market", "/open", "/enter", "/closeall", "/sl", "/tp", "/orders", "/cancel", "/balance", "/settings", "/preview", "/mainnet"}
 HELP = ("<b>Trading on Hyperliquid (here or in a DM)</b>\n"
         "/market BTC: price, funding, open interest, max leverage\n"
-        "/open BTC long 5x: market order, your full margin limit · /open BTC long 100 5x tp 79k sl 60k: $100 margin, with targets\n"
+        "/long BTC 50 3x · /short ETH 25 2x · /open BTC long 50 3x (any order: a plain number is the USD amount, 3x the leverage)\n"
+        "/long BTC: buttons ask for the amount and the leverage · add tp 79k sl 60k or limit 64.5k\n"
+        "You get a card (price, size, fees, liquidation) → Preview → Confirm. Nothing is sent before Confirm.\n"
         "/enter: reply to a Price Chat signal to trade it\n"
         "/preview BTC long 100 5x: a mainnet order preview (read-only) · /mainnet: your mainnet readiness\n"
         "/positions · /pnl · /balance · /orders\n"
@@ -80,34 +85,56 @@ def esc(s: Any) -> str:
 # ---------------------------------------------------------------- who and where
 def entry_gate(db: Session, member: Member) -> str | None:
     """Why this member may not open new positions from Telegram, or None. Hyperliquid's own referral record decides
-    (checked when the wallet was verified and on every recheck); a link click or anything the member says never does."""
+    (checked when the wallet was verified and on every recheck); a link click or anything the member says never does.
+    One or two short sentences: the button under it (gate_buttons) carries the link."""
+
+    state = _gate_state(db, member)
+    if state is None:
+        return None
+    kind, w = state
+    if kind == "no_wallet":  # Telegram is linked (this member was found by it); their Passport just has no wallet yet
+        return ("No wallet is connected to your Kiwi Passport yet. Connect the wallet you use on Hyperliquid (it signs a free "
+                "message, no keys are shared), then try again.")
+    if kind == "pending":
+        return (f"Your wallet …{w.address[-4:]} is connected, but Hyperliquid hasn't confirmed yet that it was made with our "
+                "sign-up link. Recheck in your Passport, then try again.")
+    return (f"Trading here is for Hyperliquid accounts made with our sign-up link. Hyperliquid's record for your wallet "
+            f"…{w.address[-4:]} shows it wasn't, so new trades are off (closing and managing positions still work).")
+
+
+GATE_WALLET_URL = f"{SITE}/passport#account-wallet"
+
+
+def _gate_state(db: Session, member: Member) -> tuple[str, Any] | None:
+    """None (may trade), or why not: no_wallet, pending (Hyperliquid hasn't confirmed the referral yet) or not_referred.
+    Hyperliquid's own record decides."""
+    from app.tradingbot import affiliate
     from app.tradingbot.service import codes, settings as earn_settings, wallet_of
 
-    s = earn_settings(db)
     w = wallet_of(db, member)
-    accepted = codes(s)
-    from app.tradingos.bot import tracked_url
-
-    link = tracked_url(db, "gate") or f"{SITE}/passport"
-    rule = f"Trading here is for Hyperliquid accounts made with our sign-up link: {link} (4% off fees)."
-    if w is None:  # Telegram is linked (this member was found by it); their Passport just has no wallet yet
-        who = f" @{member.username}" if getattr(member, "username", None) else ""
-        return (f"Your Telegram is linked to Kiwi Passport{who}, and that Passport has no wallet connected yet. "
-                f"Open {SITE}/passport#account-wallet signed in as{who or ' that Passport'} → Ethereum wallet → Connect "
-                f"(the wallet you use on Hyperliquid; it signs a free message, no keys are shared), then try again. {rule}")
-    from app.tradingbot import affiliate
-
+    if w is None:
+        return "no_wallet", None
     if (w.address or "").lower() == affiliate.WALLET.lower():  # the referral's own wallet (the owner): it can't be referred by itself
         return None
-    seen = (w.referral_code_seen or "").upper()
-    if w.referral_status == "verified" and seen in accepted:
+    if w.referral_status == "verified" and (w.referral_code_seen or "").upper() in codes(earn_settings(db)):
         return None
     if w.referral_status in ("pending", "unverified"):
-        return (f"Your wallet …{w.address[-4:]} is connected, but Hyperliquid hasn't confirmed yet that it was made with our "
-                f"sign-up link. Open {SITE}/passport and recheck, then try again. {rule}")
-    return (f"{rule} Hyperliquid's record for your wallet …{w.address[-4:]} shows it wasn't made with it, so new trades are off. "
-            "If you have another Hyperliquid wallet made with our link, connect that one in your Passport. "
-            "Closing and managing any position you already have still works.")
+        return "pending", w
+    return "not_referred", w
+
+
+def gate_buttons(db: Session, member: Member) -> list[list[dict[str, str]]]:
+    """The one button under a gate reply: Connect wallet (no wallet / recheck), or Sign up on Hyperliquid (the tracked
+    referral link) for a wallet Hyperliquid records as not made with it."""
+    state = _gate_state(db, member)
+    kind = state[0] if state else "no_wallet"
+    if kind == "not_referred":
+        from app.tradingos.bot import tracked_url
+
+        url = tracked_url(db, "gate")
+        rows = [[{"text": "Sign up on Hyperliquid", "url": url}]] if url else []
+        return rows + [[{"text": "Connect another wallet", "url": GATE_WALLET_URL}]]
+    return [[{"text": "🔗 Connect wallet" if kind == "no_wallet" else "Recheck in Passport", "url": GATE_WALLET_URL}]]
 
 
 def recheck_referral(db: Session, member: Member) -> None:
@@ -250,28 +277,33 @@ SECRET_WARNING = ("⚠️ That looked like a private key or a recovery phrase, s
 class OpenRequest:
     coin: str
     side: str  # LONG | SHORT
-    margin: float | None  # None: "/open BTC long 20x" without an amount uses the member's full margin limit (max allocation)
-    leverage: int
+    margin: float | None  # USD margin; None: not given yet (asked for with buttons, never guessed)
+    leverage: int | None  # None: not given yet (asked for with buttons, never guessed)
     stop: float | None = None
     tp: float | None = None
     limit: float | None = None  # worst fill price for the immediate entry (None: market)
 
 
-OPEN_USAGE = ("Usage: /open BTC long 5x (market, your full margin limit) or /open BTC long 100 5x (with $100 margin), then optionally "
-              "tp 79k · sl 60k · limit 64.5k (limit = the worst price you accept, filled now or not at all)")
+OPEN_USAGE = ("Usage: /long BTC 50 3x · /short ETH 25 2x · /open BTC long 50 3x, in any order (a plain number is the amount "
+              "in USD, a number with x the leverage), then optionally tp 79k · sl 60k · limit 64.5k "
+              "(limit = the worst price you accept, filled now or not at all)")
+EXAMPLE = "/long BTC 50 3x"
+SIDE_WORDS = {"LONG": "LONG", "BUY": "LONG", "SHORT": "SHORT", "SELL": "SHORT"}
+PRICE_WORDS = {"SL": "stop", "STOP": "stop", "TP": "tp", "TARGET": "tp", "LIMIT": "limit", "LMT": "limit"}
+_LEV_RE = re.compile(r"(\d+(?:\.\d+)?)X")
+_COIN_RE = re.compile(r"\$?([A-Z0-9]{1,15})")
 
 
 def _num(s: str) -> float | None:
-    """100 · $100 · 1,250 · 79k · 1.2m"""
+    """100 · $100 · 1,250 · 79k · 1.2m (a finite amount above zero, else None)"""
     t = s.replace("$", "").replace(",", "").strip().lower()
     mult = 1.0
     if t[-1:] in ("k", "m"):
         mult, t = (1_000.0 if t[-1] == "k" else 1_000_000.0), t[:-1]
-    try:
-        v = float(t) * mult
-    except ValueError:
+    if not re.fullmatch(r"\d+(?:\.\d+)?|\.\d+", t):  # digits only: never "inf", "nan" or "1e9"
         return None
-    return v if v > 0 else None
+    v = float(t) * mult
+    return v if v > 0 and math.isfinite(v) else None
 
 
 def _lev(s: str) -> int | None:
@@ -280,39 +312,63 @@ def _lev(s: str) -> int | None:
 
 
 def parse_open(args: list[str]) -> OpenRequest | str:
-    """`/open BTC long 100 5x sl 60000 tp 70000`: an OpenRequest, or what's wrong with it."""
+    """The words after /open (or /long, /short), in any order and any case: a side (long, short, buy, sell), a coin (BTC,
+    $BTC), an amount (a plain number: 50, $50, 1.5k = USD margin) and a leverage (a number with x: 3x), then optional
+    "sl PRICE", "tp PRICE" and "limit PRICE" pairs. A plain number is ALWAYS the amount and "Nx" is ALWAYS the leverage, so
+    nothing is guessed: two plain numbers, two coins, both sides or an unknown word get a short message saying which.
+    The amount and the leverage may be missing (OpenRequest.margin / leverage None): the bot then asks for them with buttons."""
     words = [a.strip() for a in args if a.strip()]
-    if len(words) < 3:
+    if not words:
         return OPEN_USAGE
-    coin = words[0].lstrip("$").upper()
-    if not re.fullmatch(r"[A-Z0-9]{1,15}", coin):
-        return OPEN_USAGE
-    side = {"long": "LONG", "buy": "LONG", "short": "SHORT", "sell": "SHORT"}.get(words[1].lower())
-    if side is None:
-        return "Say long or short. " + OPEN_USAGE
-    if words[2].lower().endswith("x") and _lev(words[2]) is not None:  # "/open BTC long 20x": no amount, a market order at the full margin limit
-        margin, lev, rest = None, _lev(words[2]), words[3:]
-    else:
-        if len(words) < 4:
-            return OPEN_USAGE
-        margin, lev, rest = _num(words[2]), _lev(words[3]), words[4:]
-        if margin is None:
-            return "The margin is an amount in USD, like 100. " + OPEN_USAGE
-    if lev is None:
-        return "The leverage is a whole number, like 5x. " + OPEN_USAGE
-    req = OpenRequest(coin, side, round(margin, 2) if margin is not None else None, lev)
-    while rest:
-        key = rest[0].lower()
-        if key not in ("sl", "stop", "tp", "target", "limit", "lmt") or len(rest) < 2 or _num(rest[1]) is None:
-            return "After the leverage only sl PRICE, tp PRICE and limit PRICE are understood. " + OPEN_USAGE
-        if key in ("sl", "stop"):
-            req.stop = _num(rest[1])
-        elif key in ("limit", "lmt"):
-            req.limit = _num(rest[1])
+    coin = side = None
+    amounts: list[float] = []
+    levs: list[int] = []
+    prices: dict[str, float] = {}
+    i = 0
+    while i < len(words):
+        w, u = words[i], words[i].upper()
+        if u in PRICE_WORDS:
+            field = PRICE_WORDS[u]
+            v = _num(words[i + 1]) if i + 1 < len(words) else None
+            if v is None:
+                return f"{w.lower()} needs a price after it, like {w.lower()} 60000."
+            if field in prices:
+                return f"{w.lower()} is there twice: give one {'stop' if field == 'stop' else 'target' if field == 'tp' else 'limit'}."
+            prices[field] = v
+            i += 2
+            continue
+        lm = _LEV_RE.fullmatch(u)
+        if u in SIDE_WORDS:
+            if side is not None and side != SIDE_WORDS[u]:
+                return "Long or short? Say one of them, not both."
+            side = SIDE_WORDS[u]
+        elif lm:
+            if not lm.group(1).isdigit() or not 1 <= int(lm.group(1)) <= 100:
+                return f"{esc(w)} isn't a leverage I can use: a whole number with x, like 3x."
+            levs.append(int(lm.group(1)))
+        elif _num(w) is not None:
+            amounts.append(_num(w) or 0.0)
+        elif (cm := _COIN_RE.fullmatch(u)) and re.search(r"[A-Z]", cm.group(1)):
+            if coin is not None and coin != cm.group(1):
+                return f"Two coins ({esc(coin)} and {esc(cm.group(1))}): trade one at a time, like /long {esc(coin)} 50 3x."
+            coin = cm.group(1)
         else:
-            req.tp = _num(rest[1])
-        rest = rest[2:]
-    return req
+            return f"“{esc(w)}” isn't a coin, an amount or a leverage. Example: {EXAMPLE}"
+        i += 1
+    if len(levs) > 1:
+        return f"Two leverages ({levs[0]}x and {levs[1]}x): give one."
+    if len(amounts) > 1:
+        a, b = (format(x, "g") for x in amounts[:2])
+        return (f"Two amounts ({a} and {b}): a plain number is the amount in USD, and the leverage takes an x. "
+                f"For ${a} at {b}x: /long {esc(coin or 'BTC')} {a} {b}x")
+    if coin is None:
+        return f"Which coin? For example {EXAMPLE}"
+    if side is None:
+        return f"Long or short? For example /long {esc(coin)} or /short {esc(coin)}"
+    margin = round(amounts[0], 2) if amounts else None
+    if margin is not None and margin <= 0:
+        return "That amount is too small: the amount is in USD, like 50."
+    return OpenRequest(coin, side, margin, levs[0] if levs else None, prices.get("stop"), prices.get("tp"), prices.get("limit"))
 
 
 def liquidation_price(side: str, entry: float, leverage: int, market_max_lev: int) -> float:
@@ -344,6 +400,9 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     reasons = p.reasons
     long = req.side == "LONG"
     cap = min(acc_max_leverage, market_max_lev, risk.HARD_MAX_LEVERAGE)
+    if req.margin is None or req.leverage is None:  # never guessed: the bot asks for the amount and the leverage first
+        reasons.append("give an amount and a leverage, like 50 3x")
+        return Manual(p, 0.0, 0.0)
     if paused:
         reasons.append("STOP NEW TRADES is on (/resume)")
     if global_paused:
@@ -363,8 +422,6 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     if daily_pnl <= -abs(daily_loss_limit):
         reasons.append("your daily loss limit is reached")
     max_margin = equity * max_allocation_pct / 100
-    if req.margin is None:  # no amount typed: the full margin the member's limit allows
-        req.margin = round(max_margin, 2)
     if req.margin > max_margin + 1e-9:
         reasons.append(f"${req.margin:,.2f} margin is over your limit of {max_allocation_pct:g}% of ${equity:,.2f} (${max_margin:,.2f})")
     lev = max(1, min(req.leverage, cap))
@@ -585,6 +642,21 @@ def _fees(address: str) -> dict[str, float] | None:
         return None
 
 
+def _mainnet_plan(db: Session, acc: TrAccount, req: OpenRequest, m: Any, equity: float, taker: float) -> Manual:
+    """The order sized as it would be on mainnet (LIVE positions, LIVE day counts), never raising: refusals are on the plan."""
+    live = acc.mode == "LIVE"
+    live_open = int(db.scalar(select(func.count()).select_from(TrPosition).where(
+        TrPosition.account_id == acc.id, TrPosition.mode == "LIVE", TrPosition.status.in_(execution.HELD_STATES))) or 0)
+    per_day, cooldown = execution.style_limits(acc)
+    return manual_plan(req, mark=m.mark, market_max_lev=m.max_leverage, sz_decimals=m.sz_decimals, funding_h=m.funding, equity=equity,
+                       acc_max_leverage=acc.max_leverage, max_loss_usd=acc.max_loss_per_trade_usd, max_allocation_pct=acc.max_allocation_pct,
+                       max_positions=acc.max_positions, open_positions=live_open, daily_pnl=execution.day_loss_basis(db, acc) if live else 0.0,
+                       daily_loss_limit=acc.daily_loss_limit_usd, paused=acc.paused, global_paused=signals.settings(db).paused,
+                       allowed=[c.strip().upper() for c in (acc.allowed_coins or "").split(",") if c.strip()],
+                       trades_today=execution.trades_today(db, acc) if live else 0, max_trades_today=per_day,
+                       cooldown_left_min=execution.cooldown_left(db, acc, req.coin, cooldown), taker_fee=taker)
+
+
 def mainnet_preview(db: Session, member: Member, req: OpenRequest, ex: Any = None, fees: dict[str, float] | None = None) -> str:
     """/preview (and /open on a LIVE account while Telegram mainnet execution is off): the order exactly as it would be sized on
     mainnet for this member (their real Hyperliquid balance and positions, their limits, their own fee rate), with every reason it
@@ -603,17 +675,7 @@ def mainnet_preview(db: Session, member: Member, req: OpenRequest, ex: Any = Non
         return "Couldn't read your mainnet account from Hyperliquid right now. Nothing was sent; try again in a moment."
     fees = fees if fees is not None else _fees(acc.master_address)
     taker = fees["taker"] if fees else risk.TAKER_FEE
-    live = acc.mode == "LIVE"
-    live_open = int(db.scalar(select(func.count()).select_from(TrPosition).where(
-        TrPosition.account_id == acc.id, TrPosition.mode == "LIVE", TrPosition.status.in_(execution.HELD_STATES))) or 0)
-    per_day, cooldown = execution.style_limits(acc)
-    man = manual_plan(req, mark=m.mark, market_max_lev=m.max_leverage, sz_decimals=m.sz_decimals, funding_h=m.funding, equity=equity,
-                      acc_max_leverage=acc.max_leverage, max_loss_usd=acc.max_loss_per_trade_usd, max_allocation_pct=acc.max_allocation_pct,
-                      max_positions=acc.max_positions, open_positions=live_open, daily_pnl=execution.day_loss_basis(db, acc) if live else 0.0,
-                      daily_loss_limit=acc.daily_loss_limit_usd, paused=acc.paused, global_paused=signals.settings(db).paused,
-                      allowed=[c.strip().upper() for c in (acc.allowed_coins or "").split(",") if c.strip()],
-                      trades_today=execution.trades_today(db, acc) if live else 0, max_trades_today=per_day,
-                      cooldown_left_min=execution.cooldown_left(db, acc, req.coin, cooldown), taker_fee=taker)
+    man = _mainnet_plan(db, acc, req, m, equity, taker)
     p, f = man.plan, market.fmt_price
     refusals = list(p.reasons)
     if any(x["position"]["coin"] == req.coin and float(x["position"]["szi"]) != 0 for x in st.get("assetPositions", [])):
@@ -708,7 +770,7 @@ def market_text(coin: str) -> str:
                       f"Funding {m.funding * 100:+.4f}%/h ({m.funding * 24 * 365 * 100:+.1f}% a year)",
                       f"Open interest ${oi_usd:,.0f} · 24h volume ${m.day_volume:,.0f}",
                       f"Max leverage {m.max_leverage}x (Price Chat caps it at {risk.HARD_MAX_LEVERAGE}x) · spread {spread}",
-                      "", f"Trade it privately: /open {esc(m.coin)} long 50 3x"])
+                      "", f"Trade it: /long {esc(m.coin)} 50 3x · /short {esc(m.coin)} 50 3x"])
 
 
 def bot_positions_text(db: Session, acc: TrAccount) -> str:
@@ -930,6 +992,233 @@ def _px(v: float) -> str:
     return format(v, ".12g")
 
 
+# ---------------------------------------------------------------- the trading card (/open, /long, /short) and its buttons
+AMOUNT_CHOICES = (10, 25, 50, 100)  # USD margin buttons, only those within the member's limit
+LEVERAGE_CHOICES = (1, 2, 3, 5)  # only up to the member's / the market's / Price Chat's cap (risk.HARD_MAX_LEVERAGE)
+CARD_PREFIXES = ("oa:", "op:", "ox:")  # oa: a choice (amount / leverage) · op: Preview · ox: Cancel; bot.py guards and rate-limits them
+CARD_INVALID = "That button isn't valid. Nothing was sent: send the command again."
+CARD_STALE = "That card is out of date (over 5 minutes). Nothing was sent: send the command again."
+
+
+@dataclass
+class Limits:
+    coin: str
+    mark: float
+    equity: float
+    max_margin: float
+    cap: int
+    cap_why: str
+
+
+def _limits(db: Session, acc: TrAccount, coin: str) -> Limits:
+    """The live price on the account's network and what this member may use: margin up to max allocation of equity,
+    leverage up to min(their limit, the market's, Price Chat's cap). Read-only (inside Telegram a mainnet executor is the
+    key-less reader)."""
+    m = market.for_mode(acc.mode).market(coin)
+    try:
+        equity = float(execution.executor(db, acc, m.coin).equity())
+    except execution.TradeError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise execution.TradeError("Couldn't read your balance from Hyperliquid right now. Nothing was sent; try again in a moment.") from e
+    cap = min(acc.max_leverage, m.max_leverage, risk.HARD_MAX_LEVERAGE)
+    why = "your limit" if cap == acc.max_leverage else "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{m.coin}'s maximum"
+    return Limits(m.coin, m.mark, equity, round(equity * acc.max_allocation_pct / 100, 2), max(1, cap), why)
+
+
+def _card_data(prefix: str, req: OpenRequest) -> str:
+    """A card button's callback data: what the member chose so far, never an account or an order. Everything is checked
+    again on the press (_decode_card, then the same sizing and gates as a typed command); a trade still needs Confirm."""
+    bits = [prefix.rstrip(":"), _stamp(), req.coin, "L" if req.side == "LONG" else "S",
+            _px(req.margin) if req.margin is not None else "_", str(req.leverage) if req.leverage is not None else "_"]
+    bits += [k + _px(v) for k, v in (("s", req.stop), ("t", req.tp), ("l", req.limit)) if v is not None]
+    return ":".join(bits)
+
+
+def _decode_card(data: str) -> OpenRequest | str:
+    parts = data.split(":")
+    if len(parts) < 6 or len(data.encode()) > 64:
+        return CARD_INVALID
+    _, stamp, coin, side, amt, lev, *rest = parts
+    if not _fresh(stamp):
+        return CARD_STALE
+    if not re.fullmatch(r"[A-Za-z0-9]{1,15}", coin) or side not in ("L", "S"):  # Hyperliquid's own names (kPEPE)
+        return CARD_INVALID
+    margin = None if amt == "_" else _num(amt)
+    leverage = None if lev == "_" else (int(lev) if lev.isdigit() else 0)
+    if (amt != "_" and margin is None) or (leverage is not None and not 1 <= leverage <= risk.HARD_MAX_LEVERAGE):
+        return CARD_INVALID  # a forged amount or a leverage over the system cap never gets further
+    req = OpenRequest(coin, "LONG" if side == "L" else "SHORT", round(margin, 2) if margin is not None else None, leverage)
+    for r in rest:
+        v = _num(r[1:]) if r[:1] in ("s", "t", "l") else None
+        if v is None:
+            return CARD_INVALID
+        setattr(req, {"s": "stop", "t": "tp", "l": "limit"}[r[0]], v)
+    return req
+
+
+async def _send(client: Any, chat_id: Any, text: str, buttons: Any, reply_to: int | None) -> None:
+    """In a group every card replies to the member's own command (reply_to), so bot._not_yours knows whose buttons they are."""
+    if reply_to:
+        await client.send_message(chat_id, text, buttons, html=True, reply_to=reply_to)
+    else:
+        await client.send_message(chat_id, text, buttons, html=True)
+
+
+def _head(req: OpenRequest, mode: str, mark: float) -> str:
+    return f"{'🟢' if req.side == 'LONG' else '🔴'} <b>{esc(req.coin)} {req.side}</b> · {esc(mode)} · price {market.fmt_price(mark)}"
+
+
+def _cancel_button(req: OpenRequest) -> dict[str, str]:
+    return {"text": "Cancel", "callback_data": "ox:" + req.coin}
+
+
+def ask_card(req: OpenRequest, lim: Limits, mode: str, note: str = "") -> tuple[str, list[list[dict[str, str]]] | None]:
+    """The amount or the leverage is missing: a short card asking for it with buttons (only choices within the limits)."""
+    lines = [_head(req, mode, lim.mark)] + ([esc(note)] if note else [])
+    if req.margin is None:
+        amts = [a for a in AMOUNT_CHOICES if a <= lim.max_margin + 1e-9 and a * (req.leverage or lim.cap) >= MIN_NOTIONAL]
+        if not amts and lim.max_margin >= 1 and int(lim.max_margin) * (req.leverage or lim.cap) >= MIN_NOTIONAL:
+            amts = [int(lim.max_margin)]
+        if not amts:
+            lines.append(f"Your margin limit is ${lim.max_margin:,.2f}: under Hyperliquid's ${MIN_NOTIONAL:.0f} minimum position. "
+                         "Add funds or raise it with /settings margin.")
+            return "\n".join(lines), None
+        lines.append(f"How much margin? Up to ${lim.max_margin:,.2f}" + (f" · leverage {req.leverage}x" if req.leverage else " · then the leverage"))
+        row = [{"text": f"${a:g}", "callback_data": _card_data("oa", OpenRequest(req.coin, req.side, float(a), req.leverage, req.stop,
+                                                                                    req.tp, req.limit))} for a in amts]
+    else:
+        levs = sorted({x for x in LEVERAGE_CHOICES if x <= lim.cap} | {lim.cap})
+        levs = [x for x in levs if req.margin * x >= MIN_NOTIONAL]
+        if not levs:
+            lines.append(f"${req.margin:,.2f} at up to {lim.cap}x is under Hyperliquid's ${MIN_NOTIONAL:.0f} minimum position: use a bigger amount.")
+            return "\n".join(lines), None
+        lines.append(f"Amount ${req.margin:,.2f} · which leverage? Up to {lim.cap}x")
+        row = [{"text": f"{x}x", "callback_data": _card_data("oa", OpenRequest(req.coin, req.side, req.margin, x, req.stop, req.tp,
+                                                                                  req.limit))} for x in levs]
+    if any(len(b["callback_data"].encode()) > 64 for b in row):
+        return "Those prices are too long for a button. Nothing was sent: use fewer digits.", None
+    return "\n".join(lines), [row, [_cancel_button(req)]]
+
+
+def card_text(req: OpenRequest, man: Manual, mode: str, mark: float, read_only: bool) -> str:
+    """The compact card once coin, side, amount and leverage are known. Estimates: Preview re-sizes at the price then."""
+    p, f = man.plan, market.fmt_price
+    stop = f"🛑 Stop {f(p.stop)}" + (" (yours)" if req.stop is not None else f" (default: ≈ ${p.max_loss_usd:,.2f} max loss)")
+    tp = f"🎯 TP {f(p.tp1)}" + (" (yours)" if req.tp is not None else "")
+    lines = [_head(req, mode, mark),
+             f"Amount ${req.margin:,.2f} · {p.leverage}x → position ${p.notional:,.2f} ({p.size:g} {esc(p.coin)})"
+             + (f" · limit {f(req.limit)}" if req.limit else ""),
+             f"Fees ≈ ${p.est_fees:,.2f} (open + close) · liquidation ≈ {f(man.liq)}",
+             f"{stop} · {tp}"]
+    if read_only:
+        lines.append("Mainnet orders from Telegram are off: Preview is read-only.")
+    else:
+        lines.append("Preview shows the order to confirm. Nothing is sent yet.")
+    return "\n".join(lines)
+
+
+def _card_plan(db: Session, member: Member, acc: TrAccount, req: OpenRequest, read_only: bool) -> Manual:
+    """Sizing for the card: the same as a preview's (every limit, raising with the reasons), or on a LIVE account with
+    Telegram mainnet off the read-only mainnet sizing (its refusals show on Preview)."""
+    if read_only:
+        m = market.for_mode("LIVE").market(req.coin)
+        req.coin = m.coin
+        equity = float(execution.executor(db, acc, m.coin).equity())
+        fees = _fees(acc.master_address) if acc.master_address else None
+        return _mainnet_plan(db, acc, req, m, equity, fees["taker"] if fees else risk.TAKER_FEE)
+    man, _ = _sizing(db, member, acc, req)
+    return man
+
+
+async def open_card(db: Session, client: Any, chat_id: Any, member: Member, req: OpenRequest, reply_to: int | None = None) -> str | None:
+    """/open, /long, /short and the card's choice buttons: the gates, then a card asking for what's missing, or the full card
+    with Preview / Cancel. Returns a plain reply, or None when a card was sent."""
+    import asyncio
+
+    acc = execution.account(db, member)
+    db.commit()
+    if killed(db):
+        return esc(KILLED)
+    read_only = acc.mode == "LIVE" and not mainnet_allowed(db)
+    why = None if read_only else mode_gate(db, acc)
+    if why:
+        return esc(why)
+    why = await gate_for_entry(db, member)
+    if why:
+        await _send(client, chat_id, esc(why), gate_buttons(db, member), reply_to)
+        return None
+    try:
+        lim = await asyncio.to_thread(_limits, db, acc, req.coin)
+    except (execution.TradeError, market.MarketError) as e:  # an unknown coin says so plainly
+        db.rollback()
+        return esc(str(e))
+    req.coin = lim.coin
+    notes = []
+    if req.leverage is not None and req.leverage > lim.cap:
+        notes.append(f"{req.leverage}x is over {lim.cap_why} of {lim.cap}x (/settings leverage).")
+        req.leverage = None
+    if req.margin is not None and req.margin > lim.max_margin + 1e-9:
+        notes.append(f"${req.margin:,.2f} margin is over your limit of {acc.max_allocation_pct:g}% of ${lim.equity:,.2f} (${lim.max_margin:,.2f}).")
+        req.margin = None
+    if req.margin is None or req.leverage is None:
+        text, buttons = ask_card(req, lim, acc.mode, " ".join(notes))
+        await _send(client, chat_id, text, buttons, reply_to)
+        return None
+    try:
+        man = await asyncio.to_thread(_card_plan, db, member, acc, req, read_only)
+    except (execution.TradeError, market.MarketError) as e:
+        db.rollback()
+        return esc(str(e))
+    db.commit()
+    data = _card_data("op", req)
+    if len(data.encode()) > 64:
+        return "Those prices are too long for a button. Nothing was sent: use fewer digits."
+    buttons = [[{"text": "👁 Preview", "callback_data": data}, _cancel_button(req)]]
+    await _send(client, chat_id, card_text(req, man, acc.mode, lim.mark, read_only), buttons, reply_to)
+    return None
+
+
+async def card_callback(db: Session, client: Any, member: Member, chat_id: Any, reply_to: int | None, data: str) -> str | None:
+    """A press on a card: a choice (oa:) builds the next card, Preview (op:) makes the existing preview with Confirm / Cancel
+    (or, on a LIVE account with Telegram mainnet off, the read-only mainnet preview), Cancel (ox:) drops the card. Every
+    value in the data is checked again here and by the same gates and sizing as a typed command."""
+    import asyncio
+
+    if data.startswith("ox:"):
+        return "Cancelled. Nothing was sent."
+    req = _decode_card(data)
+    if isinstance(req, str):
+        return req
+    if data.startswith("oa:"):
+        return await open_card(db, client, chat_id, member, req, reply_to)
+    if not data.startswith("op:") or req.margin is None or req.leverage is None:
+        return CARD_INVALID
+    acc = execution.account(db, member)
+    db.commit()
+    if killed(db):
+        return esc(KILLED)
+    if acc.mode == "LIVE" and not mainnet_allowed(db):  # read-only: no intent, no Confirm, nothing signed
+        try:
+            return await asyncio.to_thread(mainnet_preview, db, member, req)
+        except (execution.TradeError, market.MarketError) as e:
+            return esc(str(e))
+    why = mode_gate(db, acc)
+    if why:
+        return esc(why)
+    why = await gate_for_entry(db, member)
+    if why:
+        await _send(client, chat_id, esc(why), gate_buttons(db, member), reply_to)
+        return None
+    try:
+        it = await asyncio.to_thread(preview_open, db, member, req)
+    except (execution.TradeError, market.MarketError) as e:
+        db.rollback()
+        return esc(str(e))
+    await _send(client, chat_id, preview_open_text(it), _confirm_buttons("mo", "mn", it.token), reply_to)
+    return None
+
+
 async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: str, args: list[str]) -> str | None:
     """One trading command in the member's private chat. Returns the reply (None when a message with buttons was sent)."""
     import asyncio
@@ -938,16 +1227,15 @@ async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: s
     db.commit()
     if cmd in ("/open", "/enter") and killed(db):  # the emergency stop: no new trade on any network
         return esc(KILLED)
-    if cmd == "/open" and acc.mode == "LIVE" and not mainnet_allowed(db):  # mainnet off: the read-only preview instead
-        cmd = "/preview"
     if cmd in ("/closeall", "/sl", "/tp") or (cmd == "/cancel" and args):
         why = live_off(db, acc.mode)
         if why:
             return esc(why)
     if cmd == "/preview":
         req = parse_open(args)
-        if isinstance(req, str):
-            return esc(req.replace("/open", "/preview"))
+        if isinstance(req, str) or req.margin is None or req.leverage is None:
+            first = req if isinstance(req, str) and req != OPEN_USAGE else "A mainnet preview needs the coin, the side, the amount and the leverage."
+            return f"{first} Usage: /preview BTC long 100 5x"
         try:
             return await asyncio.to_thread(mainnet_preview, db, member, req)
         except (execution.TradeError, market.MarketError) as e:
@@ -961,19 +1249,11 @@ async def command(db: Session, client: Any, chat_id: int, member: Member, cmd: s
             return market_text(args[0].lstrip("$"))
         except market.MarketError as e:
             return esc(str(e))
-    if cmd == "/open":
+    if cmd == "/open":  # also /long, /short, /buy, /sell (bot.py): the trading card, then Preview, then Confirm
         req = parse_open(args)
         if isinstance(req, str):
-            return esc(req)
-        why = mode_gate(db, acc) or await gate_for_entry(db, member)
-        if why:
-            return esc(why)
-        try:
-            it = await asyncio.to_thread(preview_open, db, member, req)
-        except (execution.TradeError, market.MarketError) as e:  # an unknown coin says so plainly
-            return esc(str(e))
-        await client.send_message(chat_id, preview_open_text(it), _confirm_buttons("mo", "mn", it.token), html=True)
-        return None
+            return req  # parse_open escapes what the member typed
+        return await open_card(db, client, chat_id, member, req)
     if cmd == "/enter":
         number = signal_from(args)
         if number is None:

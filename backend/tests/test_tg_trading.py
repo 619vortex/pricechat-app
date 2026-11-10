@@ -100,42 +100,89 @@ def last_token(db: Session) -> str:
     return db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first().token
 
 
+def button(tg: TG, prefix: str, text: str | None = None) -> str:
+    """The callback data of the last message's button starting with prefix (and labelled text, if given)."""
+    for row in tg.buttons[-1] or []:
+        for b in row:
+            if b.get("callback_data", "").startswith(prefix) and (text is None or b["text"] == text):
+                return b["callback_data"]
+    raise AssertionError(f"no {prefix} button under: {tg.sent[-1][2]!r} {tg.buttons[-1]!r}")
+
+
+def opn(db: Session, tg: TG, uid: int, text: str) -> str:
+    """A trading command, then its card's Preview: the preview with Confirm (or what refused it)."""
+    say(db, tg, uid, text)
+    return press(db, tg, uid, button(tg, "op:"))
+
+
 # ---------------------------------------------------------------- parsing
+def req_of(text: str) -> tuple[Any, ...]:
+    r = tgtrade.parse_open(text.upper().split())
+    assert isinstance(r, tgtrade.OpenRequest), (text, r)
+    return (r.coin, r.side, r.margin, r.leverage)
+
+
 def test_open_reads_coin_side_margin_leverage_and_optional_stop_and_target() -> None:
     r = tgtrade.parse_open(["BTC", "LONG", "100", "5X"])
     assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage, r.stop, r.tp) == ("BTC", "LONG", 100.0, 5, None, None)
-    r = tgtrade.parse_open(["$sol", "short", "$50", "3", "sl", "130.5", "tp", "110"])
+    r = tgtrade.parse_open(["$sol", "short", "$50", "3x", "sl", "130.5", "tp", "110"])
     assert (r.coin, r.side, r.margin, r.leverage, r.stop, r.tp) == ("SOL", "SHORT", 50.0, 3, 130.5, 110.0)
-    for bad in [[], ["BTC", "long", "100"], ["BTC", "up", "100", "5x"], ["BTC", "long", "-5", "5x"], ["BTC", "long", "100", "2.5x"],
-                ["BTC", "long", "100", "5x", "sl"], ["BTC", "long", "100", "5x", "moon", "1"], ["B/TC", "long", "1", "1x"]]:
+    for bad in [[], ["BTC", "long", "-5", "5x"], ["BTC", "long", "100", "2.5x"], ["BTC", "long", "100", "5x", "sl"],
+                ["BTC", "long", "100", "5x", "moon", "1"], ["B/TC", "long", "1", "1x"], ["BTC", "long", "inf", "3x"], ["BTC", "long", "nan"],
+                ["BTC", "long", "1e9", "3x"], ["BTC", "long", "100", "0x"], ["BTC", "long", "100", "500x"]]:
         assert isinstance(tgtrade.parse_open(bad), str), bad
 
 
-def test_open_without_an_amount_is_a_market_order_at_the_full_margin_limit_and_prices_take_k() -> None:
-    r = tgtrade.parse_open(["btc", "long", "20x"])
-    assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage, r.limit) == ("BTC", "LONG", None, 20, None)
-    r = tgtrade.parse_open(["BTC", "LONG", "20X", "TP", "79K", "SL", "15K"])
-    assert (r.margin, r.leverage, r.tp, r.stop) == (None, 20, 79000.0, 15000.0)
-    r = tgtrade.parse_open(["eth", "short", "1.5k", "3x", "limit", "2.4k"])
-    assert (r.margin, r.limit) == (1500.0, 2400.0)
-    m = man(req=tgtrade.OpenRequest("BTC", "LONG", None, 3))  # equity 1000, max allocation 10%: $100 margin
-    assert m.plan.ok and m.plan.margin == pytest.approx(100, rel=0.01)
-    assert isinstance(tgtrade.parse_open(["BTC", "long"]), str) and isinstance(tgtrade.parse_open(["BTC", "long", "abc"]), str)
+def test_every_command_format_reads_the_same_in_any_order_and_case() -> None:
+    """Owner, 2026-11-10: /open long btc 10 10x gave a usage error. The words may come in any order and any case; a plain
+    number is the amount (USD margin), a number with x the leverage."""
+    for text in ("long btc 10 10x", "BTC long 10 10x", "btc LONG 10x 10", "10 10x long $btc", "buy BTC $10 10X"):
+        assert req_of(text) == ("BTC", "LONG", 10.0, 10), text
+    assert req_of("long btc") == ("BTC", "LONG", None, None)  # /long BTC: both asked for with buttons
+    assert req_of("short eth") == ("ETH", "SHORT", None, None)  # /short ETH
+    assert req_of("long btc 10x") == ("BTC", "LONG", None, 10)  # /long BTC 10x: the amount is asked for
+    assert req_of("long btc 25") == ("BTC", "LONG", 25.0, None)  # a bare number is never a leverage
+    assert req_of("sell sol 1.5k 2x") == ("SOL", "SHORT", 1500.0, 2)
+    r = tgtrade.parse_open("LONG BTC TP 79K 10 SL 60K 3X LIMIT 64.5K".split())  # price pairs anywhere after the side
+    assert (r.margin, r.leverage, r.tp, r.stop, r.limit) == (10.0, 3, 79000.0, 60000.0, 64500.0)
+
+
+def test_ambiguous_input_gets_a_short_specific_message_never_a_guess() -> None:
+    cases = {"long btc 10 10": "Two amounts", "long btc eth 10 3x": "Two coins", "long short btc 10 3x": "not both",
+             "long btc 10 3x 5x": "Two leverages", "long btc 10 3x moon": "Two coins", "long btc 10 3x wh@t": "isn't a coin, an amount",
+             "btc 10 3x": "Long or short", "long 10 3x": "Which coin", "long btc 10 3x sl": "needs a price", "long btc 10 3x sl 1 sl 2": "twice"}
+    for text, why in cases.items():
+        out = tgtrade.parse_open(text.upper().split())
+        assert isinstance(out, str) and why in out and len(out) < 160 and "Usage" not in out, (text, out)
+    assert "Usage" in tgtrade.parse_open([])
+
+
+def test_a_missing_amount_or_leverage_is_never_guessed() -> None:
+    m = man(req=tgtrade.OpenRequest("BTC", "LONG", None, 3))  # the old "no amount = full margin limit" is gone
+    assert not m.plan.ok and m.plan.size == 0 and any("amount and a leverage" in r for r in m.plan.reasons)
+    assert not man(req=tgtrade.OpenRequest("BTC", "LONG", 50.0, None)).plan.ok
 
 
 def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Session, md: FakeMD) -> None:
     from app.tradingbot import affiliate
 
     tg = TG()
-    kiwi(db, 4, "851")  # no wallet yet: told how to connect, in Price Chat's words
-    out = say(db, tg, 851, "/open btc long 20x")
-    assert "made with our sign-up link" in out and "has no wallet connected" in out and "Kiwi Passport" in out and "anter" not in out.lower().replace("banter.", "")
+    kiwi(db, 4, "851")  # no wallet yet: one short line and a Connect wallet button, no pitch
+    out = say(db, tg, 851, "/open btc long 20 3x")
+    assert "No wallet is connected" in out and "Kiwi Passport" in out and "anter" not in out.lower() and len(out) < 200
+    assert tg.buttons[-1] == [[{"text": "🔗 Connect wallet", "url": "https://pricechat.live/passport#account-wallet"}]]
+    assert "4% off" not in out and "@botpricechat" not in out and "/api/r/" not in out
     banter(db, "852")
-    say(db, tg, 852, "/long btc 3x")  # = /open btc long 3x: a real preview with Confirm, not a pitch
+    out = say(db, tg, 852, "/long btc 3x")  # /long BTC 3x: the amount is asked for with buttons, never guessed
+    assert "How much margin" in out and "leverage 3x" in out and not db.scalars(select(TrIntent)).all()
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["$10", "$25", "$50", "$100"]  # equity 1000 x 10%: up to $100
+    out = press(db, tg, 852, button(tg, "oa:", "$50"))  # the full card
+    assert "BTC LONG" in out and "Amount $50.00 · 3x" in out and not db.scalars(select(TrIntent)).all()
+    out = press(db, tg, 852, button(tg, "op:"))  # Preview: the preview with Confirm, as before
     it = db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first()
-    assert it is not None and it.plan["side"] == "LONG" and it.plan["request"]["margin"] is not None
-    assert any(b and "Confirm" in str(b) for b in tg.buttons[-2:])
-    say(db, tg, 852, "/short eth 50 2x")
+    assert it is not None and it.plan["side"] == "LONG" and it.plan["request"]["margin"] == 50.0 and it.plan["leverage"] == 3
+    assert button(tg, "mo:") == f"mo:{it.token}" and "Confirm within 5 minutes" in out
+    opn(db, tg, 852, "/short eth 50 2x")
     assert db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first().plan["side"] == "SHORT"
     owner = kiwi(db, 4, "853")  # the referral's own wallet can't be "referred" by itself: the owner trades too
     db.add(TbWallet(member_id=owner.id, address=affiliate.WALLET, verified_at=utcnow(), referral_status="unverified", referral_code_seen=None))
@@ -204,11 +251,14 @@ def test_private_keys_and_recovery_phrases_are_recognised() -> None:
 def test_only_the_banter_referral_opens_new_trades(db: Session, md: FakeMD) -> None:
     tg = TG()
     kiwi(db, 4, "801")  # no verified wallet
-    assert "has no wallet connected" in say(db, tg, 801, "/open BTC long 50 3x")
+    assert "No wallet is connected" in say(db, tg, 801, "/open BTC long 50 3x")
     banter(db, "802", code="SOMEONE")
-    assert "made with our sign-up link" in say(db, tg, 802, "/open BTC long 50 3x")
+    out = say(db, tg, 802, "/open BTC long 50 3x")
+    assert "made with our sign-up link" in out and "Hyperliquid's record" in out and "4% off" not in out and len(out) < 220
+    assert tg.buttons[-1][0][0]["text"] == "Sign up on Hyperliquid" and "/api/r/gate" in tg.buttons[-1][0][0]["url"]  # the tracked link
+    assert tg.buttons[-1][1][0]["url"] == "https://pricechat.live/passport#account-wallet"
     banter(db, "803", code="KLGXFMNI")  # the code Hyperliquid records for the same referrer is accepted
-    say(db, tg, 803, "/open BTC long 50 3x")
+    opn(db, tg, 803, "/open BTC long 50 3x")
     assert db.scalar(select(TrIntent)) is not None
     sig = active_signal(db, md)
     assert "sign-up link" in press(db, tg, 802, f"sig:{sig.id}:enter")  # the signal ENTER button too
@@ -220,8 +270,8 @@ def gsay(db: Session, tg: TG, uid: int, text: str, msg_id: int) -> str:
     return tg.sent[-1][2]
 
 
-def gpress(db: Session, tg: TG, uid: int, data: str, owner: int | None) -> str:
-    msg = {"chat": {"id": -100, "type": "supergroup"}, "reply_to_message": {"from": {"id": owner}} if owner else {}}
+def gpress(db: Session, tg: TG, uid: int, data: str, owner: int | None, cmd_id: int = 77) -> str:
+    msg = {"chat": {"id": -100, "type": "supergroup"}, "reply_to_message": {"message_id": cmd_id, "from": {"id": owner}} if owner else {}}
     asyncio.run(bot.handle_callback(db, tg, {"id": "x", "data": data, "from": {"id": uid}, "message": msg}))
     return tg.sent[-1][2] if tg.sent else ""
 
@@ -235,14 +285,30 @@ def test_trading_works_in_groups_and_its_buttons_only_for_whoever_asked(db: Sess
     async def note(client: Any, cq: Any, uid: int, text: str, alert: bool = False, dm: bool = True) -> None:
         answered.append(text)
     monkeypatch.setattr(bot, "_answer", note)
-    say_ = gsay(db, tg, 811, "/open BTC long 50 3x", msg_id=77)
-    assert "privately" not in say_ and tg.sent[-1][1] == -100  # answered in the group
+    out = gsay(db, tg, 811, "/long btc", msg_id=77)  # the amount card, in the group, replying to the command
+    assert "How much margin" in out and tg.sent[-1][1] == -100 and tg.replies[-1] == 77
+    pick = button(tg, "oa:", "$50")
+    n = len(tg.sent)
+    gpress(db, tg, 812, pick, owner=811)  # another member presses 811's choice
+    assert "for the member who asked" in answered[-1] and len(tg.sent) == n
+    assert "which leverage" in gpress(db, tg, 811, pick, owner=811) and tg.sent[-1][1] == -100 and tg.replies[-1] == 77
+    gpress(db, tg, 811, button(tg, "oa:", "3x"), owner=811)
+    assert "Amount $50.00 · 3x" in tg.sent[-1][2] and tg.replies[-1] == 77  # the full card replies to the command too
+    preview = button(tg, "op:")
+    gpress(db, tg, 812, preview, owner=811)  # someone else's Preview: refused, no intent
+    assert "for the member who asked" in answered[-1] and not db.scalars(select(TrIntent)).all()
+    gpress(db, tg, 812, button(tg, "ox:"), owner=811)
+    assert "for the member who asked" in answered[-1]
+    say_ = gpress(db, tg, 811, preview, owner=811)
+    assert "Confirm within 5 minutes" in say_ and tg.sent[-1][1] == -100
     assert tg.replies[-1] == 77, "the preview replies to the member's own command, so its buttons know whose they are"
     token = last_token(db)
     n = len(tg.sent)
     gpress(db, tg, 812, f"mo:{token}", owner=811)  # another member presses 811's Confirm
     assert answered and "for the member who asked" in answered[-1] and len(tg.sent) == n
     assert db.scalar(select(TrIntent).where(TrIntent.token == token)).status == "PENDING", "nothing confirmed"
+    gsay(db, tg, 811, "/open BTC long 50 3x", msg_id=81)
+    assert tg.replies[-1] == 81 and "Preview" in str(tg.buttons[-1])
     gpress(db, tg, 812, "ca:all:1", owner=None)  # a group button with no known owner works for nobody
     assert "for the member who asked" in answered[-1]
     assert "privately" not in gsay(db, tg, 811, "/balance", msg_id=78)
@@ -254,7 +320,7 @@ def test_trading_works_in_groups_and_its_buttons_only_for_whoever_asked(db: Sess
 def test_open_previews_then_trades_once_on_confirm(db: Session, md: FakeMD) -> None:
     banter(db, "821")
     tg = TG()
-    text = say(db, tg, 821, "/open BTC long 50 3x")
+    text = opn(db, tg, 821, "/open BTC long 50 3x")
     for part in ("PAPER", "Margin $", "3x isolated", "Stop", "TP1", "Liquidation ≈", "Fees ≈", "funding", "Confirm within 5 minutes"):
         assert part in text, part
     assert tg.buttons[-1][0][0]["callback_data"].startswith("mo:") and not db.scalars(select(TrPosition)).all()
@@ -274,7 +340,7 @@ def test_public_signal_numbers_ignore_manual_trades(db: Session, md: FakeMD) -> 
     sig = active_signal(db, md)
     banter(db, "825")
     tg = TG()
-    say(db, tg, 825, "/open ETH long 50 3x")
+    opn(db, tg, 825, "/open ETH long 50 3x")
     press(db, tg, 825, f"mo:{last_token(db)}")
     nxt = signals.create(db, signals.analyze(md, "BTC"), "1h", "ACTIVE", "test")
     assert nxt.number == sig.number + 1
@@ -284,14 +350,14 @@ def test_public_signal_numbers_ignore_manual_trades(db: Session, md: FakeMD) -> 
 def test_cancelled_and_expired_previews_never_trade(db: Session, md: FakeMD) -> None:
     banter(db, "831")
     tg = TG()
-    say(db, tg, 831, "/open BTC long 50 3x")
+    opn(db, tg, 831, "/open BTC long 50 3x")
     assert "Nothing was traded" in press(db, tg, 831, f"mn:{last_token(db)}")
-    say(db, tg, 831, "/open BTC long 50 3x")
+    opn(db, tg, 831, "/open BTC long 50 3x")
     it = db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first()
     it.expires_at = utcnow().replace(year=2000)
     db.commit()
     assert "expired" in press(db, tg, 831, f"mo:{it.token}")
-    say(db, tg, 831, "/open BTC long 50 3x")
+    opn(db, tg, 831, "/open BTC long 50 3x")
     assert "Dropped 1" in say(db, tg, 831, "/cancel")
     assert not db.scalars(select(TrPosition)).all()
 
@@ -300,7 +366,7 @@ def test_someone_elses_confirmation_does_nothing(db: Session, md: FakeMD) -> Non
     banter(db, "841")
     banter(db, "842")
     tg = TG()
-    say(db, tg, 841, "/open BTC long 50 3x")
+    opn(db, tg, 841, "/open BTC long 50 3x")
     assert "isn't yours" in press(db, tg, 842, f"mo:{last_token(db)}")
     assert not db.scalars(select(TrPosition)).all()
 
@@ -310,7 +376,7 @@ def test_limits_refuse_before_any_preview(db: Session, md: FakeMD) -> None:
     tg = TG()
     assert "over your limit of 3x" in say(db, tg, 851, "/open BTC long 50 10x")
     assert "over your limit of 10%" in say(db, tg, 851, "/open BTC long 500 3x")
-    assert "Usage" in say(db, tg, 851, "/open BTC long")
+    assert "How much margin" in say(db, tg, 851, "/open BTC long")  # asked with buttons, never guessed
     assert "isn't a Hyperliquid perpetual" in say(db, tg, 851, "/open NOPE long 50 3x")
     assert db.scalar(select(TrIntent)) is None
 
@@ -322,11 +388,11 @@ def test_testnet_order_refused_leaves_no_position_and_a_failed_stop_closes_at_on
     ex = FakeExchange(mark=uptrend_pullback()[-1].c, no_fill=True)
     monkeypatch.setattr(execution, "executor", lambda *a, **k: ex)
     tg = TG()
-    assert "TESTNET" in say(db, tg, 861, "/open BTC long 50 3x")
+    assert "TESTNET" in opn(db, tg, 861, "/open BTC long 50 3x")
     assert "Not filled" in press(db, tg, 861, f"mo:{last_token(db)}")
     assert db.scalar(select(TrPosition)).status == "FAILED" and not [o for o in ex.orders if o["type"] == "sl"]
     ex.no_fill, ex.stop_fails = False, True
-    say(db, tg, 861, "/open BTC long 50 3x")
+    opn(db, tg, 861, "/open BTC long 50 3x")
     msg = press(db, tg, 861, f"mo:{last_token(db)}")
     pos = db.scalars(select(TrPosition).order_by(TrPosition.id.desc())).first()
     assert pos.status != "OPEN" and "stopped for safety" in msg  # no stop: closed at market, new trades stopped
@@ -339,7 +405,9 @@ def test_mainnet_orders_from_telegram_stay_off_until_the_owner_turns_them_on(db:
     acc.mode = "LIVE"
     db.commit()
     tg = TG()
-    out = say(db, tg, 871, "/open BTC long 50 3x")  # a LIVE account: a read-only mainnet preview, never a Confirm
+    card = say(db, tg, 871, "/open BTC long 50 3x")  # a LIVE account: the card says Preview is read-only...
+    assert "LIVE" in card and "Preview is read-only" in card
+    out = press(db, tg, 871, button(tg, "op:"))  # ...and Preview is the read-only mainnet preview, never a Confirm
     assert "MAINNET PREVIEW" in out and "OFF until" in out and tg.buttons[-1] is None
     assert db.scalar(select(TrIntent)) is None
     s = signals.settings(db)
@@ -350,7 +418,7 @@ def test_mainnet_orders_from_telegram_stay_off_until_the_owner_turns_them_on(db:
 
 # ---------------------------------------------------------------- managing positions
 def open_paper(db: Session, tg: TG, uid: int, coin: str = "BTC") -> TrPosition:
-    say(db, tg, uid, f"/open {coin} long 50 3x")
+    opn(db, tg, uid, f"/open {coin} long 50 3x")
     press(db, tg, uid, f"mo:{last_token(db)}")
     return db.scalars(select(TrPosition).where(TrPosition.coin == coin).order_by(TrPosition.id.desc())).first()
 
@@ -676,7 +744,8 @@ def test_default_settings_keep_every_new_telegram_entry_off_mainnet(db: Session,
     monkeypatch.setattr(market, "_shared", md)
     monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
     tg = TG()
-    assert "MAINNET PREVIEW" in say(db, tg, 1001, "/open BTC long 50 3x") and tg.buttons[-1] is None
+    assert "MAINNET PREVIEW" in opn(db, tg, 1001, "/open BTC long 50 3x") and tg.buttons[-1] is None
+    assert "MAINNET PREVIEW" in opn(db, tg, 1001, "/long BTC 50 3x") and tg.buttons[-1] is None
     assert "MAINNET PREVIEW" in say(db, tg, 1001, f"/enter #{sig.number:03d}") and tg.buttons[-1] is None
     asyncio.run(bot.handle_command(db, tg, -100, 1001, f"/enter #{sig.number}", group=True, reply_to=5))
     assert "MAINNET PREVIEW" in tg.sent[-2][2] and tg.sent[-2][1] == 1001  # the group /enter: the preview goes privately
@@ -721,3 +790,133 @@ def test_no_telegram_path_reaches_mainnet_until_the_owner_switches_it_on(db: Ses
     acc.mode = "TESTNET"
     db.commit()
     assert off not in press(db, tg, 1002, f"sig:{sig.id}:enter")
+
+
+# ---------------------------------------------------------------- the trading card (owner, 2026-11-10)
+def test_the_card_shows_price_amount_leverage_size_fees_liquidation_and_stop(db: Session, md: FakeMD) -> None:
+    banter(db, "1101")
+    tg = TG()
+    card = say(db, tg, 1101, "/open long btc 50 3x")  # the screenshot's word order
+    mark = md.market("BTC").mark
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["👁 Preview", "Cancel"] and not db.scalars(select(TrIntent)).all()
+    out = press(db, tg, 1101, button(tg, "op:"))
+    p = db.scalars(select(TrIntent)).first().plan  # the same price in the fake market: the card's numbers are the preview's
+    f = market.fmt_price
+    for part in ("🟢 <b>BTC LONG</b> · PAPER", f"price {f(mark)}", "Amount $50.00 · 3x", f"position ${p['notional']:,.2f}",
+                 f"({p['size']:g} BTC)", f"Fees ≈ ${p['est_fees']:,.2f}", f"liquidation ≈ {f(p['liq'])}", f"Stop {f(p['stop'])}",
+                 "(default: ≈ $", f"TP {f(p['tp1'])}", "Nothing is sent yet"):
+        assert part in card, (part, card)
+    assert len(card.splitlines()) <= 6 and "Confirm within 5 minutes" in out
+    card = say(db, tg, 1101, "/short ETH 50 3x sl 1e9")  # a stop typed wrong is a word, not a price
+    assert "needs a price" in card
+    eth = md.market("ETH").mark
+    card = say(db, tg, 1101, f"/short ETH 50 3x sl {eth * 1.01:.2f} tp {eth * 0.97:.2f}")
+    assert "(yours)" in card and "🔴 <b>ETH SHORT</b>" in card
+
+
+def test_missing_pieces_are_asked_for_with_buttons_within_the_limits(db: Session, md: FakeMD) -> None:
+    m = banter(db, "1102")
+    tg = TG()
+    out = say(db, tg, 1102, "/long BTC")
+    assert "How much margin? Up to $100.00 · then the leverage" in out and "price " in out
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["$10", "$25", "$50", "$100"] and tg.buttons[-1][1][0]["text"] == "Cancel"
+    out = press(db, tg, 1102, button(tg, "oa:", "$25"))
+    assert "Amount $25.00 · which leverage? Up to 3x" in out and [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x", "3x"]
+    out = press(db, tg, 1102, button(tg, "oa:", "2x"))
+    assert "Amount $25.00 · 2x" in out and button(tg, "op:")
+    out = say(db, tg, 1102, "/long btc 40")  # an amount and no leverage
+    assert "Amount $40.00 · which leverage" in out
+    acc = execution.account(db, m)
+    acc.max_leverage, acc.max_allocation_pct = 5, 3.0  # $30 margin at most, Price Chat's cap 5x
+    db.commit()
+    say(db, tg, 1102, "/short sol")
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["$10", "$25"]
+    press(db, tg, 1102, button(tg, "oa:", "$10"))
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x", "3x", "5x"]
+    acc.max_leverage = 2
+    db.commit()
+    say(db, tg, 1102, "/long eth 10")
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x"]
+    acc.max_allocation_pct = 0.5  # $5: only $5 itself, which reaches $10 at 2x
+    db.commit()
+    say(db, tg, 1102, "/long eth")
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["$5"]
+    acc.max_allocation_pct = 0.2  # $2: nothing reaches Hyperliquid's $10 minimum
+    db.commit()
+    out = say(db, tg, 1102, "/long eth")
+    assert "under Hyperliquid's $10 minimum" in out and tg.buttons[-1] is None
+    assert not db.scalars(select(TrIntent)).all()
+
+
+def test_too_much_leverage_or_margin_asks_again_instead_of_refusing_or_guessing(db: Session, md: FakeMD) -> None:
+    banter(db, "1103")
+    tg = TG()
+    out = say(db, tg, 1103, "/open long btc 10 10x")  # the owner's screenshot: a card, not a usage error
+    assert "10x is over your limit of 3x" in out and "Amount $10.00 · which leverage" in out
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x", "3x"]
+    out = say(db, tg, 1103, "/open BTC long 500 3x")
+    assert "over your limit of 10%" in out and "How much margin" in out and not db.scalars(select(TrIntent)).all()
+
+
+def test_forged_stale_or_out_of_limit_card_buttons_never_make_a_trade(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    banter(db, "1104")
+    tg = TG()
+    s = tgtrade._stamp()
+    for data, why in ((f"op:{s}:BTC:L:50:9", "isn't valid"), (f"op:{s}:BTC:L:inf:3", "isn't valid"), (f"op:{s}:B-TC:L:50:3", "isn't valid"),
+                      (f"op:{s}:BTC:X:50:3", "isn't valid"), (f"op:{s}:BTC:L:50:3:q1", "isn't valid"), (f"op:{s}:BTC:L:_:3", "isn't valid"),
+                      ("op:1:BTC:L:50:3", "out of date"), (f"op:{s}:BTC", "isn't valid"), (f"op:{s}:BTC:L:50:3:s{'9' * 60}", "isn't valid"),
+                      (f"op:{s}:BTC:L:50:5", "over your limit of 3x"), (f"op:{s}:BTC:L:5000:3", "over your limit of 10%"),
+                      (f"oa:{s}:BTC:L:50:7", "isn't valid"), ("ox:BTC", "Cancelled")):
+        assert why in press(db, tg, 1104, data), data
+    assert not db.scalars(select(TrIntent)).all() and not db.scalars(select(TrPosition)).all()
+    assert "over your limit of 10%" in press(db, tg, 1104, f"oa:{s}:BTC:L:5000:3")  # a forged choice is only asked again
+    good = f"op:{s}:BTC:L:50:3"
+    tgtrade.set_switches(db, "admin:test", kill=True)  # the emergency stop wins over any button
+    assert "emergency stop" in press(db, tg, 1104, good)
+    tgtrade.set_switches(db, "admin:test", kill=False)
+    w = db.scalar(select(TbWallet).where(TbWallet.address.like("%1104")))
+    w.referral_status, w.referral_code_seen = "not_referred", None  # the referral gate is asked again on the press
+    db.commit()
+    assert "made with our sign-up link" in press(db, tg, 1104, good) and tg.buttons[-1][0][0]["text"] == "Sign up on Hyperliquid"
+    assert not db.scalars(select(TrIntent)).all()
+    # the buttons are rate-limited like every trading button
+    cq = {"id": "x", "data": good, "from": {"id": 1104}}
+    assert [asyncio.run(bot.trade_button_throttled(tg, cq)) for _ in range(8)][-1] is True
+    assert bot.trade_button_throttled is not None and {"oa:", "op:"} <= set(bot.TRADE_BUTTONS)
+    assert {"oa:", "op:", "ox:"} <= set(bot.OWNED_BUTTONS)
+
+
+def test_cancel_drops_the_card_and_preview_cancel_drops_the_intent(db: Session, md: FakeMD) -> None:
+    banter(db, "1105")
+    tg = TG()
+    say(db, tg, 1105, "/long BTC 50 3x")
+    assert "Cancelled. Nothing was sent" in press(db, tg, 1105, button(tg, "ox:"))
+    assert not db.scalars(select(TrIntent)).all()
+    opn(db, tg, 1105, "/long BTC 50 3x")
+    assert "Nothing was traded" in press(db, tg, 1105, button(tg, "mn:"))
+    assert db.scalars(select(TrIntent)).first().status == "CANCELLED" and not db.scalars(select(TrPosition)).all()
+
+
+def test_trading_replies_carry_no_footer_or_referral_ad_and_other_commands_keep_it(db: Session, md: FakeMD) -> None:
+    from app.tradingbot.service import settings as earn_settings
+
+    assert earn_settings(db).referral_url  # a referral link is set: the footer would carry it
+    banter(db, "1106")
+    kiwi(db, 4, "1107")  # no wallet
+    tg = TG()
+    for uid, text in ((1106, "/open BTC long 50 3x"), (1106, "/long eth"), (1106, "/balance"), (1106, "/settings"), (1106, "/orders"),
+                      (1106, "/positions"), (1106, "/market BTC"), (1106, "/long btc 10 10"), (1107, "/long BTC 50 3x"), (1106, "/status")):
+        out = say(db, tg, uid, text)
+        assert "@botpricechat" not in out and "4% off" not in out and "/api/r/footer" not in out, (text, out)
+    out = press(db, tg, 1106, f"op:{tgtrade._stamp()}:BTC:L:50:3")
+    assert "Confirm within 5 minutes" in out and "@botpricechat" not in out and "4% off" not in out
+    asyncio.run(bot.handle_command(db, tg, -100, 1106, "/long BTC 50 3x", group=True, reply_to=9))
+    assert "@botpricechat" not in tg.sent[-1][2]
+    assert "@botpricechat" in say(db, tg, 1106, "/help") and "@botpricechat" in say(db, tg, 1106, "/signals")
+
+
+def test_help_shows_the_new_formats() -> None:
+    for text in (tgtrade.HELP, bot.HELP):
+        assert "/long BTC 50 3x" in text and "/short ETH 25 2x" in text and "full margin" not in text
+    assert "/long BTC 50 3x" in tgtrade.OPEN_USAGE and "any order" in tgtrade.OPEN_USAGE
+    assert {"long", "short", "open"} <= {c for c, _ in bot.MENU_PRIVATE}

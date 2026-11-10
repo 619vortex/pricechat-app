@@ -21,7 +21,7 @@ from app.security import redact
 from app.tradingos import bot, execution, signals, tgtrade
 from app.tradingos import exchange as xch
 
-from tests.test_tg_trading import TG, FakeReader, banter, last_token, md, press, say  # noqa: F401 - md is a fixture
+from tests.test_tg_trading import TG, FakeReader, banter, last_token, md, opn, press, say  # noqa: F401 - md is a fixture
 from tests.test_trading_execution import FakeExchange, active_signal, on_testnet
 from tests.test_trading_os import FakeMD
 
@@ -161,13 +161,13 @@ def test_live_account_open_and_enter_become_previews_and_the_live_switch_restore
     live_member(db, "2005")
     monkeypatch.setattr(xch, "HyperliquidExecutor", lambda *a, **k: pytest.fail("a real Hyperliquid executor was built"))
     tg = TG()
-    assert "MAINNET PREVIEW" in say(db, tg, 2005, "/open SOL long 50 2x") and tg.buttons[-1] is None
+    assert "MAINNET PREVIEW" in opn(db, tg, 2005, "/open SOL long 50 2x") and tg.buttons[-1] is None
     assert "MAINNET PREVIEW" in say(db, tg, 2005, f"/enter {sig.number}") and tg.buttons[-1] is None
     assert not db.scalars(select(TrIntent)).all()
     switches(db, live=True)  # the owner's switch: a normal preview with Confirm (no order is placed in this test)
     ex = FakeExchange(mark=md.market("SOL").mark)
     monkeypatch.setattr(execution, "executor", lambda *a, **k: ex)
-    say(db, tg, 2005, "/open SOL long 50 2x")
+    opn(db, tg, 2005, "/open SOL long 50 2x")
     assert tg.buttons[-1] and tg.buttons[-1][0][0]["callback_data"].startswith("mo:") and "REAL MONEY" in tg.sent[-1][2]
     assert not ex.orders
 
@@ -177,11 +177,11 @@ def test_emergency_stop_blocks_new_telegram_trades_but_never_closing(db: Session
     sig = active_signal(db, md)
     m = banter(db, "2006")
     tg = TG()
-    say(db, tg, 2006, "/open BTC long 50 3x")
+    opn(db, tg, 2006, "/open BTC long 50 3x")
     press(db, tg, 2006, f"mo:{last_token(db)}")
     pos = db.scalar(select(TrPosition))
     assert pos.status == "OPEN" and pos.mode == "PAPER"
-    say(db, tg, 2006, "/open ETH long 50 3x")  # a preview waiting for Confirm when the stop goes on
+    opn(db, tg, 2006, "/open ETH long 50 3x")  # a preview waiting for Confirm when the stop goes on
     waiting = last_token(db)
     out = tgtrade.set_switches(db, "admin:test", kill=True)
     assert out["switches"]["kill"] and not out["switches"]["mainnet_execution"]
@@ -218,7 +218,7 @@ def test_the_live_switch_needs_the_phrase_and_no_emergency_stop(db: Session) -> 
 def test_admin_switches_and_monitoring_over_the_api(client: TestClient, db: Session, md: FakeMD) -> None:
     banter(db, "2007")
     tg = TG()
-    say(db, tg, 2007, "/open BTC long 50 3x")
+    opn(db, tg, 2007, "/open BTC long 50 3x")
     press(db, tg, 2007, f"mo:{last_token(db)}")
     st = client.get("/api/tradingos/admin/telegram-trading").json()
     assert st["switches"] == {"live": False, "kill": False, "killed_at": None, "gate_signal_enter": True, "global_paused": False,
@@ -235,13 +235,13 @@ def test_admin_switches_and_monitoring_over_the_api(client: TestClient, db: Sess
 def test_a_confirmation_is_used_once_even_when_pressed_twice(db: Session, md: FakeMD) -> None:
     banter(db, "2008")
     tg = TG()
-    say(db, tg, 2008, "/open BTC long 50 3x")
+    opn(db, tg, 2008, "/open BTC long 50 3x")
     token = last_token(db)
     assert "filled" in press(db, tg, 2008, f"mo:{token}")
     assert "Already handled" in press(db, tg, 2008, f"mo:{token}")
     assert len(db.scalars(select(TrPosition)).all()) == 1
     # two presses racing: the second holds a stale PENDING row; the conditional update still lets only one through
-    say(db, tg, 2008, "/open ETH long 50 3x")
+    opn(db, tg, 2008, "/open ETH long 50 3x")
     it = db.scalar(select(TrIntent).where(TrIntent.token == last_token(db)))
     execution.claim_intent(db, it)
     it.status = "PENDING"  # what a second session that read the row before the first commit still sees
@@ -258,7 +258,7 @@ def test_limit_is_the_worst_accepted_price_filled_now_or_not_at_all(db: Session,
     assert "wouldn't fill now" in say(db, tg, 2009, f"/open BTC long 50 3x limit {mark * 0.99:.4f}")
     assert "more than 5%" in say(db, tg, 2009, f"/open BTC long 50 3x limit {mark * 1.2:.4f}")
     lim = round(mark * 1.002, 4)
-    out = say(db, tg, 2009, f"/open BTC long 50 3x limit {lim}")
+    out = opn(db, tg, 2009, f"/open BTC long 50 3x limit {lim}")
     assert "or better (limit" in out
     assert "filled" in press(db, tg, 2009, f"mo:{last_token(db)}")
     pos = db.scalar(select(TrPosition))
@@ -268,7 +268,7 @@ def test_limit_is_the_worst_accepted_price_filled_now_or_not_at_all(db: Session,
     on_testnet(db, m2)
     ex = FakeExchange(mark=mark)
     monkeypatch.setattr(execution, "executor", lambda *a, **k: ex)
-    say(db, tg, 2010, f"/open BTC long 50 3x limit {lim}")
+    opn(db, tg, 2010, f"/open BTC long 50 3x limit {lim}")
     press(db, tg, 2010, f"mo:{last_token(db)}")
     entry = next(o for o in ex.orders if o["type"] == "market")
     assert entry["px"] == pytest.approx(lim, rel=1e-4) and entry["reduce"] is False

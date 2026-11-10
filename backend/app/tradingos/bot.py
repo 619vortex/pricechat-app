@@ -57,7 +57,9 @@ Add-ons: rsi macd bb ma volume oi funding depth cvd aggoi liq zones heatmap wall
 🤖 <b>Trading bot</b> (here or DM me)
 /status · /connect · /positions · /pnl · /trades
 /risk · /auto · /pause · /resume · /close
-/market BTC · /open BTC long 5x · /long BTC 5x · /short ETH 100 3x tp 3k · /enter (reply to a signal) · /balance · /orders
+/market BTC · /long BTC 50 3x · /short ETH 25 2x tp 3k · /open BTC long 50 3x (any order: a plain number is the USD amount, 3x the leverage)
+/long BTC alone: buttons ask the amount and leverage · a card, then Preview, then Confirm
+/enter (reply to a signal) · /balance · /orders
 /sl · /tp · /cancel · /closeall · /settings (here or in a DM; buttons work only for whoever asked)
 /preview BTC long 100 5x · /mainnet (mainnet preview and readiness, read-only)
 
@@ -457,14 +459,19 @@ async def handle_command(db: Session, client: Any, chat_id: int, user_id: int, t
 
 async def _handle_command(db: Session, client: Any, chat_id: int, user_id: int, text: str, group: bool = False, reply_to: int | None = None,
                           chat_username: str | None = None, author: str | None = None, throttle: bool = False) -> None:
+    from app.tradingos import tgtrade
+
     raw = client
-    client = _Footed(client, footer(db))
+    foot = footer(db)
     db.commit()  # (a first run creates settings rows): no write transaction waits on Telegram or an exchange below
     parts = text.strip().split()
     cmd = parts[0].split("@")[0].lower()
-    if cmd in ("/long", "/short", "/buy", "/sell") and len(parts) > 1:  # "/long btc 20x" = "/open btc long 20x"
-        parts = ["/open", parts[1], "long" if cmd in ("/long", "/buy") else "short", *parts[2:]]
+    if cmd in ("/long", "/short", "/buy", "/sell"):  # "/long btc 10 3x" = "/open long btc 10 3x" (tgtrade.parse_open: any order)
+        parts = ["/open", "long" if cmd in ("/long", "/buy") else "short", *parts[1:]]
         cmd = "/open"
+    # trading replies and cards go without the footer (bot channel + referral link); every other command keeps it
+    trading = cmd in (GROUP_TRADING | tgtrade.COMMANDS) and not (cmd in COMMITTEE or (cmd == "/risk" and len(parts) > 1))
+    client = raw if trading else _Footed(raw, foot)
     # market commands keep the words as typed (a Solana contract address is case-sensitive); the parsers ignore case
     args = parts[1:] if cmd in MARKET_ARGS else [p.upper() for p in parts[1:]]
     brief = cmd == "/fc"  # "fc sui": the chart and its read, no signal (that's /signal sui)
@@ -1218,7 +1225,8 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
         await _handle_callback(db, client, cq)
 
 
-TRADE_BUTTONS = ("mo:", "ca:", "pr:", "cf:", "cl:", "sig")
+TRADE_BUTTONS = ("mo:", "ca:", "pr:", "cf:", "cl:", "sig", "oa:", "op:")  # oa: / op: the trading card's choices and Preview (tgtrade)
+OWNED_BUTTONS = ("mo:", "mn:", "ca:", "pr:", "cf:", "cx:", "cl:", "oa:", "op:", "ox:")  # in a group: only for the member who asked
 
 
 async def trade_button_throttled(client: Any, cq: dict[str, Any]) -> bool:
@@ -1236,8 +1244,29 @@ async def trade_button_throttled(client: Any, cq: dict[str, Any]) -> bool:
 async def _handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
     data = str(cq.get("data") or "")
     uid = int((cq.get("from") or {}).get("id") or 0)
-    if data[:3] in ("mo:", "mn:", "ca:", "pr:", "cf:", "cx:", "cl:") and uid and _not_yours(cq, uid):
+    if data[:3] in OWNED_BUTTONS and uid and _not_yours(cq, uid):
         await _answer(client, cq, uid, "This button is for the member who asked. Type the command yourself. Nothing was sent.", alert=True, dm=False)
+        return
+    if data[:3] in ("oa:", "op:", "ox:") and uid:  # the trading card (tgtrade.open_card): answered where the card is
+        from app.tradingos import tgtrade
+
+        m = member_for(db, uid)
+        if m is None or not has_access(db, m):
+            await _answer(client, cq, uid, "Connect your Kiwi Passport first." if m is None else
+                          f"The trading service opens at Kiwi Rank {_min_rank(db)}.", alert=True, dm=False)
+            return
+        msg = cq.get("message") or {}
+        chat = msg.get("chat") or {}
+        in_group = chat.get("type", "private") != "private" and chat.get("id") is not None
+        reply_to = (msg.get("reply_to_message") or {}).get("message_id") if in_group else None
+        where = chat["id"] if in_group and reply_to else uid  # a group card always replies to the member's command
+        await _answer(client, cq, uid, "Working…", dm=False)
+        out = await tgtrade.card_callback(db, client, m, where, reply_to if where != uid else None, data)
+        if out:
+            if where != uid:
+                await client.send_message(where, out, html=True, reply_to=reply_to)
+            else:
+                await client.send_message(where, out, html=True)
         return
     if data[:3] in ("mo:", "mn:", "ca:", "pr:") and uid:  # Telegram trading's Confirm / Cancel (tgtrade.py)
         from app.tradingos import tgtrade
@@ -1724,7 +1753,8 @@ async def announce(db: Session, client: Any, sig: TsSignal, before: str) -> bool
     return True
 
 
-MENU_PRIVATE = [("rules", "The group rules"), ("market", "One perp: price, funding, OI, e.g. /market BTC"), ("open", "Trade: /open BTC long 100 5x (preview first)"),
+MENU_PRIVATE = [("rules", "The group rules"), ("market", "One perp: price, funding, OI, e.g. /market BTC"), ("long", "Long, e.g. /long BTC 50 3x (card, then preview)"),
+                ("short", "Short, e.g. /short ETH 25 2x (card, then preview)"), ("open", "Trade in any order: /open BTC long 50 3x"),
                 ("preview", "Mainnet order preview (read-only), e.g. /preview BTC long 50 3x"), ("mainnet", "Your mainnet readiness"),
                 ("balance", "Your balance"), ("orders", "Open orders"), ("settings", "Your trading limits and mode"),
                 ("markets", "Market overview · /markets weekly"), ("price", "Price, e.g. /price BTC ETH SOL"),
