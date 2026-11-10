@@ -86,10 +86,15 @@ def entry_gate(db: Session, member: Member) -> str | None:
     s = earn_settings(db)
     w = wallet_of(db, member)
     accepted = codes(s)
-    join = f" New to Hyperliquid? Sign up with Price Chat's link (4% off fees): {s.referral_url}" if s.referral_url else ""
-    if w is None:
-        return (f"To trade from Telegram, first connect and verify your Hyperliquid wallet at {SITE}/earn "
-                f"(your wallet signs a message; no keys are ever shared).{join}")
+    from app.tradingos.bot import tracked_url
+
+    link = tracked_url(db, "gate") or f"{SITE}/earn"
+    rule = f"Trading here is for Hyperliquid accounts made with our sign-up link: {link} (4% off fees)."
+    if w is None:  # Telegram is linked (this member was found by it); their Passport just has no Hyperliquid account yet
+        who = f" @{member.username}" if getattr(member, "username", None) else ""
+        return (f"Your Telegram is linked to Kiwi Passport{who}, but no Hyperliquid account is connected to it yet. "
+                f"Open {SITE}/earn while signed in as{who or ' that Passport'} → Connect Hyperliquid (your wallet signs a message; "
+                f"no keys are shared), then try again. {rule}")
     from app.tradingbot import affiliate
 
     if (w.address or "").lower() == affiliate.WALLET.lower():  # the referral's own wallet (the owner): it can't be referred by itself
@@ -98,11 +103,10 @@ def entry_gate(db: Session, member: Member) -> str | None:
     if w.referral_status == "verified" and seen in accepted:
         return None
     if w.referral_status in ("pending", "unverified"):
-        return (f"Hyperliquid hasn't confirmed your wallet's referral code yet. Recheck it at {SITE}/earn, then try again. "
-                f"Trading from Telegram is for Hyperliquid accounts that joined with Price Chat's referral code ({accepted[0]}).{join}")
-    return (f"Trading from Telegram is only for Hyperliquid accounts that joined with Price Chat's referral code "
-            f"({accepted[0]}). Hyperliquid's record for your wallet shows {seen or 'no referral code'}, so new trades are off. "
-            f"Closing and managing any position you already have still works.")
+        return (f"Hyperliquid hasn't confirmed yet that your account was made with our sign-up link. Recheck at {SITE}/earn, "
+                f"then try again. {rule}")
+    return (f"{rule} Hyperliquid's record shows your account wasn't made with it, so new trades are off. "
+            "Closing and managing any position you already have still works.")
 
 
 def recheck_referral(db: Session, member: Member) -> None:

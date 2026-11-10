@@ -675,8 +675,8 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
     if cmd == "/connect":
         join = tracked_url(db, "start")
         return ("<b>Connect Hyperliquid</b> (2 minutes)\n"
-                + (f"0. New to Hyperliquid? Sign up with Price Chat's link first (4% off fees): {join} (Telegram trading is for "
-                   "accounts Hyperliquid records with Price Chat's referral code; we check Hyperliquid's own record)\n" if join else "")
+                + (f"0. New to Hyperliquid? Sign up with our link first (4% off fees): {join}. Trading here is for accounts "
+                   "made with it; we check Hyperliquid's own record\n" if join else "")
                 + f"1. {SITE}/earn → <b>Connect Hyperliquid API</b>\n"
                 "2. On Hyperliquid › API, create an API wallet and authorize it\n"
                 "3. Paste its key on the website. You stay in PAPER until you turn on live.\n\n" + SAFETY)

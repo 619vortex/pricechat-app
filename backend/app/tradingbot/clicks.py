@@ -14,7 +14,7 @@ from app.db.base import utcnow
 from app.models.tradingbot import TbReferralClick
 
 API = "https://api.pricechat.live"  # where Telegram links point (the website uses its own same-origin /api)
-PLACEMENTS = {"card", "footer", "start", "help"}
+PLACEMENTS = {"card", "footer", "start", "help", "gate"}
 _SITE = re.compile(r"^site_[a-z0-9_]{1,24}$")  # site_<page>
 _BOTS = ("bot", "crawl", "spider", "slurp", "preview", "facebookexternalhit", "embedly", "iframely", "headless", "curl", "wget",
          "python-requests", "httpx", "go-http", "whatsapp", "skypeuri")  # link previews and scripts: not counted, UA never stored

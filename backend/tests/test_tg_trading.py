@@ -129,7 +129,7 @@ def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Sessi
     tg = TG()
     kiwi(db, 4, "851")  # no wallet yet: told how to connect, in Price Chat's words
     out = say(db, tg, 851, "/open btc long 20x")
-    assert "connect and verify your Hyperliquid wallet" in out and "Banter" not in out
+    assert "made with our sign-up link" in out and "no Hyperliquid account is connected" in out and "Kiwi Passport" in out and "anter" not in out.lower().replace("banter.", "")
     banter(db, "852")
     say(db, tg, 852, "/long btc 3x")  # = /open btc long 3x: a real preview with Confirm, not a pitch
     it = db.scalars(select(TrIntent).order_by(TrIntent.id.desc())).first()
@@ -204,14 +204,14 @@ def test_private_keys_and_recovery_phrases_are_recognised() -> None:
 def test_only_the_banter_referral_opens_new_trades(db: Session, md: FakeMD) -> None:
     tg = TG()
     kiwi(db, 4, "801")  # no verified wallet
-    assert "verify your Hyperliquid wallet" in say(db, tg, 801, "/open BTC long 50 3x")
+    assert "no Hyperliquid account is connected" in say(db, tg, 801, "/open BTC long 50 3x")
     banter(db, "802", code="SOMEONE")
-    assert "Price Chat's referral code" in say(db, tg, 802, "/open BTC long 50 3x")
+    assert "made with our sign-up link" in say(db, tg, 802, "/open BTC long 50 3x")
     banter(db, "803", code="KLGXFMNI")  # the code Hyperliquid records for the same referrer is accepted
     say(db, tg, 803, "/open BTC long 50 3x")
     assert db.scalar(select(TrIntent)) is not None
     sig = active_signal(db, md)
-    assert "referral" in press(db, tg, 802, f"sig:{sig.id}:enter")  # the signal ENTER button too
+    assert "sign-up link" in press(db, tg, 802, f"sig:{sig.id}:enter")  # the signal ENTER button too
     assert not db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()
 
 
@@ -427,7 +427,7 @@ def test_closing_works_even_without_the_referral(db: Session, md: FakeMD) -> Non
     w = db.scalar(select(TbWallet).where(TbWallet.member_id == m.id))
     w.referral_status, w.referral_code_seen = "not_referred", None  # e.g. the record changed later
     db.commit()
-    assert "referral" in say(db, tg, 921, "/open ETH long 50 3x")
+    assert "sign-up link" in say(db, tg, 921, "/open ETH long 50 3x")
     say(db, tg, 921, f"/close {pos.id}")
     assert db.get(TrPosition, pos.id).status == "CLOSED"
 
@@ -610,13 +610,13 @@ def test_TR5_the_banter_gate_on_signal_enter_is_an_owner_setting_on_by_default(d
     sig = active_signal(db, md)
     banter(db, "997", code="SOMEONE")
     tg = TG()
-    assert tgtrade.gate_signal_enter(db) and "referral" in press(db, tg, 997, f"sig:{sig.id}:enter")
+    assert tgtrade.gate_signal_enter(db) and "sign-up link" in press(db, tg, 997, f"sig:{sig.id}:enter")
     s = signals.settings(db)
     s.strategies = {**(s.strategies or {}), "telegram_trading": {"gate_signal_enter": False}}
     db.commit()
     press(db, tg, 997, f"sig:{sig.id}:enter")
     assert db.scalars(select(TrIntent).where(TrIntent.signal_id == sig.id)).all()  # ENTER works as before the branch
-    assert "Price Chat's referral code" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
+    assert "made with our sign-up link" in say(db, tg, 997, "/open BTC long 50 3x")  # manual /open stays gated
 
 
 def test_TR16_a_different_account_key_is_refused_while_testnet_positions_are_open(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
