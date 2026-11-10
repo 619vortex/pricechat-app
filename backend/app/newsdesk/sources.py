@@ -20,7 +20,7 @@ from app.brand_manager.discovery import parse_feed
 logger = logging.getLogger(__name__)
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; PriceChatNewsDesk/1.0; +https://pricechat.live)",
-      "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5"}  # Euronews: 406 from Railway without it
+      "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5"}
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 CATEGORIES = ("crypto", "stocks", "commodities", "politics", "economics", "viral")
 # tier: 0 official, 1 major outlet, 2 specialist. category None: decided from the headline's words.
@@ -100,7 +100,7 @@ WORLDMONITOR_VIA = "World Monitor catalog"
 WORLDMONITOR_FEEDS: list[dict[str, Any]] = [{**f, "via": WORLDMONITOR_VIA} for f in [
     # world and geopolitics: more independent outlets, so more major stories reach two-outlet verification
     {"name": "DW", "url": "https://rss.dw.com/xml/rss-en-all", "tier": 1, "category": "politics"},
-    {"name": "Euronews", "url": "https://www.euronews.com/rss?format=xml", "tier": 1, "category": "politics"},
+    # Euronews left out 2026-11-11: answers HTTP 406 to Railway's servers on every fetch (fine from a home connection)
     {"name": "Le Monde", "url": "https://www.lemonde.fr/en/rss/une.xml", "tier": 1, "category": "politics"},
     {"name": "CNA", "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml", "tier": 1, "category": None},
     {"name": "ABC Australia", "url": "https://www.abc.net.au/news/feed/2942460/rss.xml", "tier": 1, "category": "politics"},
