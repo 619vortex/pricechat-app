@@ -215,6 +215,12 @@ def _no_live_photo_search(request: pytest.FixtureRequest, monkeypatch: pytest.Mo
         return []
 
     monkeypatch.setattr(photos, "discover", none)
+    from app.newsdesk import datapost
+
+    async def no_prices(*_: object, **__: object) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr(datapost, "fetch_all", no_prices)  # nor Yahoo's daily closes: data-post tests pass their own
 
 
 @pytest.fixture(autouse=True)

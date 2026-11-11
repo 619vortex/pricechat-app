@@ -20,7 +20,7 @@ from app.connectors.x import XRuntime
 from app.connectors.x.errors import XAuthError, XCreditsError, XError, XForbiddenError, XRateLimitError, XUnavailableError
 from app.db.base import utcnow
 from app.models.newsdesk import NdEvent, NdPost, NdSettings, NdStory
-from app.newsdesk import brief, chaos, checks, events, moves, sources, writer
+from app.newsdesk import brief, chaos, checks, engagement, events, moves, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +425,7 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         post = enqueue(db, posts, kind="market" if market_kind else "news", category=ev.category or "viral", priority="breaking" if urgent else "scheduled", text=text, key=f"event:{ev.id}",
                        score=round(ev.virality / 10, 2), facts={"event_id": ev.id, "title": ev.title, "headline": ev.headline, "topic": ev.topic, "label": ev.label, "virality": ev.virality,
                                                                  "evidence": ev.evidence, "slot": ev.slot, "price_check": f.get("price_check", ""), "symbol": f.get("symbol"),
-                                                                 "verified": f.get("verified"), "parent_event": ev.parent_id,
+                                                                 "verified": f.get("verified"), "parent_event": ev.parent_id, "viral": engagement.features(ev),
                                                                  "corroborated_by": [n for n in (f.get("outlets") or []) if n != (ev.sources or [{}])[0].get("name")]},
                        src=ev.sources or [], source_text=source_text, names=named, expires=now + timedelta(hours=2), now=now, dedupe=False, links=links)
         if post is None:

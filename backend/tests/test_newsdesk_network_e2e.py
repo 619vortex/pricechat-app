@@ -38,7 +38,8 @@ async def test_a_slot_story_posts_the_pcs_caption_with_article_links_on_telegram
     job = db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id)).one()
     assert job.payload["model"] == "qwen" and title in job.payload["copy_request"]["user"]
     got = rq.claim(db, w, {"gpu": "NVIDIA GeForce RTX 5090"}, at + timedelta(seconds=5))
-    assert got["copy_request"]["system"] == network.MODEL_PROMPT
+    assert got["copy_request"]["system"].startswith(network.MODEL_PROMPT)  # plus the chosen hook and the voice (app/newsdesk/viral)
+    assert "Angle: " in got["copy_request"]["system"] and "no wit at all" in got["copy_request"]["system"]  # a missile strike: sober
     draft = {"headline": "Missile hits Aramco's Ras Tanura, the kingdom's largest oil export terminal", "short": "Missile hits Aramco's Ras Tanura terminal",
              "context": "Saudi officials said a missile hit the Ras Tanura terminal, the kingdom's largest oil export facility.", "stakes": "",
              "question": "Are markets pricing this in yet?"}
@@ -87,7 +88,7 @@ async def test_a_pc_caption_with_an_invented_figure_never_posts(client: Any, db:
     assert "9%" not in tg.sent[0]["caption"]  # the desk's own words went instead
     db.expire_all()
     pkg = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one().facts["package"]
-    assert pkg["copy"]["writer"] == "desk" and pkg["copy"]["rejected"][0].startswith("local: figures")
+    assert pkg["copy"]["writer"] in ("angle", "desk") and pkg["copy"]["rejected"][0].startswith("local: figures")  # the hook's own plain draft
 
 
 async def test_x_follows_telegram_at_once_but_never_through_a_pause(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811

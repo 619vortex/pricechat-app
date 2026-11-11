@@ -106,6 +106,10 @@ def rejected(story: Any) -> str | None:
 
     if is_roundup(title):  # 2026-11-11: "Hot Inflation, AI Selloff & Anthropic IPO" went out as one post with Bloomberg's newsletter as its source
         return "a round-up of several stories: one post is one story"
+    from app.newsdesk.viral import EMPTY
+
+    if EMPTY.search(title):  # Viral Engine 2.0, no empty posts: a live blog, a "what we know", a briefing says nothing on its own
+        return f"no news in it: '{EMPTY.search(title).group(0)}'"
     if SPAM.search(f"{title} {summary}"):
         return "promotional"
     if REASSURE.search(title):

@@ -131,6 +131,8 @@ def telegram_update(payload: TelegramInput, db: DbSession) -> dict[str, Any]:
 class NetworkInput(StrictInput):
     x_links: bool | None = None  # source links in X posts ($0.20 a post with a link, $0.015 without)
     emergency: bool | None = None  # stop Telegram and X at once until turned off
+    data_posts: bool | None = None  # Viral Engine 2.0: data posts and the daily MARKETS GONE MAD
+    experiments: bool | None = None  # Viral Engine 2.0: about one story in five tries its runner-up factual hook
 
 
 @router.get("/network")
@@ -146,6 +148,15 @@ def network_update(payload: NetworkInput, db: DbSession) -> dict[str, Any]:
     from app.newsdesk import network
 
     return network.configure(db, **payload.model_dump(exclude_none=True))
+
+
+@router.get("/viral")
+def viral_overview(db: DbSession) -> dict[str, Any]:
+    """Viral Engine 2.0 in Admin: the hooks chosen for recent stories (with the four that lost and why), what the audience engaged with
+    per hook, format, question and links, the experiments, and today's data-post candidates (from the closes already fetched)."""
+    from app.newsdesk import viral
+
+    return viral.overview(db, utcnow())
 
 
 class TextInput(StrictInput):

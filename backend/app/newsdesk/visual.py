@@ -1054,7 +1054,48 @@ def _design_args(ev: Any, chosen: dict[str, Any], now: Any) -> dict[str, Any]:
     kicker = kicker_for(ev, section)
     if kicker == "BREAKING" and section == "breaking":  # an incident's section name isn't a label: only a story the desk labelled BREAKING says so
         kicker = "SECURITY" if (getattr(ev, "topic", "") or "") in ("hack", "scam", "exploit") else "MARKETS"
+    if (getattr(ev, "label", "") or "") in ("BREAKING", "🚨 BREAKING") or kicker == "BREAKING":
+        kicker = "PRICE CHAT BREAKING"  # Viral Engine 2.0: the breaking card says whose it is
     return {"headline": picture_headline(ev), "kicker": kicker, "section": section, "when": _when(ev, now), "line": str(pkg.get("line") or "")}
+
+
+def timeline_of(ev: Any, db: Any) -> list[tuple[Any, str]]:
+    """The posts this channel made about the story an update belongs to, oldest first, then the update itself."""
+    from datetime import timezone as _tz
+
+    from app.models.newsdesk import NdEvent
+
+    if db is None or not getattr(ev, "parent_id", None):
+        return []
+    parent = db.get(NdEvent, ev.parent_id)
+    if parent is None or parent.released_at is None:
+        return []
+    kids = [k for k in db.query(NdEvent).filter(NdEvent.parent_id == parent.id, NdEvent.status == "released", NdEvent.id != ev.id) if k.released_at]
+
+    def utc(t: Any) -> Any:
+        return t if t.tzinfo else t.replace(tzinfo=_tz.utc)
+
+    told = [(utc(parent.released_at), picture_headline(parent))] + sorted(((utc(k.released_at), picture_headline(k)) for k in kids), key=lambda x: x[0])
+    return [*told, (utc(getattr(ev, "released_at", None) or told[-1][0]), picture_headline(ev))]
+
+
+def viral_visual(ev: Any, recent: list[dict[str, Any]] | None, now: Any, db: Any) -> tuple[bytes, dict[str, Any]] | None:
+    """Formats beyond the photo and the illustration (owner: "rotate photos, cinematic illustrations, charts, comparison cards, timelines,
+    stat graphics"): a data post is always its data card; a story's third telling or later is a timeline of what we posted, unless the
+    last two pictures were already timelines. Drawn from the data each shows, nothing illustrative."""
+    from app.newsdesk import datacards
+
+    f = ev.facts or {}
+    when = getattr(ev, "released_at", None) or now  # the post's own time: X redraws exactly what Telegram showed
+    if getattr(ev, "kind", "") == "data" and f.get("data"):
+        return datacards.data_card(f["data"], when=when, mad=bool(f.get("kicker")))
+    if getattr(ev, "kind", "") == "update":
+        steps = timeline_of(ev, db)
+        lately = [str(r.get("design") or r.get("kind") or "") for r in (recent or [])][-2:]
+        if len(steps) >= 3 and lately.count("timeline") < 2:
+            img, meta = datacards.timeline_card(headline=picture_headline(ev), entries=steps, when=when)
+            return img, {**meta, "steps": len(steps)}
+    return None
 
 
 def recent_layouts(recent: list[dict[str, Any]] | None) -> list[str]:
@@ -1165,6 +1206,9 @@ async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = N
     f = ev.facts or {}
     used = used or set()
     stored_visual = dict(f.get("visual") or {})
+    special = viral_visual(ev, recent, now, db)  # Viral Engine 2.0: a data post's card, a developing story's timeline
+    if special is not None:
+        return special
     if stored_visual.get("design"):
         try:
             got = await _again(ev, stored_visual, transport=transport, now=now, db=db)

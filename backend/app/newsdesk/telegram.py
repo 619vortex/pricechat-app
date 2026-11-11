@@ -225,6 +225,9 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         except Exception as e:  # noqa: BLE001 - the older caption instead
             logger.warning("tgnews: no package for event %s (%s)", ev.id, type(e).__name__)
             pkg = None
+        if pkg is not None and pkg.empty:  # Viral Engine 2.0: no empty posts, not even in the older format
+            logger.info("tgnews: event %s says nothing specific, not posted: %s", ev.id, pkg.empty)
+            return None, f"no empty posts: {pkg.empty}"
         if pkg is not None and not pkg.ok:
             logger.info("tgnews: package for event %s failed its checks: %s", ev.id, next((c["detail"] for c in pkg.checks if not c["passed"]), ""))
             pkg = None

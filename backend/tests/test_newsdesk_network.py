@@ -129,7 +129,7 @@ def test_the_render_job_asks_the_pc_for_a_caption_and_keeps_only_a_fact_checked_
     db.flush()
     now = datetime(2026, 11, 11, 7, 35, tzinfo=timezone.utc)
     job = render_queue.enqueue(db, ev, now, priority=0)
-    assert job.payload["copy_request"]["system"] == network.MODEL_PROMPT and ROWS[0].title in job.payload["copy_request"]["user"]
+    assert job.payload["copy_request"]["system"].startswith(network.MODEL_PROMPT) and ROWS[0].title in job.payload["copy_request"]["user"]
     breaking = NdEvent(key="story:y", kind="news", title="Strike", headline="STRIKE", topic="war", sources=[], facts={})
     db.add(breaking)
     db.flush()

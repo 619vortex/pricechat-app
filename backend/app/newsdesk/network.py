@@ -228,7 +228,8 @@ NAME_OK = {"Price", "Chat", "News", "Why", "What", "Who", "How", "Will", "Can", 
            "Markets", "Traders", "Investors", "Wall", "Street", "Bitcoin", "Ethereum", "Crypto", "Oil", "Gold", "Silver", "Fed", "US", "U.S.",
            "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "January", "February", "March", "April", "May", "June",
            "July", "August", "September", "October", "November", "December", "Hyperliquid", "Yahoo", "Finance", "And", "But", "Or", "If", "Its",
-           "AI", "CEO", "IPO", "ETF", "UTC", "GDP", "CPI", "S&P", "Nasdaq", "Dow", "Brent", "WTI", "In", "On", "At", "For", "As", "After"}
+           "AI", "CEO", "IPO", "ETF", "UTC", "GDP", "CPI", "S&P", "Nasdaq", "Dow", "Brent", "WTI", "In", "On", "At", "For", "As", "After",
+           "U.S", "UK", "U.K", "EU", "UN", "President", "Prime", "Minister", "Chairman", "Chair", "Governor", "Secretary", "Senator", "Chief", "Executive"}
 
 
 def _sentences(text: str) -> list[str]:
@@ -257,6 +258,23 @@ def headline_case(title: str) -> str:
         else:
             low = w.lower()
             out.append(low[:1].upper() + low[1:] if i == 0 else low)
+    return " ".join(out)
+
+
+def sentence_case(head: str, source_text: str) -> str:
+    """A writer's Title Case Headline In Sentence Case: a word keeps its capital only where the reporting capitalises it mid-sentence
+    (a name), or it is an acronym or ticker (NEAR, USDC, CEO). Already sentence case: unchanged."""
+    words = head.split()
+    long = [w for w in words[1:] if len(re.sub(r"\W", "", w)) > 3]
+    if not long or sum(1 for w in long if w[:1].isupper()) / len(long) < 0.6:
+        return head
+    out = [words[0]]
+    for w in words[1:]:
+        core = re.sub(r"[’']s$", "", re.sub(r"[^\w’'&.-]", "", w))
+        named = core and (re.search(rf"(?<![.!?]\s)(?<!^)\b{re.escape(core)}\b", source_text or "")
+                          or (re.search(rf"\b{re.escape(core)}\b", source_text or "") and not re.search(rf"\b{re.escape(core.lower())}\b", source_text or "")))
+        keep = not w[:1].isupper() or core.isupper() or re.search(r"[\d&]", core) or named
+        out.append(w if keep else w[:1].lower() + w[1:])
     return " ".join(out)
 
 
@@ -344,6 +362,7 @@ def desk_copy(ev: Any) -> Copy:
     raw = getattr(ev, "headline", "") or getattr(ev, "title", "")
     # a shouted headline takes the outlet's own capitals back (Wachtell, C.E.O.): never lower-case a name the desk can't check
     head = visual.display_headline(ev) if raw.isupper() and getattr(ev, "title", "") else headline_case(raw)
+    head = sentence_case(head, getattr(ev, "summary", "") or "")  # "S&P 500 Falls 3.8% in 24 Hours" reads as a headline, not a title
     head = shorten(head, HEADLINE_MAX)
     short = shorten(head, SHORT)
     return Copy(headline=head, short=short, context=_desk_context(ev, head), stakes=_desk_stakes(ev), question=question_for(ev, desk_of(ev)))
@@ -353,6 +372,9 @@ def source_text_of(ev: Any, rows: list[Any] | None = None) -> str:
     f = ev.facts or {}
     parts = [str(f.get("told") or ""), getattr(ev, "title", "") or "", getattr(ev, "headline", "") or "", getattr(ev, "summary", "") or "",
              str(f.get("price_tag") or ""), str(f.get("price_check") or ""), str(f.get("stat") or ""), "24 hours"]
+    parts += [str(x) for x in ((f.get("viral") or {}).get("measured") or {}).values()]  # our measured market reaction (app/newsdesk/money)
+    parts.append(str((f.get("data") or {}).get("told") or ""))  # a data post's figures, all measured (app/newsdesk/datapost)
+    parts.append(str(f.get("kicker") or ""))  # "UPDATE · first reported 10 Nov": the date of our own first post
     for r in rows or []:
         parts.append(f"{getattr(r, 'title', '')} {getattr(r, 'summary', '') or ''}")
     return " ".join(parts)
@@ -366,8 +388,11 @@ def verify_copy(c: Copy, source_text: str) -> list[str]:
     if extra:
         problems.append(f"figures no source gave: {', '.join(sorted(extra))}")
     low = source_text.lower()
-    unknown = sorted({m.group(1).rstrip(".’'") for m in CAPWORD.finditer(" ".join([c.context, c.stakes]))
-                      if m.group(1).rstrip(".’'") not in NAME_OK and m.group(1).rstrip(".’'").lower() not in low})
+    def bare(w: str) -> str:  # "Huang's" is Huang: a possessive with either apostrophe is the same name
+        return re.sub(r"[’']s$", "", w).rstrip(".’'")
+
+    unknown = sorted({bare(m.group(1)) for m in CAPWORD.finditer(" ".join([c.context, c.stakes]))
+                      if bare(m.group(1)) not in NAME_OK and bare(m.group(1)).lower() not in low})
     if unknown:
         problems.append(f"names no source used: {', '.join(unknown[:5])}")
     if HYPE.search(body):
@@ -409,7 +434,9 @@ async def model_copy(settings: Any, ev: Any, rows: list[Any], transport: Any = N
     if not key or not model:
         return None
     told = reporting(ev, rows)
-    body ={"model": model, "max_tokens": 500, "system": MODEL_PROMPT, "messages": [{"role": "user", "content": told}]}
+    from app.newsdesk import viral
+
+    body = {"model": model, "max_tokens": 500, "system": viral.prompt(ev), "messages": [{"role": "user", "content": told}]}
     try:
         async with httpx.AsyncClient(timeout=30, transport=transport) as client:
             r = await client.post(writer.ANTHROPIC_URL, headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}, json=body)
@@ -434,12 +461,16 @@ def reporting(ev: Any, rows: list[Any] | None) -> str:
     f = ev.facts or {}
     if f.get("price_tag") or f.get("price_check"):
         told += f"\n\nOur price data: {f.get('price_tag') or ''} {f.get('price_check') or ''}"
-    return told
+    from app.newsdesk import viral
+
+    return told + viral.reporting_extra(ev)
 
 
 def copy_request(ev: Any, rows: list[Any]) -> dict[str, str]:
     """What the GPU PC's local model is asked (app/newsdesk/render_queue sends it with the picture job)."""
-    return {"system": MODEL_PROMPT, "user": reporting(ev, rows)}
+    from app.newsdesk import viral
+
+    return {"system": viral.prompt(ev), "user": reporting(ev, rows)}
 
 
 def local_copy(ev: Any) -> Copy | None:
@@ -456,11 +487,19 @@ async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport
     """The words, from the first writer whose draft passes every check: the GPU PC's local model (written with the picture, no API cost,
     fact-checked there by a second pass), then the Anthropic model when a key exists, then the desk's own from the outlets' sentences
     (checked too: a part that fails is dropped)."""
+    from app.newsdesk import viral
+
     src = source_text_of(ev, rows)
     rejected: list[str] = []
+
+    def check(c: Copy) -> list[str]:
+        return verify_copy(c, src) + viral.draft_problems(ev, c, rows)
+
+    named = " ".join([getattr(ev, "summary", "") or "", *[getattr(r, "summary", "") or "" for r in rows or []]])  # sentence-case text: where names show
     drafted = local_copy(ev)
     if drafted is not None:
-        problems = verify_copy(drafted, src)
+        drafted.headline = sentence_case(drafted.headline, named)
+        problems = check(drafted)
         if not problems:
             return drafted
         rejected = [f"local: {p}" for p in problems]
@@ -468,11 +507,19 @@ async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport
     if settings is not None and getattr(ev, "kind", "") not in ("recap",):
         drafted = await model_copy(settings, ev, rows or [], transport)
         if drafted is not None:
-            problems = verify_copy(drafted, src)
+            drafted.headline = sentence_case(drafted.headline, named)
+            problems = check(drafted)
             if not problems:
                 return drafted
             rejected += problems
             logger.info("newsdesk network: model copy refused for event %s: %s", getattr(ev, "id", None), "; ".join(problems))
+    drafted = viral.angle_copy(ev)
+    if drafted is not None:
+        problems = check(drafted)
+        if not problems:
+            drafted.rejected = rejected
+            return drafted
+        rejected += [f"angle: {p}" for p in problems]
     c = desk_copy(ev)
     c.rejected = rejected
     for part in ("stakes", "context"):
@@ -497,10 +544,12 @@ def x_length(text: str) -> int:
     return n
 
 
-def x_caption(c: Copy, links: list[Link], *, with_links: bool = True, breaking: bool = False, outlets: list[str] | None = None) -> str:
+def x_caption(c: Copy, links: list[Link], *, with_links: bool = True, breaking: bool = False, outlets: list[str] | None = None, kicker: str = "") -> str:
     """A standalone X post: the headline, the context, a question now and then, the article. Parts are dropped from the least needed until
     it fits: the second link, the question, the stakes, the second sentence of context."""
     head = f"BREAKING: {c.headline}" if breaking and not c.headline.upper().startswith("BREAKING") else c.headline
+    if kicker:
+        head = f"{kicker}\n\n{head}"
     ctx = _sentences(c.context)
     use = [x for x in links if x.kind != "pricechat"][:2] if with_links else []
     own = next((x for x in links if x.kind == "pricechat"), None) if with_links else None
@@ -524,10 +573,17 @@ def x_caption(c: Copy, links: list[Link], *, with_links: bool = True, breaking: 
         text = "\n\n".join(blocks)
         if x_length(text) <= X_LIMIT:
             return text
+        if len(sents) == 1 and not stakes and not question and ls:  # one long sentence: shortened to fit rather than dropped
+            room = X_LIMIT - x_length("\n\n".join([head, *blocks[2:]])) - 2
+            if room >= 60:
+                blocks[1] = shorten(sents[0], room)
+                text = "\n\n".join(blocks)
+                if x_length(text) <= X_LIMIT:
+                    return text
     return head[:X_LIMIT]
 
 
-def telegram_caption(c: Copy, links: list[Link], line: str, *, breaking: bool = False, outlets: list[str] | None = None) -> tuple[str, str]:
+def telegram_caption(c: Copy, links: list[Link], line: str, *, breaking: bool = False, outlets: list[str] | None = None, kicker: str = "") -> tuple[str, str]:
     """(HTML, plain) for a Telegram photo caption: bold headline, context, why it matters, a question, the byline and clickable sources."""
     from html import escape as _escape
 
@@ -537,6 +593,10 @@ def telegram_caption(c: Copy, links: list[Link], line: str, *, breaking: bool = 
     head = f"🔴 BREAKING: {c.headline}" if breaking else c.headline
     html_parts = [f"<b>{escape(head)}</b>"]
     plain_parts = [head]
+    if kicker:
+        mark = "🤯 " if kicker == "MARKETS GONE MAD" else "🔄 " if kicker.startswith("UPDATE") else ""
+        html_parts.insert(0, f"<b>{mark}{escape(kicker)}</b>")
+        plain_parts.insert(0, kicker)
     if c.context:
         html_parts.append(escape(c.context))
         plain_parts.append(c.context)
@@ -564,7 +624,7 @@ def telegram_caption(c: Copy, links: list[Link], line: str, *, breaking: bool = 
     html, plain = "\n\n".join(html_parts), "\n\n".join(plain_parts)
     while len(html) > TG_CAPTION_LIMIT and c.context:  # a photo caption holds 1024 characters: the context gives way first
         c = Copy(**{**c.out(), "context": " ".join(_sentences(c.context)[:-1])})
-        return telegram_caption(c, links, line, breaking=breaking, outlets=outlets)
+        return telegram_caption(c, links, line, breaking=breaking, outlets=outlets, kicker=kicker)
     return html, plain
 
 
@@ -579,10 +639,11 @@ class Package:
     telegram_plain: str
     checks: list[dict[str, Any]]
     ok: bool
+    empty: str = ""  # why the words say nothing (app/newsdesk/viral.substance): such a story isn't posted at all
 
     def out(self) -> dict[str, Any]:
         return {"copy": self.copy.out(), "links": [x.out() for x in self.links], "line": self.line, "original": self.original, "x_text": self.x_text,
-                "telegram_html": self.telegram_html, "telegram_plain": self.telegram_plain, "checks": self.checks, "ok": self.ok}
+                "telegram_html": self.telegram_html, "telegram_plain": self.telegram_plain, "checks": self.checks, "ok": self.ok, "empty": self.empty}
 
 
 def x_links_on(state: dict[str, Any] | None) -> bool:
@@ -598,15 +659,21 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     line = verification(ev)
     breaking = getattr(ev, "label", "") == brief.BREAKING
     outs = outlets_of(ev)
-    x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs)
-    html, plain = telegram_caption(c, links, line, breaking=breaking, outlets=outs)
+    kicker = str((ev.facts or {}).get("kicker") or "")
+    x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs, kicker=kicker)
+    html, plain = telegram_caption(c, links, line, breaking=breaking, outlets=outs, kicker=kicker)
     src = f"{source_text_of(ev, rows)} {line}"
     allowed = [x_.url for x_ in links]
     names = [x_.name for x_ in links if x_.kind != "pricechat"] or outlets_of(ev)[:1]
     rx = checks.check_post(x, source_text=src, source_names=names, breaking=breaking, links=allowed)
     rt = checks.check_post(plain, source_text=src, source_names=names, breaking=breaking, links=allowed, max_len=TG_CAPTION_LIMIT)
     all_checks = [{**c_, "platform": "x"} for c_ in rx.checks] + [{**c_, "platform": "telegram"} for c_ in rt.checks]
-    return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok)
+    from app.newsdesk import viral
+
+    empty = viral.substance(c) if getattr(ev, "kind", "") in ("news", "update") else ""
+    if empty:
+        all_checks.append({"check": "substance", "passed": False, "detail": empty, "platform": "both"})
+    return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty, empty)
 
 
 def stored(ev: Any) -> dict[str, Any] | None:
@@ -631,10 +698,12 @@ def state(db: Any) -> dict[str, Any]:
     x, tg = engine.settings_row(db), lane.settings_row(db)
     return {"x_links": x_links_on(x.state), "x_cost_per_post_usd": 0.20 if x_links_on(x.state) else 0.015,
             "emergency": (x.pause_reason or "") == EMERGENCY or (tg.state or {}).get("problem") == EMERGENCY,
-            "x_paused": x.pause_reason or "", "telegram_paused": (tg.state or {}).get("problem") or ""}
+            "x_paused": x.pause_reason or "", "telegram_paused": (tg.state or {}).get("problem") or "",
+            "data_posts": (x.state or {}).get("data_posts", True) is not False, "experiments": (x.state or {}).get("experiments", True) is not False}
 
 
-def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = None, now: Any = None) -> dict[str, Any]:
+def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = None, data_posts: bool | None = None, experiments: bool | None = None,
+              now: Any = None) -> dict[str, Any]:
     """x_links: source links in X posts (on by default; off = named sources only, $0.015 a post). emergency: stop both platforms at once
     until resumed (the desk keeps choosing stories, nothing is posted); off lifts only an emergency pause, never another lane's own pause."""
     from datetime import timedelta
@@ -647,6 +716,10 @@ def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = 
     x, tg = engine.settings_row(db), lane.settings_row(db)
     if x_links is not None:
         x.state = {**(x.state or {}), "x_links": bool(x_links)}
+    if data_posts is not None:  # Viral Engine 2.0: data posts and MARKETS GONE MAD
+        x.state = {**(x.state or {}), "data_posts": bool(data_posts)}
+    if experiments is not None:  # Viral Engine 2.0: runner-up hook experiments
+        x.state = {**(x.state or {}), "experiments": bool(experiments)}
     if emergency is True:
         x.paused_until, x.pause_reason = now + timedelta(days=FAR), EMERGENCY
         tg.state = {**(tg.state or {}), "paused_until": (now + timedelta(days=FAR)).isoformat(), "problem": EMERGENCY}
