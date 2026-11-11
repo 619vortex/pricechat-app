@@ -55,6 +55,7 @@ VAGUE = re.compile(r"\b(could|may|might|here'?s (?:what|why|how)|what (?:to know
 EMPTY = re.compile(r"^(?:live|watch|video|podcast|opinion|analysis|explainer|newsletter|quiz|in pictures|in charts)\b|"
                    r"\b(live updates?|what we know|what to know|here'?s what|everything you need to know|key takeaways|morning briefing|"
                    r"evening briefing|week ahead|monitoring the situation|things to watch)\b", re.I)
+HEDGE = re.compile(r"\b(alleg\w*|accus\w*|suspect\w*|claim\w*|reported(?:ly)?|according to|believed to|said to|denie[sd]|deny)\b", re.I)
 STARTERS = {"The", "A", "An", "This", "That", "These", "Those", "Here", "Why", "How", "What", "When", "Live", "Watch", "Markets", "Stocks", "Investors",
             "Traders", "Analysts", "Experts", "Officials", "Prices", "Shares", "Crypto", "Global", "World"}
 FIGURE = re.compile(r"[$€£]\s?\d|\d+(?:\.\d+)?\s?%|\b\d[\d,.]*\s?(?:billion|million|bn|trillion|k)\b|\b\d{2,}\b", re.I)
@@ -252,6 +253,11 @@ def draft_problems(ev: Any, c: network.Copy, rows: list[Any] | None) -> list[str
     if names and not any(n.lower() in c.headline.lower() for n in names):
         out.append(f"the headline doesn't say who ({', '.join(sorted(names)[:3])})")
     src = " ".join(f"{getattr(r, 'title', '')} {getattr(r, 'summary', '')}" for r in rows or []) + f" {getattr(ev, 'title', '')} {getattr(ev, 'summary', '')} {(ev.facts or {}).get('told') or ''}"
+    said = f"{c.headline} {c.context}"
+    hedged = {w.lower() for m in re.finditer(r"\b(?:alleged(?:ly)?|accused(?: of)?|suspected|purported)\s+((?:[\w'’-]+\s+){0,2}[\w'’-]+)", src, re.I)
+              for w in m.group(1).split() if len(w) > 3}
+    if hedged and not HEDGE.search(said) and any(re.search(rf"\b{re.escape(w)}\b", said, re.I) for w in hedged):  # "an alleged spy" must not become "a spy"
+        out.append("the reporting says alleged or accused; the draft states it as fact")
     own = measured_only(ev, src)
     used = checks.numbers(f"{c.headline} {c.context}") & own
     if used:

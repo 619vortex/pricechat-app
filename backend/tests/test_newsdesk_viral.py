@@ -152,6 +152,10 @@ def test_a_draft_must_say_who_and_never_turn_a_measured_move_into_a_cause() -> N
     fine = network.Copy(headline="Iran denies striking a tanker near Hormuz as the US blames Tehran", short="", stakes="Since the first report: Brent crude +4.0%.")
     assert viral.draft_problems(e, fine, TANKER) == []
     assert "never in the headline or as a cause" in viral.prompt(e)
+    spy = ev(title="Nvidia hires law firm to investigate alleged Chinese spy affair", summary="Claims its boss had an affair with an alleged Chinese spy.")
+    rows = [NS(source="BBC", link="https://www.bbc.co.uk/news/a", title=spy.title, summary=spy.summary)]
+    assert any("states it as fact" in x for x in viral.draft_problems(spy, network.Copy(headline="Nvidia hires Wachtell to probe CEO's affair with Chinese spy", short=""), rows))
+    assert not any("states it as fact" in x for x in viral.draft_problems(spy, network.Copy(headline="Nvidia hires Wachtell to probe CEO's alleged spy affair", short=""), rows))
 
 
 def test_writer_headlines_come_out_in_sentence_case_keeping_names_and_tickers() -> None:
