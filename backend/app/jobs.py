@@ -500,9 +500,17 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             raise JobSkipped("Telegram bot token not set")
         client = make_client(s)
         try:
-            return await lane.tick(ctx.db, s, client, ctx.now)
+            out = await lane.tick(ctx.db, s, client, ctx.now)
         finally:
             await client.aclose()
+        if out.get("sent"):  # Telegram just posted: X posts the same event now, not on its own tick minutes later
+            from app.newsdesk import engine as desk
+
+            try:
+                out["x"] = await desk.follow_telegram(ctx.db, s, runtime.x, get_agent_config(ctx.db).id, ctx.now)
+            except Exception as e:  # noqa: BLE001 - X's own tick picks it up; Telegram's result stands
+                out["x"] = f"X follows on its own tick ({type(e).__name__})"
+        return out
 
     async def newsdesk_metrics(ctx: JobContext) -> dict[str, Any]:
         from app.newsdesk import engine as desk

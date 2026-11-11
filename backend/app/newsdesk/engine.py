@@ -687,6 +687,17 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
     return out
 
 
+async def follow_telegram(db: Session, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime | None = None) -> str | None:
+    """Owner, 2026-11-11: Telegram and X post at the same time. Called by the Telegram job the moment it delivers: X posts the same event
+    (same words, links and picture) at once instead of on its own 5-minute tick. Every X rule still applies: the emergency stop, automation,
+    pauses, X's checks; dry run records instead of posting."""
+    now = now or utcnow()
+    s = settings_row(db)
+    if s.kill_switch or not s.automation or blocked_reason(s, now) is not None:
+        return None
+    return await deliver_x(db, s, settings, runtime, agent_id, now)
+
+
 async def collect_metrics(db: Session, settings: Settings, runtime: XRuntime, now: datetime | None = None) -> dict[str, Any]:
     """Impressions, likes and reposts for the last three days' posts, once a day. X charges per post read, so at most 100."""
     from app.social.x_service import make_x_client

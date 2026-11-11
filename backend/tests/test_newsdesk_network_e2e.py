@@ -60,7 +60,8 @@ async def test_a_slot_story_posts_the_pcs_caption_with_article_links_on_telegram
     assert ev.facts["package"]["copy"]["writer"] == "local" and ev.facts["visual"]["ai_illustration"] is True
     # X: the same words and the article link, the same picture, posted automatically
     x = live["x"]
-    assert await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, at + timedelta(minutes=3)) == "published"
+    # the same moment as Telegram (owner, 2026-11-11): the Telegram job hands straight to X, no 5-minute wait for X's own tick
+    assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
     text = x.posts[0]["text"]
     assert text.startswith("Missile hits Aramco's Ras Tanura") and "https://www.dw.com/en/missile-strike-hits-saudi-aramco-terminal/a-79912345" in text
     assert network.x_length(text) <= 280 and "Source: DW" not in text and x.uploads[0] == tg.sent[0]["image"]
@@ -87,3 +88,24 @@ async def test_a_pc_caption_with_an_invented_figure_never_posts(client: Any, db:
     db.expire_all()
     pkg = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one().facts["package"]
     assert pkg["copy"]["writer"] == "desk" and pkg["copy"]["rejected"][0].startswith("local: figures")
+
+
+async def test_x_follows_telegram_at_once_but_never_through_a_pause(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
+    at = SLOT + timedelta(minutes=2)
+    title = "Missile strike hits Saudi Aramco oil terminal at Ras Tanura"
+    live["feeds"]["items"] = {DW["url"]: [{"title": title, "link": DW_URL, "at": at - timedelta(minutes=30), "summary": SAYS_DW}],
+                              NATIONAL["url"]: [{"title": title + ", officials say", "link": NAT_URL, "at": at - timedelta(minutes=25), "summary": SAYS_NATIONAL}]}
+    desk = engine.settings_row(db)
+    await engine.collect(db, desk, None, at)
+    await events.decide(db, at, quotes={}, watchlist=[], categories=desk.categories or {}, desk_state=desk.state, liquidations=False)
+    network.configure(db, emergency=True, now=at)  # paused before Telegram's tick: nothing on either platform
+    assert (await lane.tick(db, get_settings(), live["tg"], at + timedelta(minutes=1)))["sent"] is None
+    assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=1)) is None and live["x"].posts == []
+    network.configure(db, emergency=False, now=at)
+    sent = await lane.tick(db, get_settings(), live["tg"], at + timedelta(minutes=2))
+    assert sent["sent"] and await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
+    db.expire_all()
+    ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
+    post = db.get(NdPost, ev.x_post_id)
+    tgp = db.get(__import__("app.models.newsdesk", fromlist=["NdTelegramPost"]).NdTelegramPost, ev.tg_post_id)
+    assert abs((post.published_at.replace(tzinfo=None) - tgp.created_at.replace(tzinfo=None)).total_seconds()) < 60  # same minute on both
