@@ -335,7 +335,7 @@ def complete(db: Session, job_id: int, worker: BmWorker, data: bytes, result: di
     keep_copy(db, job, result or {}, now)
     hashes = [int(str((j.result or {}).get("quality", {}).get("dhash") or "0"), 16) for j in _recent_done(db) if j.id != job.id]
     problems, measured = quality(img, [x for x in hashes if x])
-    info = {k: v for k, v in (result or {}).items() if k in ("model", "seconds", "steps", "gpu", "vram_gb", "seed", "ocr", "tries")}
+    info = {k: v for k, v in (result or {}).items() if k in ("model", "seconds", "steps", "gpu", "vram_gb", "seed", "ocr", "tries", "task", "edit", "quality", "ai_area_pct", "ai_illustration", "preserved_max_diff")}
     if problems:
         tries = len(list(db.scalars(select(NdRenderJob.id).where(NdRenderJob.event_id == job.event_id))))
         retry = tries < MAX_JOBS_PER_EVENT and (job.deadline is None or _aware(job.deadline) > now)
