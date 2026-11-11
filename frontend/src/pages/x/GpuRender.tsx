@@ -21,7 +21,7 @@ export function GpuRender() {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ id: number; image: string; prompt?: string } | null>(null);
   if (failure) return <Card title="GPU pictures"><ApiErrorBanner error={failure} /></Card>;
-  if (!data) return null;
+  if (!data || !Array.isArray(data.workers) || !Array.isArray(data.recent)) return null;  // not the health answer (a test double, an old server)
   const toggle = async () => {
     setBusy(true); setError(null);
     try { await request("/x/newsdesk/render", { method: "PUT", body: JSON.stringify({ enabled: !data.enabled }), headers: { "Content-Type": "application/json" } }); await reload(); }

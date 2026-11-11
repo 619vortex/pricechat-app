@@ -843,6 +843,8 @@ def kinds_for(ev: Any) -> list[str]:
     major = typ == "incident" or ev.topic == "liquidations" or ev.label == brief.BREAKING
     if chartable:
         return ["chart", "artwork"]
+    if major and subject_queries(f"{ev.headline} {ev.title}"):
+        return ["photo", "artwork", "graphic"]  # owner, 2026-11-11: real photos first, when one of the actual subject exists
     if major:
         return ["artwork", "graphic"]
     if subject_queries(f"{ev.headline} {ev.title}") or typ in ("geopolitics", "corporate", "regulation", "controversy"):
@@ -938,6 +940,15 @@ async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any, now: Any = No
             raise NumbersRefused("; ".join(check.reasons))  # a market post IS its numbers: unverified, it doesn't go
         return None
     name = DISPLAY.get(str(f.get("name") or coin), str(f.get("name") or coin))
+    if f.get("package"):  # Price Chat News: the clean paper chart (the figures, range and change all from this same checked series)
+        from app.newsdesk import editorial_layouts as el
+
+        series = [(datetime.fromtimestamp(int(t), timezone.utc), float(v)) for t, v in points]
+        words = {"15M": "15 minutes", "1H": "an hour", "4H": "4 hours", "24H": "24 hours"}.get(window, window.lower())
+        theme = "paper" if [r for r in [chosen.get("theme")] if r] != ["ink"] else "ink"
+        data, meta = el.market_chart(series, name=name, ticker=coin or name[:4], window=words, headline=picture_headline(ev),
+                                     sources=[str(f.get("data_source") or "Hyperliquid")], when=as_of, theme=theme)
+        return data, {**chosen, "kind": "chart", "coin": coin, "number_check": check.out(), "chart_style": "paper", **meta}
     data = chart(points, name=name, ticker=coin or name[:4], pct=float(check.series_pct or 0), window=window, source=str(f.get("data_source") or "Hyperliquid"),
                  tone=chosen.get("tone", "ink"))
     return data, {**chosen, "kind": "chart", "coin": coin, "number_check": check.out()}
@@ -1017,18 +1028,174 @@ def cinematic_for(ev: Any, background: Any, bg_meta: dict[str, Any], chosen: dic
     return data, {**chosen, "kind": "cinematic", "render_job": bg_meta.get("job"), "scene": bg_meta.get("scene"), "model": model, **typeset}
 
 
+# --- Price Chat News layouts (app/newsdesk/design): real photos first, then the GPU's illustration, then the desk's own --------------
+
+SENSITIVE_TOPICS = ("hack", "scam", "failure", "controversy", "lawsuit", "crime")
+
+
+def picture_headline(ev: Any) -> str:
+    """The short headline the network package wrote for the picture (sentence case, <= 64 characters), else the display headline."""
+    pkg = (ev.facts or {}).get("package") or {}
+    short = str(((pkg.get("copy") or {}).get("short")) or "").strip()
+    return short or display_headline(ev)
+
+
+def _when(ev: Any, now: Any) -> Any:
+    from datetime import datetime, timezone
+
+    when = getattr(ev, "released_at", None) or now or datetime.now(timezone.utc)
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def _design_args(ev: Any, chosen: dict[str, Any], now: Any) -> dict[str, Any]:
+    typ = chosen.get("type") or story_type(ev)
+    section = SECTION_FOR_TYPE.get(typ, "news")
+    pkg = (ev.facts or {}).get("package") or {}
+    kicker = kicker_for(ev, section)
+    if kicker == "BREAKING" and section == "breaking":  # an incident's section name isn't a label: only a story the desk labelled BREAKING says so
+        kicker = "SECURITY" if (getattr(ev, "topic", "") or "") in ("hack", "scam", "exploit") else "MARKETS"
+    return {"headline": picture_headline(ev), "kicker": kicker, "section": section, "when": _when(ev, now), "line": str(pkg.get("line") or "")}
+
+
+def recent_layouts(recent: list[dict[str, Any]] | None) -> list[str]:
+    return [str(r.get("design") or "") for r in (recent or []) if r.get("design")]
+
+
+def is_sensitive(ev: Any) -> bool:
+    """A scandal, allegation, crime, hack or casualty story: its photo must show no people (app/newsdesk/photos)."""
+    try:
+        from app.newsdesk import photos
+
+        if photos.is_sensitive(f"{getattr(ev, 'title', '')} {getattr(ev, 'headline', '')}"):
+            return True
+    except (ImportError, AttributeError):
+        pass
+    f = ev.facts or {}
+    return (getattr(ev, "topic", "") or "") in SENSITIVE_TOPICS or bool(f.get("risk") or f.get("alleged"))
+
+
+async def photo_for(ev: Any, chosen: dict[str, Any], *, used: set[str], transport: Any, recent: list[dict[str, Any]] | None,
+                    now: Any) -> tuple[bytes, dict[str, Any]] | None:
+    """A verified, licensed photograph of the story's actual subject in a Price Chat News layout, or None. Licence, relevance and (for a
+    sensitive story) the no-people rule are app/newsdesk/photos'; the crop keeps the subject whole and the type never covers it."""
+    from app.newsdesk import design
+
+    queries = subject_queries(f"{ev.headline} {ev.title}")
+    if not queries:
+        return None
+    terms = list(dict.fromkeys(must for _, must in queries))
+    sensitive = is_sensitive(ev)
+    seed = int(chosen.get("seed") or 0)
+    try:
+        from app.newsdesk import photos
+    except ImportError:  # the older Commons-only search
+        photos = None  # type: ignore[assignment]
+    async with httpx.AsyncClient(transport=transport) as client:
+        found: list[Any] = []
+        try:
+            if photos is not None:
+                # the main subject first (a company's own headquarters before the city in the story): a later subject only when the
+                # first has no licensed photo (2026-11-11: a Beijing skyline won over Nvidia's headquarters for an Nvidia story)
+                for term in terms:
+                    found = await photos.discover(client, [q for q, must in queries if must == term], [term], used=used, sensitive=sensitive)
+                    if found:
+                        break
+            elif not sensitive:
+                for query, must in queries:
+                    found += [p for p in await find_photos(client, query) if re.search(must, p.title, re.I) and p.url not in used]
+        except Exception as e:  # noqa: BLE001 - no photo: the illustration or the desk's own picture
+            logger.info("newsdesk visual: photo discovery failed (%s)", type(e).__name__)
+            return None
+        for p in found[:4]:
+            try:
+                img = await fetch_image(client, p.url)
+            except Exception:  # noqa: BLE001
+                continue
+            if not (photos.is_colour(img) and not photos.looks_like_graphic(img) if photos is not None else is_colour(img)):
+                continue
+            box = tuple(photos.subject_box(img)) if photos is not None else None
+            data, meta = design.render(img, subject=box, credit=p.credit, recent=recent_layouts(recent), seed=seed, **_design_args(ev, chosen, now))
+            info = p.to_meta() if hasattr(p, "to_meta") else {"url": p.url, "page": getattr(p, "page", ""), "title": p.title, "licence": getattr(p, "licence", "")}
+            return data, {**chosen, "kind": "photo", "url": p.url, "credit": p.credit, "page": info.get("page", ""), "title": info.get("title", ""), "photo": info,
+                          "source_subject": list(box) if box else None, "design": meta["format"], "design_seed": seed, **meta}
+    return None
+
+
+def illustration_for(ev: Any, background: Any, bg_meta: dict[str, Any], chosen: dict[str, Any], now: Any, recent: list[dict[str, Any]] | None = None,
+                     layout: str | None = None) -> tuple[bytes, dict[str, Any]]:
+    """A GPU background as a clearly labelled AI illustration in a Price Chat News layout."""
+    from app.newsdesk import design
+
+    model = str(bg_meta.get("model") or "")
+    short = "Qwen-Image" if "qwen" in model.lower() else "FLUX.2 klein" if "klein" in model.lower() else "Z-Image" if "z-image" in model.lower() else "AI model"
+    seed = int(chosen.get("seed") or 0)
+    if layout is None:
+        last = recent_layouts(recent)[-1:]
+        layout = "band" if last == ["overlay"] else "overlay" if last == ["band"] else ("band" if seed % 2 else "overlay")
+    data, meta = design.render(background, subject=None, credit="", illustration=short, layout=layout, seed=seed, **_design_args(ev, chosen, now))
+    return data, {**chosen, "kind": "cinematic", "render_job": bg_meta.get("job"), "scene": bg_meta.get("scene"), "model": model, "ai_illustration": True,
+                  "design": meta["format"], "design_seed": seed, **meta}
+
+
+async def _again(ev: Any, chosen: dict[str, Any], *, transport: Any, now: Any, db: Any) -> tuple[bytes, dict[str, Any]] | None:
+    """The same Price Chat News picture again (X re-renders what Telegram showed): same photo or background, same layout and seed."""
+    from app.newsdesk import design
+
+    if chosen.get("kind") == "photo" and chosen.get("url"):
+        async with httpx.AsyncClient(transport=transport) as client:
+            img = await fetch_image(client, chosen["url"])
+        box = tuple(chosen["source_subject"]) if chosen.get("source_subject") else None
+        data, _ = design.render(img, subject=box, credit=str(chosen.get("credit") or ""), layout=str(chosen.get("design")), seed=int(chosen.get("design_seed") or 0),
+                                **_design_args(ev, chosen, now))
+        return data, chosen
+    if chosen.get("kind") == "cinematic" and db is not None and getattr(ev, "id", None):
+        from app.newsdesk import render_queue
+
+        bg = render_queue.background_for(db, ev.id)
+        if bg is not None:
+            return illustration_for(ev, bg[0], bg[1], chosen, now, layout=str(chosen.get("design")))
+    return None
+
+
 async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None,
                     now: Any = None, db: Any = None) -> tuple[bytes, dict[str, Any]]:
-    """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed). With a GPU
-    background ready for the story (app/newsdesk/render_queue), a non-chart story gets the cinematic editorial format."""
+    """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed). Owner, 2026-11-11:
+    real photos first (licensed, of the actual subject), then the GPU's illustration (labelled), then the desk's own drawn visuals; a
+    chart for a measured move stays a chart (accuracy first)."""
     f = ev.facts or {}
     used = used or set()
-    chosen = dict(f.get("visual") or {}) or plan(ev, recent)
+    stored_visual = dict(f.get("visual") or {})
+    if stored_visual.get("design"):
+        try:
+            got = await _again(ev, stored_visual, transport=transport, now=now, db=db)
+        except Exception as e:  # noqa: BLE001 - fall through to the desk's own picture
+            logger.info("newsdesk visual: couldn't redraw event %s (%s)", getattr(ev, "id", None), type(e).__name__)
+            got = None
+        if got is not None:
+            return got
+        stored_visual = {}
+    elif not stored_visual:
+        first = plan(ev, recent)
+        if first["kind"] != "chart" and "photo" in first.get("options", []):
+            got = await photo_for(ev, first, used=used, transport=transport, recent=recent, now=now)
+            if got is not None:
+                return got
+        if first["kind"] != "chart" and db is not None and getattr(ev, "id", None):
+            from app.newsdesk import render_queue
+
+            try:
+                bg = render_queue.background_for(db, ev.id)
+            except Exception as e:  # noqa: BLE001 - the desk's own visuals instead
+                logger.info("newsdesk visual: no GPU background for %s (%s)", getattr(ev, "id", None), type(e).__name__)
+                bg = None
+            if bg is not None:
+                return illustration_for(ev, bg[0], bg[1], first, now, recent)
+    chosen = stored_visual or plan(ev, recent)
     head = post_headline(ev)
     order = [chosen["kind"], *[k for k in chosen.get("options", kinds_for(ev)) if k != chosen["kind"]]]
-    if f.get("visual") and chosen.get("kind") != "photo":
+    if stored_visual and chosen.get("kind") != "photo":
         order = [chosen["kind"]]  # already shown on Telegram: the same picture
-    if db is not None and getattr(ev, "id", None) and (chosen.get("kind") == "cinematic" or (not f.get("visual") and chosen.get("kind") != "chart")):
+    if db is not None and getattr(ev, "id", None) and chosen.get("kind") == "cinematic":  # an older event's cinematic picture, redrawn as it was
         from app.newsdesk import render_queue
 
         try:
@@ -1047,32 +1214,22 @@ async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = N
             if got:
                 return got
             continue
-        if kind == "photo":
-            async with httpx.AsyncClient(transport=transport) as client:
+        if kind == "photo":  # a fresh photo is found only by photo_for (licence, relevance, no people on sensitive stories)
+            if chosen.get("kind") == "photo" and chosen.get("url"):  # an older event's photo picture, redrawn as it was
                 tone = "risk" if ev.topic in ("hack", "scam", "failure", "controversy") or f.get("risk") else "neutral"
-                if chosen.get("kind") == "photo" and chosen.get("url"):
+                async with httpx.AsyncClient(transport=transport) as client:
                     img = await fetch_image(client, chosen["url"])
-                    data, _ = photo(img, chosen["credit"], tone=chosen.get("tone", tone), headline=head, layout=chosen.get("layout", "lower"))
-                    return data, chosen
-                for query, must in subject_queries(f"{ev.headline} {ev.title}"):
-                    try:
-                        found = await find_photos(client, query)
-                    except Exception as e:  # noqa: BLE001
-                        logger.info("newsdesk visual: photo search failed (%s)", type(e).__name__)
-                        break
-                    for p in found:
-                        if p.url in used or not re.search(must, p.title, re.I):
-                            continue
-                        try:
-                            img = await fetch_image(client, p.url)
-                        except Exception:  # noqa: BLE001
-                            continue
-                        if not is_colour(img):
-                            continue
-                        layout = chosen.get("layout", "lower")
-                        data, typeset = photo(img, p.credit, tone=tone, headline=head, layout=layout)
-                        return data, {**chosen, "kind": "photo", "url": p.url, "credit": p.credit, "page": p.page, "tone": tone, "title": p.title, **typeset}
+                data, _ = photo(img, chosen["credit"], tone=chosen.get("tone", tone), headline=head, layout=chosen.get("layout", "lower"))
+                return data, chosen
             continue
+        if kind in ("artwork", "graphic") and f.get("package") and not stored_visual:
+            # Price Chat News: no licensed photo of the subject and no GPU picture (the PC offline): a clean typographic front page
+            from app.newsdesk import design
+
+            seed = int(chosen.get("seed") or 0)
+            theme = "paper" if (seed >> 9) % 3 == 0 else "ink"
+            data, meta = design.card(source=source_name(ev), theme=theme, **_design_args(ev, chosen, now))
+            return data, {**chosen, "kind": "card", "design": "card", "design_seed": seed, **meta}
         if kind == "artwork":
             series = [p[1] for p in f.get("points") or []] or None
             data, typeset = artwork(head, motif=chosen["motif"], palette=chosen["palette"], layout=chosen["layout"], seed=chosen["seed"], series=series)

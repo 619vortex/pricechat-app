@@ -102,6 +102,10 @@ def rejected(story: Any) -> str | None:
         return "rumour, opinion or explainer"
     if OPINION.search(title):
         return "a forecast or an opinion, not news"
+    from app.newsdesk.network import is_roundup
+
+    if is_roundup(title):  # 2026-11-11: "Hot Inflation, AI Selloff & Anthropic IPO" went out as one post with Bloomberg's newsletter as its source
+        return "a round-up of several stories: one post is one story"
     if SPAM.search(f"{title} {summary}"):
         return "promotional"
     if REASSURE.search(title):

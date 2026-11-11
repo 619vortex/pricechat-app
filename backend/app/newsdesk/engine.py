@@ -180,13 +180,13 @@ def key_prefix_cooling(db: Session, prefix: str, wait: timedelta, now: datetime)
 
 
 def enqueue(db: Session, posts: list[NdPost], *, kind: str, category: str, priority: str, text: str, key: str, score: float, facts: dict[str, Any], src: list[dict[str, Any]],
-            source_text: str, names: list[str], expires: datetime | None, now: datetime, dedupe: bool = True) -> NdPost | None:
+            source_text: str, names: list[str], expires: datetime | None, now: datetime, dedupe: bool = True, links: list[str] | None = None) -> NdPost | None:
     """Deduplicate and check; only a post that passes everything enters the queue. The checks stay with it. dedupe=False: the shared desk
     already decided this is a new event (a later, bigger move of the same asset reads much like the first)."""
     fp = checks.fingerprint(text)
     if dedupe and duplicate(fp, posts) is not None:
         return None
-    result = checks.check_post(text, source_text=source_text, source_names=names, breaking=priority == "breaking")
+    result = checks.check_post(text, source_text=source_text, source_names=names, breaking=priority == "breaking", links=links or ())
     if not result.ok:
         logger.info("newsdesk: refused: %s: %s", result.reason, text[:90].replace("\n", " "))
         return None
@@ -419,13 +419,7 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
         shown = [next(x for x in ev.sources if x["name"] == n) for n in named]
-        if X_FORMAT == "visual":  # the owner's format: the same picture as Telegram, the headline, a small source credit
-            from app.newsdesk import visual
-
-            text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
-        else:
-            text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
-        source_text = f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
+        text, links, source_text, named = x_words(ev, b, shown, named)
         urgent = ev.label == brief.BREAKING or ev.slot in ("extra", "breaking")
         market_kind = ev.kind in ("market", "recap") or bool(f.get("symbol"))
         post = enqueue(db, posts, kind="market" if market_kind else "news", category=ev.category or "viral", priority="breaking" if urgent else "scheduled", text=text, key=f"event:{ev.id}",
@@ -433,7 +427,7 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
                                                                  "evidence": ev.evidence, "slot": ev.slot, "price_check": f.get("price_check", ""), "symbol": f.get("symbol"),
                                                                  "verified": f.get("verified"), "parent_event": ev.parent_id,
                                                                  "corroborated_by": [n for n in (f.get("outlets") or []) if n != (ev.sources or [{}])[0].get("name")]},
-                       src=ev.sources or [], source_text=source_text, names=named, expires=now + timedelta(hours=2), now=now, dedupe=False)
+                       src=ev.sources or [], source_text=source_text, names=named, expires=now + timedelta(hours=2), now=now, dedupe=False, links=links)
         if post is None:
             if following:
                 logger.warning("newsdesk: X couldn't follow Telegram on event %s: the X text failed the checks", ev.id)
@@ -448,6 +442,27 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         db.commit()
         return result
     return None
+
+
+def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str]) -> tuple[str, list[str], str, list[str]]:
+    """(text, allowed links, what the sources said, source names) for X. Price Chat News (2026-11-11): the caption Telegram's package
+    wrote (headline, context, a question now and then, the article link), so both platforms say the same thing; without one, the older
+    headline-and-source format."""
+    from app.newsdesk import network
+
+    f = ev.facts or {}
+    pkg = network.stored(ev)
+    if pkg and pkg.get("x_text"):
+        links = [str(x.get("url")) for x in pkg.get("links") or [] if x.get("url")]
+        names = [str(x.get("name")) for x in pkg.get("links") or [] if x.get("kind") != "pricechat" and x.get("name")] or named
+        return str(pkg["x_text"]), links, network.source_text_of(ev), names
+    if X_FORMAT == "visual":  # the owner's format: the same picture as Telegram, the headline, a small source credit
+        from app.newsdesk import visual
+
+        text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
+    else:
+        text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
+    return text, [], f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}", named
 
 
 # --- publish ------------------------------------------------------------------------------------------------------
@@ -773,13 +788,11 @@ def _test_event(db: Session, event_id: int | None) -> NdEvent | None:
 
 def _test_text(ev: NdEvent, now: datetime) -> tuple[str, checks.Result]:
     """Exactly what the desk would write for this event on X, through the same checks."""
-    from app.newsdesk import visual
-
-    text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
     b = events.brief_of(ev, now)
     named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
-    source_text = f"{(ev.facts or {}).get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}"
-    return text, checks.check_post(text, source_text=source_text, source_names=named, breaking=False)
+    shown = [next(x for x in ev.sources if x["name"] == n) for n in named]
+    text, links, source_text, names = x_words(ev, b, shown, named)
+    return text, checks.check_post(text, source_text=source_text, source_names=names, breaking=False, links=links)
 
 
 async def test_post_preview(db: Session, event_id: int | None, now: datetime) -> dict[str, Any] | None:

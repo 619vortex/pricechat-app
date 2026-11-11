@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -134,28 +134,51 @@ def test_photo_search_matches_the_subject() -> None:
     assert ("United States Treasury Building", "treasury") in visual.subject_queries("U.S. TREASURY MOVES TO CUT OFF MEXC")
 
 
-async def test_a_news_picture_is_a_real_licensed_photo_of_the_subject_never_reused_or_black_and_white(monkeypatch: pytest.MonkeyPatch) -> None:
-    colour = Image.new("RGB", (1920, 1080), (180, 60, 40))
-    grey = Image.new("RGB", (1920, 1080), (120, 120, 120))
+def _lp(title: str, url: str, creator: str, licence: str) -> Any:
+    from app.newsdesk import photos
 
-    async def find(client: Any, query: str, limit: int = 12) -> list[visual.Photo]:
-        return [visual.Photo("File:Unrelated building.jpg", "https://img/u.jpg", "A", "CC BY 4.0", "p"),
-                visual.Photo("File:Treasury old.jpg", "https://img/old.jpg", "B", "Public domain", "p"),
-                visual.Photo("File:Treasury Building (1).jpg", "https://img/t1.jpg", "C", "CC BY-SA 3.0", "p"),
-                visual.Photo("File:Treasury Building (2).jpg", "https://img/t2.jpg", "D", "CC BY-SA 3.0", "p")]
+    return photos.LicensedPhoto(title=title, url=url, page=url + "#page", creator=creator, provider="wikimedia", licence=licence, width=1920, height=1080)
+
+
+def _scene(bg: tuple[int, int, int], fg: tuple[int, int, int], box: tuple[int, int, int, int]) -> Image.Image:
+    """A photo-like test picture: noisy colour everywhere (a photograph's colours are spread out) and a bright subject."""
+    import random
+
+    rnd = random.Random(7)
+    small = Image.new("RGB", (192, 108))
+    small.putdata([tuple(max(0, min(255, c + rnd.randint(-60, 60))) for c in bg) for _ in range(192 * 108)])
+    img = small.resize((1920, 1080), Image.Resampling.BILINEAR)
+    ImageDraw.Draw(img).rectangle(box, fill=fg)
+    return img
+
+
+async def test_a_news_picture_is_a_real_licensed_photo_of_the_subject_never_reused_or_black_and_white(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.newsdesk import photos
+
+    colour = _scene((180, 60, 40), (30, 120, 200), (1100, 300, 1600, 900))
+    grey = Image.new("RGB", (1920, 1080), (120, 120, 120))
+    asked: dict[str, Any] = {}
+
+    async def discover(client: Any, queries: list[str], terms: list[str], *, used: Any = (), sensitive: bool = False, **_: Any) -> list[Any]:
+        asked.update(queries=queries, terms=terms, used=set(used), sensitive=sensitive)
+        return [p for p in [_lp("File:Treasury old.jpg", "https://img/old.jpg", "B", "Public domain"),
+                            _lp("File:Treasury Building (1).jpg", "https://img/t1.jpg", "C", "CC BY-SA 3.0"),
+                            _lp("File:Treasury Building (2).jpg", "https://img/t2.jpg", "D", "CC BY-SA 3.0")] if p.url not in used]
 
     async def fetch(client: Any, url: str) -> Image.Image:
         return grey if url.endswith("old.jpg") else colour
 
-    monkeypatch.setattr(visual, "find_photos", find)
+    monkeypatch.setattr(photos, "discover", discover)
     monkeypatch.setattr(visual, "fetch_image", fetch)
     ev = NdEvent(key="k", kind="news", title="Treasury cuts off MEXC", headline="U.S. TREASURY MOVES TO CUT OFF MEXC", topic="controversy", sources=[{"name": "CoinDesk"}], facts={})
     data, meta = await visual.for_event(ev, used={"https://img/t1.jpg"})
-    assert jpeg_size(data) == (1600, 900) and meta["url"] == "https://img/t2.jpg" and meta["tone"] == "risk"
-    assert meta["credit"] == "Photo: D, Wikimedia Commons (CC BY-SA 3.0)"
+    assert jpeg_size(data) == (1600, 900) and meta["url"] == "https://img/t2.jpg" and meta["kind"] == "photo"
+    assert asked["sensitive"] is True and "https://img/t1.jpg" in asked["used"]  # a sanctions story: no people in the photo
+    assert meta["credit"] == "Photo: D / Wikimedia Commons (CC BY-SA 3.0)" and meta["photo"]["licence"] == "CC BY-SA 3.0" and meta["photo"]["page"]
+    assert meta["design"] in ("band", "side", "overlay") and meta["covered"] <= 0.08  # the headline never sits on the subject
     ev.facts = {"visual": meta}  # X uses the same picture as Telegram
     _, again = await visual.for_event(ev)
-    assert again["url"] == "https://img/t2.jpg"
+    assert again["url"] == "https://img/t2.jpg" and again["design"] == meta["design"]
 
 
 async def test_a_major_breaking_story_gets_editorial_artwork_credited_as_an_illustration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,27 +233,31 @@ async def test_a_verified_story_goes_out_as_picture_headline_and_source_and_noth
     tg = Tg()
     await lane.tick(db, get_settings(), tg, now, quotes={})
     sent = tg.sent[0]
-    assert sent["card"] is True and sent["text"] == "<b>BYBAZ EXCHANGE SAYS HACKERS DRAINED $400M FROM ITS HOT WALLET</b>\n\n<i>Source: The Block</i>"
-    assert "PRICE ALERT" not in sent["text"] and "#" not in sent["text"] and "http" not in sent["text"]
+    # Price Chat News (2026-11-11): a written caption with context, the byline, the verification line and the outlets' own article links
+    assert sent["card"] is True and sent["text"].startswith("<b>Bybaz exchange says hackers drained $400M from its hot wallet</b>")
+    assert "Price Chat News" in sent["text"] and "Verified across 2 outlets" in sent["text"] and '<a href="https://' in sent["text"]
+    assert "PRICE ALERT" not in sent["text"] and "#" not in sent["text"] and "exclusive" not in sent["text"].lower()
     seen = lane.settings_row(db).state["recent_visuals"]
-    assert seen[-1]["kind"] == "artwork"  # remembered, so the next pictures look different
+    assert seen[-1]["kind"] == "card" and seen[-1]["design"] == "card"  # no photo, PC offline: the typographic front page; remembered for variety
 
 
 async def test_a_company_story_gets_a_real_licensed_photo_of_the_company(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def find(client: Any, query: str, limit: int = 12) -> list[visual.Photo]:
-        return [visual.Photo("File:CERN data centre.jpg", "https://img/cern.jpg", "X", "CC BY-SA 4.0", "p"),
-                visual.Photo("File:NVIDIA Headquarters.jpg", "https://img/nv.jpg", "Coolcaesar", "CC BY-SA 4.0", "p")]
+    from app.newsdesk import photos
+
+    async def discover(client: Any, queries: list[str], terms: list[str], **_: Any) -> list[Any]:
+        assert "nvidia" in terms
+        return [_lp("File:NVIDIA Headquarters.jpg", "https://img/nv.jpg", "Coolcaesar", "CC BY-SA 4.0")]
 
     async def fetch(client: Any, url: str) -> Image.Image:
-        return Image.new("RGB", (1920, 1080), (40, 90, 160))
+        return _scene((40, 90, 160), (230, 200, 60), (200, 300, 700, 800))
 
-    monkeypatch.setattr(visual, "find_photos", find)
+    monkeypatch.setattr(photos, "discover", discover)
     monkeypatch.setattr(visual, "fetch_image", fetch)
     ev = NdEvent(key="k2", kind="news", title="Nvidia board investigates Jensen Huang", headline="NVIDIA BOARD INVESTIGATES JENSEN HUANG", topic="corporate",
                  sources=[{"name": "Decrypt"}], facts={"importance": {"kind": "corporate"}})
     data, meta = await visual.for_event(ev)
-    assert meta["kind"] == "photo" and meta["url"] == "https://img/nv.jpg" and meta["credit"] == "Photo: Coolcaesar, Wikimedia Commons (CC BY-SA 4.0)"
-    assert jpeg_size(data) == (1600, 900) and meta["type_px"] >= visual.MIN_TYPE
+    assert meta["kind"] == "photo" and meta["url"] == "https://img/nv.jpg" and meta["credit"] == "Photo: Coolcaesar / Wikimedia Commons (CC BY-SA 4.0)"
+    assert jpeg_size(data) == (1600, 900) and meta["headline_px"] >= 44
 
 
 # --- X image upload ----------------------------------------------------------------------------------------------------

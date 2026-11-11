@@ -1,7 +1,8 @@
 """What a post must pass to go out, whoever or whatever wrote it. Any failure stops it.
 
-A URL makes a post cost $0.20 instead of $0.015 on X's pay-per-use pricing, so sources are named in the text and their links kept with the
-post. Numbers must be ones a source gave: a model can't invent a figure and have it published.
+A URL makes a post cost $0.20 instead of $0.015 on X's pay-per-use pricing. Since 2026-11-11 the owner wants the original reporting linked
+on every post: a link may appear only when it is one of the event's own verified source links (`links`); any other address still fails.
+Numbers must be ones a source gave: a model can't invent a figure and have it published (digits inside an allowed link don't count).
 """
 
 import re
@@ -63,16 +64,27 @@ def similarity(a: str, b: str) -> float:
     return len(x & y) / len(x | y) if x and y else 0.0
 
 
-def check_post(text: str, *, source_text: str, source_names: list[str], breaking: bool = False, as_edited: bool = False, max_len: int = MAX_LEN) -> Result:
-    """source_text: everything the sources said, plus the verified figures. as_edited: a person changed it, and may add figures they checked."""
+EXCLUSIVE = re.compile(r"\b(exclusive|scoop|we can reveal|first reported by price chat|our reporting|price chat (has )?learned)\b", re.I)
+
+
+def check_post(text: str, *, source_text: str, source_names: list[str], breaking: bool = False, as_edited: bool = False, max_len: int = MAX_LEN,
+               links: list[str] | tuple[str, ...] = ()) -> Result:
+    """source_text: everything the sources said, plus the verified figures. as_edited: a person changed it, and may add figures they checked.
+    links: the event's own verified source links; only these may appear in the text."""
     checks: list[dict[str, Any]] = []
 
     def add(name: str, passed: bool, detail: str = "") -> None:
         checks.append({"check": name, "passed": bool(passed), "detail": detail or name})
 
     t = (text or "").strip()
-    add("length", 0 < len(t) <= max_len, f"{len(t)} characters (limit {max_len})")
-    add("no_link", not URLISH.search(t), "It contains a link or web address, which costs $0.20 instead of $0.015 on X")
+    bare = t
+    for url in sorted(links, key=len, reverse=True):
+        bare = bare.replace(url, "")
+    weighted = len(bare) + 23 * sum(t.count(u) for u in links) if links else len(t)  # X counts a link as 23 characters
+    add("length", 0 < weighted <= max_len, f"{weighted} characters (limit {max_len})")
+    add("no_link", not URLISH.search(bare), "It contains a link that isn't one of the story's own sources" if links else
+        "It contains a link or web address, which costs $0.20 instead of $0.015 on X")
+    add("not_exclusive", not EXCLUSIVE.search(bare), "It claims exclusive or original reporting: the outlets reported it")
     add("no_mentions", "@" not in t, "It mentions an account")
     add("hashtags", t.count("#") <= 1, "Too many hashtags")
     add("claims", not FORBIDDEN.search(t), "It makes a promise or gives investment advice")
@@ -80,6 +92,6 @@ def check_post(text: str, *, source_text: str, source_names: list[str], breaking
     add("attribution", not source_names or any(n.lower() in t.lower() for n in source_names), f"It doesn't name its source ({', '.join(source_names)})")
     add("urgency", breaking or not any(w in t for w in URGENT[:2]), "It says BREAKING, but isn't a verified breaking story")
     if not as_edited:
-        extra = numbers(t) - numbers(source_text)
+        extra = numbers(bare) - numbers(source_text)
         add("figures", not extra, f"Figures no source gave: {', '.join(sorted(extra))}")
     return Result(all(c["passed"] for c in checks), checks)

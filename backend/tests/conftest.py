@@ -204,6 +204,20 @@ def _one_fake_market_for_both_networks(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_live_photo_search(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: News Desk tests never search Wikimedia Commons or Openverse. A test that wants photos stubs photos.discover itself;
+    tests/test_newsdesk_photos.py tests discover() with its own mocked transport."""
+    if request.module.__name__.endswith("test_newsdesk_photos"):
+        return
+    from app.newsdesk import photos
+
+    async def none(*_: object, **__: object) -> list[object]:
+        return []
+
+    monkeypatch.setattr(photos, "discover", none)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_database() -> Iterator[None]:
     from app.services import usage
 

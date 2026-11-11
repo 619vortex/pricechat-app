@@ -256,6 +256,19 @@ def _engagement_points(adj: dict[str, float], topic: str) -> float:
     return float(adj.get(topic, 0.0))
 
 
+def discovery_points(evidence: str, lead: str, outlets: set[str]) -> float:
+    """Owner, 2026-11-11: our own verified discoveries lead, generic single-publisher headlines follow. A story the desk confirmed across
+    three or more independent outlets, or with a World Monitor catalog outlet among them, or from an official source earns points; the
+    two-outlet floor and a single attributed outlet earn none."""
+    every = {lead, *outlets}
+    if evidence == "official":
+        return 2.0
+    if evidence != "two outlets" or len(every) < 2:
+        return 0.0
+    # two outlets is the evidence floor every verified story already meets: only wider confirmation earns more
+    return (3.0 if len(every) >= 3 else 0.0) + (2.0 if any(sources.via(n) for n in every) else 0.0)
+
+
 def score_story(v: chaos.Verdict, quotes: dict[str, sources.Quote], now: datetime, adj: dict[str, float]) -> tuple[virality.Score, dict[str, Any], str]:
     """(score, facts, headline) for a story that passed the evidence rules."""
     story, b = v.story, v.brief
@@ -282,6 +295,9 @@ def score_story(v: chaos.Verdict, quotes: dict[str, sources.Quote], now: datetim
     else:
         s = virality.news(title=story.title or "", summary=story.summary or "", evidence=v.evidence, lead_topic=b.topic, outlets=len(outlets), outlets_3h=len(near),
                           age_minutes=age_min, alleged=b.alleged, tickers=b.tickers, measured_ratio=measured[2] if measured else 0.0, engagement=_engagement_points(adj, b.topic))
+    bonus = discovery_points(v.evidence, story.source, outlets)
+    if bonus:
+        s = virality._finish({**{k: x for k, x in s.parts.items() if k != "freshness"}, "discovery": bonus}, age_min)
     head = headline.news(story.title or "", tag=tag)
     told = " ".join(f"{x.title} {x.summary or ''}" for x in [story, *v.others]) + f" {v.price_check} {tag}"
     assets = [claim.asset] if claim is not None and claim.at < lead else []  # the asset the headline leads with: "Bitcoin ... as Wall Street sells off" is Bitcoin's
@@ -850,7 +866,9 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         return None
     covered = editorial.coverage(db, now)
     for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
-        if ev.kind not in ("news", "update") or ev.virality < p.breaking_bar or not verified_important(ev):
+        # the discovery points rank slot stories; they never make a story breaking (the 70 bar is judged without them)
+        bare = ev.virality - float((ev.parts or {}).get("discovery") or 0) * float((ev.parts or {}).get("freshness") or 1)
+        if ev.kind not in ("news", "update") or bare < p.breaking_bar or not verified_important(ev):
             continue
         worthy, because = editorial.breaking_worthy(ev.title or "", ev.topic or "", (ev.facts or {}).get("importance"))
         if not worthy:

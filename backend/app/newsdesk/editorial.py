@@ -522,8 +522,8 @@ def importance_score(sig: Significance, *, evidence: str, outlets: int, outlets_
 # what a hard event does to markets (owner, 2026-11-11: verified major World Monitor events break between slots at 70+). Without this part an
 # importance story topped out at 67 (geopolitics) or 65 (corporate) and could never break, however big: a missile strike on Saudi Aramco's
 # largest export terminal, confirmed by two outlets, scored 56. Only a hard event (never talk) with a direct market tie earns it.
-MARKET_TIE = _rx(r"(oil|crude|brent|wti|refiner(?:y|ies)|oil (?:field|terminal|facility|facilities)|export terminal|pipelines?|gas ?fields?|lng|"
-                 r"tankers?|shipping|strait|suez|red sea|bab el-mandeb|aramco|opec|power grid|chip ?plants?|semiconductor|stock exchange|central bank)")
+MARKET_TIE = _rx(r"\b(oil|crude|brent|wti|refiner(?:y|ies)|oil (?:field|terminal|facility|facilities)|export terminal|pipelines?|gas ?fields?|lng|"
+                 r"tankers?|shipping|strait|suez|red sea|bab el-mandeb|aramco|opec|power grid|chip ?plants?|semiconductor|stock exchange|central bank)\b")
 
 
 def consequence(sig: Significance, title: str) -> float:

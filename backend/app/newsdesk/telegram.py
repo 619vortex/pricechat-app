@@ -160,7 +160,7 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
     now = now or utcnow()
     f = ev.facts or {}
     if FORMAT == "visual":
-        return await compose_visual(ev, s, now, transport, db=db)
+        return await compose_visual(ev, s, now, transport, db=db, settings=settings)
     if ev.kind == "recap":  # the market check is written and checked when it's made (app/newsdesk/recap): text only, no card
         if not f.get("telegram_html"):
             return None, "the market check has no Telegram text"
@@ -196,20 +196,48 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
     return None, result.reason if result else "nothing to say"
 
 
+async def stories_of(db: Session | None, ev: NdEvent) -> list[NdStory]:
+    if db is None:
+        return []
+    rows = [db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:6]]
+    return [r for r in rows if r is not None]
+
+
 async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetime, transport: Any = None, market: Any = None,
-                         db: Session | None = None) -> tuple[dict[str, Any] | None, str]:
-    """The owner's format: the picture (app/newsdesk/visual), the headline in bold beneath it, the source in small italics. Nothing else.
-    The headline is the event's own verified one; the desk's checks run on exactly what is posted."""
-    from app.newsdesk import visual
+                         db: Session | None = None, settings: Settings | None = None) -> tuple[dict[str, Any] | None, str]:
+    """Price Chat News (owner, 2026-11-11): the picture (app/newsdesk/visual: a licensed photo of the subject, the GPU's labelled
+    illustration, a chart or the desk's own), a written caption (headline, context, why it matters, sometimes a question), the byline with
+    its verification line and 1-3 clickable source links (app/newsdesk/network). The package is stored on the event so X posts the same
+    words and links. When the package fails its checks, the older format goes out: the verified headline and its source."""
+    from app.newsdesk import network, visual
 
     f = ev.facts or {}
+    pkg = None
+    if ev.kind != "recap":
+        rows = await stories_of(db, ev)
+        desk_state = {}
+        if db is not None:
+            from app.newsdesk import engine
+
+            desk_state = engine.settings_row(db).state or {}
+        try:
+            pkg = await network.package(ev, settings=settings, rows=rows, transport=transport, x_links=network.x_links_on(desk_state))
+        except Exception as e:  # noqa: BLE001 - the older caption instead
+            logger.warning("tgnews: no package for event %s (%s)", ev.id, type(e).__name__)
+            pkg = None
+        if pkg is not None and not pkg.ok:
+            logger.info("tgnews: package for event %s failed its checks: %s", ev.id, next((c["detail"] for c in pkg.checks if not c["passed"]), ""))
+            pkg = None
+        if pkg is not None:
+            ev.facts = f = {**f, "package": pkg.out()}
     head = visual.post_headline(ev)
     src = visual.source_name(ev)
     plain = f"{head}\n\nSource: {src}"
-    told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours"
-    result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)
-    if not result.ok:
-        return None, result.reason
+    if pkg is None:
+        told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours"
+        result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)
+        if not result.ok:
+            return None, result.reason
     used = {u for u, _ in ((s.state or {}).get("used_photos") or []) if u} if s is not None else set()
     recent = list((s.state or {}).get("recent_visuals") or []) if s is not None else []
     try:
@@ -219,11 +247,16 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         return None, f"no picture could be made ({type(e).__name__})"
     ev.facts = {**f, "visual": meta}
     if s is not None:  # what the picture looked like, so the next ones look different
-        seen = {k: meta.get(k) for k in ("kind", "motif", "palette", "layout", "tone")}
+        seen = {k: meta.get(k) for k in ("kind", "motif", "palette", "layout", "tone", "design")}
         s.state = {**(s.state or {}), "recent_visuals": [*recent, {**seen, "event": ev.id, "at": now.isoformat()}][-visual.RECENT * 2:]}
     if s is not None and meta.get("kind") == "photo":
         keep = [(u, at) for u, at in ((s.state or {}).get("used_photos") or []) if at >= (now - timedelta(days=visual.USED_DAYS)).isoformat()]
         s.state = {**(s.state or {}), "used_photos": [*keep, (meta["url"], now.isoformat())][-200:]}
+    if pkg is not None:
+        srcs = [{"name": x.name, "url": x.url} for x in pkg.links if x.kind != "pricechat"]
+        return {"headline": pkg.copy.headline, "summary": pkg.copy.context, "html": pkg.telegram_html, "plain": pkg.telegram_plain, "sources": srcs,
+                "writer": f"network-{pkg.copy.writer}", "card": image, "choice": {}, "link": f"event:{ev.id}", "title": ev.title, "source": src[:60],
+                "fingerprint": checks.fingerprint(f"{pkg.copy.headline} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""
     srcs = [{"name": x["name"], "url": x["url"]} for x in ev.sources or [] if str(x.get("url", "")).startswith("https://")][:3]
     return {"headline": head, "summary": "", "html": visual.caption_html(head, src), "plain": plain, "sources": srcs, "writer": "visual", "card": image, "choice": {},
             "link": f"event:{ev.id}", "title": ev.title, "source": src[:60], "fingerprint": checks.fingerprint(f"{head} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""

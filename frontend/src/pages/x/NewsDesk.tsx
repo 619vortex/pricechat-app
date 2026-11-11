@@ -5,6 +5,7 @@ import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type T
 import { TelegramLane } from "./TelegramLane";
 import { EditorialDesk } from "./EditorialDesk";
 import { GpuRender } from "./GpuRender";
+import { NetworkSwitches } from "./NetworkSwitches";
 
 /** Admin › X › News Desk: Price Chat's automatic news account. The server decides everything; this page shows it and holds the switches. */
 
@@ -163,6 +164,7 @@ export function NewsDesk() {
 
       <EditorialDesk />
 
+      <NetworkSwitches />
       <GpuRender />
 
       <NewPost busy={busy} onAdd={(text) => act(() => request("/x/newsdesk/posts", body("POST", { text })))} />

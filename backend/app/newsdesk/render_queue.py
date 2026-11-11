@@ -50,7 +50,8 @@ SCENES: dict[str, list[str]] = {
     "bitcoin": ["a dark server hall of bitcoin mining rigs, rows of machines with blue LEDs, long perspective, haze",
                 "a container of mining machines in a snowy field at night, warm light from its open doors"],
     "crypto": ["a dim data centre aisle, cold blue light, fibre cables", "a glowing fibre-optic cable bundle in darkness, macro, shallow depth of field"],
-    "hack": ["a dark server room with a single red warning light, haze", "a broken padlock on a steel server rack, macro, cold light"],
+    "hack": ["a dark server room with a single red warning light, haze", "a broken padlock on a steel server rack, macro, cold light",
+             "a heavy steel vault door standing ajar in a dark data centre, cold blue light", "severed network cables hanging from an open rack, red rim light, haze"],
     "stocks": ["a trading floor at night, rows of glowing screens out of focus, one silhouette", "a stock exchange facade at dawn, columns, long shadows"],
     "tech": ["a semiconductor wafer under clean-room light, macro, iridescent", "a glass-walled tech campus at night, reflections, rain"],
     "macro": ["a neoclassical central bank facade at dawn, stone columns, cold light", "stacks of banknotes under a desk lamp, dark office, macro"],
@@ -211,6 +212,13 @@ def enqueue(db: Session, ev: NdEvent, now: datetime, *, priority: int = 0, deadl
                       deadline=deadline, result={},
                       payload={"prompt": d.prompt, "negative": NEGATIVE, "width": SIZE[0], "height": SIZE[1], "seed": d.seed, "model": model,
                                "scene_key": d.scene_key, "scene": d.scene, "light": d.light, "grade": d.grade})
+    # slot stories only: breaking news can't wait a minute for the local model (its picture has 2.5 min), it gets the desk's words
+    if attempt == 0 and priority < 10 and getattr(ev, "kind", "") in ("news", "update") and not (ev.facts or {}).get("local_copy"):
+        from app.models.newsdesk import NdStory
+        from app.newsdesk import network
+
+        rows = [r for r in (db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:3]) if r is not None]
+        job.payload = {**job.payload, "copy_request": network.copy_request(ev, rows)}  # the PC's local model writes the caption too (owner: no paid API)
     db.add(job)
     db.flush()
     return job
@@ -301,6 +309,19 @@ def quality(img: Image.Image, recent_hashes: list[int]) -> tuple[list[str], dict
     return problems, {"mean": round(mean, 1), "spread": round(spread, 1), "detail": round(edges, 2), "nearest": nearest, "dhash": f"{hsh:016x}"}
 
 
+def keep_copy(db: Session, job: NdRenderJob, result: dict[str, Any], now: datetime) -> None:
+    """The caption the PC's local model wrote (and fact-checked) with the picture: kept on the event for app/newsdesk/network, which checks
+    it again against the reporting before anything is posted. Kept even when the picture is rejected."""
+    got = result.get("copy") if isinstance(result.get("copy"), dict) else None
+    if not got or not isinstance(got.get("draft"), dict) or not got.get("ok"):
+        return
+    ev = db.get(NdEvent, job.event_id)
+    if ev is None:
+        return
+    draft = {k: str(got["draft"].get(k) or "")[:400] for k in ("headline", "short", "context", "stakes", "question")}
+    ev.facts = {**(ev.facts or {}), "local_copy": {**draft, "model": str(got.get("model") or "")[:60], "at": now.isoformat()}}
+
+
 def complete(db: Session, job_id: int, worker: BmWorker, data: bytes, result: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
     now = now or utcnow()
     job = _own(db, job_id, worker)
@@ -311,6 +332,7 @@ def complete(db: Session, job_id: int, worker: BmWorker, data: bytes, result: di
         img = img.convert("RGB")
     except Exception as e:  # noqa: BLE001 - anything that isn't a picture
         raise RenderError(400, f"Not a readable image: {type(e).__name__}") from e
+    keep_copy(db, job, result or {}, now)
     hashes = [int(str((j.result or {}).get("quality", {}).get("dhash") or "0"), 16) for j in _recent_done(db) if j.id != job.id]
     problems, measured = quality(img, [x for x in hashes if x])
     info = {k: v for k, v in (result or {}).items() if k in ("model", "seconds", "steps", "gpu", "vram_gb", "seed", "ocr", "tries")}

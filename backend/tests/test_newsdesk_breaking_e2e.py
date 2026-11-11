@@ -139,7 +139,7 @@ async def test_a_world_monitor_event_breaks_on_telegram_and_x_with_a_klein_pictu
     sent = await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=40))
     assert sent["sent"] == 501 and len(tg.sent) == 1
     pic = Image.open(io.BytesIO(tg.sent[0]["image"]))
-    assert pic.size == (1600, 900) and "<b>" in tg.sent[0]["caption"] and "Source: DW" in tg.sent[0]["caption"]
+    assert pic.size == (1600, 900) and "<b>" in tg.sent[0]["caption"] and "Sources: DW · The National" in tg.sent[0]["caption"]  # feed links: named, not linked
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
     assert ev.tg_status == "delivered" and ev.facts["visual"]["kind"] == "cinematic" and "klein" in ev.facts["visual"]["model"].lower()

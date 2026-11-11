@@ -128,6 +128,26 @@ def telegram_update(payload: TelegramInput, db: DbSession) -> dict[str, Any]:
     return telegram_lane.overview(db)
 
 
+class NetworkInput(StrictInput):
+    x_links: bool | None = None  # source links in X posts ($0.20 a post with a link, $0.015 without)
+    emergency: bool | None = None  # stop Telegram and X at once until turned off
+
+
+@router.get("/network")
+def network_overview(db: DbSession) -> dict[str, Any]:
+    from app.newsdesk import network
+
+    return network.state(db)
+
+
+@router.put("/network")
+def network_update(payload: NetworkInput, db: DbSession) -> dict[str, Any]:
+    """Price Chat News switches: links on X, and the emergency pause for both platforms."""
+    from app.newsdesk import network
+
+    return network.configure(db, **payload.model_dump(exclude_none=True))
+
+
 class TextInput(StrictInput):
     text: str = Field(min_length=1, max_length=280)
 
