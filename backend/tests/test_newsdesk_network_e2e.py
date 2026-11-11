@@ -109,3 +109,57 @@ async def test_x_follows_telegram_at_once_but_never_through_a_pause(client: Any,
     post = db.get(NdPost, ev.x_post_id)
     tgp = db.get(__import__("app.models.newsdesk", fromlist=["NdTelegramPost"]).NdTelegramPost, ev.tg_post_id)
     assert abs((post.published_at.replace(tzinfo=None) - tgp.created_at.replace(tzinfo=None)).total_seconds()) < 60  # same minute on both
+
+
+async def test_world_monitor_scan_shows_what_was_read_and_what_will_post(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
+    from tests.test_newsdesk_breaking_e2e import BETWEEN
+
+    at = BETWEEN  # between slots: the story waits as a candidate for the next one
+    title = "Missile strike hits Saudi Aramco oil terminal at Ras Tanura"
+    live["feeds"]["items"] = {
+        DW["url"]: [{"title": title, "link": DW_URL, "at": at - timedelta(hours=3), "summary": SAYS_DW},
+                    {"title": "Hot Inflation, AI Selloff & Anthropic IPO", "link": "https://www.dw.com/en/hot-inflation-ai-selloff-anthropic-ipo/a-1", "at": at - timedelta(hours=1),
+                     "summary": "Three stories."}],
+        NATIONAL["url"]: [{"title": title + ", officials say", "link": NAT_URL, "at": at - timedelta(hours=3), "summary": SAYS_NATIONAL}]}
+    desk = engine.settings_row(db)
+    await engine.collect(db, desk, None, at)
+    await events.decide(db, at, quotes={}, watchlist=[], categories=desk.categories or {}, desk_state=desk.state, liquidations=False)
+    import app.newsdesk.monitor as monitor
+    from unittest.mock import patch
+
+    with patch("app.api.routes.newsdesk_editorial.utcnow", return_value=at):
+        scan = client.get("/api/x/newsdesk/editorial/monitor/scan").json()
+        up = client.get("/api/x/newsdesk/editorial/monitor/upcoming").json()
+    rows = {r["title"]: r for r in scan["stories"]}
+    aramco = rows[title]
+    assert aramco["state"] == "verified" and aramco["world_monitor"] is True and aramco["confirmed_by"] == ["The National"]
+    assert aramco["world_monitor_confirms"] == ["The National"] and aramco["event"]["status"] in ("candidate", "released")
+    roundup = rows["Hot Inflation, AI Selloff & Anthropic IPO"]
+    assert roundup["state"] == "rejected" and "round-up" in roundup["why"] and roundup["roundup"] is True
+    assert scan["counts"]["verified"] >= 1 and scan["world_monitor_found"] >= 2
+    post = next(p for p in up["posts"] if p["event"] == aramco["event"]["id"])
+    pkg = post["package"]
+    assert pkg["ok"] and "https://www.dw.com/en/missile-strike-hits-saudi-aramco-terminal/a-79912345" in pkg["x_text"]
+    assert "Verified across 2 outlets" in pkg["telegram_html"] and network.x_length(pkg["x_text"]) <= 280 and post["image"].endswith(".jpg")
+    assert monitor.SCAN_LIMIT >= len(scan["stories"])
+    # reading changed nothing: still not posted anywhere
+    db.expire_all()
+    ev = db.get(NdEvent, aramco["event"]["id"])
+    assert "package" not in (ev.facts or {}) and live["tg"].sent == [] and live["x"].posts == []
+
+
+def test_scan_now_reads_the_feeds_stores_new_stories_and_never_posts(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
+    from unittest.mock import patch
+
+    from tests.test_newsdesk_breaking_e2e import BETWEEN
+
+    title = "Missile strike hits Saudi Aramco oil terminal at Ras Tanura"
+    live["feeds"]["items"] = {DW["url"]: [{"title": title, "link": DW_URL, "at": BETWEEN - timedelta(minutes=20), "summary": SAYS_DW}]}
+    with patch("app.api.routes.newsdesk_editorial.utcnow", return_value=BETWEEN):
+        r = client.post("/api/x/newsdesk/editorial/monitor/scan-now")
+        assert r.status_code == 200 and r.json()["new_stories"] == 1
+        row = next(s for s in r.json()["stories"] if s["title"] == title)
+        assert row["state"] == "held" and "second outlet" in row["why"]  # one outlet so far: held, not "rejected"
+        assert client.post("/api/x/newsdesk/editorial/monitor/scan-now").status_code == 429  # once a minute
+    db.expire_all()
+    assert db.scalar(select(NdEvent.id)) is None and live["tg"].sent == [] and live["x"].posts == []  # reading never decides or posts

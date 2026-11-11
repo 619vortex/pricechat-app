@@ -6,6 +6,7 @@ import { TelegramLane } from "./TelegramLane";
 import { EditorialDesk } from "./EditorialDesk";
 import { GpuRender } from "./GpuRender";
 import { NetworkSwitches } from "./NetworkSwitches";
+import { WorldMonitor } from "./WorldMonitor";
 
 /** Admin › X › News Desk: Price Chat's automatic news account. The server decides everything; this page shows it and holds the switches. */
 
@@ -161,6 +162,8 @@ export function NewsDesk() {
       </Card>
 
       {data.desk?.schedule && <SchedulePanel schedule={data.desk.schedule} feeds={data.feed_health} />}
+
+      <WorldMonitor />
 
       <EditorialDesk />
 

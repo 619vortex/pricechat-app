@@ -106,6 +106,12 @@ async def preview(db: Session, event_id: int, now: datetime) -> tuple[bytes, dic
     copy = NdEvent(key=ev.key, kind=ev.kind, title=ev.title, headline=ev.headline, topic=ev.topic, label=ev.label, sources=ev.sources, facts=dict(ev.facts or {}),
                    virality=ev.virality, released_at=ev.released_at, first_seen=ev.first_seen, evidence=ev.evidence)
     copy.id = ev.id
+    if not (copy.facts or {}).get("package"):  # Price Chat News: the picture uses the package's short headline, as the real post will
+        from app.newsdesk import monitor
+
+        pkg = await monitor.package_for(db, ev)
+        if pkg.get("ok"):
+            copy.facts = {**(copy.facts or {}), "package": pkg}
     tg = db.get(NdTelegramSettings, 1)
     state = (tg.state or {}) if tg is not None else {}
     used = {u for u, _ in (state.get("used_photos") or []) if u}
