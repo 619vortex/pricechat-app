@@ -154,7 +154,7 @@ def test_a_draft_must_say_who_and_never_turn_a_measured_move_into_a_cause() -> N
     assert "never in the headline or as a cause" in viral.prompt(e)
     spy = ev(title="Nvidia hires law firm to investigate alleged Chinese spy affair", summary="Claims its boss had an affair with an alleged Chinese spy.")
     rows = [NS(source="BBC", link="https://www.bbc.co.uk/news/a", title=spy.title, summary=spy.summary)]
-    assert any("states it as fact" in x for x in viral.draft_problems(spy, network.Copy(headline="Nvidia hires Wachtell to probe CEO's affair with Chinese spy", short=""), rows))
+    assert any("states it as fact" in x for x in viral.draft_problems(spy, network.Copy(headline="Nvidia hires Wachtell to probe CEO's affair with Chinese spy", short="", writer="local"), rows))
     assert not any("states it as fact" in x for x in viral.draft_problems(spy, network.Copy(headline="Nvidia hires Wachtell to probe CEO's alleged spy affair", short=""), rows))
 
 
@@ -165,7 +165,9 @@ def test_writer_headlines_come_out_in_sentence_case_keeping_names_and_tickers() 
     assert network.sentence_case("Nvidia hires ex-prosecutor to probe CEO's affair", src) == "Nvidia hires ex-prosecutor to probe CEO's affair"
     assert network.sentence_case("Samsung Wallet Launches USDC For Galaxy Users", "Eligible U.S. Galaxy users can now hold USDC.") == \
         "Samsung wallet launches USDC for Galaxy users"  # Galaxy only ever appears capitalised: a name
-    assert network.desk_copy(ev(headline="S&P 500 Falls 3.8% in 24 Hours", title="S&P 500 Falls 3.8% in 24 Hours", summary="")).headline == "S&P 500 falls 3.8% in 24 hours"
+    assert network.desk_copy(ev(kind="market", headline="S&P 500 Falls 3.8% in 24 Hours", title="S&P 500 Falls 3.8% in 24 Hours", summary="")).headline == "S&P 500 falls 3.8% in 24 hours"
+    nyt = "Nvidia Hires Wachtell Lipton to Investigate CEO Jensen Huang’s Affair With Chinese Executive"
+    assert network.desk_copy(ev(headline=nyt, title=nyt, summary="")).headline == nyt  # an outlet's names stay as the outlet wrote them
     assert datapost.price(7354.2, "^GSPC") == "7,354" and datapost.price(73550.0, "BTC-USD") == "$73,550"  # an index is points, not dollars
     long = network.Copy(headline="Binance’s $6.3B hack leaves questions over hot wallet safeguards", short="",
                         context="Experts say blockchain records show repeated wallet drains but cannot establish Binance’s internal signing controls or transaction limits, which leaves users guessing.")

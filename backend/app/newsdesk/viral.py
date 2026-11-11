@@ -256,7 +256,8 @@ def draft_problems(ev: Any, c: network.Copy, rows: list[Any] | None) -> list[str
     said = f"{c.headline} {c.context}"
     hedged = {w.lower() for m in re.finditer(r"\b(?:alleged(?:ly)?|accused(?: of)?|suspected|purported)\s+((?:[\w'’-]+\s+){0,2}[\w'’-]+)", src, re.I)
               for w in m.group(1).split() if len(w) > 3}
-    if hedged and not HEDGE.search(said) and any(re.search(rf"\b{re.escape(w)}\b", said, re.I) for w in hedged):  # "an alleged spy" must not become "a spy"
+    own = c.writer in ("angle", "desk")  # the outlets' own sentences: what they assert, they assert (NYT: "Affair With Chinese Executive")
+    if hedged and not own and not HEDGE.search(said) and any(re.search(rf"\b{re.escape(w)}\b", said, re.I) for w in hedged):  # "an alleged spy" must not become "a spy"
         out.append("the reporting says alleged or accused; the draft states it as fact")
     own = measured_only(ev, src)
     used = checks.numbers(f"{c.headline} {c.context}") & own

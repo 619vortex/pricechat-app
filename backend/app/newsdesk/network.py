@@ -362,7 +362,8 @@ def desk_copy(ev: Any) -> Copy:
     raw = getattr(ev, "headline", "") or getattr(ev, "title", "")
     # a shouted headline takes the outlet's own capitals back (Wachtell, C.E.O.): never lower-case a name the desk can't check
     head = visual.display_headline(ev) if raw.isupper() and getattr(ev, "title", "") else headline_case(raw)
-    head = sentence_case(head, getattr(ev, "summary", "") or "")  # "S&P 500 Falls 3.8% in 24 Hours" reads as a headline, not a title
+    if getattr(ev, "kind", "") in ("market", "data"):  # our own titles ("S&P 500 Falls 3.8% in 24 Hours"); an outlet's keeps its names as written
+        head = sentence_case(head, getattr(ev, "summary", "") or "")
     head = shorten(head, HEADLINE_MAX)
     short = shorten(head, SHORT)
     return Copy(headline=head, short=short, context=_desk_context(ev, head), stakes=_desk_stakes(ev), question=question_for(ev, desk_of(ev)))
