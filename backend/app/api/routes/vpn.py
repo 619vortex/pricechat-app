@@ -68,7 +68,7 @@ def stats(db: DbSession) -> dict[str, Any]:
 def start_trial(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     """Takes no input: eligibility comes from the account, Admin's switch and the server's clock."""
     member = _require(db, pc_session)
-    wait = LIMITS["vpn_device"].hit(str(member.id))
+    wait = LIMITS["vpn_trial"].hit(str(member.id))
     if wait is not None:
         raise HTTPException(429, "Too many tries. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     preview = _preview(db, request)
@@ -87,8 +87,21 @@ class DeviceInput(StrictInput):
 
 @router.post("/members/vpn/devices", status_code=status.HTTP_201_CREATED)
 def create_device(payload: DeviceInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
+    """Only a genuinely new key is charged to the rate limit. A key this member already registered adds nothing: the same
+    key, server and name again (a retry whose answer was lost) returns that device; anything else with it is refused (409),
+    free either way. Replacing a device the member just deleted is charged to its own small bucket (rate_limit.device_charge)."""
     member = _require(db, pc_session)
-    wait = LIMITS["vpn_device"].hit(str(member.id))
+    if payload.public_key is not None:
+        mine = service.own_device_with_key(db, member, payload.public_key)
+        db.commit()
+        if mine is not None:
+            if mine.server_id != payload.server_id or mine.name != " ".join(payload.name.split()):
+                raise HTTPException(409, "That key is already in use.")
+            try:
+                return {"device": service.device_out(mine), "peer": service.device_peer(db, member, mine.id)}
+            except VpnError as e:
+                raise _fail(e) from e
+    wait = rate_limit.device_charge(str(member.id), payload.server_id, payload.name)
     if wait is not None:
         raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:
@@ -118,10 +131,12 @@ def my_ip(request: Request, response: Response) -> dict[str, str]:
 
 @router.delete("/members/vpn/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_device(device_id: int, db: DbSession, pc_session: SessionToken = None) -> Response:
+    member = _require(db, pc_session)
     try:
-        service.delete_device(db, _require(db, pc_session), device_id)
+        server_id, name = service.delete_device(db, member, device_id)
     except VpnError as e:
         raise _fail(e) from e
+    rate_limit.FREED.add(str(member.id), server_id, name)  # a new device in its place soon is a replacement, not a new one
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -134,7 +149,7 @@ class BrowserInput(StrictInput):
 def create_browser(payload: BrowserInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     """The browser extension's login for one server. Shown this once; only its hash is kept."""
     member = _require(db, pc_session)
-    wait = LIMITS["vpn_device"].hit(str(member.id))
+    wait = LIMITS["vpn_browser"].hit(str(member.id))
     if wait is not None:
         raise HTTPException(429, "Too many new connections. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:
@@ -310,7 +325,7 @@ def anon_view(request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)
 
 @router.post("/members/vpn/anon/devices", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_key"))])
 def anon_device(payload: DeviceInput, request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
-    wait = LIMITS["vpn_device"].hit(f"a{acct.id}")
+    wait = LIMITS["vpn_anon_device"].hit(f"a{acct.id}")
     if wait is not None:
         raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:

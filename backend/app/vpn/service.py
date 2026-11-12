@@ -653,12 +653,23 @@ def admin_delete_browser(db: Session, browser_id: int) -> None:
     db.commit()
 
 
-def delete_device(db: Session, who: Who, device_id: int) -> None:
+def delete_device(db: Session, who: Who, device_id: int) -> tuple[int, str]:
+    """Returns the deleted device's (server id, name), so a replacement can be recognised (app.security.rate_limit.FREED)."""
     dev = db.get(VpnDevice, device_id)
     if dev is None or dev.account_id != account_of(db, who).id:
         raise VpnError("Device not found.", 404)
+    gone = (dev.server_id, dev.name)
     _remove(db, dev)
     db.commit()
+    return gone
+
+
+def own_device_with_key(db: Session, who: Who, public_key: str) -> VpnDevice | None:
+    """This account's device registered with exactly this public key, if any (keys are unique across all devices)."""
+    dev = db.scalar(select(VpnDevice).where(VpnDevice.public_key == public_key))
+    if dev is None or dev.account_id != account_of(db, who).id:
+        return None
+    return dev
 
 
 def _remove(db: Session, dev: VpnDevice, server: VpnServer | None = None) -> None:

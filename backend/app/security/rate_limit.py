@@ -66,7 +66,24 @@ LIMITS = {
     "health": Bucket(burst=10, every=6, shared_burst=200, shared_every=0.1),  # 10/min per client after a burst of 10
     "referral": Bucket(burst=10, every=6, shared_burst=300, shared_every=0.2),  # over it: still redirected, click not counted
     "earn": Bucket(burst=30, every=1, shared_burst=600, shared_every=0.02),
-    "vpn_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),  # Kiwi VPN device creation, per member
+    # Kiwi VPN: one bucket per purpose, so the browser extension's logins and a trial start can't use up the Kiwi VPN app's
+    # devices (they used to share one bucket of 5 and the Windows app's server failover got "Too many new devices").
+    # vpn_device: a NEW device key registered by a member (website, Windows app, the Telegram bot's /vpn add), per member.
+    #   Burst 8 instead of 5: the Windows app makes one device per server, so a fresh install that fails over across a few
+    #   servers, plus a reinstall, needs several at once; the slot cap (max_devices) still bounds how many exist, and the long
+    #   term rate is unchanged at one new key per 10 minutes. Re-sending a key the member already has costs nothing (no new
+    #   key exists); see app.api.routes.vpn.create_device.
+    "vpn_device": Bucket(burst=8, every=600, shared_burst=60, shared_every=5),
+    # replacing a device the member just deleted (same server, same name: the Windows app after a reinstall) is taken from
+    # here instead of vpn_device, a few times an hour at most, so delete+create with new keys is never free for long: past
+    # this it's charged to vpn_device like any new key. See FREED below.
+    "vpn_replace": Bucket(burst=3, every=3600, shared_burst=30, shared_every=10),
+    # the browser extension's login (a proxy credential; the account's oldest is retired past the device limit), per member
+    "vpn_browser": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),
+    # starting the free trial (it can only succeed once per account), per member
+    "vpn_trial": Bucket(burst=3, every=600, shared_burst=30, shared_every=10),
+    # a device made with an anonymous key (X-Kiwi-Key), per account
+    "vpn_anon_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),
     "vpn_support": Bucket(burst=5, every=720, shared_burst=60, shared_every=10),  # Kiwi VPN bug reports / feedback, per member: 5 an hour
     "vpn_key": Bucket(burst=30, every=5, shared_burst=600, shared_every=0.1),  # anonymous key requests, per client
     "vpn_new": Bucket(burst=5, every=600, shared_burst=120, shared_every=5),  # new anonymous keys, per client
@@ -97,6 +114,62 @@ LIMITS = {
 }
 
 
+class Freed:
+    """Kiwi VPN devices a member just deleted, as (member key, server id, device name) -> when, for FREED_FOR seconds.
+
+    A new device on the same server with the same name within that time replaces it (the Windows app deletes the stale
+    "<PC> (<server>)" device after a reinstall and makes a new one): it adds no capacity, so it's charged to "vpn_replace"
+    rather than "vpn_device". Each deletion can be used once. In memory like the buckets (one replica; a restart forgets,
+    and a forgotten one is simply charged as new)."""
+
+    def __init__(self, ttl: float) -> None:
+        self.ttl = ttl
+        self._seen: OrderedDict[tuple[str, int, str], float] = OrderedDict()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(key: str, server_id: int, name: str) -> tuple[str, int, str]:
+        return key, int(server_id), " ".join((name or "").split())
+
+    def add(self, key: str, server_id: int, name: str, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        k = self._key(key, server_id, name)
+        with self._lock:
+            self._seen.pop(k, None)
+            self._seen[k] = now
+            while len(self._seen) > MAX_KEYS:
+                self._seen.popitem(last=False)
+
+    def has(self, key: str, server_id: int, name: str, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            at = self._seen.get(self._key(key, server_id, name))
+            return at is not None and now - at <= self.ttl
+
+    def take(self, key: str, server_id: int, name: str) -> None:
+        with self._lock:
+            self._seen.pop(self._key(key, server_id, name), None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._seen.clear()
+
+
+FREED_FOR = 900  # 15 minutes: the app deletes the stale device and makes the new one within seconds
+FREED = Freed(FREED_FOR)
+
+
+def device_charge(key: str, server_id: int, name: str) -> int | None:
+    """Charge one new Kiwi VPN device key: None when allowed, else the Retry-After seconds.
+
+    Replacing a device this member deleted moments ago (same server and name) takes from "vpn_replace" while that has
+    tokens, and uses up the deletion; anything else, or once "vpn_replace" is empty, takes from "vpn_device"."""
+    if FREED.has(key, server_id, name) and LIMITS["vpn_replace"].hit(key) is None:
+        FREED.take(key, server_id, name)
+        return None
+    return LIMITS["vpn_device"].hit(key)
+
+
 def retry_after(rule: str, request: Request) -> int | None:
     return LIMITS[rule].hit(client_key(request))
 
@@ -115,3 +188,4 @@ def limit(rule: str):  # type: ignore[no-untyped-def]
 def reset_for_tests() -> None:
     for b in LIMITS.values():
         b.clear()
+    FREED.clear()
