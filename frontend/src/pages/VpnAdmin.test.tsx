@@ -181,9 +181,19 @@ describe("VPN admin: access, payments, customers and blocking", () => {
     await open(/Servers/);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Edit capacity"), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText("Included traffic"), { target: { value: "1024" } });
     fireEvent.click(screen.getByRole("button", { name: "Save server" }));
     await flush();
-    expect(calls).toContain('PATCH /api/vpn/admin/servers/3 {"name":"Auckland 1","region":"New Zealand","capacity":50}');
+    expect(calls).toContain('PATCH /api/vpn/admin/servers/3 {"name":"Auckland 1","region":"New Zealand","capacity":50,"traffic_included_gb":1024}');
+  });
+});
+
+describe("traffic text", () => {
+  it("shows the month's traffic against the allowance", async () => {
+    const { trafficText } = await import("./VpnAdmin");
+    expect(trafficText(812e9, 1024)).toBe("812 GB of 1,024 GB (79%)");
+    expect(trafficText(2.5e9, 0)).toBe("2.5 GB this month");
+    expect(trafficText(undefined, undefined)).toBe("0.0 GB this month");
   });
 });
 

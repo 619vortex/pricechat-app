@@ -32,6 +32,7 @@ FAIL_AFTER_JOB = {"system.backup": 1}  # the nightly backup runs once a day: its
 TIKTOK_BAD = ("expired", "revoked", "disconnected")
 VPN_OFFLINE_AFTER = 2  # syncs in a row that couldn't reach a VPN server's agent
 VPN_FULL_AT, VPN_FULL_CLEAR = 0.9, 0.8  # "nearly full" once past 90% of capacity, re-armed only below 80%
+VPN_TRAFFIC_WARN, VPN_TRAFFIC_OVER = 0.8, 1.0  # of a server's monthly allowance; both re-arm when a new month starts
 
 
 def settings_row(db: Session) -> OwnerAlertSettings:
@@ -243,11 +244,13 @@ async def check_vpn_servers(db: Session, *, settings: Settings | None = None, tr
     """One message per transition: offline (2 failed syncs in a row) → back online; nearly full (≥ 90% of capacity),
     re-armed once it drops below 80%. A disabled server's open problems are closed quietly."""
     from app.models.vpn import VpnServer
-    from app.vpn.service import device_counts
+    from app.vpn.service import device_counts, server_traffic
 
     now = now or utcnow()
     counts = device_counts(db)
-    out = {"vpn_offline": 0, "vpn_recovered": 0, "vpn_full": 0}
+    traffic = server_traffic(db, now)
+    month = now.strftime("%Y-%m")
+    out = {"vpn_offline": 0, "vpn_recovered": 0, "vpn_full": 0, "vpn_traffic": 0}
     for v in list(db.scalars(select(VpnServer).order_by(VpnServer.id))):
         off_key, full_key = f"vpn:offline:{v.id}", f"vpn:full:{v.id}"
         if not v.enabled:
@@ -276,6 +279,18 @@ async def check_vpn_servers(db: Session, *, settings: Settings | None = None, tr
                                                       cooldown=False, open_=True)
         elif load < VPN_FULL_CLEAR:
             _close(db, full_key)
+        if v.traffic_included_gb > 0:
+            used = traffic.get(v.id, 0)
+            share = used / (v.traffic_included_gb * 1e9)
+            for level, label in ((VPN_TRAFFIC_OVER, "over its included traffic: extra traffic is billed"), (VPN_TRAFFIC_WARN, "at 80% of its included traffic")):
+                if share >= level:
+                    key = f"vpn:traffic:{v.id}:{month}:{int(level * 100)}"  # once per server, level and month
+                    if not _is_open(db, key):
+                        text = (f"Price Chat alert: Kiwi VPN server bandwidth\nServer: {v.name} is {label}.\n"
+                                f"This month: {used / 1e9:.0f} GB of {v.traffic_included_gb} GB ({round(share * 100)}%).\n"
+                                f"Consider moving users to another server or raising its plan.\nTime: {_when(now)}")
+                        out["vpn_traffic"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
+                    break
     return out
 
 
