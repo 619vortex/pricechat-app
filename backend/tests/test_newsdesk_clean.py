@@ -13,6 +13,15 @@ from app.newsdesk.network import Copy, Link
 AT = datetime(2026, 11, 12, 3, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _no_wikidata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No network in tests: Wikidata's portrait lookup finds nothing unless a test says otherwise."""
+    async def none(client: Any, name: str) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(photos, "wikidata_portraits", none)
+
+
 def ev(headline: str, title: str = "", label: str = "", kind: str = "news", **facts: Any) -> NdEvent:
     e = NdEvent(key="k", kind=kind, title=title or headline, headline=headline, summary="", topic="", label=label, evidence="two outlets",
                 category="news", sources=[], facts=facts, released_at=AT)
@@ -68,8 +77,9 @@ def test_the_telegram_caption_is_label_story_sources_and_the_community() -> None
              stakes="Chipmakers fell with it in late trading.", question="Is the AI trade cooling?")
     html, plain, checked = clean.telegram_caption(c, LINKS, prefix="JUST IN:")
     assert html.startswith("<b>JUST IN:</b> Nvidia $NVDA falls 4% after hours on weaker data-centre guidance. Revenue guidance came in at $54 billion")
-    assert "Chipmakers fell with it" in html and html.count("Nvidia fell 4%") == 0  # the re-telling of the headline is dropped
-    assert "Is the AI trade cooling?" not in html  # no question, no "why it matters", no byline: 1-3 sentences
+    assert html.count("Nvidia fell 4%") == 0  # the re-telling of the headline is dropped
+    assert "Chipmakers fell with it" not in html  # owner 2026-11-12, "shorter, punchier": the hook and one sentence of context at most
+    assert "Is the AI trade cooling?" not in html  # no question, no "why it matters", no byline
     assert '🔗 <a href="https://www.reuters.com/markets/nvidia-falls">Reuters</a> · <a href="https://www.cnbc.com/2026/11/12/nvidia.html">CNBC</a>' in html
     assert html.endswith('<a href="https://t.me/thepricechat">@thepricechat</a>') and plain.endswith("@thepricechat")
     assert "@" not in checked and "Source: Reuters · CNBC" in checked  # the checks read the story, the signature is ours
@@ -206,7 +216,8 @@ async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(mon
     monkeypatch.setattr(photos, "fetch", fetch)
     _, meta = await clean.picture(ev("Nvidia hires Wachtell Lipton to investigate CEO Jensen Huang's affair"), now=AT)
     assert calls[0]["terms"] == ["Jensen Huang"] and calls[0]["sensitive"] is False  # the subject's own search
-    assert meta["title"] == "File:Jensen Huang at Computex 2025.jpg" and meta["layout"] == "photo"  # neutral, not the courtroom one
+    assert meta["title"] == "File:Jensen Huang at Computex 2025.jpg"  # neutral, not the courtroom one
+    assert meta["layout"] == "portrait"  # a tall photo of a person is shown whole, never cropped through the face
     calls.clear()
     await clean.picture(ev("John Smith charged with fraud at Ohio exchange"), now=AT)
     assert all(c["sensitive"] for c in calls) and not any(c["terms"] == ["John Smith"] for c in calls)  # a private person: never

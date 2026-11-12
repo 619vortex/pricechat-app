@@ -30,7 +30,7 @@ from html import escape as _html_escape
 from typing import Any
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,9 @@ GRID, AXIS = (28, 28, 28), (150, 150, 150)
 CHART_BARS = 96  # 15-minute candles: the last 24 hours
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 UA = {"User-Agent": "Mozilla/5.0 (PriceChatNewsDesk/1.0; +https://pricechat.live)"}
-MAX_SENTENCES = 3
+MAX_SENTENCES = 2  # owner, 2026-11-12: "shorter, punchier": the hook, and one sentence of context at most
+SECOND_MAX = 150  # a second sentence longer than this is cut, not squeezed in
+X_SAFE = 260  # X allows 280 weighted characters; we stay under 260 so a counting difference can never cut a post
 TG_LIMIT = 1024
 X_LIMIT = 280
 
@@ -147,6 +149,17 @@ def _words(t: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9$%.]+", t.lower()) if len(w) > 2}
 
 
+FILLER = re.compile(r"^(?:(?:some |many )?(?:experts|analysts|observers|commentators|reports?) (?:say|said|note|noted|suggest|suggested) "
+                    r"(?:that )?|according to (?:reports?|sources), |it (?:is|was) (?:reported|understood) that )", re.I)
+
+
+def _trim_attribution(s: str) -> str:
+    """Drop a vague lead-in ("Experts say that ...") that only delays the fact; the reporting outlet is credited in the source line. A
+    named source ("Elliptic said", "Zelensky says") is never touched."""
+    t = FILLER.sub("", s.strip())
+    return t[:1].upper() + t[1:] if t != s.strip() and t else s
+
+
 def sentences_of(c: Any, case_source: str = "") -> list[str]:
     """The headline as a sentence, then up to two more: the context's sentences that add something (not a re-telling of the headline),
     then what it means for markets. An outlet's Title Case Headline is set in sentence case, a word keeping its capital only where the
@@ -158,9 +171,9 @@ def sentences_of(c: Any, case_source: str = "") -> list[str]:
     out = [head]
     seen = _words(head)
     for s in [*_sentences(c.context), *([c.stakes] if c.stakes else [])]:
-        s = _sentence(s)
+        s = _sentence(_trim_attribution(s))
         w = _words(s)
-        if not w or len(w & seen) / len(w) > 0.6:
+        if not w or len(w & seen) / len(w) > 0.6 or len(s) > SECOND_MAX:
             continue
         out.append(s)
         seen |= w
@@ -202,18 +215,32 @@ def telegram_caption(c: Any, links: list[Any], *, prefix: str = "", outlets: lis
 
 
 def x_caption(c: Any, links: list[Any], *, prefix: str = "", with_links: bool = True, outlets: list[str] | None = None, case_source: str = "") -> str:
-    """The same story for X: the hook (prefix + the headline with its cashtags), a second sentence when it fits, one source link."""
+    """The same story for X: the hook (prefix + the headline with its cashtags) and one source link. A second sentence only when it
+    brings the number the hook lacks, and only under X_SAFE by X's own counting (network.x_length: links 23, emoji and CJK 2). A hook
+    that can't fit is shortened at a word, never mid-word, and the link always survives."""
     from app.newsdesk.network import x_length
 
     sents = [cashtag(s)[0] for s in sentences_of(c, case_source)]
     head = f"{prefix} {sents[0]}" if prefix else sents[0]
     srcs = [x for x in links if getattr(x, "kind", "article") != "pricechat"]
     link = f"{srcs[0].name}: {srcs[0].url}" if (with_links and srcs) else (f"Via {' · '.join([x.name for x in srcs][:2] or (outlets or [])[:2])}" if (srcs or outlets) else "")
-    for extra in (sents[1:2], []):
+    # the hook alone; the second sentence only when it carries the number the hook lacks ("US inflation higher than expected" +
+    # "Prices rose by 0.4% over the month"), and the whole stays short
+    digit = re.compile(r"\d")
+    second = sents[1:2]
+    extras = [second, []] if second and not digit.search(head) and digit.search(second[0]) and len(head) + len(second[0]) <= 200 else [[]]
+    for extra in extras:
         text = "\n\n".join(p for p in [" ".join([head, *extra]), link] if p)
-        if x_length(text) <= X_LIMIT:
+        if x_length(text) <= X_SAFE:
             return text
-    return head[:X_LIMIT]
+    budget = X_SAFE - (x_length(link) + 2 if link else 0) - 1
+    words, cut = head.split(), ""
+    for w in words:
+        if x_length(f"{cut} {w}".strip()) > budget:
+            break
+        cut = f"{cut} {w}".strip()
+    cut = cut.rstrip(",;:—-") + "…"
+    return "\n\n".join(p for p in [cut, link] if p)
 
 
 # --------------------------------------------------------------------------------------------------------------- pictures
@@ -359,6 +386,38 @@ def single_photo(photo: Image.Image, credit: str) -> tuple[bytes, dict[str, Any]
     return _png(img), {"layout": "photo", "subject": list(box)}
 
 
+def portrait_photo(photo: Image.Image, credit: str) -> tuple[bytes, dict[str, Any]]:
+    """A tall photo (a person's portrait) without cutting the face: the whole photo, full height, centred over a softly blurred and
+    darkened enlargement of itself. No pixel of the photo itself is changed beyond a resize."""
+    from PIL import ImageFilter
+
+    photo = photo.convert("RGB")
+    back = ImageOps.fit(photo, (W, H), method=Image.LANCZOS).filter(ImageFilter.GaussianBlur(28))
+    back = Image.blend(back, Image.new("RGB", (W, H), (0, 0, 0)), 0.45)
+    h = H
+    w = round(photo.width * h / photo.height)
+    if w > W * 0.62:  # nearly square: let it be wider, never past 62% of the frame
+        w = round(W * 0.62)
+        h = round(photo.height * w / photo.width)
+    fg = photo.resize((w, h), Image.LANCZOS)
+    back.paste(fg, ((W - w) // 2, (H - h) // 2))
+    _small(back, credit, "left")
+    return _png(back), {"layout": "portrait", "subject": [((W - w) / 2) / W, 0.0, ((W + w) / 2) / W, 1.0]}
+
+
+def duo(person: Image.Image, person_credit: str, context: Image.Image, context_credit: str) -> tuple[bytes, dict[str, Any]]:
+    """Two photos side by side (the collage's 795 x 1000 panels): the person the story is about, and the company or place it is about.
+    Each keeps its own credit in its own corner."""
+    left, _ = photo_picture(person, person_credit, PANEL)
+    _small(left, person_credit, "left")
+    right, _ = photo_picture(context, context_credit, PANEL)
+    _small(right, context_credit, "left")
+    canvas = Image.new("RGB", (CW, CH), BG)
+    canvas.paste(left, (0, 0))
+    canvas.paste(right, (PANEL[0] + GAP, 0))
+    return _png(canvas), {"layout": "duo"}
+
+
 def single_chart(bars: list[list[float]], label: str) -> tuple[bytes, dict[str, Any]]:
     return _png(candles_panel(bars, (W, H), label)), {"layout": "chart"}
 
@@ -474,39 +533,102 @@ MARKET_PHOTOS = [(re.compile(r"\b(s&p|dow|nasdaq|wall street|stocks?)\b", re.I),
                  (re.compile(r"\bgold\b", re.I), "gold bullion bars", "gold")]
 
 
-async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool) -> tuple[Image.Image, dict[str, Any]] | None:
+NATIONALITY = {"iran": "Iranian", "israel": "Israeli", "ukrain": "Ukrainian", "russia": "Russian", "china": "Chinese", "chinese": "Chinese",
+               "taiwan": "Taiwanese", "korea": "Korean", "japan": "Japanese", "india": "Indian", "pakistan": "Pakistani", "turk": "Turkish",
+               "saudi": "Saudi", "syria": "Syrian", "yemen": "Yemeni", "venezuela": "Venezuelan", "american": "American", "u.s.": "American"}
+COUNTRY = {"Iranian": "Iran", "Israeli": "Israel", "Ukrainian": "Ukraine", "Russian": "Russia", "Chinese": "China", "Taiwanese": "Taiwan",
+           "Korean": "Korea", "Japanese": "Japan", "Indian": "India", "Pakistani": "Pakistan", "Turkish": "Turkey", "Saudi": "Saudi Arabia",
+           "Syrian": "Syria", "Yemeni": "Yemen", "Venezuelan": "Venezuela", "American": "United States"}
+WOMEN = re.compile(r"\b(women|woman|female|girls?)\b", re.I)
+MILITARY = re.compile(r"\b(military|army|soldiers?|troops|training camp|conscript\w*|armed forces|recruits?|cadets?|navy|air force)\b", re.I)
+# a company's own product is a better picture than its office (owner: "reject generic buildings when better images exist")
+PRODUCTS = [(re.compile(r"\bsamsung\b", re.I), re.compile(r"\b(galaxy|phones?|smartphones?|wallet)\b", re.I), "Samsung Galaxy smartphone", ["Samsung Galaxy"], None),
+            (re.compile(r"\bapple\b", re.I), re.compile(r"\b(iphones?|phones?|wallet|pay)\b", re.I), "Apple iPhone", ["iPhone"], None),
+            (re.compile(r"\bnvidia\b", re.I), re.compile(r"\b(chips?|gpus?|blackwell|h100|h200|semiconductors?|graphics)\b", re.I), "Nvidia GPU",
+             ["Nvidia"], re.compile(r"\b(gpu|chip|graphics card|geforce|h100|h200|dgx|blackwell|rtx|tesla v100)\b", re.I)),
+            (re.compile(r"\btesla\b", re.I), re.compile(r"\b(cars?|vehicles?|ev|evs|model [3sxy]|cybertruck|robotaxi)\b", re.I), "Tesla car",
+             ["Tesla Model", "Cybertruck"], None)]
+
+
+def topic_plans(text: str) -> list[tuple[list[str], list[str], Any]]:
+    """(searches, terms one of which the photo must name, an extra pattern the photo's words must also match) for what the story is
+    about when that is more specific than a place: a group of people the story is about (Iranian women soldiers for an all-women
+    training camp), a company's product. Checked before the generic building or skyline."""
+    out: list[tuple[list[str], list[str], Any]] = []
+    low = text.lower()
+    if WOMEN.search(text) and MILITARY.search(text):
+        adj = next((a for k, a in NATIONALITY.items() if k in low), "")
+        if adj:
+            out.append(([f"{adj} female soldiers", f"{adj} women soldiers", f"{adj} army women"], [adj, COUNTRY.get(adj, adj)],
+                        [WOMEN, MILITARY]))  # both: a protest photo of women in Iran must never illustrate a military story
+    for company, about, q, terms, also in PRODUCTS:
+        if company.search(text) and about.search(text):
+            out.append(([q], terms, [also] if also is not None else None))
+    return out
+
+
+async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, skip_person: bool = False,
+                     only_company: bool = False) -> tuple[Image.Image, dict[str, Any]] | None:
     """A licensed photo of the story's subject: the person first (when a person is the subject and the story isn't sensitive), else the
     company or place (app/newsdesk/visual.subject_queries). Every licence and relevance rule of app/newsdesk/photos applies."""
     from app.newsdesk import photos, visual
 
     sensitive = visual.is_sensitive(ev)
-    plans: list[tuple[list[str], list[str]]] = []
-    person = person_subject(ev)
+    text = f"{ev.headline} {ev.title}"
+    plans: list[tuple[list[str], list[str], Any]] = []
+    person = None if skip_person else person_subject(ev)
     if person:
-        plans.append(([person, f"{person} portrait"], [person]))  # its own search: the person is the subject (see the neutral filter below)
-    queries = visual.subject_queries(f"{ev.headline} {ev.title}")
+        plans.append(([person, f"{person} portrait"], [person], None))  # its own search: the person is the subject (neutral filter below)
+    if not only_company:
+        plans += topic_plans(text)
+    queries = visual.subject_queries(text)
+    if only_company:
+        queries = [(q, must) for q, must in queries if visual.COMPANIES.search(must)]
     if getattr(ev, "kind", "") in ("market", "recap"):
-        queries += [(q, must) for rx, q, must in MARKET_PHOTOS if rx.search(f"{ev.headline} {ev.title}")]
+        queries += [(q, must) for rx, q, must in MARKET_PHOTOS if rx.search(text)]
     for term in dict.fromkeys(must for _, must in queries):
-        plans.append(([q for q, must in queries if must == term], [term]))
+        plans.append(([q for q, must in queries if must == term], [term], None))
     async with httpx.AsyncClient(transport=transport) as client:
-        for qs, terms in plans:
+        for qs, terms, also in plans:
             try:
                 is_person = person is not None and terms == [person]
-                found = await photos.discover(client, qs, terms, used=used, sensitive=sensitive and not is_person, panel=panel)
+                found = []
+                if is_person:  # Wikidata's own picture of the person first: a recognisable portrait, not a hall that mentions them
+                    try:
+                        found = [p for p in await photos.wikidata_portraits(client, person) if _url_free(p, used)]
+                    except Exception as e:  # noqa: BLE001
+                        logger.info("clean: wikidata portrait failed (%s)", type(e).__name__)
+                found += await photos.discover(client, qs, terms, used=used, sensitive=sensitive and not is_person, panel=panel or is_person,
+                                               person=is_person)
+                if also:  # every extra pattern must match the photo's own words
+                    found = [p for p in found if all(rx.search(f"{p.title} {p.description} {' '.join(p.tags)}") for rx in also)]
                 if is_person and sensitive:  # a controversy: only a neutral photo of them (no arrest, court, police or protest scene)
                     found = [p for p in found if not NOT_NEUTRAL.search(f"{p.title} {p.description} {' '.join(p.tags)}")]
+                if is_person:  # never a wide shot of the person when a close one exists
+                    close = [p for p in found if photos.composition(p, person=True) > -1]
+                    found = close or found
             except Exception as e:  # noqa: BLE001
                 logger.info("clean: photo discovery failed (%s)", type(e).__name__)
                 continue
             for p in found[:3]:
-                img = await photos.fetch(client, p, min_width=photos.PANEL_MIN_WIDTH if panel else photos.MIN_WIDTH)
+                img = await photos.fetch(client, p, min_width=500 if is_person else photos.PANEL_MIN_WIDTH if panel else photos.MIN_WIDTH)
                 if img is None:
                     continue
                 meta = p.to_meta() if hasattr(p, "to_meta") else {"url": p.url}
                 return img, {"url": p.url, "page": meta.get("page", ""), "title": meta.get("title", ""), "credit": p.credit,
                              "licence": meta.get("licence", "") or getattr(p, "licence", ""), "photo": meta, "person": terms[0] if terms == [person] else ""}
     return None
+
+
+def _url_free(p: Any, used: set[str]) -> bool:
+    from app.newsdesk import photos
+
+    keys = {photos._norm_url(u) for u in used if u}
+    return photos._norm_url(p.url) not in keys and photos._norm_url(p.page) not in keys
+
+
+def _tall(img: Image.Image) -> bool:
+    return img.width < img.height * 1.25  # cropping this to 16:9 would cut the person's head or body
 
 
 async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, now: datetime | None = None,
@@ -564,6 +686,18 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
         if len(bars) >= 20:
             data, meta = collage(img, credit, bars, label)
             return data, {**base, **pmeta, **meta, "kind": "photo", "bars": bars, "label": label, "symbol": subject[0] if subject else "", "credit_line": credit}
+        if pmeta.get("person") and visual.COMPANIES.search(text):  # the person and their company, side by side
+            ctx = await find_photo(ev, used=used | {pmeta.get("url", ""), pmeta.get("page", "")}, transport=transport, panel=True,
+                                   skip_person=True, only_company=True)
+            if ctx is not None:
+                cimg, cmeta = ctx
+                ccredit = image_credit(cmeta)
+                data, meta = duo(img, credit, cimg, ccredit)
+                return data, {**base, **pmeta, **meta, "kind": "photo", "credit_line": credit, "context_photo": {k: cmeta.get(k) for k in
+                              ("url", "page", "title", "credit", "licence")}, "context_credit": ccredit}
+        if pmeta.get("person") and _tall(img):
+            data, meta = portrait_photo(img, credit)
+            return data, {**base, **pmeta, **meta, "kind": "photo", "credit_line": credit}
         data, meta = single_photo(img, credit)
         return data, {**base, **pmeta, **meta, "kind": "photo", "credit_line": credit}
     if len(bars) >= 20:
@@ -599,11 +733,16 @@ async def download(url: str, transport: Any = None) -> Image.Image:
 async def redraw(ev: Any, meta: dict[str, Any], *, transport: Any = None, db: Any = None, now: datetime | None = None) -> tuple[bytes, dict[str, Any]] | None:
     """The same clean picture again from what was stored (X posts what Telegram showed): the same photo, the same candles."""
     layout = meta.get("layout")
-    if layout in ("collage", "photo") and meta.get("url"):
+    if layout in ("collage", "photo", "portrait", "duo") and meta.get("url"):
         img = await download(meta["url"], transport)
         credit = str(meta.get("credit_line") or image_credit(meta))
         if layout == "collage":
             return collage(img, credit, meta.get("bars") or [], str(meta.get("label") or ""))[0], meta
+        if layout == "portrait":
+            return portrait_photo(img, credit)[0], meta
+        if layout == "duo" and (meta.get("context_photo") or {}).get("url"):
+            ctx = await download(meta["context_photo"]["url"], transport)
+            return duo(img, credit, ctx, str(meta.get("context_credit") or ""))[0], meta
         return single_photo(img, credit)[0], meta
     if layout == "chart" and meta.get("bars"):
         return single_chart(meta["bars"], str(meta.get("label") or ""))[0], meta

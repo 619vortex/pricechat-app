@@ -534,14 +534,33 @@ async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport
 EMOJI_RX = re.compile("[\U0001F000-\U0001FAFF☀-➿️]")
 
 
+# X auto-links a bare domain ("pricechat.live", "Reuters.com") and counts it as a 23-character link too
+BARE_DOMAIN = re.compile(r"(?<![\w@$/.-])(?:[a-z0-9-]+\.)+(?:com|net|org|io|co|live|news|ai|app|uk|us|eu|de|fr|jp|xyz|info|biz|tv|me|gg|fi)"
+                         r"(?:/[^\s]*)?(?![\w-])", re.I)
+X_LIGHT = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))  # twitter-text v3: these code points weigh 1, every other one 2
+
+
+def _x_char(ch: str) -> int:
+    o = ord(ch)
+    if o in (0xFE0F, 0x200D) or 0x1F3FB <= o <= 0x1F3FF:
+        return 0  # emoji joiners, variation selectors and skin tones belong to the emoji before them
+    if EMOJI_RX.match(ch):
+        return 2
+    return 1 if any(a <= o <= b for a, b in X_LIGHT) else 2
+
+
 def x_length(text: str) -> int:
-    """X's weighted length: a link is 23, an emoji 2, everything else 1 (close enough for Latin text)."""
+    """X's weighted length, by its own rules (twitter-text v3): every link, with or without https:// (a bare "example.com" is linked
+    too), counts 23; an emoji counts 2 (with its joiners and modifiers); Latin, Greek, Cyrillic, Arabic, Hebrew and common punctuation
+    count 1; CJK and other scripts count 2. A $CASHTAG is ordinary text."""
     n = 0
     for part in re.split(r"(https?://\S+)", text):
         if part.startswith(("http://", "https://")):
             n += X_URL_WEIGHT
-        else:
-            n += len(part) + len(EMOJI_RX.findall(part))
+            continue
+        pieces = BARE_DOMAIN.split(part)
+        n += X_URL_WEIGHT * (len(pieces) - 1)
+        n += sum(_x_char(ch) for piece in pieces for ch in piece)
     return n
 
 

@@ -428,24 +428,69 @@ async def search_commons(client: httpx.AsyncClient, query: str, limit: int = 20)
               "gsrlimit": str(limit), "prop": "imageinfo", "iiprop": "url|size|extmetadata|mime", "iiurlwidth": "1920"}
     r = await client.get(COMMONS, params=params, headers=UA, timeout=TIMEOUT)
     r.raise_for_status()
-    out = []
     pages = sorted((r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 0))
-    for page in pages:
-        info = (page.get("imageinfo") or [{}])[0]
-        meta = info.get("extmetadata") or {}
+    return [p for p in (_commons_photo(page, query) for page in pages) if p is not None]
 
-        def mv(k: str) -> str:
-            return str((meta.get(k) or {}).get("value", "") or "")
 
-        if mv("NonFree").lower() == "true":
+def _commons_photo(page: dict[str, Any], query: str) -> LicensedPhoto | None:
+    """One Commons file page (prop=imageinfo with extmetadata) as a LicensedPhoto; None for non-free files."""
+    info = (page.get("imageinfo") or [{}])[0]
+    meta = info.get("extmetadata") or {}
+
+    def mv(k: str) -> str:
+        return str((meta.get(k) or {}).get("value", "") or "")
+
+    if mv("NonFree").lower() == "true" or not info:
+        return None
+    year = YEAR.search(_plain(mv("DateTimeOriginal")))
+    return LicensedPhoto(
+        title=page.get("title", ""), url=info.get("thumburl") or info.get("url", ""), page=info.get("descriptionurl", ""),
+        creator=_plain(mv("Artist")), provider="wikimedia", source="wikimedia", licence=_plain(mv("LicenseShortName")),
+        licence_url=mv("LicenseUrl"), width=int(info.get("width") or 0), height=int(info.get("height") or 0),
+        description=_plain(mv("ImageDescription"))[:600], tags=tuple(c.strip() for c in mv("Categories").split("|") if c.strip()),
+        year=int(year.group(1)) if year else None, mime=info.get("mime", ""), restrictions=mv("Restrictions"), query=query)
+
+
+WIKIDATA = "https://www.wikidata.org/w/api.php"
+PORTRAIT_FILE = re.compile(r"\b(official[ _]portrait|portrait|headshot|cropped|close[- ]?up)\b", re.I)
+
+
+async def wikidata_portraits(client: httpx.AsyncClient, name: str) -> list[LicensedPhoto]:
+    """The images Wikidata gives a PERSON (property P18 of an item that is an instance of human) as licensed Commons photos, portrait-like
+    files first. By Wikidata's own guidelines a person's image is a recognisable picture of them (usually a close-up): a story naming
+    "Jensen Huang" gets Jen-Hsun Huang's portrait, not a keynote hall that mentions him. The licence rules still apply to every file."""
+    r = await client.get(WIKIDATA, params={"action": "wbsearchentities", "search": name, "language": "en", "type": "item", "limit": "3",
+                                           "format": "json"}, headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    ids = [x["id"] for x in r.json().get("search") or [] if x.get("id")]
+    if not ids:
+        return []
+    r = await client.get(WIKIDATA, params={"action": "wbgetentities", "ids": "|".join(ids), "props": "claims", "format": "json"},
+                         headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    ents = r.json().get("entities") or {}
+    files: list[str] = []
+    for i in ids:  # the search's own order, best match first; humans only
+        claims = (ents.get(i) or {}).get("claims") or {}
+        human = any((((c.get("mainsnak") or {}).get("datavalue") or {}).get("value") or {}).get("id") == "Q5" for c in claims.get("P31", []))
+        if not human:
             continue
-        year = YEAR.search(_plain(mv("DateTimeOriginal")))
-        out.append(LicensedPhoto(
-            title=page.get("title", ""), url=info.get("thumburl") or info.get("url", ""), page=info.get("descriptionurl", ""),
-            creator=_plain(mv("Artist")), provider="wikimedia", source="wikimedia", licence=_plain(mv("LicenseShortName")),
-            licence_url=mv("LicenseUrl"), width=int(info.get("width") or 0), height=int(info.get("height") or 0),
-            description=_plain(mv("ImageDescription"))[:600], tags=tuple(c.strip() for c in mv("Categories").split("|") if c.strip()),
-            year=int(year.group(1)) if year else None, mime=info.get("mime", ""), restrictions=mv("Restrictions"), query=query))
+        files = [str(c["mainsnak"]["datavalue"]["value"]) for c in claims.get("P18", []) if (c.get("mainsnak") or {}).get("datavalue")]
+        break
+    if not files:
+        return []
+    files.sort(key=lambda f: 0 if PORTRAIT_FILE.search(f) else 1)
+    r = await client.get(COMMONS, params={"action": "query", "format": "json", "titles": "|".join(f"File:{f}" for f in files[:4]),
+                                          "prop": "imageinfo", "iiprop": "url|size|extmetadata|mime", "iiurlwidth": "1600"},
+                         headers=UA, timeout=TIMEOUT)
+    r.raise_for_status()
+    by_title = {str(p.get("title", "")).replace("_", " "): p for p in ((r.json().get("query") or {}).get("pages") or {}).values()}
+    out = []
+    for f in files[:4]:
+        page = by_title.get(f"File:{f}".replace("_", " "))
+        photo = _commons_photo(page, f"wikidata:{name}") if page else None
+        if photo is not None and not verify_licence(photo) and photo.width >= 500:
+            out.append(photo)
     return out
 
 
@@ -523,7 +568,36 @@ def _keys(p: LicensedPhoto) -> set[str]:
     return keys
 
 
-def _score(p: LicensedPhoto, subject_terms: list[str], story_terms: list[str], sensitive: bool = False) -> float:
+# Composition (owner, 2026-11-12: "the Nvidia/Jensen Huang story uses a distant conference crowd. That's a weak visual"). Judged from the
+# file's own words: a person's photo should be a recognisable close-up, not a stage, hall or crowd; any story's photo should be its
+# subject, not a generic building or skyline when something better exists. A score, so a building still wins when nothing better is found.
+WIDE_SHOT = re.compile(r"\b(keynotes?|conferences?|conventions?|summits?|expos?|exhibitions?|stages?|audiences?|crowds?|arenas?|halls?|"
+                       r"forums?|panels?|ceremon(?:y|ies)|rall(?:y|ies)|booths?|events?|festivals?|venues?|presentations?|"
+                       r"(?:group|family|team) photo|delegations?)\b", re.I)
+CLOSE_UP = re.compile(r"\b(portraits?|headshots?|cropped|close[- ]?ups?|official photo)\b", re.I)
+GENERIC_PLACE = re.compile(r"\b(skylines?|cityscapes?|panoramas?|aerial|headquarters|hq|office buildings?|buildings?|campus|exterior|"
+                           r"facade|façade|towers?|view from)\b", re.I)
+
+
+def composition(p: LicensedPhoto, *, person: bool = False, sensitive: bool = False) -> float:
+    """A score adjustment for what the photo shows, judged from its title, categories and the description's first sentence."""
+    title, tags = _title(p), " | ".join(p.tags)
+    adj = 0.0
+    if person:
+        if CLOSE_UP.search(title) or CLOSE_UP.search(tags):
+            adj += 2.5
+        if p.height >= p.width * 0.95:
+            adj += 1.0  # a portrait-shaped photo of a person is almost always a close shot
+        if WIDE_SHOT.search(title):
+            adj -= 3.0
+        elif WIDE_SHOT.search(f"{tags} | {_lead(p.description)}"):
+            adj -= 1.0
+    elif not sensitive and GENERIC_PLACE.search(title):
+        adj -= 1.5
+    return adj
+
+
+def _score(p: LicensedPhoto, subject_terms: list[str], story_terms: list[str], sensitive: bool = False, person: bool = False) -> float:
     title, tags = _title(p), " | ".join(p.tags)
     in_title = _has(title, subject_terms)
     in_tags = [t for t in _has(tags, subject_terms) if t not in in_title]
@@ -538,11 +612,12 @@ def _score(p: LicensedPhoto, subject_terms: list[str], story_terms: list[str], s
         trust -= 0.3
     aspect = 1 - min(abs(p.width / max(p.height, 1) - 16 / 9), 1)
     place = 1.0 if sensitive and (PREFER.search(title) or PREFER.search(tags)) else 0.0  # places and objects first
-    return round(match + res + recency + 1.5 * trust + 0.5 * aspect + place, 4)
+    return round(match + res + recency + 1.5 * trust + (0.0 if person else 0.5 * aspect) + place + composition(p, person=person, sensitive=sensitive), 4)
 
 
 async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms: list[str], *, used: Iterable[str] = frozenset(),
-                   limit: int = 8, story_terms: Iterable[str] = (), sensitive: bool = False, panel: bool = False) -> list[LicensedPhoto]:
+                   limit: int = 8, story_terms: Iterable[str] = (), sensitive: bool = False, panel: bool = False,
+                   person: bool = False) -> list[LicensedPhoto]:
     """Licensed, relevant photographs for a story, best first. Commons and Openverse are searched in parallel (Pexels too when keyed);
     duplicates across providers collapse to the most trusted copy; anything in `used` (URLs or pages) is skipped. `sensitive` (a scandal,
     fraud, crime, hack, death or war story: `is_sensitive(headline)`) admits only photos of places and objects, never of people."""
@@ -565,7 +640,7 @@ async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms:
         if why:
             logger.debug("newsdesk photos: skip %s (%s)", p.title[:80], why)
             continue
-        p.score = _score(p, subject_terms, story, sensitive)
+        p.score = _score(p, subject_terms, story, sensitive, person)
         ok.append(p)
     ok.sort(key=lambda p: p.score, reverse=True)
     seen: set[str] = set()
