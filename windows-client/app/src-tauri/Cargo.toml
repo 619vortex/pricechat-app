@@ -1,6 +1,6 @@
 [package]
 name = "kiwivpn-app"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 description = "Kiwi VPN for Windows: the desktop window. It runs as the signed-in person and asks the Kiwi VPN service to do everything privileged."
 

@@ -490,7 +490,45 @@ function Payments({ on }: { on: boolean }) {
   );
 }
 
-type Tab = "overview" | "servers" | "customers" | "payments";
+export type VpnSupportReport = { id: number; kind: "bug" | "feedback"; source: "desktop" | "web"; member: string; member_id: number; created_at: string | null;
+  app_version: string | null; message: string; /** the app's diagnostics, redacted on the server */ diagnostics: string | null; done: boolean; done_at: string | null };
+
+/** Bug reports and feedback members sent from the Kiwi VPN app (Tools › Support) or the website. Keys and configs were removed before they were stored. */
+function Support() {
+  const r = useApi(() => request<{ items: VpnSupportReport[] }>("/vpn/admin/support"), 60_000);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [hideDone, setHideDone] = useState(false);
+  async function mark(x: VpnSupportReport, done: boolean) {
+    setNote(null);
+    try { await request(`/vpn/admin/support/${x.id}/done`, { method: "POST", body: JSON.stringify({ done }) }); await r.reload(); }
+    catch (e) { setNote({ ok: false, text: errText(e) }); }
+  }
+  const items = (r.data?.items ?? []).filter((x) => !hideDone || !x.done);
+  return (
+    <Card title="Support" actions={<label className="small"><input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} /> Hide done</label>}>
+      {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
+      {note && <Badge tone={note.ok ? "good" : "bad"}>{note.text}</Badge>}
+      {r.loading && !r.data ? <Loading /> : !items.length ? <Empty>{r.data?.items?.length ? "Everything is done." : "No reports yet. Members send them from the Kiwi VPN app (Tools › Support)."}</Empty> : (
+        <ul className="vpna-support">
+          {items.map((x) => (
+            <li key={x.id} className={x.done ? "is-done" : ""}>
+              <div className="vpna-support-head">
+                <Badge tone={x.kind === "bug" ? "bad" : "good"}>{x.kind === "bug" ? "Bug" : "Feedback"}</Badge>
+                <b>{x.member}</b>
+                <span className="muted small">{x.created_at ? relativeTime(x.created_at) : ""}{x.app_version ? ` · app ${x.app_version}` : ""}{x.source === "web" ? " · website" : ""}</span>
+                <label className="small vpna-support-done"><input type="checkbox" checked={x.done} onChange={(e) => void mark(x, e.target.checked)} aria-label={`Done: report ${x.id}`} /> Done</label>
+              </div>
+              <p className="vpna-support-msg">{x.message}</p>
+              {x.diagnostics && <details><summary className="small">Diagnostics</summary><pre className="mono small vpna-support-diag">{x.diagnostics}</pre></details>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+type Tab = "overview" | "servers" | "customers" | "payments" | "support";
 
 export function VpnAdminPage() {
   const r = useApi(() => request<VpnOverview>("/vpn/admin/overview"), 60_000);
@@ -512,7 +550,7 @@ export function VpnAdminPage() {
                 tone={d.servers.some((x) => x.enabled && !x.online) ? "warn" : "good"} />
         </div>
         <Tabs<Tab> value={tab} onChange={setTab} tabs={[{ key: "overview", label: "Overview" }, { key: "servers", label: `Servers (${d.servers.length})` },
-          { key: "customers", label: "People" }, { key: "payments", label: "Payments" }]} />
+          { key: "customers", label: "People" }, { key: "payments", label: "Payments" }, { key: "support", label: "Support" }]} />
         {tab === "overview" && <>
           {!d.servers.some((x) => x.online) && (
             <Card title="Get connected">
@@ -538,6 +576,7 @@ export function VpnAdminPage() {
         </Card>
         <AddServer onAdded={r.reload} />
         </>}
+        {tab === "support" && <Support />}
         {tab === "customers" && <Customers payments={d.settings.payments_enabled} onChanged={r.reload} />}
         {tab === "payments" && <>
           {d.billing && (

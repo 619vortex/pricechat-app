@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useExit } from "./exit";
-import { DEFAULT_FAILOVER, type FailoverState, freshFailover, nextFailoverStep, rankServers } from "./smart";
+import { DEFAULT_FAILOVER, DEFAULT_LIVENESS, type FailoverState, type LivenessState, failoverOrder, freshFailover, freshLiveness, nextFailoverStep, observeRx, probeResult, rankServers } from "./smart";
+import { Support } from "./support";
 import { ConnectionSettings, Tools } from "./tools";
-import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, probeServers, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
+import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, probeServers, probeTunnel, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
 
 const POLL_MS = 1000;
 const ACCOUNT_MS = 60_000;
@@ -99,6 +100,8 @@ export function App() {
   /** The person asked to be connected (and hasn't asked to stop): failover only acts then. */
   const want = useRef(false);
   const fo = useRef<FailoverState>(freshFailover(null));
+  /** Is the server still answering through the tunnel? Faster than waiting for WireGuard's handshake to go stale. */
+  const alive = useRef<LivenessState>(freshLiveness());
   const autoChecked = useRef(false);
   const wasOn = useRef(false);
   const meantToStop = useRef(false);
@@ -160,11 +163,29 @@ export function App() {
     catch (e) { setProblem(String(e)); }
     finally { setAction(null); }
   };
-  const connectTo = async (serverId: number) => {
+  const connectTo = async (serverId: number, pauseFirst = false) => {
     want.current = true;
     if (fo.current.serverId !== serverId) fo.current = freshFailover(serverId);
-    take(await vpnConnect(serverId));
+    alive.current = freshLiveness();
+    take(await vpnConnect(serverId, pauseFirst));
     await loadAccount();
+  };
+  /** Failover's move: the old tunnel is paused (kill switch still blocking) and the next server tried. If a server can't be had
+   * (no config: the device limit, the server gone), the next candidate is tried at once rather than after another grace period. */
+  const failoverTo = async (serverId: number, isSwitch: boolean, order: Server[]) => {
+    let id = serverId;
+    for (;;) {
+      const to = (view?.account?.servers ?? []).find((x) => x.id === id);
+      if (isSwitch && to) setSwitchedTo(serverPlace(to));
+      try { await connectTo(id, true); return; }
+      catch (e) {
+        if (!isSwitch) throw e;
+        const n = nextFailoverStep(DEFAULT_FAILOVER, fo.current, false, Date.now(), order, true);
+        if (n.step.kind !== "switch") throw e;
+        fo.current = n.state;
+        id = n.step.serverId;
+      }
+    }
   };
   const connect = (serverId: number) => run("connect", async () => {
     setSwitchedTo(null);
@@ -194,18 +215,35 @@ export function App() {
   const picked = chosen ?? (smartOn ? SMART : view?.suggested ?? null);
   const shown = servers.find((s) => s.id === (phase === "on" || phase === "connecting" ? view?.last_server ?? fo.current.serverId ?? picked : picked)) ?? null;
 
-  // Failover: while the person wants to be connected and the service says the tunnel isn't healthy, wait, retry once,
+  // Liveness (2.1): while connected, watch the bytes coming in; after a quiet spell, probe through the tunnel. Several unanswered
+  // probes in a row, with nothing received, mean the server is gone, and failover below moves on at once. Declared before the
+  // failover effect, so both see the same reading.
+  useEffect(() => {
+    const st = answer?.status;
+    if (!want.current || prefs?.failover !== true || action !== null || reported !== "on" || !st) { alive.current = freshLiveness(); return; }
+    const o = observeRx(DEFAULT_LIVENESS, alive.current, st.rx_bytes, Date.now());
+    alive.current = o.state;
+    if (o.probe) {
+      void probeTunnel().catch(() => null).then((answered) => { alive.current = probeResult(DEFAULT_LIVENESS, alive.current, answered ?? null, Date.now()); });
+    }
+  }, [answer, now]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Failover: while the person wants to be connected and the service says the tunnel isn't healthy (or the liveness probe found
+  // the server gone), wait, retry once,
   // then move to the next best server. It never runs after Disconnect, and gives up rather than looping.
   useEffect(() => {
     if (!want.current || prefs?.failover !== true || action !== null || !account) return;
     if (reported === "loading" || reported === "no-service" || reported === "stopping") return;
-    const r = nextFailoverStep(DEFAULT_FAILOVER, fo.current, reported === "on", Date.now(), rankServers(servers, timings));
+    // servers this PC already has a device for first: switching there creates no device, so the device limit can't refuse it
+    const order = failoverOrder(rankServers(servers, timings), view?.known_servers);
+    const dead = reported === "on" && alive.current.dead;
+    const r = nextFailoverStep(DEFAULT_FAILOVER, fo.current, reported === "on", Date.now(), order, dead);
     fo.current = r.state;
     if (r.step.kind === "retry" || r.step.kind === "switch") {
       const id = r.step.serverId;
-      const to = servers.find((x) => x.id === id);
-      if (r.step.kind === "switch" && to) setSwitchedTo(serverPlace(to));
-      void run("connect", () => connectTo(id));
+      const isSwitch = r.step.kind === "switch";
+      alive.current = freshLiveness();
+      void run("connect", () => failoverTo(id, isSwitch, order));
     } else if (r.step.kind === "give-up") {
       want.current = false;
       setProblem(r.step.reason);
@@ -270,6 +308,7 @@ export function App() {
           <button type="button" className="link" onClick={() => setTools(false)}>Back</button>
         </header>
         <Tools connected={reported === "on"} normalIp={phase === "off" ? ip ?? null : null} />
+        <Support signedIn={!!view?.signed_in} />
       </main>
     );
   }

@@ -112,7 +112,11 @@ pub trait Backend {
     fn logout(&self, token: &str) -> Result<(), ApiError>;
     fn refresh(&self, token: &str) -> Result<String, ApiError>;
     fn my_ip(&self) -> Result<String, ApiError>;
+    /// Tools › Support (2.1): a bug report or feedback. `diagnostics` is already stripped (see `support::report`).
+    fn support(&self, token: &str, kind: &str, message: &str, app_version: &str, diagnostics: Option<&str>) -> Result<(), ApiError>;
 }
+
+pub const SUPPORT_PATH: &str = "/members/vpn/support";
 
 pub struct Http {
     agent: ureq::Agent,
@@ -253,6 +257,11 @@ impl Backend for Http {
         let reply: Reply = parsed(self.agent.get(&self.url("/members/vpn/ip")).call())?;
         Ok(reply.ip)
     }
+
+    fn support(&self, token: &str, kind: &str, message: &str, app_version: &str, diagnostics: Option<&str>) -> Result<(), ApiError> {
+        let body = crate::support::body(kind, message, app_version, diagnostics);
+        self.with_session("POST", SUPPORT_PATH, token).send_json(body).map(|_| ()).map_err(failure)
+    }
 }
 
 #[cfg(test)]
@@ -274,5 +283,57 @@ mod tests {
         let v = serde_json::json!({"Status":0,"Answer":[{"name":"pricechat.live","type":5,"data":"x.example."},{"name":"pricechat.live","type":1,"data":"76.76.21.21"},{"type":1,"data":"not an ip"},{"type":28,"data":"2606::1"}]});
         assert_eq!(doh_addresses(&v), vec!["76.76.21.21".parse::<std::net::IpAddr>().unwrap()]);
         assert!(doh_addresses(&serde_json::json!({"Status":3})).is_empty());
+    }
+
+    /// One request to a local stand-in for Price Chat: what it received (request head, body), after answering `status` with `reply`.
+    fn one_request(status: &str, reply: &'static str, call: impl FnOnce(&Http)) -> (String, String) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status = status.to_string();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                head.push_str(&line);
+            }
+            let length = head.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap())).expect("a Content-Length");
+            let mut body = vec![0u8; length];
+            reader.read_exact(&mut body).unwrap();
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).unwrap();
+            stream.flush().unwrap();
+            (head, String::from_utf8(body).unwrap())
+        });
+        call(&Http::new(&format!("http://127.0.0.1:{port}")).unwrap());
+        server.join().unwrap()
+    }
+
+    #[test]
+    fn a_support_report_is_posted_with_the_session_cookie_and_the_expected_body() {
+        let (head, body) = one_request("201 Created", r#"{"ok":true,"id":7}"#, |http| {
+            http.support("kd.session", "bug", "  Failover didn't move me from 10.0.0.2  ", "2.1.0", Some("Kiwi VPN for Windows 2.1.0")).unwrap();
+        });
+        assert!(head.starts_with("POST /api/members/vpn/support HTTP/1.1\r\n"), "{head}");
+        assert!(head.lines().any(|l| l == "Cookie: pc_session=kd.session"), "{head}");
+        assert!(head.to_ascii_lowercase().contains("content-type: application/json"), "{head}");
+        let sent: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(sent, serde_json::json!({ "kind": "bug", "message": "Failover didn't move me from [address]", "app_version": "2.1.0", "diagnostics": "Kiwi VPN for Windows 2.1.0" }));
+    }
+
+    #[test]
+    fn a_support_report_without_diagnostics_leaves_them_out_and_a_refusal_keeps_price_chat_s_words() {
+        let mut got = None;
+        let (_, body) = one_request("429 Too Many Requests", r#"{"detail":"You've sent several reports already. Please try again later."}"#, |http| {
+            got = Some(http.support("kd.session", "feedback", "Nice app", "2.1.0", None));
+        });
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&body).unwrap(), serde_json::json!({ "kind": "feedback", "message": "Nice app", "app_version": "2.1.0" }));
+        assert_eq!(got.unwrap().unwrap_err(), ApiError { status: 429, message: "You've sent several reports already. Please try again later.".into() });
     }
 }

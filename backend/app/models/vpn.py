@@ -132,3 +132,19 @@ class VpnDevice(IdMixin, TimestampMixin, Base):
     rx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)  # the agent's last raw counters
     tx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
     paused_until: Mapped[datetime | None] = mapped_column(UTCDateTime())  # over the monthly cap: peer off the node until then
+
+
+class VpnSupportReport(IdMixin, TimestampMixin, Base):
+    """A bug report or feedback a member sent from a Kiwi VPN app (or the website). Admin › Kiwi VPN › Support.
+
+    The message and diagnostics are redacted before they are stored (app.vpn.support): no private keys, no WireGuard configs."""
+
+    __tablename__ = "vpn_support_reports"
+
+    member_id: Mapped[int] = mapped_column(ForeignKey("members.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)  # bug | feedback
+    source: Mapped[str] = mapped_column(String(12), default="web", server_default="web", nullable=False)  # desktop (the app's session) | web
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    app_version: Mapped[str | None] = mapped_column(String(32))
+    diagnostics: Mapped[str | None] = mapped_column(Text)  # the app's own diagnostics text, at most support.MAX_DIAGNOSTICS characters
+    done_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # the owner marked it handled

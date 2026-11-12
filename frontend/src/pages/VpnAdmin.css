@@ -30,3 +30,12 @@
 .vpna-devices { display: grid; gap: 6px; }
 .vpna-device { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
 .vpna-note { margin: 0; }
+
+/* Support: members' bug reports and feedback */
+.vpna-support { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.vpna-support li { border: 1px solid var(--border, rgba(127, 127, 127, 0.25)); border-radius: 10px; padding: 10px 12px; }
+.vpna-support li.is-done { opacity: 0.6; }
+.vpna-support-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vpna-support-done { margin-left: auto; }
+.vpna-support-msg { margin: 8px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vpna-support-diag { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }

@@ -17,7 +17,7 @@ export function storeLink(store: "chrome" | "edge", href: string): string | null
 export const PLAN = { price_usd: 9.99, period_days: 30, trial_days: 30, keep_days: 30 };
 
 /** The Windows beta: the button appears only while this names a hosted installer. All three together, from the build. Clear them and nothing on the page offers a download. */
-export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "2.0.0", sha256: "1F2BAAB6A99E201750B8B72795BE7A2704E7B517A14BA6E607D9F640D99FD7BA" };
+export const WINDOWS_BETA: { href: string; version: string; sha256: string } = { href: "/downloads/KiwiVPN-Setup.exe", version: "2.1.0", sha256: "660C2D5B6845CACA77E298C002CC44F9A79806129BCAFB71E85FAFCD387668C3" };
 
 /** The Android APK. Fill `href` and `sha256` together, and a test ties them to the file. Clear them and the button goes back to disabled.
  *  `testing`: true while real-phone testing is unfinished, so the card says so plainly rather than presenting a verified release. Set it false only once that testing has passed. */

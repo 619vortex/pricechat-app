@@ -10,6 +10,7 @@ pub mod measure;
 #[cfg(windows)]
 pub mod opener;
 pub mod settings;
+pub mod support;
 pub mod tune;
 #[cfg(windows)]
 pub mod store;
