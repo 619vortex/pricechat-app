@@ -59,6 +59,8 @@ def _active(db: Session, uid: int) -> list[TsPriceAlert]:
 
 
 def _describe(a: TsPriceAlert) -> str:
+    if a.kind == "setup":  # a /signal WAIT card's Alert Me: fires when that market's card turns LONG or SHORT
+        return f"{(a.plan or {}).get('tag') or a.coin} {(a.plan or {}).get('tf', '1h')} becomes a valid setup"
     if a.kind == "zone":
         side = (a.plan or {}).get("side", "")
         return f"{a.coin} {side} entry zone {_fmt(a.price)}–{_fmt(a.price_hi or a.price)}".replace("  ", " ")
@@ -264,10 +266,14 @@ async def check(db: Session, client: Any, md: Any, now: Any = None) -> dict[str,
         return out
     _, marks = await asyncio.to_thread(md.markets)  # one read for every alert
     telegram_ok = True
+    setups: list[TsPriceAlert] = []
     for a in rows:
         if a.expires_at <= now:
             a.status = "expired"
             out["expired"] += 1
+            continue
+        if a.kind == "setup":  # no price crossing: the market's card is re-read on each closed candle (signalcard.check_setups)
+            setups.append(a)
             continue
         m = marks.get(a.coin.upper())
         if m is None or m.mark <= 0:
@@ -292,5 +298,11 @@ async def check(db: Session, client: Any, md: Any, now: Any = None) -> dict[str,
             db.commit()
         a.last_price = px
     db.commit()
+    if setups and telegram_ok:
+        from app.tradingos import signalcard
+
+        got = await signalcard.check_setups(db, client, md, setups, now)
+        out["fired"] += got["fired"]
+        out["setups_checked"] = got["checked"]
     out["active"] = len(rows) - out["fired"] - out["expired"] - out["blocked"]
     return out

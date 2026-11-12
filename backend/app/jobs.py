@@ -265,9 +265,11 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         """/signal track record: grade the plans /signal showed on the candles that followed (record.py)."""
         import asyncio
 
-        from app.tradingos import market, record
+        from app.tradingos import market, record, signalcard
 
-        return await asyncio.to_thread(record.grade_all, ctx.db, market.data())
+        md = market.data()
+        out = await asyncio.to_thread(record.grade_all, ctx.db, md)
+        return {**out, "wait_cards": await asyncio.to_thread(signalcard.grade_all, ctx.db, md)}
 
     async def tradingos_brief(ctx: JobContext) -> dict[str, Any]:
         """The daily brief in the signal group, once a day at the configured UTC hour (bot.daily_brief)."""

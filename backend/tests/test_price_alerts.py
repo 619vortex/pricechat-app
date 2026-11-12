@@ -188,15 +188,17 @@ def test_rate_limit_stops_sending_until_next_run(db: Session, md: MarksMD) -> No
 def test_signal_button_creates_zone_alert(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     f = FakeMD({"BTC": uptrend_pullback()})
     monkeypatch.setattr(market, "_shared", f)
-    tg = FakeTG()
+    from tests.test_signal_cards import CardTG
+
+    tg = CardTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal BTC", group=True, reply_to=3))
-    kind, _, _, btns = tg.sent[-1]
-    data = btns[0][0]["callback_data"]
-    assert kind == "photo" and btns[0][0]["text"] == "🔔 Alert me at entry" and data.startswith("pa:BTC:") and len(data.encode()) <= 64
-    asyncio.run(bot.handle_callback(db, tg, {"id": "c1", "from": {"id": 9}, "data": data}))
+    btns = tg.buttons[-1]
+    alert = next(b for row in btns for b in row if b["text"] == "🔔 Alert Me")
+    asyncio.run(bot.handle_callback(db, tg, {"id": "c1", "from": {"id": 9}, "data": alert["callback_data"], "message": {"chat": {"id": -5}, "message_id": 1}}))
     a = mine(db)[0]
-    _, plan, lo, hi = alerts.parse_button(data)  # type: ignore[misc]
-    assert (a.kind, a.price, a.price_hi, a.plan) == ("zone", lo, hi, plan) and plan["side"] in ("LONG", "SHORT")
+    lo, hi = a.price, a.price_hi
+    plan = a.plan
+    assert a.kind == "zone" and lo < hi and plan["side"] in ("LONG", "SHORT")
     assert tg.sent[-2][1] == 9 and "entry zone" in tg.sent[-2][2] and tg.sent[-1][0] == "answer"
     # the price enters the zone from outside: the plan comes with the alert, once
     mid = (lo + hi) / 2

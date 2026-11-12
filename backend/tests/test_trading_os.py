@@ -202,12 +202,12 @@ def test_commands_public_and_private(db: Session, md: FakeMD) -> None:
     asyncio.run(bot.handle_command(db, tg, 2, 556, "/risk"))
     assert "Mode: PAPER" in tg.sent[-1][2]  # open to every member: Rank 1 can use it
     asyncio.run(bot.handle_command(db, tg, 1, 555, "/signal SOL"))
-    assert tg.sent[-1][0] == "photo" and "not a published signal" in tg.sent[-1][2]  # analysis: anyone, no account needed
+    assert tg.sent[-1][0] == "msg" and "LONG" in tg.sent[-1][2] and "Entry" in tg.sent[-1][2]  # analysis: anyone, no account needed
     kiwi(db, 4, "557")
     asyncio.run(bot.handle_command(db, tg, 3, 557, "/signal FLAT"))
-    assert "NO TRADE" in tg.sent[-1][2] and "Entry" not in tg.sent[-1][2]  # no full setup: NO TRADE, never a made-up plan
+    assert "WAIT" in tg.sent[-1][2] and "Entry" not in tg.sent[-1][2]  # no full setup: WAIT, never a made-up plan
     asyncio.run(bot.handle_command(db, tg, 3, 557, "/signal SOL"))
-    assert tg.sent[-1][0] == "photo" and "LONG setup" in tg.sent[-1][2]
+    assert tg.sent[-1][0] == "msg" and "🟢 <b>LONG" in tg.sent[-1][2]
     asyncio.run(bot.handle_command(db, tg, 3, 557, "/auto"))
     assert "AUTO is off" in tg.sent[-1][2]  # nothing trades for anyone until they turn it on with their limits
 

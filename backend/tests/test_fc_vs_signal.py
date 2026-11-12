@@ -105,22 +105,22 @@ def test_a_full_caption_still_gets_both_links() -> None:
 
 
 @pytest.mark.parametrize("coin", ["BTC", "ETH"])
-def test_signal_is_the_trade_analysis_with_both_links(db: Session, md: StudyMD, links: None, coin: str) -> None:
+def test_signal_is_the_card_without_the_promotional_footer(db: Session, md: StudyMD, links: None, coin: str) -> None:
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, f"/signal {coin}", group=True, reply_to=1))
     text = _sent_text(tg, 0)
-    assert re.search(r"\b(LONG|SHORT)\b|WAIT", text) and _has_links(text)
-    if re.search(r"(LONG|SHORT) setup", text):  # a setup that passes every rule: the whole plan
-        assert "Entry" in text and "Stop" in text and "Target" in text and "R/R" in text
+    assert re.search(r"\b(LONG|SHORT)\b|WAIT", text)
+    assert not _has_links(text) and "@botpricechat" not in text and "4% off" not in text  # owner 2026-11-12: no promotional clutter
+    if re.search(r"<b>(LONG|SHORT) ", text):  # a setup that passes every rule: the whole plan
+        assert all(w in text for w in ("Entry", "SL", "TP1", "TP2", "Invalid if", "Not financial advice"))
 
 
-def test_signal_without_a_setup_says_why_with_both_links(db: Session, md: StudyMD, links: None) -> None:
+def test_signal_without_a_setup_says_what_each_side_needs(db: Session, md: StudyMD, links: None) -> None:
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal FLAT", group=True, reply_to=1))
     text = _sent_text(tg, 0)
-    assert re.search(r"NO TRADE|WAIT", text) and "Why:" in text and _has_links(text)
-    assert "setup</b> · passes every rule" not in text  # never presented as a signal
-    for pat in (r"\bEntry\b", r"\bStop\b", r"\bTarget\b", r"R/R", r"WATCH", "🎯", "🛑", "✅"):  # no invented prices on NO TRADE
+    assert "WAIT" in text and ("LONG when" in text or "SHORT when" in text) and not _has_links(text)
+    for pat in (r"\bEntry\b", r"\bSL\b", r"\bTP1\b", r"R/R", r"WATCH", "🎯", "🛑", "✅"):  # no invented prices on a WAIT
         assert not re.search(pat, text), f"NO TRADE sent {pat!r}:\n{text}"
     assert not [x for x in tg.sent if x[0] == "photo"]  # no plan drawn either
 
@@ -192,4 +192,4 @@ def test_signal_still_has_the_signal_and_its_usual_footer(db: Session, md: Study
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal BTC 15MIN", group=True, reply_to=1))
     text = _sent_text(tg, 0)
-    assert re.search(r"\b(LONG|SHORT)\b|WAIT|NO TRADE", text) and "Signals: @botpricechat" in text
+    assert re.search(r"\b(LONG|SHORT)\b|WAIT", text) and "· 15m ·" in text and "Signals: @botpricechat" not in text  # the card alone

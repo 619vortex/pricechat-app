@@ -669,9 +669,11 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
             return "No open signals: they're only posted when every rule passes. /signal BTC shows the best setup now."
         return "\n\n".join(esc(signals.card(x)) for x in open_)
     if cmd == "/record":  # the /signal track record (record.py): public, no user data
-        from app.tradingos import record
+        from app.tradingos import record, signalcard
 
-        return record.record_table(db)
+        if args and args[0].upper() == "IDEAS":  # the earlier plan ideas (before cards), by family
+            return record.record_table(db)
+        return signalcard.record_text(db) + "\n/record ideas: the earlier plan ideas, by family"
     if cmd == "/connect":
         join = tracked_url(db, "start")
         return ("<b>Connect Hyperliquid</b> (2 minutes)\n"
@@ -692,15 +694,13 @@ async def _command(db: Session, client: Any, chat_id: int, user_id: int, cmd: st
         if sym is None:
             return "Usage: /signal (the best setup now) · /signal DOGE · /signal $DOGE 1h"
         listing = await _md(venues.resolve, sym, md, venues.client())
-        # the full rules where they run (Hyperliquid perps); elsewhere a chart read: NO TRADE, never a made-up plan
-        if listing.venue != "hyperliquid":
-            candles = await _md(venues.candles, listing, tf, 200, md, venues.client())
-            a = signals.Analysis(coin=listing.tag, decision="NO TRADE", reasons=["chart-based read only on this market"])
-        else:
-            a = await _md(signals.analyze, md, listing.symbol, tf, st.min_volume_usd, st.max_spread_bps, st.min_rr)
-            candles = await _md(md.candles, a.coin, tf, 200)
-        a.indicators = {**signals.chart_indicators(candles, tf), **a.indicators}  # short histories still get a read
-        return await _send_signal(db, client, chat_id, reply_to, listing, tf, a, candles)
+        # the card (signalcard.py): the full rules where they run (Hyperliquid perps); elsewhere a chart read, WAIT, never a made-up plan.
+        # Sent without the channel/referral footer: the card is the whole message.
+        from app.tradingos import signalcard
+
+        card, _ = await signalcard.build(db, md, listing, tf, _chat_type(chat_id))
+        await signalcard.send(db, getattr(client, "_c", client), chat_id, card, reply_to)
+        return None
     if cmd in alerts.COMMANDS:  # per Telegram user: no Passport needed
         return await alerts.command(db, user_id, cmd, args, md)
     # ---- the private trading service: a linked Kiwi Passport at the required rank
@@ -847,135 +847,80 @@ async def _indicator(md: Any, args: list[str]) -> str:
     return "\n".join([_price_line(x), "", *(esc(line) for line in lines), f"<i>{readout.tf_label(tf)} candles</i>"])
 
 
-def signal_text(listing: Any, tf: str, a: Any, candles: list[Any]) -> str:
-    """/signal on a Hyperliquid perpetual, in Telegram HTML: the setup when every rule passes; otherwise NO TRADE with why
-    and what would change it (no entry, stop or target), or WAIT when there's no read at all. Analysis on request: never a
-    published signal, never traded."""
-    from app.tradingos import indicators
-
-    price = a.indicators.get("price") or (candles[-1].c if candles else None)
-    inds = indicators.main_three_lines(a.indicators.get("main3") or indicators.main_three([c.c for c in signals.closed(candles, tf)]))
-    head = [f"📊 <b>{esc(listing.tag)}</b> | {readout.tf_label(tf)} | {esc(listing.label)}"]
-    if price:
-        chg = f" ({listing.change_24h:+.2f}% 24h)" if listing.change_24h is not None else ""
-        head.append(f"Price {market.fmt_price(price)}{chg}")
-    block = ["", *(f"· {esc(x)}" for x in inds)] if inds else []
-    f = market.fmt_price
-
-    def plan(lo: float, hi: float, stop: float, target: float, rr: float, ref: float) -> list[str]:
-        mid = (lo + hi) / 2  # stop and target from the entry; the entry from the price now
-
-        def pct(px: float, base: float) -> str:
-            return f"{(px - base) / base * 100:+.1f}%"
-        return [f"🎯 Entry  {f(lo)} – {f(hi)}" + ("" if lo <= ref <= hi else f"  ({pct(mid, ref)} from now)"),
-                f"🛑 Stop   {f(stop)}  ({pct(stop, mid)})", f"✅ Target {f(target)}  ({pct(target, mid)}) · R/R 1:{rr:.1f}"]
-    if a.decision == "NO TRADE":  # the owner's rule (2026-10-31): no entry, stop or target the rules didn't produce
-        why = "; ".join(esc(r) for r in a.reasons[:2]) or "no setup"
-        if not price:
-            return "\n".join([*head, "", "⏸ <b>WAIT</b> · no clean read on this chart", f"Why: {why}", *block, "", "<i>Not financial advice.</i>"])
-        return "\n".join([*head, "", "⏸ <b>NO TRADE</b> · no setup passes every rule", f"Why: {why}",
-                          f"What would change it: {_what_changes(a)}", *block, "", "<i>Not financial advice.</i>"])
-    lo, hi = min(a.entry), max(a.entry)
-    lev = f"{a.lev[0]}x" if a.lev[0] == a.lev[1] else f"{a.lev[0]}–{a.lev[1]}x"
-    return "\n".join([*head, "", f"{'🟢' if a.decision == 'LONG' else '🔴'} <b>{a.decision} setup</b> · passes every rule (not a published signal)",
-                       *plan(lo, hi, a.stop, a.target, a.rr, (lo + hi) / 2), f"⚡ {lev}", *block, "",
-                       f"💬 {esc(a.reasons[0].replace(' (closed candles)', ''))}" if a.reasons else "", "<i>Not financial advice.</i>"])
-
-
-def _what_changes(a: Any) -> str:
-    """NO TRADE: the chart's own levels a setup would need, never a made-up plan."""
-    i, f = a.indicators, market.fmt_price
-    need = " or ".join(x for x in (f"a close above resistance {f(i['resistance'])} (long side)" if i.get("resistance") else "",
-                                   f"a close below support {f(i['support'])} (short side)" if i.get("support") else "") if x)
-    if not need:
-        return "the failing rules above passing on a closed candle"
-    return need + (", with EMA20 / EMA50 lining up with the move" if i.get("ema20") and i.get("ema50") else "")
-
-
-def _full_plan(a: Any) -> Any:
-    """/signal's plan only when every rule passes: a NO TRADE never gets prices, a chart plan or a track-record entry."""
-    p = signals.best_plan(a)
-    return p if p is not None and p.full else None
-
-
 SCAN_TOP = 15  # /signal without a coin: how many of the most traded Hyperliquid markets are compared
-
-
-async def best_signal(db: Session, md: Any, tf: str, chat_type: str = "group") -> tuple[str, bytes | None]:
-    """The most promising setup that passes every rule across the top markets (by score), else NO TRADE:
-    its text and chart. /signal alone and the daily brief. Analysis on request, never published or traded."""
-    st = signals.settings(db)
-    gate = asyncio.Semaphore(4)
-
-    async def one(coin: str) -> tuple[Any, Any] | None:
-        async with gate:
-            try:
-                a = await _md(signals.analyze, md, coin, tf, st.min_volume_usd, st.max_spread_bps, st.min_rr)
-            except market.MarketError:
-                return None
-        return a, _full_plan(a)
-
-    coins = [m.coin for m in await _md(md.top, SCAN_TOP, st.min_volume_usd)]
-    read = [g for g in await asyncio.gather(*(one(c) for c in coins)) if g]
-    got = [g for g in read if g[1]]
-    if not read:
-        return "Couldn't read the markets right now. Try /signal BTC.", None
-    if not got:
-        return (f"⏸ <b>NO TRADE</b> · none of the {len(coins)} most traded markets has a setup that passes every rule "
-                "right now. /signal BTC for one coin's read.\n\n<i>Not financial advice.</i>"), None
-    a, _ = max(got, key=lambda g: g[1].score)
-    listing = await _md(venues.resolve, tickers.symbol_args([a.coin])[0], md, venues.client())
-    candles = await _md(md.candles, a.coin, tf, 200)
-    a.indicators = {**signals.chart_indicators(candles, tf), **a.indicators}
-    lead = f"🏆 <b>Most promising now</b> · best of the {len(coins)} most traded markets"
-    return await signal_post(db, listing, tf, a, candles, lead, chat_type)
 
 
 def _chat_type(chat_id: int | str) -> str:
     return "private" if isinstance(chat_id, int) and chat_id > 0 else "group"  # Telegram groups have negative ids (or @names)
 
 
+def _closest(md: Any, reads: list[Any], tf: str, st: Any) -> list[tuple[float, str, str, int, int, str]]:
+    """No setup anywhere: the markets nearest one, by the share of a side's conditions met (signalcard's own conditions)."""
+    from app.tradingos import indicators as ind_
+    from app.tradingos import signalcard
+
+    btc = None
+    out = []
+    for a in reads:
+        cs = signals.closed(md.candles(a.coin, tf, 201), tf)[-200:]
+        x = signalcard.context([c.c for c in cs], [c.h for c in cs], [c.l for c in cs], [c.v for c in cs])
+        if x is None or len(cs) < 120:
+            continue
+        if a.coin != "BTC" and btc is None:
+            bc = [c.c for c in signals.closed(md.candles("BTC", tf, 121), tf)]
+            b50 = ind_.ema(bc, 50)
+            btc = (bc[-1], b50[-1]) if b50 else None
+        gates = signalcard.market_gates(a.indicators, st.min_volume_usd, st.max_spread_bps)
+        if any(not g.ok for g in gates):
+            continue  # blocked both ways (thin book, low volume): not "close"
+        for side in ("LONG", "SHORT"):
+            conds = signalcard.side_conditions(side, x, tf, a.indicators.get("funding_h"), btc if a.coin != "BTC" else None)
+            met = sum(c.ok for c in conds) + len(gates)  # counted like the card: the market rules (all passing here) and the side's
+            need = next((c.need for c in conds if not c.ok), "")
+            out.append((met / (len(conds) + len(gates)), a.coin, side, met, len(conds) + len(gates), need))
+    return sorted(out, key=lambda r: -r[0])
+
+
+async def best_signal(db: Session, md: Any, tf: str, chat_type: str = "group") -> tuple[Any, str]:
+    """/signal alone and the daily brief: (the best LONG/SHORT card across the most traded markets, its lead line), or
+    (None, a WAIT summary naming the markets closest to a setup and what each still needs). Analysis on request, never traded."""
+    from app.tradingos import signalcard
+
+    st = signals.settings(db)
+    gate = asyncio.Semaphore(4)
+
+    async def one(coin: str) -> Any:
+        async with gate:
+            try:
+                return await _md(signals.analyze, md, coin, tf, st.min_volume_usd, st.max_spread_bps, st.min_rr)
+            except market.MarketError:
+                return None
+
+    coins = [m.coin for m in await _md(md.top, SCAN_TOP, st.min_volume_usd)]
+    reads = [a for a in await asyncio.gather(*(one(c) for c in coins)) if a]
+    if not reads:
+        return None, "Couldn't read the markets right now. Try /signal BTC."
+    setups = sorted((a for a in reads if a.decision in ("LONG", "SHORT")), key=lambda a: -a.score)
+    if setups:
+        listing = await _md(venues.resolve, tickers.symbol_args([setups[0].coin])[0], md, venues.client())
+        card, _ = await signalcard.build(db, md, listing, tf, chat_type)
+        if card.verdict != "WAIT":  # (a setup can vanish between two reads on a candle close)
+            return card, f"🏆 <b>Best setup of the {len(coins)} most traded markets</b> · {tf}"
+    near = (await _md(_closest, md, reads, tf, st))[:3]
+    lines = [f"⏸ <b>WAIT</b> · none of the {len(coins)} most traded Hyperliquid markets has a valid setup on {tf}"]
+    if near:
+        lines += ["", "<b>Closest</b>", *(f"• {esc(tickers.cashtag(coin))} {side} {met}/{n} · needs {esc(need)}" for _, coin, side, met, n, need in near),
+                  "", f"/signal {near[0][1]} for its card and triggers."]
+    return None, "\n".join([*lines, "", "<i>Not financial advice.</i>"])
+
+
 async def _best_signal(db: Session, client: Any, chat_id: int | str, reply_to: int | None, md: Any, tf: str) -> str | None:
-    text, png = await best_signal(db, md, tf, _chat_type(chat_id))
-    if png is None:
+    from app.tradingos import signalcard
+
+    card, text = await best_signal(db, md, tf, _chat_type(chat_id))
+    if card is None:
         return text
-    await client.send_photo(chat_id, png, text, reply_to=reply_to, html=True)
-    return None
-
-
-async def signal_post(db: Session, listing: Any, tf: str, a: Any, candles: list[Any], lead: str = "",
-                      chat_type: str = "group") -> tuple[str, bytes | None]:
-    """/signal's reply: text (+ the track-record line) and the chart when there's a plan. The plan is logged for grading."""
-    from app.tradingos import record
-    from app.tradingos.market import INTERVALS
-
-    text = (f"{lead}\n\n" if lead else "") + signal_text(listing, tf, a, candles)
-    plan = _full_plan(a)
-    if plan is None:
-        return text, None
-    try:  # the record never blocks a reply
-        line = record.record_line(db, record.log_plan(db, listing, tf, plan, chat_type).family)
-        text += f"\n{line}" if line else ""
-    except Exception:  # noqa: BLE001
-        logger.exception("signal idea not logged")
-        db.rollback()
-    if len(candles) < 2:
-        return text, None
-    title = f"{listing.tag} · {readout.tf_label(tf)} · {plan.side} {'setup' if plan.full else 'idea'}"
-    png = await asyncio.to_thread(chart.render_study, candles, title, listing.label, show=min(120, len(candles)),
-                                  interval_ms=INTERVALS[tf] * 1000, levels=(a.indicators.get("support"), a.indicators.get("resistance")),
-                                  plan=plan, change=listing.change_24h, source=listing.label)
-    return text, png
-
-
-async def _send_signal(db: Session, client: Any, chat_id: int | str, reply_to: int | None, listing: Any, tf: str, a: Any,
-                       candles: list[Any]) -> str | None:
-    text, png = await signal_post(db, listing, tf, a, candles, chat_type=_chat_type(chat_id))
-    if png is None:
-        return text
-    plan = _full_plan(a)
-    btns = alerts.button(a.coin, plan, tf) if listing.venue == "hyperliquid" and plan else None  # 🔔 Alert me at entry
-    await client.send_photo(chat_id, png, text, buttons=btns, reply_to=reply_to, html=True)
+    await signalcard.send(db, getattr(client, "_c", client), chat_id, card, reply_to, lead=text)
     return None
 
 
@@ -998,11 +943,11 @@ async def daily_brief(db: Session, client: Any, md: Any = None, now: Any = None)
     md = md or market.data()
     digest = await _md(markets_digest, md)
     try:
-        text, png = await best_signal(db, md, s.timeframe, "brief")
+        card, lead = await best_signal(db, md, s.timeframe, "brief")
     except Exception:  # noqa: BLE001 - no setup today: the overview still goes out
         logger.exception("daily brief: no setup")
         db.rollback()
-        text, png = "", None
+        card, lead = None, ""
     signals.settings(db).brief_sent_on = today
     db.commit()
     try:
@@ -1011,10 +956,12 @@ async def daily_brief(db: Session, client: Any, md: Any = None, now: Any = None)
         signals.settings(db).brief_sent_on = None  # nothing went out: the next run tries again
         db.commit()
         raise
-    if png is None:  # no chart means no setup (best_signal's "Couldn't read the markets"): not posted in the group
+    if card is None:  # no setup today: only the overview goes out
         return "sent (overview only)"
     try:
-        await _Footed(client, footer(db)).send_photo(chat, png, text, html=True)
+        from app.tradingos import signalcard
+
+        await signalcard.send(db, client, chat, card, lead=lead)
     except Exception as e:  # noqa: BLE001 - the overview went out: not retried (no duplicates)
         logger.info("daily brief setup skipped: %s", e)
         return "sent (overview only)"
@@ -1218,7 +1165,7 @@ async def handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None:
         await _handle_callback(db, client, cq)
 
 
-TRADE_BUTTONS = ("mo:", "ca:", "pr:", "cf:", "cl:", "sig")
+TRADE_BUTTONS = ("mo:", "ca:", "pr:", "cf:", "cl:", "sig", "sc:")
 
 
 async def trade_button_throttled(client: Any, cq: dict[str, Any]) -> bool:
@@ -1259,6 +1206,11 @@ async def _handle_callback(db: Session, client: Any, cq: dict[str, Any]) -> None
         from app.tradingos import committeecmd
 
         await committeecmd.callback(db, client, cq)
+        return
+    if data.startswith("sc:") and uid:  # a /signal card's buttons (signalcard.py)
+        from app.tradingos import signalcard
+
+        await signalcard.callback(db, client, cq, uid, data)
         return
     if data.startswith("pa:") and uid:  # 🔔 Alert me at entry (under /signal)
         await alerts.callback(db, client, cq, uid, data)

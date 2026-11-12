@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.base import utcnow
-from app.models.tradingos import TsSignal, TsSignalIdea
+from app.models.tradingos import TsSignal, TsSignalCard, TsSignalIdea
 from app.tradingos import bot, market, record, signals, weekly
 from app.tradingos.market import Candle
 
@@ -55,6 +55,8 @@ def test_signal_logs_each_plan_once_an_hour_without_user_ids(db: Session, md: St
     asyncio.run(bot.handle_command(db, tg, 1, 10, "/signal FLAT"))
     assert db.scalar(select(TsSignalIdea).where(TsSignalIdea.coin == "FLAT")) is None  # NO TRADE: no plan shown, none logged
     rows[0].created_at = utcnow() - timedelta(hours=2)  # an hour later the same plan is a new record
+    for c in db.scalars(select(TsSignalCard)):
+        c.created_at = utcnow() - timedelta(hours=2)
     db.commit()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal SOL", group=True))
     assert len(db.scalars(select(TsSignalIdea).where(TsSignalIdea.coin == "SOL")).all()) == 2
@@ -188,21 +190,31 @@ def test_record_line_by_family_then_overall(db: Session) -> None:
 
 
 def test_signal_reply_carries_the_record_line(db: Session, md: StudyMD) -> None:
-    graded(db, "full", 7, 3)
+    graded(db, "full", 7, 3)  # plans no card showed: not in the card record
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal SOL", group=True))
-    assert "📈 Track record: full setups 70% hit target (last 10 graded)" in tg.sent[-1][2]
+    assert "📊 Setup record: none graded yet (1 being followed)" in tg.sent[-1][2]
+    x = db.get(TsSignalIdea, db.scalar(select(TsSignalCard.idea_id)))
+    x.status, x.filled_at, x.r = "STOP", utcnow(), -1.0  # a loss counts like any other result
+    db.commit()
+    for c in db.scalars(select(TsSignalCard)):
+        c.created_at = utcnow() - timedelta(hours=2)
+    db.commit()
+    asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal SOL", group=True))
+    assert "📊 Setup record: 1 graded · 0 TP1 · 1 SL · 0 never filled · avg −1.00R".replace("−", "-") in tg.sent[-1][2]
 
 
 def test_record_command(db: Session, md: StudyMD) -> None:
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/record", group=True))
+    assert "every card, nothing removed" in tg.sent[-1][2] and "None graded yet" in tg.sent[-1][2] and "/record ideas" in tg.sent[-1][2]
+    asyncio.run(bot.handle_command(db, tg, -5, 9, "/record ideas", group=True))
     assert "Nothing graded yet" in tg.sent[-1][2]
     graded(db, "pullback", 3, 1)
     x = idea(db)
     x.status = "EXPIRED"  # unfilled
     db.commit()
-    asyncio.run(bot.handle_command(db, tg, -5, 9, "/record", group=True))
+    asyncio.run(bot.handle_command(db, tg, -5, 9, "/record ideas", group=True))
     text = tg.sent[-1][2]
     assert "track record" in text and "<code>pullback    5   80%  75%  +1.25</code>" in text and "<code>all" in text
     assert "/record" in bot.HELP
@@ -220,9 +232,9 @@ def test_daily_brief_once_a_day(db: Session, md: StudyMD) -> None:
     tg = FakeTG()
     assert asyncio.run(bot.daily_brief(db, tg, md, at(7))) == "waiting for 08:00 UTC" and not tg.sent
     assert asyncio.run(bot.daily_brief(db, tg, md, at(8))) == "sent"
-    assert [k for k, *_ in tg.sent] == ["msg", "photo"] and tg.sent[0][1] == "@botpricechat"
+    assert [k for k, *_ in tg.sent] == ["msg", "msg"] and tg.sent[0][1] == "@botpricechat"
     assert "Daily brief" in tg.sent[0][2] and "market overview" in tg.sent[0][2]
-    assert "Most promising now" in tg.sent[1][2] and "Entry" in tg.sent[1][2]
+    assert "Best setup of the" in tg.sent[1][2] and "Entry" in tg.sent[1][2]
     assert db.scalar(select(TsSignalIdea).where(TsSignalIdea.chat_type == "brief")) is not None  # its plan is tracked too
     db.expire_all()  # a restart: the date is in the database
     assert asyncio.run(bot.daily_brief(db, tg, md, at(9))) == "already sent today" and len(tg.sent) == 2
@@ -256,10 +268,10 @@ def test_daily_brief_without_a_setup_posts_only_the_overview(db: Session, md: St
     signals.settings(db).publish_chat = "@botpricechat"
     db.commit()
 
-    async def no_setup(*a: object, **kw: object) -> tuple[str, None]:
+    async def no_setup(*a: object, **kw: object) -> tuple[None, str]:
         if fails:
             raise market.MarketError("Hyperliquid is busy")
-        return "Couldn't read the markets right now. Try /signal BTC.", None
+        return None, "Couldn't read the markets right now. Try /signal BTC."
 
     monkeypatch.setattr(bot, "best_signal", no_setup)
     tg = FakeTG()

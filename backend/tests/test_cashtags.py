@@ -235,10 +235,11 @@ def test_signal_with_cashtags_and_for_coins_hyperliquid_doesnt_list(db: Session,
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal $DOGE", group=True, reply_to=1))
     out = tg.sent[-1][2]
-    assert "$DOGEUSD" in out and "Hyperliquid Perpetual" in out and ("<b>WAIT</b>" in out or "setup</b>" in out) and "RSI(14)" in out
+    assert "$DOGEUSD" in out and "Hyperliquid Perpetual" in out and any(f"<b>{v}  $DOGEUSD" in out for v in ("WAIT", "LONG", "SHORT")) and "RSI" in out
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal $KAS", group=True, reply_to=2))
     kas = tg.sent[-1][2]
-    assert "Hyperliquid" not in kas.split("\n\n📢")[0] and "$KASUSDT</b> | 1H | Bybit Spot" in kas and "NO TRADE" in kas and "chart-based read only" in kas  # said without fuss
+    assert "Hyperliquid" not in kas and "<b>WAIT  $KASUSDT</b> · 1h · Bybit Spot" in kas and "Chart read only: the setup rules don't run on this market" in kas
+    assert "LONG when" not in kas and "SHORT when" not in kas and "Entry" not in kas  # no triggers where no setup can ever come
     assert "Entry" not in kas and "WATCH" not in kas  # the full rules don't run there: never a made-up plan
 
 

@@ -111,10 +111,10 @@ def test_chart_command_replies_with_options_and_errors(db: Session, md: StudyMD)
 def test_signal_is_answered_in_groups(db: Session, md: StudyMD) -> None:
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal FLAT", group=True, reply_to=3))
-    flat = tg.sent[-1]  # no setup passes the rules: NO TRADE with why, no made-up plan and no plan chart
-    assert flat[0] == "msg" and "NO TRADE" in flat[2] and "Entry" not in flat[2] and "privately" not in flat[2]
+    flat = tg.sent[-1]  # no setup passes the rules: WAIT with what each side needs, no made-up plan
+    assert flat[0] == "msg" and "WAIT" in flat[2] and "Entry" not in flat[2] and "privately" not in flat[2]
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal SOL", group=True, reply_to=4))
-    assert tg.sent[-1][0] == "photo" and "not a published signal" in tg.sent[-1][2]
+    assert tg.sent[-1][0] == "msg" and "LONG" in tg.sent[-1][2] and "Entry" in tg.sent[-1][2] and "TP2" in tg.sent[-1][2]
     assert db.scalar(select(TsSignal)) is None  # analysis only: nothing is published or traded
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/positions", group=True, reply_to=5))
     assert "privately" not in tg.sent[-1][2]  # owner's decision (2026-11-10): trading commands answer in groups too
@@ -273,18 +273,13 @@ def test_watch_ideas_are_computed_but_signal_without_a_full_setup_is_no_trade() 
     wild = signals.watch_setup(a(price=1.0, atr=0.5, macd_hist=-0.1))  # ATR half the price: a 1.5 ATR short would target below zero
     assert wild is None or min(*wild.entry, wild.stop, wild.target) > 0
     assert signals.watch_setup(a(price=1.0, atr=0.8, macd_hist=-0.1)) is None  # nothing sensible fits: WAIT, never a negative target
-    assert "NO TRADE" in bot.signal_text(SimpleNamespace(tag="$NEWUSD", label="DEX", change_24h=None), "1d", a(price=1.0, atr=0.8, macd_hist=-0.1), [])
-    assert "WAIT" in bot.signal_text(SimpleNamespace(tag="$NEWUSD", label="DEX", change_24h=None), "1d", a(), [])  # no price: no read at all
-    listing = SimpleNamespace(tag="$XUSD", label="Hyperliquid Perpetual", change_24h=1.0)
-    text = bot.signal_text(listing, "1h", a(price=110, ema20=105, ema50=100, atr=2, support=95, resistance=112), [])
-    assert "NO TRADE" in text and "Why: RSI 74" in text and "What would change it: a close above resistance" in text
-    assert not any(w in text for w in ("Entry", "Stop", "Target", "R/R", "WATCH", "🎯", "🛑"))  # never a made-up plan
+    # (the /signal card never shows these WATCH ideas: test_signal_cards.py)
 
 
 def test_signal_without_a_coin_answers_with_the_most_promising_market(db: Session, md: StudyMD) -> None:
     tg = FakeTG()
     asyncio.run(bot.handle_command(db, tg, -5, 9, "/signal", group=True, reply_to=3))
-    assert tg.sent[-1][0] == "photo" and "Most promising now" in tg.sent[-1][2] and "Entry" in tg.sent[-1][2]
+    assert tg.sent[-1][0] == "msg" and "Best setup of the" in tg.sent[-1][2] and "Entry" in tg.sent[-1][2]
     assert db.scalar(select(TsSignal)) is None  # analysis only: nothing is published or traded
 
 

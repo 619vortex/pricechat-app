@@ -151,7 +151,8 @@ def render_study(candles: list[Candle], title: str, subtitle: str, *, show: int,
                  depth: dict[str, list[tuple[float, float]]] | None = None, heat: list[Any] | None = None,
                  zones: list[dict[str, Any]] | None = None, walls: list[dict[str, Any]] | None = None,
                  twap: list[dict[str, Any]] | None = None, sources: list[str] | None = None, source: str = "Hyperliquid",
-                 levels: tuple[float | None, float | None] | None = None, plan: Any = None, change: float | None = None) -> bytes:
+                 levels: tuple[float | None, float | None] | None = None, plan: Any = None, change: float | None = None,
+                 marks: list[tuple[float, str, bool]] | None = None) -> bytes:
     """Candles with EMA 20/50 (+ EMA 100/200 with `ma`, Bollinger Bands with `bb`), an order-book depth profile on the right
     (`depth`), and stacked panels below: volume, RSI, MACD, funding (hourly rates, ms), open interest (ms, USD), CVD
     (cvd: structure.cvd()), aggregated OI (aggoi: structure.open_interest()) and reported liquidations (liq). On the price
@@ -159,7 +160,8 @@ def render_study(candles: list[Candle], title: str, subtitle: str, *, show: int,
     the right edge (`zones`, labelled as estimates), liquidity walls (`walls`) and TWAP-like runs (`twap`, labelled inferred).
     Indicators are computed over all the candles given and the last `show` are drawn. Large text for phone screens.
     Always: the last price as a tagged line on the axis. With `levels` (support, resistance) dashed level lines, with `plan`
-    (signals.Watch) the entry zone, stop and target on the right, with `change` the 24h move as a coloured badge."""
+    (signals.Watch) the entry zone, stop and target on the right (TP1 and TP2 when the plan has a tp2), with `change` the
+    24h move as a coloured badge, with `marks` (price, label, long?) dashed trigger lines: a /signal WAIT card's levels."""
     from app.tradingos import indicators as ind
 
     if len(candles) < 2:
@@ -195,7 +197,12 @@ def render_study(candles: list[Candle], title: str, subtitle: str, *, show: int,
         if b:
             lo, hi = min(lo, b[2]), max(hi, b[1])
     if plan is not None:  # the whole plan stays in view
-        lo, hi = min(lo, plan.stop, plan.target, *plan.entry), max(hi, plan.stop, plan.target, *plan.entry)
+        extra = [plan.tp2] if getattr(plan, "tp2", None) else []
+        lo, hi = min(lo, plan.stop, plan.target, *plan.entry, *extra), max(hi, plan.stop, plan.target, *plan.entry, *extra)
+    for px_, _, _ in marks or []:  # a trigger level stays in view when it's near (within half the range)
+        span = hi - lo
+        if lo - span / 2 <= px_ <= hi + span / 2:
+            lo, hi = min(lo, px_), max(hi, px_)
     ax = price_axis.axis(lo, hi, pad=0.04)  # log past a phi (1.618x) range, else linear: never a setting
     lo, hi = ax.lo, ax.hi
     py0, py1 = top_pad, top_pad + price_h
@@ -250,6 +257,12 @@ def render_study(candles: list[Candle], title: str, subtitle: str, *, show: int,
                 for xx in range(int(x0), int(xr), 16):
                     d.line([(xx, y(px_)), (xx + 8, y(px_))], fill=colour, width=1)
                 tags.append(((x0 + 6, y(px_) - 20), f"{name} {fmt_price(px_)}", colour))
+    for px_, name, long_ in marks or []:  # WAIT triggers: dashed, labelled on the right
+        if lo <= px_ <= hi:
+            colour = UP if long_ else DOWN
+            for xx in range(int(x0), int(xr), 22):
+                d.line([(xx, y(px_)), (xx + 12, y(px_))], fill=colour, width=2)
+            tags.append(((xr - 8 - d.textlength(f"{name} {fmt_price(px_)}", font=_font(17)), y(px_) - 22), f"{name} {fmt_price(px_)}", colour))
     body = max(1.0, step * 0.62)
     for i, c in enumerate(vis):
         colour = UP if c.c >= c.o else DOWN
@@ -410,7 +423,10 @@ def render_study(candles: list[Candle], title: str, subtitle: str, *, show: int,
         yy += ph + gap
 
     if plan is not None:  # the plan's prices, tagged on the right of the zone
-        for px_, colour, name in ((plan.target, TARGET, "TARGET"), (sum(plan.entry) / 2, ENTRY, "ENTRY"), (plan.stop, STOP, "STOP")):
+        two = getattr(plan, "tp2", None)
+        rows = ((plan.target, TARGET, "TP1"), (two, TARGET, "TP2"), (sum(plan.entry) / 2, ENTRY, "ENTRY"), (plan.stop, STOP, "SL")) if two else \
+            ((plan.target, TARGET, "TARGET"), (sum(plan.entry) / 2, ENTRY, "ENTRY"), (plan.stop, STOP, "STOP"))
+        for px_, colour, name in rows:
             d.line([(plan_x, y(px_)), (xr, y(px_))], fill=colour, width=2)
             _label(d, (plan_x + 6, y(px_) - 20), f"{name} {fmt_price(px_)}", colour)
         badge = f"{plan.side} {'SETUP' if plan.full else 'IDEA'}"

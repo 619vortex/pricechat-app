@@ -315,6 +315,31 @@ class TsSignalIdea(IdMixin, TimestampMixin, Base):
     r: Mapped[float | None] = mapped_column(Float)  # result in R from the zone's mid: TARGET +reward, STOP -1, EXPIRED (filled) at the close
 
 
+class TsSignalCard(IdMixin, TimestampMixin, Base):
+    """Every /signal card shown (LONG, SHORT and WAIT), for the public record: nothing is left out. A LONG/SHORT card links the
+    plan graded in ts_signal_ideas (fill, TP1, stop, never filled); a WAIT card is graded here on the candles that followed
+    (how far price went up, down and where it closed). The card's buttons (Chart, Alert, Refresh, Trade, Details) read it
+    back. No user ids: only where it was asked (group | private | brief | alert)."""
+
+    __tablename__ = "ts_signal_cards"
+    __table_args__ = (Index("ix_ts_signal_cards_status", "status"), Index("ix_ts_signal_cards_dedupe", "coin", "timeframe", "created_at"))
+
+    venue: Mapped[str] = mapped_column(String(16), nullable=False)
+    coin: Mapped[str] = mapped_column(String(64), nullable=False)  # the venue's own symbol
+    tag: Mapped[str] = mapped_column(String(64), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(4), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(5), nullable=False)  # LONG | SHORT | WAIT
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence: Mapped[str] = mapped_column(String(8), default="", server_default="", nullable=False)  # High | Medium | Low ('' for WAIT)
+    plan: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # LONG/SHORT: lo, hi, stop, tp1, tp2, rr1, rr2, lev, expires
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # the card's evidence: rules met, timeframes, triggers, checks
+    idea_id: Mapped[int | None] = mapped_column(Integer)  # ts_signal_ideas row grading the plan
+    chat_type: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(String(8), default="OPEN", server_default="OPEN", nullable=False)  # OPEN | GRADED | SKIPPED
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # WAIT: high_pct, low_pct, close_pct over the next candles
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
 class TsAutoDelete(IdMixin, Base):
     """A bot message in the main chat, deleted at delete_at (tradingos.autodelete)."""
 
