@@ -6,8 +6,8 @@ Two ways in, and only one can be trusted to report the visitor:
   Vercel replaces X-Forwarded-For with the visitor's address (a caller's own copy is dropped); X-Vercel-Forwarded-For
   is NOT replaced (checked in production 2026-11-12), so it is never trusted. A `routes` transform in vercel.json also sets EDGE_HEADER to PROXY_SHARED_SECRET (Vercel's env),
   replacing anything the caller sent. Only when that header matches our PROXY_SHARED_SECRET (constant-time) do we believe
-  what Vercel says the visitor is: the left-most X-Forwarded-For entry (Vercel wrote it; Railway appends after it).
-  X-Vercel-Forwarded-For is never read: Vercel passes a caller's own copy of it through.
+  what Vercel says the visitor is: the right-most X-Vercel-Forwarded-For entry (Railway's edge doesn't touch that header;
+  it rewrites X-Forwarded-For completely, so there only Vercel's egress address survives).
 * Directly to the Railway domain (anyone can): every header is the caller's to forge, EXCEPT the entry Railway's edge
   adds at the right of X-Forwarded-For (the address that connected to it). So the key is the right-most entry
   (TRUSTED_PROXY_HOPS counts in from the right, default 1) and never the left-most one.
@@ -98,6 +98,15 @@ def _forwarded_for(request: Request) -> list[str]:
     return [p.strip() for line in request.headers.getlist("x-forwarded-for") for p in line.split(",")]
 
 
+def _vercel_for(request: Request) -> list[str]:
+    return [p.strip() for line in request.headers.getlist("x-vercel-forwarded-for") for p in line.split(",") if p.strip()]
+
+
+def vercel_count(request: Request) -> int:
+    """How many X-Vercel-Forwarded-For entries the request carries (a count only)."""
+    return len(_vercel_for(request))
+
+
 def forwarded_count(request: Request) -> int:
     """How many X-Forwarded-For entries the request carries (a caller's own entries included)."""
     return len([h for h in _forwarded_for(request) if h])
@@ -109,10 +118,11 @@ def client_ip(request: Request, settings: Settings | None = None) -> str:
     trusted = via_vercel(request, settings)
     _note(request, settings, trusted)
     if trusted:
-        # The left-most X-Forwarded-For entry: Vercel overwrites that header with the visitor's address. NOT
-        # X-Vercel-Forwarded-For: production showed Vercel passes a caller's own copy of it through (a forged
-        # "X-Vercel-Forwarded-For: 1.2.3.4" sent to the website came out as the client address).
-        ip = parse_ip(hops[0]) if hops else None
+        # Measured in production 2026-11-12 (forwarded_hops / vercel_hops on /members/vpn/ip): Railway's edge DISCARDS any
+        # incoming X-Forwarded-For and writes exactly [connecting address, internal hop], so through the website that
+        # header only ever names Vercel's egress. The visitor survives only in X-Vercel-Forwarded-For, where a caller's
+        # own copy can arrive too: the RIGHT-most entry is the one Vercel adds, never a caller-written one further left.
+        ip = parse_ip(_vercel_for(request)[-1]) if _vercel_for(request) else None
         if ip:
             return ip
     if hops and not secrets_of(settings):  # LEGACY until the secret is set up (see the module docstring)

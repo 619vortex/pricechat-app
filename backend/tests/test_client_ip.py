@@ -75,17 +75,24 @@ def test_a_forged_x_vercel_forwarded_for_through_the_website_is_ignored() -> Non
     # Production 2026-11-12: Vercel passes a caller's own X-Vercel-Forwarded-For through (with the valid x-pc-edge
     # added), while it overwrites X-Forwarded-For. Only the left-most X-Forwarded-For entry may name the visitor.
     h = _vercel("192.0.2.44")
-    h["x-vercel-forwarded-for"] = "1.2.3.4"
+    h["x-vercel-forwarded-for"] = "1.2.3.4, 192.0.2.44"  # a caller's copy on the left, Vercel's entry on the right
     assert client_ip.client_ip(_req(h), _settings()) == "192.0.2.44"
+
+
+def test_production_chain_railway_rewrites_x_forwarded_for_so_the_visitor_comes_from_vercels_header() -> None:
+    # Measured 2026-11-12: through the website, Railway hands us X-Forwarded-For = [Vercel egress, Railway internal hop]
+    h = {"x-forwarded-for": "16.171.112.228, 152.233.13.166", "x-vercel-forwarded-for": "65.109.255.206",
+         "x-vercel-id": "arn1::abcd", "x-pc-edge": SECRET}
+    assert client_ip.client_ip(_req(h), _settings()) == "65.109.255.206"
 
 
 def test_vercel_path_with_the_right_secret_uses_the_reported_visitor() -> None:
     s = _settings()
     assert client_ip.client_ip(_req(_vercel("192.0.2.44")), s) == "192.0.2.44"
-    # without x-vercel-forwarded-for: the left-most entry, which Vercel wrote
+    # without x-vercel-forwarded-for: Railway-edge rules (X-Forwarded-For is Railway's own rewrite, never the visitor)
     h = _vercel("192.0.2.45")
     del h["x-vercel-forwarded-for"]
-    assert client_ip.client_ip(_req(h), s) == "192.0.2.45"
+    assert client_ip.client_ip(_req(h), s) == "76.76.21.9"
     # Vercel's header unusable and no XFF: Railway-edge rules (here: the peer)
     assert client_ip.client_ip(_req({"x-pc-edge": SECRET, "x-vercel-forwarded-for": "nope"}), s) == "10.1.2.3"
 

@@ -128,7 +128,8 @@ def my_ip(request: Request, response: Response) -> dict[str, Any]:
     forwarded_hops: how many X-Forwarded-For entries arrived (a count, no addresses), so the owner can see how many entries
     Railway's own proxies add after the caller and set TRUSTED_PROXY_HOPS from evidence (client_ip.py)."""
     response.headers["Cache-Control"] = "no-store"
-    return {"ip": client_ip.client_ip(request), "forwarded_hops": client_ip.forwarded_count(request)}
+    return {"ip": client_ip.client_ip(request), "forwarded_hops": client_ip.forwarded_count(request),
+            "vercel_hops": client_ip.vercel_count(request)}
 
 
 @router.delete("/members/vpn/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
