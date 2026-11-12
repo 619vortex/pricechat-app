@@ -1,7 +1,7 @@
 // Kiwi VPN's service worker: owns the proxy setting, answers the proxy's login request, and watches the connection.
 // Fails closed: while switched on, a lost connection stops traffic and shows a red badge instead of quietly going around the VPN.
 // Only "off" (always one click, needs no network) puts traffic back on the normal connection.
-import { API, CHECK_URL, badge, isOurChallenge, proxyConfig, refusal } from "./lib.js";
+import { API, CHECK_URL, SMART, badge, browserServers, isOurChallenge, median, proxyConfig, refusal, smartPick } from "./lib.js";
 
 class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -20,7 +20,7 @@ async function api(path, init = {}) {
   return body;
 }
 
-const read = () => chrome.storage.local.get({ on: false, login: null, problem: null, lastServer: null, exitIp: null });
+const read = () => chrome.storage.local.get({ on: false, login: null, problem: null, lastServer: null, exitIp: null, choice: SMART, smart: null });
 const write = (v) => chrome.storage.local.set(v);
 
 async function paint() {
@@ -62,10 +62,39 @@ async function newLogin(serverId, replace) {
   return login;
 }
 
+/** Time to reach one server's proxy: 3 HTTPS requests (the proxy answers a direct request with a quick 404 and no data),
+ *  median in ms, or null if none answered. Only run while off, so the current proxy doesn't skew it. */
+async function timeServer(server) {
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    const t0 = performance.now();
+    try {
+      await fetch(`https://${server.proxy_host}/kiwi-ping?${Date.now()}${i}`, { cache: "no-store", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(2500) });
+      out.push(performance.now() - t0);
+    } catch { /* no answer: no sample */ }
+  }
+  return median(out);
+}
+
+async function smartChoice(account) {
+  const servers = browserServers(account).filter((s) => s.online);
+  const { lastServer } = await read();
+  const measurable = servers.filter((s) => s.proxy_host);
+  const timings = Object.fromEntries(await Promise.all(measurable.map(async (s) => [s.id, await timeServer(s)])));
+  const id = smartPick(servers, timings, lastServer);
+  await write({ smart: { serverId: id, ms: timings[id] == null ? null : Math.round(timings[id]), at: Date.now() } });
+  return id;
+}
+
 async function connect(serverId) {
   const account = await api("");
   const no = refusal(account);
   if (no) throw new ApiError(403, no);
+  await write({ choice: serverId === SMART ? SMART : serverId }); // remembered for next time: Smart, or the server picked by hand
+  if (serverId === SMART) {
+    serverId = await smartChoice(account);
+    if (serverId == null) throw new ApiError(503, "No server is online right now. Try again in a minute.");
+  }
   const { login: old } = await read();
   let login = old?.server_id === serverId ? old : await newLogin(serverId, old?.username);
   await applyProxy(login);
