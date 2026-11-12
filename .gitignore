@@ -41,3 +41,6 @@ worker/cache/
 # fundarb local state: the quote/gate database and the human-confirmed universe schema (per machine, never committed)
 *.sqlite3
 fundarb_universe_schema.json
+
+# worker settings hold the worker token (PRICECHAT_WORKER_TOKEN): never commit
+worker/worker.env
