@@ -67,6 +67,10 @@ class JobSpec:
     # never wait behind a backup or a News Desk run. Such a job must keep its write transactions short (it shares SQLite
     # with whatever job holds the lane).
     own_lane: bool = False
+    # A daily job whose failure shouldn't wait a day (the nightly backup): retried this many seconds after a failure, and
+    # again `initial_delay_seconds` after a restart while its last run failed. 2026-11-12: 21 failed backups in a row, and
+    # after the fix the next attempt was still up to a day away because next_run_at survives restarts.
+    retry_failed_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +146,8 @@ class Scheduler:
                         row.last_error = "Interrupted by a restart"
                     if row.next_run_at is None or row.next_run_at < now:
                         row.next_run_at = now + timedelta(seconds=spec.initial_delay_seconds)
+                    elif spec.retry_failed_seconds and row.last_status == "failed" and row.consecutive_failures > 0:
+                        row.next_run_at = min(row.next_run_at, now + timedelta(seconds=spec.initial_delay_seconds))
             db.commit()
 
     @property
@@ -281,7 +287,7 @@ class Scheduler:
                 row.consecutive_failures += 1
                 row.last_error = error
                 backoff = min(spec.interval_seconds * 2 ** (row.consecutive_failures - 1), spec.max_backoff_seconds)
-                row.next_run_at = now + timedelta(seconds=max(backoff, spec.interval_seconds))
+                row.next_run_at = now + timedelta(seconds=spec.retry_failed_seconds or max(backoff, spec.interval_seconds))
             else:
                 row.consecutive_failures = 0
                 row.last_error = error if status == "skipped" else None
