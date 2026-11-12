@@ -123,10 +123,12 @@ def device_peer(device_id: int, db: DbSession, pc_session: SessionToken = None) 
 
 
 @router.get("/members/vpn/ip", dependencies=[Depends(rate_limit.limit("earn"))])
-def my_ip(request: Request, response: Response) -> dict[str, str]:
-    """The address this request came from, so the Kiwi VPN app can check its tunnel without telling an outside service. It's only returned, never stored or logged here."""
+def my_ip(request: Request, response: Response) -> dict[str, Any]:
+    """The address this request came from, so the Kiwi VPN app can check its tunnel without telling an outside service. It's only returned, never stored or logged here.
+    forwarded_hops: how many X-Forwarded-For entries arrived (a count, no addresses), so the owner can see how many entries
+    Railway's own proxies add after the caller and set TRUSTED_PROXY_HOPS from evidence (client_ip.py)."""
     response.headers["Cache-Control"] = "no-store"
-    return {"ip": client_ip.client_ip(request)}
+    return {"ip": client_ip.client_ip(request), "forwarded_hops": client_ip.forwarded_count(request)}
 
 
 @router.delete("/members/vpn/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -235,6 +235,8 @@ def test_app_sessions_are_recorded_apart_and_can_be_revoked_without_touching_bro
 def test_the_app_can_ask_its_own_address_without_signing_in(client: TestClient) -> None:
     r = client.get("/api/members/vpn/ip")
     assert r.status_code == 200 and r.json()["ip"] and r.headers["cache-control"] == "no-store"
+    assert r.json()["forwarded_hops"] == 0, "a count only: no addresses beyond the caller's own"
+    assert client.get("/api/members/vpn/ip", headers={"x-forwarded-for": "1.2.3.4, 5.6.7.8"}).json()["forwarded_hops"] == 2
 
 
 def test_the_token_swap_marks_the_session(client: TestClient, db: Session) -> None:

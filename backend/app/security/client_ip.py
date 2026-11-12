@@ -3,11 +3,11 @@
 Two ways in, and only one can be trusted to report the visitor:
 
 * Through the website: browser -> Vercel (frontend/vercel.json rewrites /api/* to Railway) -> Railway's edge -> uvicorn.
-  Vercel replaces X-Forwarded-For / X-Real-IP / X-Vercel-Forwarded-For with the visitor's address (it never passes a
-  caller's own copy on). A `routes` transform in vercel.json also sets EDGE_HEADER to PROXY_SHARED_SECRET (Vercel's env),
+  Vercel replaces X-Forwarded-For with the visitor's address (a caller's own copy is dropped); X-Vercel-Forwarded-For
+  is NOT replaced (checked in production 2026-11-12), so it is never trusted. A `routes` transform in vercel.json also sets EDGE_HEADER to PROXY_SHARED_SECRET (Vercel's env),
   replacing anything the caller sent. Only when that header matches our PROXY_SHARED_SECRET (constant-time) do we believe
-  what Vercel says the visitor is: X-Vercel-Forwarded-For (Railway's edge doesn't touch it), else the left-most
-  X-Forwarded-For entry (Vercel wrote it; Railway appends after it).
+  what Vercel says the visitor is: the left-most X-Forwarded-For entry (Vercel wrote it; Railway appends after it).
+  X-Vercel-Forwarded-For is never read: Vercel passes a caller's own copy of it through.
 * Directly to the Railway domain (anyone can): every header is the caller's to forge, EXCEPT the entry Railway's edge
   adds at the right of X-Forwarded-For (the address that connected to it). So the key is the right-most entry
   (TRUSTED_PROXY_HOPS counts in from the right, default 1) and never the left-most one.
@@ -98,14 +98,21 @@ def _forwarded_for(request: Request) -> list[str]:
     return [p.strip() for line in request.headers.getlist("x-forwarded-for") for p in line.split(",")]
 
 
+def forwarded_count(request: Request) -> int:
+    """How many X-Forwarded-For entries the request carries (a caller's own entries included)."""
+    return len([h for h in _forwarded_for(request) if h])
+
+
 def client_ip(request: Request, settings: Settings | None = None) -> str:
     settings = settings or _settings(request)
     hops = _forwarded_for(request)
     trusted = via_vercel(request, settings)
     _note(request, settings, trusted)
     if trusted:
-        vercel = request.headers.get("x-vercel-forwarded-for", "").split(",")[0]
-        ip = parse_ip(vercel) or (parse_ip(hops[0]) if hops else None)
+        # The left-most X-Forwarded-For entry: Vercel overwrites that header with the visitor's address. NOT
+        # X-Vercel-Forwarded-For: production showed Vercel passes a caller's own copy of it through (a forged
+        # "X-Vercel-Forwarded-For: 1.2.3.4" sent to the website came out as the client address).
+        ip = parse_ip(hops[0]) if hops else None
         if ip:
             return ip
     if hops and not secrets_of(settings):  # LEGACY until the secret is set up (see the module docstring)
