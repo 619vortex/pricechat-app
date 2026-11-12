@@ -80,6 +80,34 @@ async def test_scheduler_backoff_is_capped() -> None:
     assert (row.next_run_at - row.last_finished_at) <= timedelta(seconds=601)
 
 
+async def test_a_failed_daily_backup_retries_within_the_hour_and_after_a_restart() -> None:
+    calls = {"n": 0}
+
+    async def job(ctx: JobContext) -> dict:
+        calls["n"] += 1
+        raise RuntimeError("SignatureDoesNotMatch")
+
+    spec = JobSpec("test.job", "Backup", "daily", 86400, job, initial_delay_seconds=900, retry_failed_seconds=3600)
+    s = Scheduler(SessionLocal, [spec])
+    s.sync_jobs()
+    await s.run_job("test.job")
+    row = _row()
+    assert timedelta(seconds=3590) <= row.next_run_at - row.last_finished_at <= timedelta(seconds=3610)  # an hour, not a day
+    with SessionLocal() as db:  # as it was in production: the next try a day away
+        r = db.get(ScheduledJob, "test.job")
+        r.next_run_at = utcnow() + timedelta(hours=20)
+        db.commit()
+    Scheduler(SessionLocal, [spec]).sync_jobs()  # a restart (a fix deployed): the failed backup runs 15 minutes later
+    assert _row().next_run_at - utcnow() <= timedelta(seconds=901)
+    plain = JobSpec("test.job", "Other", "daily", 86400, job, initial_delay_seconds=900)
+    with SessionLocal() as db:
+        r = db.get(ScheduledJob, "test.job")
+        r.next_run_at = utcnow() + timedelta(hours=20)
+        db.commit()
+    Scheduler(SessionLocal, [plain]).sync_jobs()  # other jobs keep their schedule across restarts
+    assert _row().next_run_at - utcnow() > timedelta(hours=19)
+
+
 async def test_scheduler_skip_no_overlap_and_tick() -> None:
     gate = asyncio.Event()
     runs = {"n": 0}
