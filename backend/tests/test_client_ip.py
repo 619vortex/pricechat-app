@@ -71,6 +71,14 @@ def test_missing_headers_use_the_socket_peer() -> None:
 # --- through the website (Vercel) -----------------------------------------------------------------------------------------
 
 
+def test_a_forged_x_vercel_forwarded_for_through_the_website_is_ignored() -> None:
+    # Production 2026-11-12: Vercel passes a caller's own X-Vercel-Forwarded-For through (with the valid x-pc-edge
+    # added), while it overwrites X-Forwarded-For. Only the left-most X-Forwarded-For entry may name the visitor.
+    h = _vercel("192.0.2.44")
+    h["x-vercel-forwarded-for"] = "1.2.3.4"
+    assert client_ip.client_ip(_req(h), _settings()) == "192.0.2.44"
+
+
 def test_vercel_path_with_the_right_secret_uses_the_reported_visitor() -> None:
     s = _settings()
     assert client_ip.client_ip(_req(_vercel("192.0.2.44")), s) == "192.0.2.44"
