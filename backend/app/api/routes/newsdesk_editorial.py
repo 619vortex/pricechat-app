@@ -75,6 +75,15 @@ async def monitor_scan_now(db: DbSession) -> dict[str, Any]:
             **monitor.scan(db, now, categories=desk.categories or None, desk_state=desk.state or {})}
 
 
+@router.get("/monitor/app")
+def monitor_app(db: DbSession) -> dict[str, Any]:
+    """The World Monitor desktop app on the owner's PC, as its bridge last reported it: connected or not, each feed's health, and the
+    signals (earthquakes, instability, military air activity, FAA, climate, cyber). Read-only; nothing here posts."""
+    from app.newsdesk import wm_app
+
+    return wm_app.view(db, utcnow())
+
+
 @router.get("/monitor/upcoming")
 async def monitor_upcoming(db: DbSession, runtime: Runtime) -> dict[str, Any]:
     """What the desk is about to post: the exact Telegram caption, X post, links and picture, in the order they would go."""

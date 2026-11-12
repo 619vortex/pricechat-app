@@ -22,7 +22,16 @@ type Upcoming = { at: string; next_slot_dubai: string; x_links: boolean; simulta
 
 const STATE_TONE = { verified: "good", held: "warn", rejected: "neutral" } as const;
 const WRITER: Record<string, string> = { local: "written on your PC (local model, fact-checked)", model: "written by Claude", desk: "the outlets' own words" };
-type View = "scan" | "next";
+type View = "scan" | "next" | "app";
+export type AppSignal = { id: string; layer: string; severity: "critical" | "high" | "elevated" | "low"; title: string; detail: string; at: string | null; url: string;
+  lat: number | null; lon: number | null };
+export type AppSnap = { connected: boolean; seen: boolean; age_seconds: number | null; note: string; app_version?: string; bridge_version?: string; received_at?: string;
+  feeds: Record<string, { ok: boolean; count: number; note: string; ms: number }>; signals: AppSignal[];
+  summary: { "macro-signals"?: { verdict?: string; fear_greed?: number; fear_greed_label?: string };
+    "theater-posture"?: { theaters?: { theater: string; level: string; aircraft: number; vessels: number }[] } } };
+const SEV_TONE = { critical: "bad", high: "warn", elevated: "info", low: "neutral" } as const;
+const LAYER: Record<string, string> = { earthquake: "Earthquakes", military: "Military activity", instability: "Country instability", aviation: "Aviation (FAA)",
+  climate: "Climate", cyber: "Cyber threats", other: "Other" };
 type Filter = "all" | "verified" | "world";
 
 /** Telegram HTML as the channel shows it: only bold, italics, line breaks and https links survive; everything else is plain text. */
@@ -105,6 +114,55 @@ function ScanView({ data }: { data: Scan }) {
   );
 }
 
+function AppView({ data }: { data: AppSnap }) {
+  const [layer, setLayer] = useState<string>("all");
+  if (!data.seen) return <Empty>{data.note} It runs on your PC as the "Price Chat World Monitor" task and reports every 5 minutes.</Empty>;
+  const layers = Array.from(new Set(data.signals.map((s) => s.layer)));
+  const rows = data.signals.filter((s) => layer === "all" || s.layer === layer);
+  const feeds = Object.entries(data.feeds);
+  const macro = data.summary["macro-signals"];
+  const theaters = data.summary["theater-posture"]?.theaters ?? [];
+  const urgent = data.signals.filter((s) => s.severity === "critical" || s.severity === "high").length;
+  return (
+    <>
+      <div className="stat-grid">
+        <Stat label="Desktop app" value={data.connected ? "Connected" : "Offline"} tone={data.connected ? "good" : "bad"} />
+        <Stat label="Signals" value={String(data.signals.length)} />
+        <Stat label="Critical / high" value={String(urgent)} tone={urgent ? "warn" : undefined} />
+        <Stat label="Fear & greed" value={macro?.fear_greed != null ? `${macro.fear_greed} ${macro.fear_greed_label ?? ""}` : "-"} />
+      </div>
+      <p className="small muted">World Monitor {data.app_version || "?"} on your PC · last report {data.received_at ? relativeTime(data.received_at) : "never"} ·
+        {" "}{feeds.filter(([, f]) => f.ok).length}/{feeds.length} feeds working
+        {feeds.some(([, f]) => !f.ok) ? ` · not working: ${feeds.filter(([, f]) => !f.ok).map(([k, f]) => `${k} (${f.note || "down"})`).join(", ")}` : ""}.
+        {" "}Signals to watch; the desk doesn't post from them. {data.note}</p>
+      {theaters.length ? <p className="small muted">Military air activity: {theaters.map((t) => `${t.theater} ${t.level}`).join(" · ")}</p> : null}
+      <div className="row" style={{ gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
+        {["all", ...layers].map((l) => (
+          <button key={l} className={`btn btn-sm${layer === l ? " btn-primary" : ""}`} onClick={() => setLayer(l)}>{l === "all" ? "Everything" : LAYER[l] ?? l}</button>
+        ))}
+      </div>
+      {rows.length === 0 ? <Empty>No signals right now.</Empty> : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="table small">
+            <thead><tr><th>Level</th><th>Signal</th><th>Layer</th><th>When</th></tr></thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id}>
+                  <td><Badge tone={SEV_TONE[s.severity] ?? "neutral"}>{s.severity}</Badge></td>
+                  <td style={{ minWidth: 260 }}>{s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : s.title}
+                    {s.detail ? <div className="muted">{s.detail}</div> : null}</td>
+                  <td>{LAYER[s.layer] ?? s.layer}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{s.at ? relativeTime(s.at) : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 function NextView({ data }: { data: Upcoming }) {
   if (data.posts.length === 0) return <Empty>Nothing lined up for the {data.next_slot_dubai} Dubai slot yet. An empty slot stays empty rather than posting filler.</Empty>;
   return (
@@ -143,6 +201,7 @@ export function WorldMonitor() {
   const [view, setView] = useState<View>("scan");
   const scan = useApi(() => request<Scan>("/x/newsdesk/editorial/monitor/scan"), 30000);
   const next = useApi(() => request<Upcoming>("/x/newsdesk/editorial/monitor/upcoming"), 60000);
+  const app = useApi(() => request<AppSnap>("/x/newsdesk/editorial/monitor/app"), 60000);
   const [busy, setBusy] = useState(false);
   const [found, setFound] = useState<string>("");
   const [error, setError] = useState<unknown>(null);
@@ -156,13 +215,16 @@ export function WorldMonitor() {
   };
   const s = scan.data && Array.isArray(scan.data.stories) ? scan.data : null;
   const n = next.data && Array.isArray(next.data.posts) ? next.data : null;
+  const a = app.data && Array.isArray(app.data.signals) && typeof app.data.connected === "boolean" ? app.data : null;
   return (
     <Card title="World Monitor" actions={<button className="btn btn-sm" disabled={busy} onClick={() => void scanNow()}>{busy ? "Scanning feeds…" : "Scan now"}</button>}>
       {error ? <ApiErrorBanner error={error} /> : null}
       {found ? <p className="small muted">{found}. The desk decides what to post on its own schedule; scanning never posts.</p> : null}
-      <Tabs tabs={[{ key: "scan", label: "Scanning" }, { key: "next", label: "Up next" }]} value={view} onChange={setView} />
+      <Tabs tabs={[{ key: "scan", label: "Scanning" }, { key: "next", label: "Up next" },
+        { key: "app", label: a ? `Desktop app ${a.connected ? "●" : "○"}` : "Desktop app" }]} value={view} onChange={setView} />
       {view === "scan" ? (scan.failure ? <ApiErrorBanner error={scan.failure} /> : s ? <ScanView data={s} /> : <p className="muted">Scanning…</p>)
-        : (next.failure ? <ApiErrorBanner error={next.failure} /> : n ? <NextView data={n} /> : <p className="muted">Writing the next posts…</p>)}
+        : view === "next" ? (next.failure ? <ApiErrorBanner error={next.failure} /> : n ? <NextView data={n} /> : <p className="muted">Writing the next posts…</p>)
+        : (app.failure ? <ApiErrorBanner error={app.failure} /> : a ? <AppView data={a} /> : <p className="muted">Asking your PC…</p>)}
     </Card>
   );
 }
