@@ -132,7 +132,11 @@ def test_chart_subject_and_people() -> None:
     assert clean.chart_subject("US inflation higher than expected")[:3] == ("^GSPC", "S&P 500", "S&P 500")
     assert clean.chart_subject("Mercado Bitcoin reopens") is None
     assert clean.person_subject(ev("First day of Ukraine peace talks constructive, Zelensky says")) == "Volodymyr Zelenskyy"
-    assert clean.person_subject(ev("Nvidia hires Wachtell to investigate CEO Jensen Huang's affair")) is None  # sensitive: never a face
+    # owner, 2026-11-12: a controversy may show the public figure it is about; never a private person, never on violence or death
+    assert clean.person_subject(ev("Nvidia hires Wachtell to investigate CEO Jensen Huang's affair")) == "Jensen Huang"
+    assert clean.person_subject(ev("Trump sued by New York over business records")) == "Donald Trump"
+    assert clean.person_subject(ev("John Smith charged with fraud in Ohio")) is None  # not a public figure
+    assert clean.person_subject(ev("Putin says the war will continue after the attack")) is None  # violence: no face
 
 
 @pytest.fixture
@@ -181,9 +185,31 @@ async def test_x_redraws_exactly_what_telegram_showed(found: list[dict[str, Any]
     assert again == data and meta2 is meta or meta2 == meta
 
 
-async def test_a_sensitive_story_never_searches_for_the_person(found: list[dict[str, Any]]) -> None:
-    await clean.picture(ev("Nvidia hires Wachtell Lipton to investigate CEO Jensen Huang's affair"), now=AT)
-    assert all("Jensen Huang" not in c["terms"] for c in found) and all(c["sensitive"] for c in found)
+async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def shot(title: str) -> Any:
+        return photos.LicensedPhoto(url=f"https://upload.wikimedia.org/{title}.jpg", page=f"https://commons.wikimedia.org/wiki/File:{title}.jpg",
+                                    title=f"File:{title}.jpg", creator="Jane Doe", licence="CC BY 2.0", provider="wikimedia", source="wikimedia",
+                                    width=1200, height=1500)
+
+    async def discover(client: Any, queries: list[str], terms: list[str], **kw: Any) -> list[Any]:
+        calls.append({"terms": terms, **kw})
+        if terms == ["Jensen Huang"]:  # an arrest-style or courtroom photo is never used, even licensed
+            return [shot("Jensen Huang leaving court"), shot("Jensen Huang at Computex 2025")]
+        return []
+
+    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+        return photo()
+
+    monkeypatch.setattr(photos, "discover", discover)
+    monkeypatch.setattr(photos, "fetch", fetch)
+    _, meta = await clean.picture(ev("Nvidia hires Wachtell Lipton to investigate CEO Jensen Huang's affair"), now=AT)
+    assert calls[0]["terms"] == ["Jensen Huang"] and calls[0]["sensitive"] is False  # the subject's own search
+    assert meta["title"] == "File:Jensen Huang at Computex 2025.jpg" and meta["layout"] == "photo"  # neutral, not the courtroom one
+    calls.clear()
+    await clean.picture(ev("John Smith charged with fraud at Ohio exchange"), now=AT)
+    assert all(c["sensitive"] for c in calls) and not any(c["terms"] == ["John Smith"] for c in calls)  # a private person: never
 
 
 async def test_no_photo_but_prices_is_the_chart(monkeypatch: pytest.MonkeyPatch) -> None:

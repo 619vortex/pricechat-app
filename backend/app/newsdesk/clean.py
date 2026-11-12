@@ -423,20 +423,49 @@ def chart_subject(text: str) -> tuple[str, str, str] | None:
     return None
 
 
-def person_subject(ev: Any) -> str | None:
-    """The person the story is about, when it is about one (and isn't a scandal, crime or allegation story)."""
+# owner, 2026-11-12: "allow authentic, licensed photos of public figures in controversy stories when directly relevant, with neutral presentation
+# and no implication of guilt". A controversy story may show the public figure it is about; never a private person, never on a story of
+# violence or death, and never a photo of an arrest, a courtroom, a police scene or a prison (that photo would imply the guilt).
+VIOLENT = re.compile(r"\b(death|deaths|dead|dies|died|killed|kills?|murder\w*|suicide|wars?|casualt(?:y|ies)|assault\w*|rape|sexual|shooting|"
+                     r"terror\w*|kidnap\w*|attack\w*|bomb\w*|strikes?)\b", re.I)
+ROLE = re.compile(r"\b(CEO|chief executive|founder|co-?founder|chair(?:man|woman)?|president|prime minister|minister|senator|governor|"
+                  r"secretary|chancellor|king|queen|prince|mayor|director|billionaire)\b", re.I)
+NOT_NEUTRAL = re.compile(r"\b(arrest\w*|court\w*|trial|mug ?shot|police|prison|jail\w*|handcuff\w*|booking|custody|protest\w*|perp walk|"
+                         r"indict\w*|testif\w*|hearing|deposition|crying|angry|shouting)\b", re.I)
+
+
+def _named_person(text: str) -> str | None:
     from app.newsdesk import photos
 
-    text = f"{getattr(ev, 'headline', '')} {getattr(ev, 'title', '')}"
-    if photos.is_sensitive(text):
-        return None
-    names = photos.people_named(text)
+    names = [re.sub(r"[’']s$", "", n) for n in photos.people_named(text)]  # "Jensen Huang's affair": the person, not the possessive
     if names:
         return names[0]
     for word in re.findall(r"\b[A-Z][a-z]+\b", text):
         if word.lower() in KNOWN_PEOPLE:
             return KNOWN_PEOPLE[word.lower()]
     return None
+
+
+def public_figure(name: str, text: str) -> bool:
+    """A person the public knows by role: a name we know, or one the story gives a public role ("CEO Jensen Huang")."""
+    if name in KNOWN_PEOPLE.values():
+        return True
+    last = name.split()[-1]
+    return bool(re.search(rf"{ROLE.pattern}\W+(?:\w+\W+){{0,3}}?{re.escape(name)}|{re.escape(last)}\W+(?:\w+\W+){{0,2}}?{ROLE.pattern}", text, re.I))
+
+
+def person_subject(ev: Any) -> str | None:
+    """The person the story is about, when it is about one. In a controversy story only a public figure it names, and never in a story of
+    violence or death."""
+    from app.newsdesk import photos
+
+    text = f"{getattr(ev, 'headline', '')} {getattr(ev, 'title', '')}"
+    name = _named_person(text)
+    if not name:
+        return None
+    if photos.is_sensitive(text) and (VIOLENT.search(text) or not public_figure(name, text)):
+        return None
+    return name
 
 
 # a market move's subject, for the photo beside its chart: (words in the headline, search, word the photo's title must contain)
@@ -452,9 +481,9 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool) ->
 
     sensitive = visual.is_sensitive(ev)
     plans: list[tuple[list[str], list[str]]] = []
-    person = None if sensitive else person_subject(ev)
+    person = person_subject(ev)
     if person:
-        plans.append(([person, f"{person} portrait"], [person]))
+        plans.append(([person, f"{person} portrait"], [person]))  # its own search: the person is the subject (see the neutral filter below)
     queries = visual.subject_queries(f"{ev.headline} {ev.title}")
     if getattr(ev, "kind", "") in ("market", "recap"):
         queries += [(q, must) for rx, q, must in MARKET_PHOTOS if rx.search(f"{ev.headline} {ev.title}")]
@@ -463,7 +492,10 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool) ->
     async with httpx.AsyncClient(transport=transport) as client:
         for qs, terms in plans:
             try:
-                found = await photos.discover(client, qs, terms, used=used, sensitive=sensitive, panel=panel)
+                is_person = person is not None and terms == [person]
+                found = await photos.discover(client, qs, terms, used=used, sensitive=sensitive and not is_person, panel=panel)
+                if is_person and sensitive:  # a controversy: only a neutral photo of them (no arrest, court, police or protest scene)
+                    found = [p for p in found if not NOT_NEUTRAL.search(f"{p.title} {p.description} {' '.join(p.tags)}")]
             except Exception as e:  # noqa: BLE001
                 logger.info("clean: photo discovery failed (%s)", type(e).__name__)
                 continue
