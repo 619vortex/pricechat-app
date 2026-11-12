@@ -651,7 +651,18 @@ def x_links_on(state: dict[str, Any] | None) -> bool:
     return (state or {}).get("x_links") is not False
 
 
-async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = None, transport: Any = None, x_links: bool = True) -> Package:
+STYLES = ("clean", "classic")
+DEFAULT_STYLE = "clean"  # tests of the classic layout set "classic"
+
+
+def post_style(state: dict[str, Any] | None) -> str:
+    """clean (owner, 2026-11-12: the picture speaks, a short caption, @thepricechat) unless Admin set the older classic layout back."""
+    s = str((state or {}).get("post_style") or DEFAULT_STYLE)
+    return s if s in STYLES else DEFAULT_STYLE
+
+
+async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = None, transport: Any = None, x_links: bool = True,
+                  style: str = "classic") -> Package:
     """Everything both platforms post for an event, checked. Stored on the event (facts.package) so X uses exactly what Telegram used."""
     from app.newsdesk import brief
 
@@ -661,13 +672,22 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     breaking = getattr(ev, "label", "") == brief.BREAKING
     outs = outlets_of(ev)
     kicker = str((ev.facts or {}).get("kicker") or "")
-    x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs, kicker=kicker)
-    html, plain = telegram_caption(c, links, line, breaking=breaking, outlets=outs, kicker=kicker)
+    if style == "clean":  # app/newsdesk/clean: the label earned, the story in 1-3 sentences with cashtags, the sources, @thepricechat
+        from app.newsdesk import clean
+
+        pre = clean.prefix_for(ev)
+        said = " ".join([str(getattr(ev, "summary", "") or ""), *(str(getattr(r, "summary", "") or "") for r in rows or [])])
+        x = clean.x_caption(c, links, prefix=pre, with_links=x_links, outlets=outs, case_source=said)
+        html, plain, checked = clean.telegram_caption(c, links, prefix=pre, outlets=outs, case_source=said)
+    else:
+        x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs, kicker=kicker)
+        html, plain = telegram_caption(c, links, line, breaking=breaking, outlets=outs, kicker=kicker)
+        checked = plain
     src = f"{source_text_of(ev, rows)} {line}"
     allowed = [x_.url for x_ in links]
     names = [x_.name for x_ in links if x_.kind != "pricechat"] or outlets_of(ev)[:1]
     rx = checks.check_post(x, source_text=src, source_names=names, breaking=breaking, links=allowed)
-    rt = checks.check_post(plain, source_text=src, source_names=names, breaking=breaking, links=allowed, max_len=TG_CAPTION_LIMIT)
+    rt = checks.check_post(checked, source_text=src, source_names=names, breaking=breaking, links=allowed, max_len=TG_CAPTION_LIMIT)  # the story, not the signature
     all_checks = [{**c_, "platform": "x"} for c_ in rx.checks] + [{**c_, "platform": "telegram"} for c_ in rt.checks]
     from app.newsdesk import viral
 
@@ -700,11 +720,12 @@ def state(db: Any) -> dict[str, Any]:
     return {"x_links": x_links_on(x.state), "x_cost_per_post_usd": 0.20 if x_links_on(x.state) else 0.015,
             "emergency": (x.pause_reason or "") == EMERGENCY or (tg.state or {}).get("problem") == EMERGENCY,
             "x_paused": x.pause_reason or "", "telegram_paused": (tg.state or {}).get("problem") or "",
-            "data_posts": (x.state or {}).get("data_posts", True) is not False, "experiments": (x.state or {}).get("experiments", True) is not False}
+            "data_posts": (x.state or {}).get("data_posts", True) is not False, "experiments": (x.state or {}).get("experiments", True) is not False,
+            "post_style": post_style(x.state)}
 
 
 def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = None, data_posts: bool | None = None, experiments: bool | None = None,
-              now: Any = None) -> dict[str, Any]:
+              post_style: str | None = None, now: Any = None) -> dict[str, Any]:
     """x_links: source links in X posts (on by default; off = named sources only, $0.015 a post). emergency: stop both platforms at once
     until resumed (the desk keeps choosing stories, nothing is posted); off lifts only an emergency pause, never another lane's own pause."""
     from datetime import timedelta
@@ -721,6 +742,8 @@ def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = 
         x.state = {**(x.state or {}), "data_posts": bool(data_posts)}
     if experiments is not None:  # Viral Engine 2.0: runner-up hook experiments
         x.state = {**(x.state or {}), "experiments": bool(experiments)}
+    if post_style is not None and post_style in STYLES:  # clean (default) or the classic layout
+        x.state = {**(x.state or {}), "post_style": post_style}
     if emergency is True:
         x.paused_until, x.pause_reason = now + timedelta(days=FAR), EMERGENCY
         tg.state = {**(tg.state or {}), "paused_until": (now + timedelta(days=FAR)).isoformat(), "problem": EMERGENCY}

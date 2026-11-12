@@ -90,7 +90,8 @@ async def package_for(db: Session, ev: NdEvent, settings: Any = None) -> dict[st
 
     rows = await stories_of(db, ev)
     try:
-        pkg = await network.package(_copy(ev), settings=settings, rows=rows, x_links=network.x_links_on(engine.settings_row(db).state))
+        desk = engine.settings_row(db).state
+        pkg = await network.package(_copy(ev), settings=settings, rows=rows, x_links=network.x_links_on(desk), style=network.post_style(desk))
         got = {**pkg.out(), "final": False}
     except Exception as e:  # noqa: BLE001 - shown, never raised: the monitor must not break Admin
         logger.info("newsdesk monitor: no package for event %s (%s)", ev.id, type(e).__name__)

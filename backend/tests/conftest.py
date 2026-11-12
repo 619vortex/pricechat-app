@@ -220,6 +220,13 @@ def _no_live_photo_search(request: pytest.FixtureRequest, monkeypatch: pytest.Mo
     async def no_prices(*_: object, **__: object) -> dict[str, object]:
         return {}
 
+    from app.newsdesk import clean
+
+    async def no_bars(*_: object, **__: object) -> list[object]:
+        return []
+
+    monkeypatch.setattr(clean, "fetch_bars", no_bars)  # the clean style's charts never read Yahoo in tests
+
     monkeypatch.setattr(datapost, "fetch_all", no_prices)  # nor Yahoo's daily closes: data-post tests pass their own
 
 
@@ -395,3 +402,12 @@ def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
         # the older tests drive X on its own; tests/test_x_follows_telegram.py covers X mirroring Telegram (owner, 2026-11-09)
         monkeypatch.setattr(nd_events, "X_FOLLOWS_TELEGRAM", False)
+
+
+@pytest.fixture(autouse=True)
+def _classic_post_style(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: the News Desk's older tests are about the classic layout (still Admin's rollback); the clean style's own tests
+    (test_newsdesk_clean*.py) set network.DEFAULT_STYLE = "clean"."""
+    from app.newsdesk import network
+
+    monkeypatch.setattr(network, "DEFAULT_STYLE", "classic")

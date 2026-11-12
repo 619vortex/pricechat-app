@@ -221,7 +221,8 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
 
             desk_state = engine.settings_row(db).state or {}
         try:
-            pkg = await network.package(ev, settings=settings, rows=rows, transport=transport, x_links=network.x_links_on(desk_state))
+            pkg = await network.package(ev, settings=settings, rows=rows, transport=transport, x_links=network.x_links_on(desk_state),
+                                        style=network.post_style(desk_state))
         except Exception as e:  # noqa: BLE001 - the older caption instead
             logger.warning("tgnews: no package for event %s (%s)", ev.id, type(e).__name__)
             pkg = None
@@ -255,6 +256,10 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     if s is not None and meta.get("kind") == "photo":
         keep = [(u, at) for u, at in ((s.state or {}).get("used_photos") or []) if at >= (now - timedelta(days=visual.USED_DAYS)).isoformat()]
         s.state = {**(s.state or {}), "used_photos": [*keep, (meta["url"], now.isoformat())][-200:]}
+    if pkg is not None and meta.get("style") == "clean":  # a photographer's name the picture couldn't draw: credited in the caption
+        from app.newsdesk import clean
+
+        pkg.telegram_html, pkg.telegram_plain = clean.with_credit(pkg.telegram_html, pkg.telegram_plain, meta)
     if pkg is not None:
         srcs = [{"name": x.name, "url": x.url} for x in pkg.links if x.kind != "pricechat"]
         return {"headline": pkg.copy.headline, "summary": pkg.copy.context, "html": pkg.telegram_html, "plain": pkg.telegram_plain, "sources": srcs,

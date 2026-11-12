@@ -1098,6 +1098,23 @@ def viral_visual(ev: Any, recent: list[dict[str, Any]] | None, now: Any, db: Any
     return None
 
 
+def _style_of(stored: dict[str, Any], db: Any) -> str:
+    """The picture's style: what it was first drawn in (X redraws Telegram's), else the desk's setting (network.post_style). Without a
+    database (older callers, tests) the classic layout."""
+    if stored.get("style"):
+        return "clean" if stored["style"] == "clean" else "classic"
+    if stored.get("design") or stored.get("kind"):
+        return "classic"
+    if db is None:
+        return "classic"
+    from app.newsdesk import engine, network
+
+    try:
+        return network.post_style(engine.settings_row(db).state)
+    except Exception:  # noqa: BLE001
+        return "classic"
+
+
 def recent_layouts(recent: list[dict[str, Any]] | None) -> list[str]:
     return [str(r.get("design") or "") for r in (recent or []) if r.get("design")]
 
@@ -1199,13 +1216,25 @@ async def _again(ev: Any, chosen: dict[str, Any], *, transport: Any, now: Any, d
 
 
 async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None,
-                    now: Any = None, db: Any = None) -> tuple[bytes, dict[str, Any]]:
+                    now: Any = None, db: Any = None, style: str | None = None) -> tuple[bytes, dict[str, Any]]:
     """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed). Owner, 2026-11-11:
     real photos first (licensed, of the actual subject), then the GPU's illustration (labelled), then the desk's own drawn visuals; a
     chart for a measured move stays a chart (accuracy first)."""
     f = ev.facts or {}
     used = used or set()
     stored_visual = dict(f.get("visual") or {})
+    if (style or _style_of(stored_visual, db)) == "clean":  # app/newsdesk/clean: the picture without a poster around it
+        from app.newsdesk import clean
+
+        if stored_visual.get("style") == "clean":
+            try:
+                again = await clean.redraw(ev, stored_visual, transport=transport, db=db, now=now)
+            except Exception as e:  # noqa: BLE001 - drawn afresh below
+                logger.info("newsdesk visual: couldn't redraw clean picture for %s (%s)", getattr(ev, "id", None), type(e).__name__)
+                again = None
+            if again is not None:
+                return again
+        return await clean.picture(ev, used=used, transport=transport, market=market, now=now, db=db)
     special = viral_visual(ev, recent, now, db)  # Viral Engine 2.0: a data post's card, a developing story's timeline
     if special is not None:
         return special

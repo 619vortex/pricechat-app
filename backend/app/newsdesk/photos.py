@@ -345,7 +345,12 @@ def name_runs(text: str, known: Iterable[str] = ()) -> list[str]:
     return out
 
 
-def relevant(photo: LicensedPhoto, subject_terms: Iterable[str], *, story_terms: Iterable[str] = (), sensitive: bool = False) -> str | None:
+PANEL_MIN_WIDTH = 700  # a collage panel (app/newsdesk/clean) is 795 px wide: a portrait of the subject fits it
+PANEL_MIN_ASPECT = 0.55  # down to a 9:16 portrait (a headshot)
+
+
+def relevant(photo: LicensedPhoto, subject_terms: Iterable[str], *, story_terms: Iterable[str] = (), sensitive: bool = False,
+             min_width: int = MIN_WIDTH, min_aspect: float = MIN_ASPECT) -> str | None:
     """None when the photo is a real, recent, landscape colour photograph of the subject; otherwise why not.
 
     A subject term must appear as a whole word in the title, a human tag/category, or the description's first sentence. A description-only
@@ -375,9 +380,9 @@ def relevant(photo: LicensedPhoto, subject_terms: Iterable[str], *, story_terms:
         return f"too old: {max(years)}"
     if not photo.width or not photo.height:
         return "size unknown"
-    if photo.width < MIN_WIDTH:
+    if photo.width < min_width:
         return f"too small: {photo.width} px wide"
-    if photo.width < photo.height * MIN_ASPECT:
+    if photo.width < photo.height * min_aspect:
         return "portrait or square"
     incidents = [m.group(0) for m in INCIDENT.finditer(title)]
     if incidents and not _has(" ".join(story_terms + subject_terms), incidents):
@@ -537,7 +542,7 @@ def _score(p: LicensedPhoto, subject_terms: list[str], story_terms: list[str], s
 
 
 async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms: list[str], *, used: Iterable[str] = frozenset(),
-                   limit: int = 8, story_terms: Iterable[str] = (), sensitive: bool = False) -> list[LicensedPhoto]:
+                   limit: int = 8, story_terms: Iterable[str] = (), sensitive: bool = False, panel: bool = False) -> list[LicensedPhoto]:
     """Licensed, relevant photographs for a story, best first. Commons and Openverse are searched in parallel (Pexels too when keyed);
     duplicates across providers collapse to the most trusted copy; anything in `used` (URLs or pages) is skipped. `sensitive` (a scandal,
     fraud, crime, hack, death or war story: `is_sensitive(headline)`) admits only photos of places and objects, never of people."""
@@ -555,7 +560,8 @@ async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms:
     for p in found:
         if not p.url or _norm_url(p.url) in used_keys or _norm_url(p.page) in used_keys:
             continue
-        why = verify_licence(p) or relevant(p, subject_terms, story_terms=story, sensitive=sensitive)
+        why = verify_licence(p) or relevant(p, subject_terms, story_terms=story, sensitive=sensitive,
+                                            **({"min_width": PANEL_MIN_WIDTH, "min_aspect": PANEL_MIN_ASPECT} if panel else {}))
         if why:
             logger.debug("newsdesk photos: skip %s (%s)", p.title[:80], why)
             continue
@@ -573,7 +579,7 @@ async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms:
     return out[:limit]
 
 
-async def fetch(client: httpx.AsyncClient, photo: LicensedPhoto) -> Image.Image | None:
+async def fetch(client: httpx.AsyncClient, photo: LicensedPhoto, min_width: int = MIN_WIDTH) -> Image.Image | None:
     """The photograph itself, or None when the pixels fail the rules the metadata could not check (black and white, too small)."""
     try:
         r = await client.get(photo.url, headers=UA, timeout=30, follow_redirects=True)
@@ -583,7 +589,7 @@ async def fetch(client: httpx.AsyncClient, photo: LicensedPhoto) -> Image.Image 
     except Exception as e:  # noqa: BLE001
         logger.warning("newsdesk photos: download failed for %s (%s)", photo.url[:120], type(e).__name__)
         return None
-    if img.width < MIN_WIDTH * 0.9 or not is_colour(img) or looks_like_graphic(img):  # a 1920 rendition can be a little narrower
+    if img.width < min_width * 0.9 or not is_colour(img) or looks_like_graphic(img):  # a 1920 rendition can be a little narrower
         return None
     return img
 
