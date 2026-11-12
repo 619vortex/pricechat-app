@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TelegramText, WorldMonitor, xLength, type Scan } from "./WorldMonitor";
+import { TelegramText, WorldMonitor, xLength, type AppSnap, type Scan } from "./WorldMonitor";
 
 const SCAN: Scan = {
   at: "2026-11-11T08:00:00Z", hours: 12, counts: { verified: 1, held: 1, rejected: 1 }, world_monitor_found: 2, world_monitor_confirmed: 1, next_slot_dubai: "12:00",
@@ -21,11 +21,20 @@ const NEXT = { at: "", next_slot_dubai: "12:00", x_links: true, simultaneous: "X
     telegram_html: '<b>Missile hits Aramco terminal</b>\n\n🔗 Source: <a href="https://www.dw.com/en/a-1">DW</a> <a href="javascript:alert(1)">bad</a><script>x</script>',
     copy: { writer: "local" } } }] };
 
+const APP: AppSnap = { connected: true, seen: true, age_seconds: 60, note: "", app_version: "2.3.8", received_at: "2026-11-12T05:20:00Z",
+  feeds: { earthquakes: { ok: true, count: 2, note: "", ms: 400 }, "acled-conflict": { ok: false, count: 0, note: "ACLED not configured", ms: 100 } },
+  signals: [
+    { id: "q", layer: "earthquake", severity: "critical", title: "M7.2 earthquake, Kermadec Islands (tsunami flag)", detail: "USGS", at: "2026-11-12T04:00:00Z",
+      url: "https://earthquake.usgs.gov/a", lat: -29, lon: -177 },
+    { id: "c", layer: "instability", severity: "high", title: "Ukraine: instability 59/100", detail: "", at: null, url: "", lat: null, lon: null },
+  ],
+  summary: { "macro-signals": { verdict: "CASH", fear_greed: 28, fear_greed_label: "Fear" } } };
+
 function serve(scanNow = { new_stories: 3 }) {
   const calls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     calls.push(`${init?.method ?? "GET"} ${input}`);
-    const body = input.includes("scan-now") ? scanNow : input.includes("/monitor/upcoming") ? NEXT : SCAN;
+    const body = input.includes("scan-now") ? scanNow : input.includes("/monitor/upcoming") ? NEXT : input.includes("/monitor/app") ? APP : SCAN;
     return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
   }));
   return calls;
@@ -68,5 +77,17 @@ describe("World Monitor", () => {
     expect(xLength("Hi https://example.com/a/very/long/path/that/goes/on")).toBe(3 + 23);
     render(<TelegramText html={"<b>Bold</b>\nline"} />);
     expect(screen.getByText("Bold").tagName).toBe("B");
+  });
+  it("shows the desktop app's signals, its health and the keyless feeds", async () => {
+    serve();
+    render(<WorldMonitor />);
+    fireEvent.click(await screen.findByText(/Desktop app/));
+    expect(await screen.findByText("M7.2 earthquake, Kermadec Islands (tsunami flag)")).toBeTruthy();
+    expect(screen.getByText("Connected")).toBeTruthy();
+    expect(screen.getByText("28 Fear")).toBeTruthy();
+    expect(screen.getByText(/acled-conflict \(ACLED not configured\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Country instability" }));
+    await waitFor(() => expect(screen.queryByText(/Kermadec/)).toBeNull());
+    expect(screen.getByText("Ukraine: instability 59/100")).toBeTruthy();
   });
 });

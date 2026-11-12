@@ -70,3 +70,27 @@ def fail(job_id: int, body: FailIn, db: DbSession, authorization: Bearer = None)
         return rq.fail(db, job_id, w, body.error)
     except rq.RenderError as e:
         raise HTTPException(e.status, str(e)) from e
+
+
+class WorldMonitorIn(StrictInput):
+    """One snapshot from the World Monitor desktop app on the PC (app/newsdesk/wm_app.py; worker/pricechat_worker/worldmonitor.py)."""
+
+    app_version: str = Field("", max_length=20)
+    bridge_version: str = Field("", max_length=20)
+    collected_at: str = Field("", max_length=40)
+    feeds: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    signals: list[dict[str, Any]] = Field(default_factory=list, max_length=400)
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/world-monitor")
+def world_monitor(body: WorldMonitorIn, db: DbSession, authorization: Bearer = None) -> dict[str, Any]:
+    """The PC bridge's snapshot of the World Monitor desktop app, shown in Admin › World Monitor › Desktop app. Never posts."""
+    from app.db.base import utcnow
+    from app.newsdesk import wm_app
+
+    w = _worker(db, authorization)
+    try:
+        return wm_app.save(db, w.name, body.model_dump(), utcnow())
+    except wm_app.WmError as e:
+        raise HTTPException(413, str(e)) from e

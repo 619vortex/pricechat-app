@@ -3,6 +3,7 @@
 No network: StudyMD fakes Hyperliquid; the trade path stops at tgtrade's own preview (PAPER), never an order without Confirm."""
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -300,3 +301,24 @@ def test_card_text_and_timing_helpers() -> None:
     soon = (datetime.now(timezone.utc) + timedelta(hours=2)).replace(second=0, microsecond=0)
     assert signalcard._when(soon.isoformat()) == soon.strftime("%H:%M UTC")
     assert record.FILL_WITHIN == 24  # the card's "isn't filled by" is the record's own fill window
+
+
+TG_TAGS = re.compile(r"</?(?:b|i|code|pre|a)(?:\s[^<>]*)?>")
+
+
+def telegram_html_ok(s: str) -> bool:
+    """Telegram refuses a message whose text has any '<' or '>' that isn't one of the tags it knows (live 2026-11-12:
+    'Unsupported start tag "0"' from "MACD <0", so every /signal while MACD was below zero failed)."""
+    return "<" not in TG_TAGS.sub("", s) and ">" not in TG_TAGS.sub("", s)
+
+
+def test_bearish_indicators_are_escaped_so_telegram_accepts_the_card() -> None:
+    bear = {"rsi": 38.0, "hist": -0.4, "hist_prev": -0.2, "ema20": 99.0, "ema50": 101.0, "vol_ratio": 1.3}
+    row = signalcard.ind_row(bear)
+    assert "MACD &lt;0" in row and "EMA20 &lt; EMA50" in row and telegram_html_ok(row)
+    assert telegram_html_ok(signalcard.ind_row({**bear, "hist": 0.4, "ema20": 102.0}))
+    c = TsSignalCard(id=1, venue="hyperliquid", coin="BTC", tag="$BTCUSD", timeframe="1h", verdict="WAIT", price=100.0,
+                     data={"inds": bear, "tfs": {"15m": "down", "1h": "down", "4h": "up"}, "met": {"LONG": [2, 8], "SHORT": [5, 8]},
+                           "triggers": {"SHORT": ["RSI 30–55 (now 38) <b>"], "LONG": ["EMA20 > EMA50"]},
+                           "sides": {"LONG": [[False, "EMA20 > EMA50 (now 99 < 101)"]], "SHORT": [[True, "close < EMA50"]]}})
+    assert telegram_html_ok(signalcard.text(None, c)) and telegram_html_ok(signalcard.details(c))
