@@ -45,6 +45,7 @@ const RealmAdminPage = lazy(() => import("./pages/RealmAdmin").then((m) => ({ de
 const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ default: m.VpnAdminPage })));
 const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
 const TelegramTradingPage = lazy(() => import("./pages/TelegramTradingPage").then((m) => ({ default: m.TelegramTradingPage })));
+const WorldMonitorPage = lazy(() => import("./pages/WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
 const TradingOSPage = lazy(() => import("./pages/TradingOS").then((m) => ({ default: m.TradingOSPage })));
 const pf = () => import("./pages/pokemon/portfolio");
 const PortfolioPage = lazy(() => pf().then((m) => ({ default: m.PortfolioPage })));
@@ -65,6 +66,7 @@ export function AdminApp() {
             <Route path="knowledge" element={<KnowledgePage />} />
             <Route path="content" element={<ContentPage />} />
             <Route path="x" element={<XPage />} />
+            <Route path="world-monitor" element={<WorldMonitorPage />} />
             <Route path="brand-manager/*" element={<BrandManagerPage />} />
             <Route path="short-market/*" element={<ShortMarketPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />

@@ -36,6 +36,7 @@ export const AREAS: NavArea[] = [
   {
     key: "social", label: "Social media", icon: "✺",
     pages: [
+      { to: "/world-monitor", label: "World Monitor", about: "What the News Desk is reading now, how it judged each story, and what it posts next on Telegram and X." },
       { to: "/x", label: "X / Twitter", about: "Your X account: what's being said, post ideas and replies waiting for approval." },
       { to: "/youtube", label: "YouTube", about: "Your YouTube channel and new videos." },
       { to: "/brand-manager", label: "Brand Manager", about: "Plan and make posts for your social accounts." },
