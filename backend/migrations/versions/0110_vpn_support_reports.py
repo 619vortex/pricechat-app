@@ -1,10 +1,10 @@
 """Kiwi VPN support: bug reports and feedback members send from the apps, listed in Admin.
 
-Numbered 0110 because feat/kiwi-production (not merged) already uses 0108 and 0109. It revises main's head 0107: if
+Numbered 0110 because feat/kiwi-production (not merged) already uses 0108 and 0109. It revises main's head 0109_signal_cards (rechained 2026-11-12); if
 feat/kiwi-production merges first, change down_revision below to '0109_vpn_server_checks' (one head, no data change).
 
 Revision ID: 0110_vpn_support_reports
-Revises: 0107_vpn_payment_recovery
+Revises: 0109_signal_cards
 """
 
 from collections.abc import Sequence
@@ -14,7 +14,7 @@ from alembic import op
 
 
 revision: str = '0110_vpn_support_reports'
-down_revision: str | None = '0107_vpn_payment_recovery'
+down_revision: str | None = '0109_signal_cards'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
