@@ -341,12 +341,40 @@ def test_sync_revokes_readds_and_removes_unknown(db: Session, fake: FakeNode) ->
     ungrant(db, keep)
     out = vpn.sync_all(db)
     assert out["suspended"] == 2 and out["revoked"] == 0 and fake.peers == {} and db.get(VpnDevice, d_keep.id) is not None
-    # an unreachable agent marks the server offline, keeps everything else
+    # an unreachable agent: one failure keeps it online with the error noted; two in a row mark it offline, keeping everything else
     fake.fail = True
     assert vpn.sync_all(db)["online"] == 0
     db.expire_all()
     s = db.get(VpnServer, server.id)
-    assert s.online is False and s.last_error
+    assert s.online is True and s.fail_streak == 1 and s.last_error
+    vpn.sync_all(db)
+    db.expire_all()
+    s = db.get(VpnServer, server.id)
+    assert s.online is False and s.fail_streak == 2 and s.last_error
+
+
+def test_one_failed_check_doesnt_take_a_server_offline(db: Session, fake: FakeNode) -> None:
+    """A blip (one sync or Admin test that can't reach the agent) leaves the server usable; a success in between resets it."""
+    server = add_server(db, fake)
+    open_vpn(db)
+    for fail in (True, False, True, False):  # alternating: never two in a row
+        fake.fail = fail
+        vpn.sync_all(db)
+        db.expire_all()
+        assert db.get(VpnServer, server.id).online is True
+    assert db.get(VpnServer, server.id).fail_streak == 0
+    fake.fail = True
+    assert vpn.test_server(db, server.id)["ok"] is False
+    db.expire_all()
+    assert db.get(VpnServer, server.id).online is True  # the Admin test counts as one check too
+    vpn.sync_all(db)
+    db.expire_all()
+    assert db.get(VpnServer, server.id).online is False
+    fake.fail = False
+    vpn.sync_all(db)
+    db.expire_all()
+    s = db.get(VpnServer, server.id)
+    assert s.online is True and s.fail_streak == 0 and s.last_error is None
 
 
 def test_sync_checks_members_without_a_query_per_member(db: Session, fake: FakeNode) -> None:
