@@ -132,7 +132,8 @@ def market_gates(i: dict[str, Any], min_volume: float, max_spread: float) -> lis
     spread = max(i.get("spread_bps") or 0, i.get("impact_spread_bps") or 0)
     depth = min(i.get("depth_bid") or 0, i.get("depth_ask") or 0)
     atr_pct = i.get("atr_pct") or 0
-    return [Cond(i["volume_24h"] >= min_volume, f"24h volume ${i['volume_24h'] / 1e6:,.0f}M (needs ${min_volume / 1e6:,.0f}M)", "volume"),
+    vol = i["volume_24h"] / 1e6
+    return [Cond(i["volume_24h"] >= min_volume, f"24h volume ${vol:,.{1 if vol < 10 else 0}f}M (needs ${min_volume / 1e6:,.0f}M)", "volume"),
             Cond(spread <= max_spread, f"spread {spread:.1f} bps (max {max_spread:g})", "spread"),
             Cond(depth >= signals.MIN_DEPTH_USD, f"order book ${depth / 1e3:,.0f}k within 0.5% (needs $100k)", "depth"),
             Cond(0.25 <= atr_pct <= 5, f"volatility {atr_pct:.2f}% ATR (needs 0.25–5%)", "volatility")]
@@ -325,7 +326,7 @@ def text(db: Session | None, c: TsSignalCard, lead: str = "") -> str:
         elif met:
             out.append(f"No setup yet · LONG {met['LONG'][0]}/{met['LONG'][1]} · SHORT {met['SHORT'][0]}/{met['SHORT'][1]} conditions met")
         if d.get("blockers"):
-            out.append("⛔ Blocked both ways: " + esc("; ".join(d["blockers"])))
+            out.append("⛔ Blocked both ways: " + esc("; ".join(d["blockers"])) + ". No setup until this clears.")
         heads = {"LONG": "▲ <b>LONG when</b>", "SHORT": "▼ <b>SHORT when</b>"}
         order = sorted(heads, key=lambda s_: -(met.get(s_) or [0])[0])  # the side closer to a setup first, in full; the other in short
         for n_side, side in enumerate(order):
