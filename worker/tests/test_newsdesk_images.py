@@ -2,7 +2,9 @@
 
 import base64
 import io
+import os
 import random
+import time
 from pathlib import Path
 from typing import Any
 
@@ -226,11 +228,18 @@ def test_health_lists_models_on_disk(tmp_path: Path) -> None:
     (part / "snapshots" / "def").mkdir(parents=True)
     (part / "snapshots" / "def" / "model_index.json").write_text("{}")
     (part / "blobs").mkdir()
-    (part / "blobs" / "x.incomplete").write_text("")
+    (part / "blobs" / "x.incomplete").write_text("")  # downloading now
+    old = tmp_path / "models--Tongyi-MAI--Z-Image-Turbo"
+    (old / "snapshots" / "g").mkdir(parents=True)
+    (old / "snapshots" / "g" / "model_index.json").write_text("{}")
+    (old / "blobs").mkdir()
+    stale = old / "blobs" / "y.incomplete"
+    stale.write_text("")
+    os.utime(stale, (time.time() - 2 * 86400, time.time() - 2 * 86400))  # abandoned two days ago: the snapshot is complete
     h = nd.Health("klein", True, cache=tmp_path)
     h.done, h.failed, h.last_seconds = 3, 1, 61.2
     info = h.info("qwen")
-    assert info["version"] == "1.2" and info["on_disk"] == ["qwen"] and info["loaded"] == "qwen"
+    assert info["version"] == nd.VERSION and info["on_disk"] == ["qwen", "zimage"] and info["loaded"] == "qwen"
     assert info["done"] == 3 and info["failed"] == 1 and info["last_s"] == 61.2 and "qwen_edit" in info["models"]
 
 
@@ -261,6 +270,7 @@ def test_copy_clean_draft_needs_one_check() -> None:
     assert c["draft"] == {"text": "Brent gave back gains"} and c["ok"] is True and c["problems"] == [] and c["rewrites"] == 0
     chat = [b for u, b in o.calls if u.endswith("/api/chat")]
     assert len(chat) == 2 and chat[0]["format"] == "json" and chat[0]["stream"] is False and chat[0]["options"]["temperature"] == 0.4
+    assert all(c["options"]["num_predict"] == nd.COPY_MAX_TOKENS for c in chat)  # every call bounded: a runaway can't hold the job
     assert chat[1]["messages"][0]["content"].startswith("You are a fact checker") and "REPORTING:\nReuters" in chat[1]["messages"][1]["content"]
     assert '"Brent gave back gains"' in chat[1]["messages"][1]["content"]
     assert o.calls[-1] == (f"{nd.OLLAMA}/api/generate", {"model": c["model"], "keep_alive": 0})  # VRAM freed before the picture

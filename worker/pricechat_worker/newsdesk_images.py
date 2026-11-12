@@ -48,7 +48,7 @@ import httpx
 
 log = logging.getLogger("newsdesk_images")
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.2"
+VERSION = "1.2.1"
 STOP = False
 CANVAS = (1536, 864)
 MAX_AI_AREA_PCT = 40.0  # extend: more invented scenery than this and the picture is no longer the photo
@@ -503,6 +503,8 @@ def process(job: dict[str, Any], renderer: Any, ocr: Any = None, tries: int = 3,
 
 OLLAMA = os.environ.get("PCW_OLLAMA_URL", "http://localhost:11434")
 COPY_VRAM_GB = 14.0  # gpt-oss:20b needs about this much free; less and the image model is unloaded first
+COPY_MAX_TOKENS = 2048  # per call, reasoning included (~10 s on the 5090). 2026-11-12, first live job: one call ran 150 s and timed out
+COPY_TIMEOUT_S = 90.0   # (gpt-oss in JSON mode can run away on a long prompt); now it stops, the job goes on, the desk writes the copy
 FACT_CHECK = ("You are a fact checker. Compare the DRAFT with the REPORTING. List every statement in the draft that the reporting does not "
               "directly support (a changed verb like 'fell' for 'gave back gains' counts, a merged claim from two outlets counts, any cause or "
               "consequence not stated counts). Reply JSON {\"ok\": true|false, \"problems\": [..]}")
@@ -513,9 +515,9 @@ def _ollama_chat(model: str, system: str, user: str, keep_alive: Any, post: Call
     import json
 
     body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "format": "json",
-            "stream": False, "keep_alive": keep_alive, "options": {"temperature": 0.4}}
+            "stream": False, "keep_alive": keep_alive, "options": {"temperature": 0.4, "num_predict": COPY_MAX_TOKENS}}
     if post is None:
-        r = httpx.post(f"{OLLAMA}/api/chat", json=body, timeout=150.0)
+        r = httpx.post(f"{OLLAMA}/api/chat", json=body, timeout=COPY_TIMEOUT_S)
         r.raise_for_status()
         data = r.json()
     else:
@@ -611,10 +613,17 @@ def hub_cache() -> Path:
         return Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface") / "hub"
 
 
+STALE_PARTIAL_S = 6 * 3600  # a .incomplete blob untouched this long is an abandoned download, not one in progress
+
+
 def on_disk(repo: str, cache: Path | None = None) -> bool:
-    """A complete diffusers snapshot of repo in the HF cache: model_index.json present and no half-downloaded blobs."""
+    """A complete diffusers snapshot of repo in the HF cache: model_index.json present and no download in progress (a
+    .incomplete blob written to in the last 6 hours). 2026-11-12: klein's 2-day-old abandoned partial made Admin show it
+    missing while it rendered fine from its snapshot."""
     d = (cache or hub_cache()) / ("models--" + repo.replace("/", "--"))
-    return any(d.glob("snapshots/*/model_index.json")) and not any(d.glob("blobs/*.incomplete"))
+    now = time.time()
+    busy = any(now - p.stat().st_mtime < STALE_PARTIAL_S for p in d.glob("blobs/*.incomplete"))
+    return any(d.glob("snapshots/*/model_index.json")) and not busy
 
 
 class Health:
