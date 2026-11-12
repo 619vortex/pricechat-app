@@ -283,7 +283,7 @@ def ind_row(i: dict[str, Any]) -> str:
         bits.append(f"EMA20 {'>' if i['ema20'] > i['ema50'] else '<'} EMA50")
     if i.get("vol_ratio") is not None:
         bits.append(f"Vol {i['vol_ratio']:.1f}× avg")
-    return " · ".join(bits)
+    return esc(" · ".join(bits))  # "MACD <0" / "EMA20 < EMA50" are text: a raw "<0" made Telegram refuse the whole card
 
 
 def _head(c: TsSignalCard) -> list[str]:
