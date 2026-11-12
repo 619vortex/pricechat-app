@@ -75,3 +75,30 @@ def test_admin_sets_the_allowance_and_sees_this_months_traffic(client: TestClien
     row = next(x for x in client.get("/api/vpn/admin/overview").json()["servers"] if x["id"] == s.id)
     assert row["traffic_included_gb"] == 1024 and row["traffic_month_bytes"] == 0
     assert client.patch(f"/api/vpn/admin/servers/{s.id}", json={"traffic_included_gb": -1}).status_code == 422
+
+
+def test_one_blip_neither_alerts_nor_hides_the_server_but_two_in_a_row_do(db: Session, fake: FakeNode) -> None:  # noqa: F811
+    """The flap guard: one sync that can't reach the agent keeps the server online (no owner alert, still counted for
+    Smart Connect); OFFLINE_AFTER in a row mark it offline and alert once; a good sync brings it back with "recovered"."""
+    from app import alerts
+    from tests.test_owner_alerts import SETTINGS, Bot
+
+    tg = Bot()
+    alerts.settings_row(db).telegram_chat = "424242"
+    db.commit()
+    open_vpn(db)
+    s = add_server(db, fake, "US East")
+    run = lambda: asyncio.run(alerts.check_vpn_servers(db, settings=SETTINGS, transport=tg.transport, now=utcnow()))  # noqa: E731
+    fake.fail = True
+    vpn.sync_all(db)
+    db.expire_all()
+    assert db.get(type(s), s.id).online is True
+    assert run()["vpn_offline"] == 0 and tg.sent == []
+    vpn.sync_all(db)
+    db.expire_all()
+    assert db.get(type(s), s.id).online is False
+    assert run()["vpn_offline"] == 1 and "offline" in tg.sent[-1]["text"]
+    assert run()["vpn_offline"] == 0  # told once
+    fake.fail = False
+    vpn.sync_all(db)
+    assert run()["vpn_recovered"] == 1 and "online again" in tg.sent[-1]["text"]
