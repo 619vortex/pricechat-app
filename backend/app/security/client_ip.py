@@ -98,6 +98,11 @@ def _forwarded_for(request: Request) -> list[str]:
     return [p.strip() for line in request.headers.getlist("x-forwarded-for") for p in line.split(",")]
 
 
+def forwarded_count(request: Request) -> int:
+    """How many X-Forwarded-For entries the request carries (a caller's own entries included)."""
+    return len([h for h in _forwarded_for(request) if h])
+
+
 def client_ip(request: Request, settings: Settings | None = None) -> str:
     settings = settings or _settings(request)
     hops = _forwarded_for(request)

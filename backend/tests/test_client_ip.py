@@ -184,3 +184,8 @@ def test_notes_once_whether_website_traffic_carries_the_secret(caplog: pytest.Lo
             client_ip.client_ip(_req(_vercel("192.0.2.1")), _settings())
     msgs = [r.getMessage() for r in caplog.records]
     assert len(msgs) == 2 and "may differ" in msgs[0] and "carries the proxy secret" in msgs[1]
+
+
+def test_forwarded_count_counts_every_entry_across_header_lines() -> None:
+    assert client_ip.forwarded_count(_req({})) == 0
+    assert client_ip.forwarded_count(_req({"x-forwarded-for": "1.2.3.4, 65.109.255.206, 152.233.13.166"})) == 3
