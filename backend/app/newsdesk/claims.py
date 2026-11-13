@@ -61,7 +61,7 @@ LEGAL = ("stole", "stolen", "steal", "theft", "thief", "thieves", "charged", "ch
 LEGAL_ACTION = _rx(r"\b(charged|charges|seized|seizes|seizure|sued|sues|suing|lawsuit|arrested|arrest|indicted|indictment|convicted|guilty|"
                    r"sentenced|jailed|fined|banned|sanctioned|subpoena\w*|raided|confiscat\w+|forfeit\w*|pleaded|accused|alleg\w+|fraud\w*|"
                    r"launder\w*|stole|stolen|theft|embezzl\w*|brib\w*)\b")
-CAUSAL = _rx(r"\b(sparks?|sparked|triggers?|triggered|causes?|caused|drives?|drove|fuels?|fueled|fuelled|sends?|sent|forces?|forced|"
+CAUSAL = _rx(r"\b(sparks?|sparked|triggers?|triggered|causes?|caused|drives? (?:\w+ )?(?:up|down|higher|lower)|drove (?:\w+ )?(?:up|down|higher|lower)|fuels?|fueled|fuelled|sends? (?:\w+ ){0,3}(?:higher|lower|soaring|tumbling|plunging|up|down)|sent (?:\w+ ){0,3}(?:higher|lower|soaring|tumbling|plunging)|forces?|forced|"
              r"leads? to|led to|because(?: of)?|due to|blamed on|thanks to|in response to|prompts?|prompted|on the back of)\b")
 # major outlets whose own reporting carries a legal action or an accusation on its own
 RELIABLE = ("reuters", "bloomberg", "associated press", "ap news", "ap", "afp", "financial times", "ft", "wall street journal", "wsj",
@@ -98,7 +98,7 @@ def ticker_problems(text: str, source_text: str) -> list[str]:
     out = []
     for m in CASHTAG.finditer(text or ""):
         t = m.group(1)
-        if t in ok or f"${t}" in src:
+        if t in ok or f"${t}" in src or (t in COINS and re.search(rf"(?<![\w$]){t}(?![\w])", src)):  # a coin's own symbol in the sources
             continue
         if t in TOKENS:
             out.append(f"${t}: the sources name {TOKENS[t][0].title()}, not its {t} token (a company's name is not its token)")
@@ -178,10 +178,10 @@ def check(text: str, source_text: str, *, evidence: str = "", outlets: list[str]
     return list(dict.fromkeys(probs))
 
 
-def for_event(ev: Any, text: str, source_text: str, outlets: list[str] | None = None) -> list[str]:
+def for_event(ev: Any, text: str, source_text: str, outlets: list[str] | None = None, numbers: bool = True) -> list[str]:
     names = outlets if outlets is not None else [str(s.get("name") or "") for s in (getattr(ev, "sources", None) or [])]
     attributed = any(n and n.lower() in (text or "").lower() for n in names) or bool(re.search(r"\b(says?|said|according to|reports?|reported)\b", text or "", re.I))
-    return check(text, source_text, evidence=getattr(ev, "evidence", "") or "", outlets=names, attributed=attributed)
+    return check(text, source_text, evidence=getattr(ev, "evidence", "") or "", outlets=names, attributed=attributed, numbers=numbers)
 
 
 __all__ = ["check", "for_event", "legal_problems", "people_problems", "reliable_problems", "ticker_problems"]

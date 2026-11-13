@@ -96,7 +96,8 @@ def test_subject_must_be_named_as_a_whole_word() -> None:
     assert P.relevant(_photo("File:Binance headquarters Dubai.jpg"), ["Binance"]) is None
     assert P.relevant(_photo("File:Data centre at CERN.jpg"), ["Binance"]) is not None  # the 2026-11-09 stand-in
     assert P.relevant(_photo("File:Binancefoo tower.jpg"), ["Binance"]) is not None  # not a whole word
-    assert P.relevant(_photo("File:Skyline.jpg", tags=("Binance offices",)), ["Binance"]) is None  # a human tag/category names it
+    assert P.relevant(_photo("File:DSC 4410.jpg", tags=("Binance offices",)), ["Binance"]) is None  # a human tag/category names it
+    assert "generic scene" in P.relevant(_photo("File:Skyline.jpg", tags=("Binance offices",)), ["Binance"])  # 2026-11-13: a skyline isn't the story
     assert P.relevant(_photo("File:Strait_of_Hormuz_from_space.jpg"), ["Strait of Hormuz"]) is None  # underscores are spaces
 
 

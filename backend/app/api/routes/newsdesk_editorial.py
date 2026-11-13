@@ -145,3 +145,43 @@ def quality(payload: QualityInput, db: DbSession) -> dict[str, Any]:
     desk.state = state
     db.commit()
     return {"editorial_min": events.policy(state).editorial_min}
+
+
+class HeadlineInput(StrictInput):
+    event_id: int
+    text: str = Field("", max_length=160)  # "" clears the pick
+
+
+@router.put("/headline")
+def headline_variant(payload: HeadlineInput, db: DbSession) -> dict[str, Any]:
+    """The owner picks a headline variant for a waiting story. It must pass the same fact-check as every hook (no name, number, ticker,
+    accusation, cause or quote the sources don't have); then the writer's checks, check_post, the claim checker and the final gate still
+    run on the post as it goes out. Refused with the reasons otherwise."""
+    from app.models.newsdesk import NdEvent
+    from app.newsdesk import claims, hooks, network
+
+    ev = db.get(NdEvent, payload.event_id)
+    if ev is None or ev.kind not in ("news", "update"):
+        raise HTTPException(404, "No such news story.")
+    if ev.status == "released" and ev.tg_status not in ("pending", "queued", None, ""):
+        raise HTTPException(409, "Already delivered: a posted headline can't be changed.")
+    text = payload.text.strip()
+    plan = dict((ev.facts or {}).get("hooks") or {})
+    if text:
+        from app.models.newsdesk import NdStory
+
+        rows = [r for r in (db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:6]) if r is not None]
+        src = network.source_text_of(ev, rows)
+        problems, accuracy = hooks.fact_check(text, src, evidence=ev.evidence or "", outlets=len({str(s.get("name") or "") for s in ev.sources or []}) or 1,
+                                              who=hooks.subjects(ev.title or ""))
+        names = [str(s_.get("name") or "") for s_ in ev.sources or []]
+        # attribution comes from the post's sources line, which every caption carries; the final caption is checked for it again
+        problems += [p for p in claims.check(text, src, evidence=ev.evidence or "", outlets=names, attributed=True) if p not in problems]
+        if problems or accuracy < hooks.ACCURACY_MIN:
+            raise HTTPException(422, {"message": "This headline fails the fact-check.", "problems": problems or [f"accuracy {accuracy} under {hooks.ACCURACY_MIN}"]})
+        plan["admin_choice"] = text
+    else:
+        plan.pop("admin_choice", None)
+    ev.facts = {**(ev.facts or {}), "hooks": plan}
+    db.commit()
+    return {"event_id": ev.id, "admin_choice": plan.get("admin_choice") or ""}

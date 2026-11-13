@@ -326,3 +326,54 @@ def test_admin_shows_scorecards_hooks_rejections_and_performance(client: Any, db
     assert client.put("/api/x/newsdesk/editorial/quality", json={"editorial_min": 55}).json() == {"editorial_min": 55}
     assert client.put("/api/x/newsdesk/editorial/quality", json={"editorial_min": 101}).status_code == 422
     assert client.get("/api/x/newsdesk/editorial/scorecards").json()["minimum"] == 55
+
+
+# --- the viral upgrade can't bypass verification (owner, 2026-11-13) ---------------------------------------------------------------
+
+
+def _seizure_event(db: Session) -> NdEvent:
+    now = utcnow()
+    e = NdEvent(key="story:doj", kind="news", title="DOJ seizes $1.2B from Binance hack", headline="DOJ seizes $1.2B from Binance hack", summary=SOURCE,
+                topic="hack", evidence="official", virality=95, status="released", released_at=now, first_seen=now, label="",
+                facts={"told": SOURCE, "editorial": {"total": 90, "beat": "scandal", "dims": {d: 18 for d in scorecard.DIMENSIONS}, "reject": ""}},
+                parts={}, sources=[{"name": "Reuters", "url": "https://reuters.test/doj"}, {"name": "Bloomberg", "url": "https://bloomberg.test/doj"}])
+    db.add(e)
+    db.commit()
+    return e
+
+
+async def test_a_high_engagement_candidate_that_fails_the_accuracy_check_is_never_published(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.newsdesk import telegram as lane
+
+    e = _seizure_event(db)
+    real_draft = network.draft
+
+    async def catchy_but_false(settings: Any, ev: Any, rows: Any = None, transport: Any = None) -> network.Copy:
+        c = await real_draft(settings, ev, rows, transport)
+        c.context = "Binance's CEO was arrested as the DOJ seized the funds."  # an arrest no source reports
+        return c
+
+    monkeypatch.setattr(network, "draft", catchy_but_false)
+    msg, why = await lane.compose_visual(e, None, utcnow(), db=db)
+    assert msg is None and why.startswith("accuracy:") and "arrest" in why
+    assert e.facts["accuracy"]["ok"] is False and e.virality == 95  # score never overrides the gate; the reason is kept for Admin
+
+
+async def test_admin_headline_variants_pass_the_same_gates(client: Any, db: Session) -> None:
+    e = _seizure_event(db)
+    e.status, e.tg_status = "candidate", ""
+    db.commit()
+    bad = client.put("/api/x/newsdesk/editorial/headline", json={"event_id": e.id, "text": "Binance CEO arrested as DOJ seizes $1.2B"})
+    assert bad.status_code == 422 and any("arrest" in p for p in bad.json()["detail"]["problems"])
+    bnb = client.put("/api/x/newsdesk/editorial/headline", json={"event_id": e.id, "text": "DOJ seizes $1.2B of stolen Binance $BNB"})
+    assert bnb.status_code == 422 and any("$BNB" in p for p in bnb.json()["detail"]["problems"])
+    ok = client.put("/api/x/newsdesk/editorial/headline", json={"event_id": e.id, "text": "DOJ seizes $1.2B stolen in the Binance hack"})
+    assert ok.status_code == 200 and ok.json()["admin_choice"] == "DOJ seizes $1.2B stolen in the Binance hack"
+    db.refresh(e)
+    pkg = await network.package(e, style="clean")
+    assert pkg.ok and pkg.copy.headline == "DOJ seizes $1.2B stolen in the Binance hack"
+    # a pick that skipped the endpoint (written straight into the event) still meets the final gate: not publishable
+    e.facts = {**e.facts, "hooks": {**(e.facts.get("hooks") or {}), "admin_choice": "Binance CEO arrested as DOJ seizes $1.2B"}}
+    db.commit()
+    pkg = await network.package(e, style="clean")
+    assert not pkg.ok and any("arrest" in p for p in pkg.accuracy)

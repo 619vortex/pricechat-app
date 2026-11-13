@@ -188,6 +188,9 @@ async def test_a_major_breaking_story_gets_editorial_artwork_credited_as_an_illu
     monkeypatch.setattr(visual, "find_photos", never)
     ev = NdEvent(key="k", kind="news", title="Bybaz hacked", headline="BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION", topic="hack", sources=[{"name": "The Block"}],
                  facts={}, first_seen=SLOT, virality=70, label="")
+    first, _ = await visual.for_event(ev)
+    assert _["kind"] == "graphic"  # owner, 2026-11-13: the verified figure on a card first; an illustration only when chosen
+    monkeypatch.setattr(visual, "kinds_for", lambda e: ["artwork", "graphic"])
     data, meta = await visual.for_event(ev)
     assert meta["kind"] == "artwork" and jpeg_size(data) == (1600, 900)
     assert meta["type_px"] >= visual.MIN_TYPE and meta["contrast"] >= 4.5  # readable on a phone

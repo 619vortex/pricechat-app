@@ -63,9 +63,10 @@ LOADED = ("record", "biggest", "largest", "worst", "first", "all-time", "histori
           "surge", "meltdown", "panic", "chaos", "fraud", "scam", "scandal", "ponzi", "criminal", "illegal", "lied", "lying", "stole", "theft",
           "arrest", "charged", "guilty", "bankrupt", "insolvent", "war", "crisis", "default", "bailout", "ban", "banned", "fired", "ousted",
           "resign", "hack", "exploit", "drained", "rug", "manipulat", "insider", "spy", "espionage", "affair", "probe", "investigat", "sued",
-          "lawsuit", "sanction", "seize", "frozen", "halt", "delist", "wiped", "liquidat", "doubled", "tripled", "halved", "slashed", "dump")
+          "lawsuit", "sanction", "seize", "frozen", "halt", "delist", "wiped", "liquidat", "doubled", "tripled", "halved", "slashed", "dump",
+          "defy", "defie", "slam", "blast", "rattl", "crush", "tank", "plummet", "skyrocket", "explod", "rocket", "turmoil", "shock")
 SUFFIX = r"(?:s|es|ed|d|ing|ned|ning|ion|ions|ation|ive|er|ers|ly|ure|ures|ped|ping)?"
-CAUSAL = _rx(r"\b(sparks?|sparked|triggers?|triggered|causes?|caused|drives?|drove|fuels?|fueled|fuelled|sends?|sent|forces?|forced|leads? to|"
+CAUSAL = _rx(r"\b(sparks?|sparked|triggers?|triggered|causes?|caused|drives? (?:\w+ )?(?:up|down|higher|lower)|drove (?:\w+ )?(?:up|down|higher|lower)|fuels?|fueled|fuelled|sends? (?:\w+ ){0,3}(?:higher|lower|soaring|tumbling|plunging|up|down)|sent (?:\w+ ){0,3}(?:higher|lower|soaring|tumbling|plunging)|forces?|forced|leads? to|"
              r"led to|because(?: of)?|due to|blamed on|thanks to|in response to|prompts?|prompted)\b")
 LINK = _rx(r"\b(as|after|on|amid|following)\b")
 HEDGE = _rx(r"\b(alleg\w*|accus\w*|suspect\w*|reported(?:ly)?|claims?|according to|says?|said|denie[sd]|deny)\b")
@@ -306,11 +307,31 @@ def engagement(text: str, strategy: str = "", learned: dict[str, float] | None =
 # --- ranking -----------------------------------------------------------------------------------------------------------------------
 
 
+MERGE_MIN = 0.6  # the share of a hook's words one single report must carry: no stitching two reports into one claim
+
+
+def merged(text: str, reports: list[str]) -> str:
+    """Why the hook stitches facts from different reports together, or "". Each report (an outlet's headline and summary) is read on
+    its own: 2026-11-12, "Israeli strike kills Palestinian footballer, hospital staff" joined a BBC hospital report to an unrelated Al
+    Jazeera story that had been grouped with it."""
+    words = checks.tokens(text)
+    if not words or not reports:
+        return ""
+    best = max(len(words & checks.tokens(r)) / len(words) for r in reports)
+    return "" if best >= MERGE_MIN else f"no single report carries it ({best:.0%} at most): it merges facts from different reports"
+
+
 def rank(hooks: list[Hook], source_text: str, *, evidence: str = "", outlets: int = 1, sentences: list[str] | None = None,
-         learned: dict[str, float] | None = None, who: set[str] | None = None) -> list[Hook]:
+         learned: dict[str, float] | None = None, who: set[str] | None = None, reports: list[str] | None = None) -> list[Hook]:
     for h in hooks:
         h.problems, h.accuracy = fact_check(h.text, source_text, evidence=evidence, outlets=outlets, sentences=sentences,
                                             extractive=h.strategy not in ("model", "writer"), who=who)
+        if h.strategy in ("model", "writer") and reports:
+            why = merged(h.text, reports)
+            if why:
+                h.problems.append(why)
+        if not h.problems and h.accuracy < ACCURACY_MIN:
+            h.problems.append(f"too little of it is the sources' own wording (accuracy {h.accuracy}, needs {ACCURACY_MIN})")
         h.engagement, h.parts = engagement(h.text, h.strategy, learned)
     ordered = sorted(hooks, key=lambda h: (not h.ok, -h.total, -h.accuracy, STRATEGIES.index(h.strategy) if h.strategy in STRATEGIES else 99))
     for i, h in enumerate(ordered, 1):
@@ -333,8 +354,11 @@ def plan(ev: Any, rows: list[Any] | None = None, model_hooks: list[str] | None =
         cands.append(Hook(writer_headline, "writer"))
     src = network.source_text_of(ev, rows)
     outlets = len({str(s.get("name") or "").lower() for s in (getattr(ev, "sources", None) or [])} - {""}) or len((ev.facts or {}).get("outlets") or []) or 1
+    reports = [f"{getattr(r, 'title', '')}. {getattr(r, 'summary', '') or ''}" for r in rows or []]
+    # the event's own summary is already a merge of its reports: only the lead headline (and our measured tag) counts as a report of its own
+    reports.append(f"{getattr(ev, 'title', '')}. {(ev.facts or {}).get('price_tag') or ''}" if rows else f"{getattr(ev, 'title', '')}. {getattr(ev, 'summary', '') or ''}")
     ranked = rank(cands, src, evidence=getattr(ev, "evidence", "") or "", outlets=outlets, sentences=viral.sentences(ev, rows), learned=learned,
-                  who=subjects(getattr(ev, "title", "") or ""))
+                  who=subjects(getattr(ev, "title", "") or ""), reports=reports)
     best = next((h for h in ranked if h.ok), None)
     return {"source": "model" if model_hooks else "desk", "hooks": [h.out() for h in ranked], "chosen": best.text if best else "",
             "chosen_strategy": best.strategy if best else "", "why": (f"rank 1 of {len(ranked)}: engagement {best.engagement}, accuracy {best.accuracy}"
@@ -363,6 +387,8 @@ def question_problems(q: str, source_text: str) -> list[str]:
     q = (q or "").strip()
     if not q.endswith("?") or len(q) > 90:
         out.append("not a short question")
+    if re.match(r"^(?:why|how|what|when|where)\b", q, re.I) and not re.match(r"^(?:what moves next|who wins)", q, re.I):
+        out.append("a factual question, not an opinion people can disagree on")
     if OUTRAGE.search(q):
         out.append(f"outrage word: '{OUTRAGE.search(q).group(0).lower()}'")
     if GUILT.search(q):

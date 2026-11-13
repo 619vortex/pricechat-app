@@ -518,9 +518,13 @@ def polish(ev: Any, c: Copy, rows: list[Any] | None) -> Copy:
     src = source_text_of(ev, rows)
     plan = hooks.plan(ev, rows, model_hooks=c.hooks or None, writer_headline=c.headline)
     best = plan.get("chosen") or ""
-    mine = next((h for h in plan.get("hooks") or [] if h.get("text") == c.headline), None)
+    picked = str((f.get("hooks") or {}).get("admin_choice") or "")
+    if picked:  # the owner's pick from Admin: it goes through every check below and every gate after, like any other headline
+        plan["admin_choice"] = picked
+        best = picked
+    mine = None if picked else next((h for h in plan.get("hooks") or [] if h.get("text") == c.headline), None)
     top = next((h for h in plan.get("hooks") or [] if h.get("ok")), None)
-    if mine and mine.get("ok") and top and float(mine["total"]) >= float(top["total"]) - WRITER_MARGIN:
+    if not picked and mine and mine.get("ok") and top and float(mine["total"]) >= float(top["total"]) - WRITER_MARGIN:
         best = c.headline  # the checked draft's own headline stands unless a hook is clearly stronger
         plan["chosen"], plan["chosen_strategy"] = best, mine.get("strategy") or "writer"
         plan["why"] = f"the writer's headline (total {mine['total']}) is within {WRITER_MARGIN:g} of the best hook ({top['total']})"
@@ -763,7 +767,7 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
 URL = re.compile(r"https?://\S+|\b[\w.-]+\.(?:com|org|net|io|co|uk|xyz)/\S*")
 
 
-def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets: list[str]) -> list[str]:
+def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets: list[str], numbers: bool = True) -> list[str]:
     """The claim checker (app/newsdesk/claims) on the exact texts both platforms would post, after cashtags and every other step. Market
     moves, recaps and data posts are built from our own measured numbers and keep their own checks."""
     if getattr(ev, "kind", "") not in ("news", "update"):
@@ -773,7 +777,8 @@ def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets
     out: list[str] = []
     for platform, text in (("X", x_text), ("Telegram", tg_text)):
         bare = URL.sub(" ", text or "").replace("@thepricechat", " ")
-        out += [f"{platform}: {p}" for p in claims.for_event(ev, bare, source_text, [*outlets, *[str(s.get("name") or "") for s in getattr(ev, "sources", None) or []]])]
+        out += [f"{platform}: {p}" for p in claims.for_event(ev, bare, source_text, [*outlets, *[str(s.get("name") or "") for s in getattr(ev, "sources", None) or []]],
+                                                             numbers=numbers)]
     return list(dict.fromkeys(out))
 
 
