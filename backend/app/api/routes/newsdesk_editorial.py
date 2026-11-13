@@ -177,6 +177,9 @@ def headline_variant(payload: HeadlineInput, db: DbSession) -> dict[str, Any]:
         names = [str(s_.get("name") or "") for s_ in ev.sources or []]
         # attribution comes from the post's sources line, which every caption carries; the final caption is checked for it again
         problems += [p for p in claims.check(text, src, evidence=ev.evidence or "", outlets=names, attributed=True) if p not in problems]
+        from app.newsdesk import checks
+
+        problems += [f"final gate: {p}" for p in checks.final_gate(text, src) if f"final gate: {p}" not in problems]
         if problems or accuracy < hooks.ACCURACY_MIN:
             raise HTTPException(422, {"message": "This headline fails the fact-check.", "problems": problems or [f"accuracy {accuracy} under {hooks.ACCURACY_MIN}"]})
         plan["admin_choice"] = text

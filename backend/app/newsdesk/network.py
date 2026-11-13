@@ -779,6 +779,8 @@ def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets
         bare = URL.sub(" ", text or "").replace("@thepricechat", " ")
         out += [f"{platform}: {p}" for p in claims.for_event(ev, bare, source_text, [*outlets, *[str(s.get("name") or "") for s in getattr(ev, "sources", None) or []]],
                                                              numbers=numbers)]
+        if numbers:  # the production final gate on the same text (compose_visual runs it again after the credit)
+            out += [f"{platform}: final gate: {p}" for p in checks.final_gate(bare, source_text)]
     return list(dict.fromkeys(out))
 
 

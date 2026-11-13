@@ -377,3 +377,37 @@ async def test_admin_headline_variants_pass_the_same_gates(client: Any, db: Sess
     db.commit()
     pkg = await network.package(e, style="clean")
     assert not pkg.ok and any("arrest" in p for p in pkg.accuracy)
+
+
+async def test_a_top_candidate_whose_final_caption_fails_the_final_gate_is_held_and_admin_shows_why(client: Any, db: Session,
+                                                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.newsdesk import clean, telegram as lane, visual
+
+    e = _seizure_event(db)
+
+    async def picture(ev: Any, **kw: Any) -> tuple[bytes, dict[str, Any]]:
+        return b"\x89PNG", {"style": "clean", "kind": "graphic"}
+
+    monkeypatch.setattr(visual, "for_event", picture)
+    # the last formatting step slips in a ticker and a "seized" claim about a person: only the final gate sees the caption this way
+    monkeypatch.setattr(clean, "with_credit", lambda html, plain, meta: (html, plain + "\n\nBinance $BNB holders panic as Richard Teng arrested"))
+    msg, why = await lane.compose_visual(e, None, utcnow(), db=db)
+    assert msg is None and why.startswith("final check:") and "$BNB" in why
+    db.commit()
+    s = next(x for x in client.get("/api/x/newsdesk/editorial/scorecards").json()["stories"] if x["event"] == e.id)
+    assert s["accuracy"]["ok"] is False and any("$BNB" in p for p in s["accuracy"]["problems"])
+    assert e.virality == 95 and e.facts["editorial"]["total"] == 90  # the best-scoring story still doesn't go
+
+
+def test_hooks_questions_and_admin_picks_run_through_the_production_final_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    real = checks.final_gate
+
+    def spy(text: str, source_text: str, chart_symbol: str = "") -> list[str]:
+        calls.append(text)
+        return real(text, source_text, chart_symbol)
+
+    monkeypatch.setattr(checks, "final_gate", spy)
+    hooks.fact_check("DOJ seizes $1.2B stolen in the Binance hack", SOURCE)
+    hooks.question_problems("Right call by DOJ, or a mistake?", SOURCE)
+    assert calls == ["DOJ seizes $1.2B stolen in the Binance hack", "Right call by DOJ, or a mistake?"]

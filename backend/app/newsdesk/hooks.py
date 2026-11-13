@@ -252,6 +252,7 @@ def fact_check(text: str, source_text: str, *, evidence: str = "", outlets: int 
     from app.newsdesk import claims
 
     problems += claims.ticker_problems(h, src) + claims.people_problems(h, src) + claims.legal_problems(h, src)
+    problems += [f"final gate: {p}" for p in checks.final_gate(h, src)]  # the production gate (checks.final_gate) on the hook itself
     problems = list(dict.fromkeys(problems))
     for q in re.findall(r"[\"“]([^\"”]{6,})[\"”]|(?<!\w)['‘]([^'’]{6,})['’](?!\w)", h):
         q = q[0] or q[1]
@@ -308,6 +309,7 @@ def engagement(text: str, strategy: str = "", learned: dict[str, float] | None =
 
 
 MERGE_MIN = 0.6  # the share of a hook's words one single report must carry: no stitching two reports into one claim
+MERGE_MISSING = 2  # and at most this many of its words may come from anywhere else
 
 
 def merged(text: str, reports: list[str]) -> str:
@@ -317,8 +319,12 @@ def merged(text: str, reports: list[str]) -> str:
     words = checks.tokens(text)
     if not words or not reports:
         return ""
-    best = max(len(words & checks.tokens(r)) / len(words) for r in reports)
-    return "" if best >= MERGE_MIN else f"no single report carries it ({best:.0%} at most): it merges facts from different reports"
+    shares = [(len(words & checks.tokens(r)) / len(words), len(words - checks.tokens(r))) for r in reports]
+    best = max(s for s, _ in shares)
+    fewest = min(m for _, m in shares)
+    if best >= MERGE_MIN and fewest <= MERGE_MISSING:
+        return ""
+    return f"no single report carries it ({best:.0%} at most, {fewest} words from elsewhere): it merges facts from different reports"
 
 
 def rank(hooks: list[Hook], source_text: str, *, evidence: str = "", outlets: int = 1, sentences: list[str] | None = None,
@@ -345,11 +351,13 @@ def plan(ev: Any, rows: list[Any] | None = None, model_hooks: list[str] | None =
     from app.newsdesk import network, viral
 
     cands: list[Hook] = []
-    if model_hooks:
-        cands += [Hook(str(t).strip(), "model") for t in model_hooks[:5] if str(t).strip()]
+    said = " ".join([getattr(ev, "summary", "") or "", *[getattr(r, "summary", "") or "" for r in rows or []]])  # sentence case: where names show
+    if model_hooks:  # a writer's Title Case Hook In Sentence Case first, exactly as network.write treats its headline
+        cands += [Hook(network.sentence_case(str(t).strip(), said), "model") for t in model_hooks[:5] if str(t).strip()]
     if len(cands) < 5:
         have = {checks.fingerprint(h.text) for h in cands}
         cands += [h for h in desk_hooks(ev, rows) if checks.fingerprint(h.text) not in have][: 5 - len(cands)]
+    writer_headline = network.sentence_case(writer_headline, said) if writer_headline else ""
     if writer_headline and all(checks.similarity(checks.fingerprint(writer_headline), checks.fingerprint(h.text)) < 0.8 for h in cands):
         cands.append(Hook(writer_headline, "writer"))
     src = network.source_text_of(ev, rows)
@@ -358,7 +366,7 @@ def plan(ev: Any, rows: list[Any] | None = None, model_hooks: list[str] | None =
     # the event's own summary is already a merge of its reports: only the lead headline (and our measured tag) counts as a report of its own
     reports.append(f"{getattr(ev, 'title', '')}. {(ev.facts or {}).get('price_tag') or ''}" if rows else f"{getattr(ev, 'title', '')}. {getattr(ev, 'summary', '') or ''}")
     ranked = rank(cands, src, evidence=getattr(ev, "evidence", "") or "", outlets=outlets, sentences=viral.sentences(ev, rows), learned=learned,
-                  who=subjects(getattr(ev, "title", "") or ""), reports=reports)
+                  who=subjects(getattr(ev, "title", "") or "", said), reports=reports)
     best = next((h for h in ranked if h.ok), None)
     return {"source": "model" if model_hooks else "desk", "hooks": [h.out() for h in ranked], "chosen": best.text if best else "",
             "chosen_strategy": best.strategy if best else "", "why": (f"rank 1 of {len(ranked)}: engagement {best.engagement}, accuracy {best.accuracy}"
@@ -404,17 +412,24 @@ def question_problems(q: str, source_text: str) -> list[str]:
     from app.newsdesk import claims
 
     out += claims.ticker_problems(q, source_text) + claims.people_problems(q, source_text) + claims.legal_problems(q, source_text)
+    out += [f"final gate: {p}" for p in checks.final_gate(q, source_text)]
     return out
 
 
 DEMONYM = re.compile(r"^(?:north|south|east|west|new|[A-Za-z]+(?:ian|ean|ese|ish|ic|i))$", re.I)  # Russian, Chinese, Israeli, Saudi: not an actor
 
 
-def subjects(title: str) -> set[str]:
-    """The names a story is about (as editorial.names_in, without demonyms and directions)."""
+def subjects(title: str, text: str = "") -> set[str]:
+    """The names a story is about (as editorial.names_in, without demonyms and directions). With the reporting's own sentences (`text`), a
+    Title Case headline's ordinary words ("Perp Trades Above") don't count: a name is capitalised mid-sentence there too."""
     from app.newsdesk import editorial
 
-    return {n for n in editorial.names_in(title or "") if not DEMONYM.match(n) and len(n) > 2}
+    out = {n for n in editorial.names_in(title or "") if not DEMONYM.match(n) and len(n) > 2}
+    if text:
+        named = {n for n in out if re.search(rf"(?<![.!?]\s)(?<!^)\b{re.escape(n)}", text, re.I)
+                 and re.search(rf"(?<![.!?]\s)(?<!^)\b{re.escape(n[:1].upper() + n[1:])}", text)}
+        out = named or out
+    return out
 
 
 def _who(ev: Any, beat: str = "") -> str:
