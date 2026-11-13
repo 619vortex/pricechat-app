@@ -318,7 +318,10 @@ def keep_copy(db: Session, job: NdRenderJob, result: dict[str, Any], now: dateti
     ev = db.get(NdEvent, job.event_id)
     if ev is None:
         return
-    draft = {k: str(got["draft"].get(k) or "")[:400] for k in ("headline", "short", "context", "stakes", "question")}
+    draft: dict[str, Any] = {k: str(got["draft"].get(k) or "")[:400] for k in ("headline", "short", "context", "stakes", "question")}
+    hooks = got["draft"].get("hooks")
+    if isinstance(hooks, list):  # the five alternative headlines (app/newsdesk/hooks fact-checks them against the reporting)
+        draft["hooks"] = [str(h)[:160] for h in hooks if isinstance(h, str)][:5]
     ev.facts = {**(ev.facts or {}), "local_copy": {**draft, "model": str(got.get("model") or "")[:60], "at": now.isoformat()}}
 
 

@@ -275,6 +275,20 @@ class TelethonGateway:
             raise
         return out if forward else list(reversed(out))  # oldest first
 
+    async def message_stats(self, channel: str, ids: list[int]) -> list[dict[str, Any]]:
+        """Public counters of a channel's own posts (News Desk engagement): views, forwards, comment count and reaction total, as Telegram
+        reports them to any reader of the channel. Read-only."""
+        entity = await self._call(self._client.get_entity(channel))
+        got = await self._call(self._client.get_messages(entity, ids=list(ids)))
+        out = []
+        for m in got or []:
+            if m is None:
+                continue
+            reactions = sum(int(getattr(r, "count", 0) or 0) for r in (getattr(getattr(m, "reactions", None), "results", None) or []))
+            out.append({"id": int(m.id), "views": int(getattr(m, "views", 0) or 0), "forwards": int(getattr(m, "forwards", 0) or 0),
+                        "replies": int(getattr(getattr(m, "replies", None), "replies", 0) or 0), "reactions": reactions})
+        return out
+
     async def estimate_since(self, chat: DialogInfo, since: datetime) -> int | None:
         entity = await self._entity(chat)
         latest = await self._call(self._client.get_messages(entity, limit=1))

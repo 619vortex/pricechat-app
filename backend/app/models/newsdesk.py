@@ -177,3 +177,26 @@ class NdRenderJob(IdMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class NdEngagement(IdMixin, TimestampMixin, Base):
+    """What a published News Desk post did, per platform (app/newsdesk/engagement): Telegram views, forwards, replies and reactions (read
+    with the owner's Telegram account over MTProto when it is logged in; the Bot API has no view counts) and X impressions, reposts, replies
+    and likes (from engine.collect_metrics). Raw counts as the platform reported them, plus the normalized rate the learner uses. A post
+    whose platform can't be read has no row: nothing is ever estimated."""
+
+    __tablename__ = "nd_engagement"
+    __table_args__ = (UniqueConstraint("platform", "post_ref"), Index("ix_nd_engagement_event", "event_id"))
+
+    event_id: Mapped[int | None] = mapped_column(Integer)
+    platform: Mapped[str] = mapped_column(String(10), nullable=False)  # telegram | x
+    post_ref: Mapped[str] = mapped_column(String(64), nullable=False)  # Telegram message id or X post id
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    measured_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    views: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # Telegram views / X impressions
+    shares: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # Telegram forwards / X reposts + quotes
+    replies: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # Telegram comments / X replies
+    reactions: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # Telegram reactions / X likes + bookmarks
+    rate: Mapped[float | None] = mapped_column(Float)  # (2 x shares + 2 x replies + reactions) / views; None under MIN_VIEWS
+    features: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # beat, hook strategy, editorial total, format, question
+    raw: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

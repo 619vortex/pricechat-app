@@ -229,6 +229,11 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         if pkg is not None and pkg.empty:  # Viral Engine 2.0: no empty posts, not even in the older format
             logger.info("tgnews: event %s says nothing specific, not posted: %s", ev.id, pkg.empty)
             return None, f"no empty posts: {pkg.empty}"
+        if pkg is not None and pkg.accuracy:  # the claim checker: a hard gate, never the older caption instead (owner, 2026-11-13)
+            logger.info("tgnews: event %s failed the accuracy check, not posted: %s", ev.id, pkg.accuracy[0])
+            ev.facts = {**(ev.facts or {}), "accuracy": {"ok": False, "problems": pkg.accuracy[:8], "x_text": pkg.x_text[:600],
+                                                         "telegram_plain": pkg.telegram_plain[:1200]}}
+            return None, f"accuracy: {pkg.accuracy[0]}"
         if pkg is not None and not pkg.ok:
             logger.info("tgnews: package for event %s failed its checks: %s", ev.id, next((c["detail"] for c in pkg.checks if not c["passed"]), ""))
             pkg = None

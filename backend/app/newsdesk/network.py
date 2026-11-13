@@ -212,6 +212,7 @@ class Copy:
     question: str = ""  # a question for the replies, now and then
     writer: str = "desk"  # model | desk
     rejected: list[str] = field(default_factory=list)  # why a model draft was refused (Admin)
+    hooks: list[str] = field(default_factory=list)  # the writer's five alternative headlines (app/newsdesk/hooks ranks and fact-checks them)
 
     def out(self) -> dict[str, Any]:
         return asdict(self)
@@ -421,6 +422,9 @@ MODEL_PROMPT = (
     "context: one or two sentences (max 230 characters) with the most telling figures and who is involved.\n"
     "stakes: one sentence (max 140 characters) on market consequences, winners or losers, ONLY if the reporting states them; else \"\".\n"
     "question: a short neutral question that invites debate (max 80 characters), or \"\".\n"
+    "hooks: a list of five alternative headlines (each under 90 characters) for the same story: short, provocative, specific, each led by "
+    "a different angle (the figure, the actor, the conflict, the contradiction, the consequence); every word must be supported by the "
+    "reporting: no new name, number, ticker, accusation, legal action, cause or quote.\n"
     "Rules: use only facts, names and figures that appear in the reporting, exactly as given. Never invent a figure, a cause, a reaction or a "
     "quote. Never say exclusive, first or that Price Chat reported it; the outlets reported it. No advice to buy or sell. No outrage words. "
     "Reply with the JSON only.")
@@ -447,7 +451,8 @@ async def model_copy(settings: Any, ev: Any, rows: list[Any], transport: Any = N
         text = "".join(b.get("text", "") for b in r.json().get("content") or [] if isinstance(b, dict) and b.get("type") == "text").strip()
         data = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", text))
         c = Copy(headline=str(data.get("headline") or "").strip(), short=str(data.get("short") or "").strip(), context=str(data.get("context") or "").strip(),
-                 stakes=str(data.get("stakes") or "").strip(), question=str(data.get("question") or "").strip(), writer="model")
+                 stakes=str(data.get("stakes") or "").strip(), question=str(data.get("question") or "").strip(), writer="model",
+                 hooks=[str(h).strip() for h in (data.get("hooks") or []) if isinstance(h, str) and str(h).strip()][:5])
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as e:
         logger.info("newsdesk network: writer %s", type(e).__name__)
         return None
@@ -479,12 +484,65 @@ def local_copy(ev: Any) -> Copy | None:
     if not isinstance(got, dict) or not got.get("headline"):
         return None
     c = Copy(headline=str(got["headline"]).strip(), short=str(got.get("short") or "").strip(), context=str(got.get("context") or "").strip(),
-             stakes=str(got.get("stakes") or "").strip(), question=str(got.get("question") or "").strip(), writer="local")
+             stakes=str(got.get("stakes") or "").strip(), question=str(got.get("question") or "").strip(), writer="local",
+             hooks=[str(h).strip() for h in (got.get("hooks") or []) if isinstance(h, str) and str(h).strip()][:5])
     c.short = c.short or shorten(c.headline, SHORT)
     return c
 
 
 async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport: Any = None) -> Copy:
+    """The words (`draft`), then the media engine's pass (`polish`): the strongest verified hook as the headline, a debate question only
+    when the story invites one, one punchy sentence of context."""
+    c = await draft(settings, ev, rows, transport)
+    try:
+        return polish(ev, c, rows)
+    except Exception as e:  # noqa: BLE001 - the checked draft stands
+        logger.info("newsdesk network: no polish for event %s (%s)", getattr(ev, "id", None), type(e).__name__)
+        return c
+
+
+CONTEXT_MAX = 160  # owner, 2026-11-13: short, punchy Telegram captions: one sentence of context
+WRITER_MARGIN = 8.0  # a hook replaces a checked writer's headline only when it ranks this many points higher
+
+
+def polish(ev: Any, c: Copy, rows: list[Any] | None) -> Copy:
+    """Only for stories the scorecard saw (facts["editorial"]). The five hooks (the writer's, else the desk's) are ranked for engagement and
+    accuracy (app/newsdesk/hooks); the winner replaces the headline only if the whole copy still passes every check. Hooks that fail are
+    recorded with why, never repaired. The debate question replaces the writer's unless the writer's passes the question rules."""
+    from app.newsdesk import hooks, viral
+
+    f = getattr(ev, "facts", None) or {}
+    card = f.get("editorial")
+    if not card or getattr(ev, "kind", "") not in ("news", "update"):
+        return c
+    src = source_text_of(ev, rows)
+    plan = hooks.plan(ev, rows, model_hooks=c.hooks or None, writer_headline=c.headline)
+    best = plan.get("chosen") or ""
+    mine = next((h for h in plan.get("hooks") or [] if h.get("text") == c.headline), None)
+    top = next((h for h in plan.get("hooks") or [] if h.get("ok")), None)
+    if mine and mine.get("ok") and top and float(mine["total"]) >= float(top["total"]) - WRITER_MARGIN:
+        best = c.headline  # the checked draft's own headline stands unless a hook is clearly stronger
+        plan["chosen"], plan["chosen_strategy"] = best, mine.get("strategy") or "writer"
+        plan["why"] = f"the writer's headline (total {mine['total']}) is within {WRITER_MARGIN:g} of the best hook ({top['total']})"
+    out = Copy(**{**asdict(c)})
+    if best and best != c.headline:
+        trial = Copy(**{**asdict(c), "headline": best, "short": shorten(best, SHORT)})
+        problems = verify_copy(trial, src) + viral.draft_problems(ev, trial, rows)
+        if not problems:
+            out = trial
+        else:
+            plan["kept_writer"] = f"the winning hook failed the copy checks: {problems[0]}"
+    q, why = hooks.debate_question(ev, card, writer_question=c.question, source_text=src)
+    out.question = q
+    plan["question"], plan["question_why"] = q, why
+    if len(out.context) > CONTEXT_MAX:
+        first = (_sentences(out.context) or [out.context])[0]
+        out.context = first if len(first) <= CONTEXT_MAX + 60 else ""
+    ev.facts = {**f, "hooks": plan}
+    return out
+
+
+async def draft(settings: Any, ev: Any, rows: list[Any] | None = None, transport: Any = None) -> Copy:
     """The words, from the first writer whose draft passes every check: the GPU PC's local model (written with the picture, no API cost,
     fact-checked there by a second pass), then the Anthropic model when a key exists, then the desk's own from the outlets' sentences
     (checked too: a part that fails is dropped)."""
@@ -641,10 +699,12 @@ class Package:
     checks: list[dict[str, Any]]
     ok: bool
     empty: str = ""  # why the words say nothing (app/newsdesk/viral.substance): such a story isn't posted at all
+    accuracy: list[str] = field(default_factory=list)  # app/newsdesk/claims on the final texts: any problem = not publishable (hard gate)
 
     def out(self) -> dict[str, Any]:
         return {"copy": self.copy.out(), "links": [x.out() for x in self.links], "line": self.line, "original": self.original, "x_text": self.x_text,
-                "telegram_html": self.telegram_html, "telegram_plain": self.telegram_plain, "checks": self.checks, "ok": self.ok, "empty": self.empty}
+                "telegram_html": self.telegram_html, "telegram_plain": self.telegram_plain, "checks": self.checks, "ok": self.ok, "empty": self.empty,
+                "accuracy": self.accuracy}
 
 
 def x_links_on(state: dict[str, Any] | None) -> bool:
@@ -694,7 +754,27 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     empty = viral.substance(c) if getattr(ev, "kind", "") in ("news", "update") else ""
     if empty:
         all_checks.append({"check": "substance", "passed": False, "detail": empty, "platform": "both"})
-    return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty, empty)
+    accuracy = final_accuracy(ev, x, checked, src, names)
+    for prob in accuracy:
+        all_checks.append({"check": "accuracy", "passed": False, "detail": prob, "platform": "both"})
+    return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty and not accuracy, empty, accuracy)
+
+
+URL = re.compile(r"https?://\S+|\b[\w.-]+\.(?:com|org|net|io|co|uk|xyz)/\S*")
+
+
+def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets: list[str]) -> list[str]:
+    """The claim checker (app/newsdesk/claims) on the exact texts both platforms would post, after cashtags and every other step. Market
+    moves, recaps and data posts are built from our own measured numbers and keep their own checks."""
+    if getattr(ev, "kind", "") not in ("news", "update"):
+        return []
+    from app.newsdesk import claims
+
+    out: list[str] = []
+    for platform, text in (("X", x_text), ("Telegram", tg_text)):
+        bare = URL.sub(" ", text or "").replace("@thepricechat", " ")
+        out += [f"{platform}: {p}" for p in claims.for_event(ev, bare, source_text, [*outlets, *[str(s.get("name") or "") for s in getattr(ev, "sources", None) or []]])]
+    return list(dict.fromkeys(out))
 
 
 def stored(ev: Any) -> dict[str, Any] | None:

@@ -369,6 +369,9 @@ def relevant(photo: LicensedPhoto, subject_terms: Iterable[str], *, story_terms:
     bad = NOT_PHOTO.search(title) or NOT_PHOTO.search(tags) or GRAPHIC.search(desc)
     if bad:
         return f"not a news photograph: {bad.group(0).lower()}"
+    generic = generic_scene(photo, story_terms + subject_terms)
+    if generic:
+        return generic
     if photo.mime and photo.mime.lower() not in ("image/jpeg", "image/png", "image/webp", "jpg", "jpeg", "png", "webp"):
         return f"not a photograph file: {photo.mime}"
     if MONO.search(title) or MONO.search(tags):
@@ -523,6 +526,38 @@ def _keys(p: LicensedPhoto) -> set[str]:
     return keys
 
 
+# Owner, 2026-11-13: "prefer recognizable people, dramatic real photography, verified charts; reject generic server rooms, office buildings,
+# meaningless AI illustrations". A generic scene says nothing about the story even when its caption names the company (a server room, a
+# data centre, an office interior, a skyline, a stock concept): rejected unless the story itself is about that kind of place.
+GENERIC = re.compile(r"\b(server ?rooms?|servers?|server racks?|data ?cent(?:er|re)s?|racks?|cables?|cubicles?|open[- ]plan|office (?:interior|space|desk|"
+                     r"workers?|staff)|coworking|meeting rooms?|conference rooms?|boardrooms?|skylines?|cityscapes?|business district|"
+                     r"stock (?:photo|image)|abstract|concept|binary|keyboards?|laptops?|computer screens?|monitors?|trading screens?|"
+                     r"stock tickers?|handshakes?|coins? (?:stack|pile)|piggy ?bank|hoodie|hacker)\b", re.I)
+BUILDING = re.compile(r"\b(headquarters|hq|office building|offices|office|building|facade|façade|campus|exterior|tower)\b", re.I)
+
+
+def generic_scene(photo: LicensedPhoto, story_terms: Iterable[str] = ()) -> str | None:
+    """Why this photo is a generic stand-in rather than a picture of the story, or None."""
+    text = f"{_title(photo)} | {' | '.join(photo.tags)} | {_lead(photo.description)}"
+    hit = GENERIC.search(text)
+    if hit and not _has(" ".join(story_terms), [hit.group(0)]):
+        return f"a generic scene, not the story: {hit.group(0).lower()}"
+    return None
+
+
+def scene_points(p: LicensedPhoto, subject_terms: list[str], sensitive: bool) -> float:
+    """Ranking: a recognizable person who is the story's subject first (never on sensitive stories), an office building last."""
+    title = _title(p)
+    pts = 0.0
+    if not sensitive:
+        named = [n for n in people_named(title) if any(_term_rx(w).search(" ".join(subject_terms)) for w in n.split() if len(w) > 2)]
+        if named:
+            pts += 2.5
+        if BUILDING.search(title) and not named:
+            pts -= 1.5
+    return pts
+
+
 def _score(p: LicensedPhoto, subject_terms: list[str], story_terms: list[str], sensitive: bool = False) -> float:
     title, tags = _title(p), " | ".join(p.tags)
     in_title = _has(title, subject_terms)
@@ -538,7 +573,7 @@ def _score(p: LicensedPhoto, subject_terms: list[str], story_terms: list[str], s
         trust -= 0.3
     aspect = 1 - min(abs(p.width / max(p.height, 1) - 16 / 9), 1)
     place = 1.0 if sensitive and (PREFER.search(title) or PREFER.search(tags)) else 0.0  # places and objects first
-    return round(match + res + recency + 1.5 * trust + 0.5 * aspect + place, 4)
+    return round(match + res + recency + 1.5 * trust + 0.5 * aspect + place + scene_points(p, subject_terms, sensitive), 4)
 
 
 async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms: list[str], *, used: Iterable[str] = frozenset(),

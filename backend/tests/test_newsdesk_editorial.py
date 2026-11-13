@@ -230,7 +230,8 @@ def _ev(kind: str = "news", topic: str = "corporate", title: str = "Nvidia board
 
 def test_the_picture_kind_follows_the_story() -> None:
     assert visual.kinds_for(_ev(kind="recap", topic="move", points=[[i, 1.0] for i in range(20)]))[0] == "chart"
-    assert visual.kinds_for(_ev(topic="hack", title="Bybaz exchange hacked for $400 million"))[0] == "artwork"
+    # owner, 2026-11-13: no meaningless AI illustrations: a hack with no photo of its subject gets the verified figure on a card first
+    assert visual.kinds_for(_ev(topic="hack", title="Bybaz exchange hacked for $400 million"))[:2] == ["graphic", "artwork"]
     assert visual.kinds_for(_ev(importance={"kind": "corporate"}))[0] == "photo"
     assert visual.kinds_for(_ev(topic="geopolitics", title="Saudi Arabia downs missiles fired at Riyadh", importance={"kind": "geopolitics"}))[0] == "photo"
     assert visual.kinds_for(_ev(topic="etf", title="Bitcoin ETFs shed $1.3B in biggest weekly outflow", importance={"kind": "flows"}))[0] == "graphic"

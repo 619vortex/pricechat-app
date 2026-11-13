@@ -36,6 +36,9 @@ from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, 
 logger = logging.getLogger(__name__)
 
 
+EDITORIAL_MIN = 45  # scorecard bar for news (tests of the older desk pin 0 in conftest; tests/test_newsdesk_media.py covers it)
+
+
 @dataclass
 class Policy:
     regular_per_day: int = 4
@@ -80,6 +83,9 @@ class Policy:
     recap: bool = False  # see RECAP_FALLBACK
     market_bar: int = 70  # a price move or liquidation flush on its own needs this to take a slot: no small "price alert" posts
     experiments: bool = True  # about one story in five tries its runner-up factual hook (app/newsdesk/viral)
+    # the editorial scorecard (app/newsdesk/scorecard, owner 2026-11-13): a news story under this total is not posted, however it scores
+    # for virality, and a slot with nothing above it is skipped. 0 turns the editorial bar off (the scorecard still ranks and is shown).
+    editorial_min: int = field(default_factory=lambda: EDITORIAL_MIN)
     priority_bonus: int = 6  # ranking only, never the bar: Bitcoin, Ethereum, Hyperliquid, macro, commodities, geopolitics come first
     priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC"}))
 
@@ -144,7 +150,7 @@ ESCALATE = re.compile(r"\b(lazarus|north korea\w*|behind the|blamed?|attribut\w+
                       r"fbi|doj|justice department|criminal)\b", re.I)
 
 
-NUMBERS = ("market_bar", "regular_per_day", "regular_bar", "opening_bar", "extra_bar", "extra_per_day", "ceiling", "window_hours", "topic_max", "updates_per_story")
+NUMBERS = ("editorial_min", "market_bar", "regular_per_day", "regular_bar", "opening_bar", "extra_bar", "extra_per_day", "ceiling", "window_hours", "topic_max", "updates_per_story")
 MINUTES = ("regular_gap", "extra_gap", "min_gap", "asset_cooldown")
 
 
@@ -392,6 +398,13 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     """One pass of the desk. Safe to run from both lanes: event keys are unique and release is one row at a time."""
     p = policy(desk_state)
     adj = engagement.adjustments(db, now)
+    try:
+        adj = {**adj, **{f"beat:{k}": v for k, v in engagement.beat_points(db, now).items()},
+               **{f"strategy:{k}": v for k, v in engagement.strategy_points(db, now).items()}, "editorial_min": float(p.editorial_min)}
+    except Exception as e:  # noqa: BLE001 - learning is optional; the table may not exist before migration 0112
+        logger.info("newsdesk events: no engagement learning (%s)", type(e).__name__)
+        db.rollback()
+        adj = {**adj, "editorial_min": float(p.editorial_min)}
     recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - TRACK)))
     out = {"stories": 0, "markets": 0, "updates": 0, "released": None}
     _expire(db, recent, now, p)
@@ -619,6 +632,49 @@ def _fill(ev: NdEvent, v: chaos.Verdict, score: virality.Score, facts: dict[str,
     ev.virality, ev.parts, ev.facts, ev.sources = float(score.total), score.parts, {**facts, "peak": peak, **kept}, _sources(v)
     if quotes is not None:
         _angle(ev, v, quotes, now, adj, experiments)
+    _editorial(ev, [v.story, *v.others], adj)
+
+
+def _editorial(ev: NdEvent, rows: list[Any] | None, adj: dict[str, float] | None) -> None:
+    """The editorial scorecard, the five ranked hooks, the debate question and the picture plan, stored as facts["editorial"] and
+    facts["hooks"] (Admin, the writer, the learner). Never raises: a story without them is judged the way it was before."""
+    from app.newsdesk import hooks, scorecard
+
+    try:
+        adj = adj or {}
+        learned = {k.split(":", 1)[1]: x for k, x in adj.items() if k.startswith("beat:")}
+        minimum = int(adj.get("editorial_min", scorecard.MINIMUM))
+        card = scorecard.for_event(ev, rows, learned, minimum)
+        out = card.out()
+        strat = {k.split(":", 1)[1]: x for k, x in adj.items() if k.startswith("strategy:")}
+        plan = hooks.plan(ev, rows, learned=strat)
+        from app.newsdesk import network
+
+        q, why = hooks.debate_question(ev, out, source_text=network.source_text_of(ev, rows))
+        out["question"], out["question_why"] = q, why
+        out["visual"] = visual_choice(ev)
+        ev.facts = {**(ev.facts or {}), "editorial": out, "hooks": plan}
+    except Exception as e:  # noqa: BLE001
+        logger.info("newsdesk events: no scorecard for %s (%s)", ev.key, type(e).__name__)
+
+
+def visual_choice(ev: NdEvent) -> dict[str, Any]:
+    """What the picture will be and why (app/newsdesk/visual.kinds_for, photos rules), for Admin and the learner."""
+    from app.newsdesk import photos, visual
+
+    try:
+        kinds = visual.kinds_for(ev)
+    except Exception:  # noqa: BLE001
+        kinds = ["graphic"]
+    title = f"{ev.headline or ''} {ev.title or ''}"
+    sensitive = photos.is_sensitive(ev.title or "")
+    reasons = {"chart": "a verified price series exists for the story's own asset: the real chart",
+               "photo": ("a licensed photo of the subject itself (a place or object only: the story is sensitive, no person is shown)" if sensitive
+                         else "a licensed news photo of the person, place or company the story is about; generic stock is rejected"),
+               "graphic": "no real photo or chart of the subject: the desk's typeset card with the verified figure",
+               "artwork": "last resort: a labelled illustration, only when nothing real exists"}
+    subject = [q for q, _ in visual.subject_queries(title)[:3]]
+    return {"order": kinds, "first": kinds[0] if kinds else "", "why": reasons.get(kinds[0], "") if kinds else "", "subject": subject, "sensitive": sensitive}
 
 
 async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy, second_opinion: Any, market: Any) -> int:
@@ -826,12 +882,16 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
 
     def rank(e: NdEvent) -> tuple[float, int]:
         return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e) - editorial.diversity(e, covered, now)[0] - damp(e)
-                  + float((e.facts or {}).get("angle_bonus") or 0)), e.id)
+                  + float((e.facts or {}).get("angle_bonus") or 0) + editorial_bonus(e)), e.id)
 
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
         age = _age(ev, now)
         if _repeat(ev, covered, now) or _blocked(ev):
+            continue
+        weak = editorial_reject(ev, p)
+        if weak:
+            ev.why = f"editorial: {weak}"
             continue
         held_back = editorial.diversity(ev, covered, now)[1]
         if held_back:
@@ -912,7 +972,7 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
             continue
         if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
             continue
-        if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1]:
+        if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1] or editorial_reject(ev, p):
             continue
         if ev.kind == "update":
             parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
@@ -943,9 +1003,49 @@ def parent_told(parent: NdEvent) -> str:
     return str((parent.facts or {}).get("told") or parent.title or "")[:200]
 
 
+def editorial_bonus(ev: NdEvent) -> float:
+    """The scorecard's ranking points (scorecard.Scorecard.rank_bonus), news and updates only."""
+    if ev.kind not in ("news", "update"):
+        return 0.0
+    return float(((ev.facts or {}).get("editorial") or {}).get("rank_bonus") or 0)
+
+
+def editorial_reject(ev: NdEvent, p: Policy) -> str:
+    """Why a news story fails the editorial bar now, or "": the factual-safety rule, a minor corporate announcement, or a total under
+    Policy.editorial_min (0 = off). Market moves and data posts have their own bars (market_bar + exceptional, datapost.DATA_BAR)."""
+    if ev.kind not in ("news", "update") or not p.editorial_min:
+        return ""
+    card = (ev.facts or {}).get("editorial") or {}
+    if not card:
+        return ""
+    if card.get("safety"):
+        return str(card["safety"][0])
+    if card.get("beat") == "minor_corporate":
+        return "a minor corporate announcement: not news our audience argues about"
+    total = int(card.get("total") or 0)
+    if ev.kind == "news" and total < p.editorial_min:
+        dims = card.get("dims") or {}
+        weak = sorted(dims, key=lambda d: dims[d])[:2]
+        return (f"editorial score {total} under the minimum of {p.editorial_min}"
+                + (f" (weakest: {', '.join(f'{d} {dims[d]:g}' for d in weak)})" if weak else ""))
+    return ""
+
+
+NEAR_WINDOW = timedelta(hours=48)
+
+
 def _repeat(ev: NdEvent, covered: list[editorial.Covered], now: datetime) -> bool:
     """The same story as one already out, with nothing materially new: folded away for good (status superseded), with the reason."""
     v = editorial.repeat_verdict(ev, covered, now)
+    if v.ok and ev.kind == "news":
+        # story-level dedup across wordings (owner, 2026-11-13): another outlet's version of an event already out, even when the names
+        # differ ("Saudi output jumps 26%" / "Riyadh reports near pre-war production"), is the same story
+        from app.newsdesk import scorecard
+
+        near = scorecard.near_duplicate(ev.title or ev.headline or "", [(c.event_id, str(c.sig.get("headline") or "")) for c in covered
+                                                                        if c.event_id != ev.id and now - c.at <= NEAR_WINDOW])
+        if near is not None:
+            v = editorial.Verdict(False, f"same story as #{near[0]}: another version of the same event (headline overlap {near[1]:.2f})", near[0])
     if v.ok:
         if v.reason:
             f = ev.facts or {}

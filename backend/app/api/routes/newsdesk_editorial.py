@@ -105,3 +105,43 @@ def block(payload: BlockInput, db: DbSession) -> dict[str, Any]:
     if ev is None:
         raise HTTPException(404, "No such event.")
     return events.event_out(ev)
+
+
+# --- the media engine (owner, 2026-11-13): editorial scores, rejection reasons, headline variants, performance ------------------------
+
+
+@router.get("/scorecards")
+def scorecards(db: DbSession, hours: int = 48, limit: int = 60) -> dict[str, Any]:
+    """Every news candidate of the last hours with its editorial scorecard (five dimensions, beat, audience points), the five ranked
+    hooks with their accuracy problems, the debate question, the picture plan, the accuracy gate's result and what the desk decided."""
+    from app.newsdesk import scorecard
+
+    now = utcnow()
+    p = events.policy(engine.settings_row(db).state or {})
+    return {"minimum": p.editorial_min, "dimensions": list(scorecard.DIMENSIONS), "beats": scorecard.BEAT_NAMES,
+            "stories": scorecard.overview(db, now, hours=max(1, min(hours, 168)), limit=max(1, min(limit, 200)), minimum=p.editorial_min)}
+
+
+@router.get("/performance")
+def performance(db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """Engagement on Telegram and X, normalized per platform, by beat, hook strategy, picture format and question; what the learner adds;
+    which metric sources are connected (Telegram needs the owner's Telegram account; the Bot API has no view counts)."""
+    from app.newsdesk import engagement
+
+    return engagement.performance(db, utcnow(), runtime.settings)
+
+
+class QualityInput(StrictInput):
+    editorial_min: int = Field(ge=0, le=100)
+
+
+@router.put("/quality")
+def quality(payload: QualityInput, db: DbSession) -> dict[str, Any]:
+    """The editorial bar: a news story under this scorecard total is not posted and an empty slot is skipped. 0 turns the bar off (the
+    factual-safety and accuracy gates stay on regardless)."""
+    desk = engine.settings_row(db)
+    state = dict(desk.state or {})
+    state["policy"] = {**(state.get("policy") or {}), "editorial_min": int(payload.editorial_min)}
+    desk.state = state
+    db.commit()
+    return {"editorial_min": events.policy(state).editorial_min}

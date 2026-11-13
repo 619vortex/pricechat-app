@@ -844,11 +844,11 @@ def kinds_for(ev: Any) -> list[str]:
     if chartable:
         return ["chart", "artwork"]
     if major and subject_queries(f"{ev.headline} {ev.title}"):
-        return ["photo", "artwork", "graphic"]  # owner, 2026-11-11: real photos first, when one of the actual subject exists
+        return ["photo", "graphic", "artwork"]  # owner, 2026-11-11: real photos first; 2026-11-13: an illustration only when nothing real fits
     if major:
-        return ["artwork", "graphic"]
+        return ["graphic", "artwork"]  # owner, 2026-11-13: no meaningless illustrations: the verified figure on a card first
     if subject_queries(f"{ev.headline} {ev.title}") or typ in ("geopolitics", "corporate", "regulation", "controversy"):
-        return ["photo", "artwork" if typ in ("geopolitics", "controversy") else "graphic", "graphic"]
+        return ["photo", "graphic", "artwork"]
     return ["graphic", "artwork"]
 
 

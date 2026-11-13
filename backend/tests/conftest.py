@@ -390,6 +390,12 @@ def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         monkeypatch.setattr(nd_telegram, "FORMAT", "classic")
         monkeypatch.setattr(nd_engine, "X_FORMAT", "classic")
         monkeypatch.setattr(nd_recap, "VISUAL", False)
+    if request.module.__name__.split(".")[-1] not in ("test_newsdesk_media", "test_newsdesk_breaking_e2e"):
+        from app.newsdesk import events as nd_events
+
+        # the editorial scorecard bar (2026-11-13) judges real headlines; the older tests' synthetic stories were written before it.
+        # tests/test_newsdesk_media.py covers the bar, and the breaking end-to-end test runs with it on.
+        monkeypatch.setattr(nd_events, "EDITORIAL_MIN", 0)
     if request.module.__name__.split(".")[-1] in ("test_newsdesk", "test_newsdesk_events", "test_newsdesk_telegram", "test_newsdesk_slots", "test_newsdesk_visual",
                                                   "test_newsdesk_editorial", "test_x_follows_telegram", "test_newsdesk_x_live"):
         from app.newsdesk import events as nd_events

@@ -120,3 +120,209 @@ def report(db: Session, now: datetime) -> dict[str, Any]:
     return {"days": DAYS, "measured_posts": len(measured), "average_rate": round(mean, 5), "learning": len(measured) >= MIN_POSTS,
             "features": table, "experiments": experiments, "hook_points": {k.split(":", 1)[1]: v for k, v in adjustments(db, now).items() if k.startswith("hook:")},
             "telegram": "Telegram's Bot API gives no view counts for channel posts: X metrics drive the learning."}
+
+
+# --- the media engine (owner, 2026-11-13): both platforms, normalized, learned per beat -----------------------------------------------
+#
+# Telegram: views, forwards, comments and reactions of the channel's posts, read with the owner's Telegram account (MTProto, Admin >
+# Telegram > Account) when it is logged in. The Bot API gives none of these for channel posts, so without that login Telegram is
+# "not connected" and contributes nothing. X: impressions, reposts, quotes, replies, likes and bookmarks from engine.collect_metrics.
+# Each post is stored once per platform (NdEngagement) as the platform reported it; its rate is (2 x shares + 2 x replies + reactions) /
+# views, and its index is that rate against the platform's own median over DAYS, so a Telegram post and an X post compare fairly. The
+# learner turns the average index per beat (scorecard.BEATS) and per hook strategy (hooks.STRATEGIES) into -6..+6 points, pulled towards
+# 1.0 by PRIOR pseudo-posts, and only once LEARN_MIN posts are measured. Nothing is ever estimated: no data, no adjustment.
+
+MIN_VIEWS = {"telegram": 20, "x": 50}
+LEARN_MIN = 8
+BEAT_SPAN = 6.0
+TG_NOT_CONNECTED = ("not connected: Telegram's Bot API gives no view, forward or reaction counts for channel posts. Log the owner's Telegram "
+                    "account in (Admin > Telegram > Account, MTProto) and the desk reads them once a day.")
+
+
+def norm_rate(platform: str, views: int, shares: int, replies: int, reactions: int) -> float | None:
+    if views < MIN_VIEWS.get(platform, 50):
+        return None
+    return round((2 * shares + 2 * replies + reactions) / views, 5)
+
+
+def features_for(ev: Any) -> dict[str, Any]:
+    """What a post was made of, for the learner: beat and editorial total (scorecard), hook strategy, picture kind, question, writer."""
+    f = getattr(ev, "facts", None) or {}
+    card, hk, pkg = f.get("editorial") or {}, f.get("hooks") or {}, f.get("package") or {}
+    return {"beat": str(card.get("beat") or ""), "editorial": card.get("total"), "hook_strategy": str(hk.get("chosen_strategy") or ""),
+            "format": str((f.get("visual") or {}).get("kind") or ""), "question": bool((pkg.get("copy") or {}).get("question")),
+            "writer": str((pkg.get("copy") or {}).get("writer") or ""), "kind": str(getattr(ev, "kind", "") or ""), "topic": str(getattr(ev, "topic", "") or "")}
+
+
+def record(db: Session, *, platform: str, post_ref: str, views: int, shares: int, replies: int, reactions: int, now: datetime,
+           event_id: int | None = None, published_at: datetime | None = None, features: dict[str, Any] | None = None,
+           raw: dict[str, Any] | None = None) -> Any:
+    from app.models.newsdesk import NdEngagement
+
+    row = db.scalar(select(NdEngagement).where(NdEngagement.platform == platform, NdEngagement.post_ref == str(post_ref)))
+    if row is None:
+        row = NdEngagement(platform=platform, post_ref=str(post_ref), features={}, raw={})
+        db.add(row)
+    row.event_id = event_id if event_id is not None else row.event_id
+    row.published_at = published_at or row.published_at
+    row.measured_at = now
+    row.views, row.shares, row.replies, row.reactions = int(views), int(shares), int(replies), int(reactions)
+    row.rate = norm_rate(platform, row.views, row.shares, row.replies, row.reactions)
+    row.features = features if features is not None else (row.features or {})
+    row.raw = raw or {}
+    return row
+
+
+def ingest_x(db: Session, now: datetime) -> int:
+    """X metrics already collected on NdPost (engine.collect_metrics) -> NdEngagement."""
+    from app.models.newsdesk import NdEvent
+
+    n = 0
+    for p in db.scalars(select(NdPost).where(NdPost.status == "published", NdPost.x_id.is_not(None), NdPost.published_at >= now - timedelta(days=DAYS))):
+        m = p.metrics or {}
+        if "impression_count" not in m:
+            continue
+        eid = (p.facts or {}).get("event_id")
+        ev = db.get(NdEvent, eid) if eid else None
+        record(db, platform="x", post_ref=str(p.x_id), event_id=eid, published_at=p.published_at, now=now,
+               views=int(m.get("impression_count") or 0), shares=int(m.get("retweet_count") or 0) + int(m.get("quote_count") or 0),
+               replies=int(m.get("reply_count") or 0), reactions=int(m.get("like_count") or 0) + int(m.get("bookmark_count") or 0),
+               features=features_for(ev) if ev is not None else {"kind": p.kind, "topic": str((p.facts or {}).get("topic") or "")},
+               raw={k: m.get(k) for k in ("impression_count", "retweet_count", "quote_count", "reply_count", "like_count", "bookmark_count")})
+        n += 1
+    db.commit()
+    return n
+
+
+def telegram_connection(settings: Any) -> dict[str, Any]:
+    try:
+        from app.telegram import account_service
+
+        if settings is not None and account_service.has_session(settings):
+            return {"connected": True, "why": "the owner's Telegram account (MTProto) is logged in: views, forwards, comments and reactions are read daily"}
+    except Exception:  # noqa: BLE001 - no credential store: not connected
+        pass
+    return {"connected": False, "why": TG_NOT_CONNECTED}
+
+
+async def collect_telegram(db: Session, settings: Any, account_rt: Any, now: datetime, fetch: Any = None) -> dict[str, Any]:
+    """Telegram counters for the channel posts of the last DAYS days. `fetch(channel, ids)` is for tests; otherwise the owner's logged-in
+    Telegram account is used, read-only. Not logged in: nothing is read and the result says so."""
+    from app.models.newsdesk import NdEvent, NdTelegramPost
+
+    if fetch is None:
+        conn = telegram_connection(settings)
+        if not conn["connected"]:
+            return {"connected": False, "updated": 0, "why": conn["why"]}
+        from app.telegram import account_service
+
+        async def fetch(channel: str, ids: list[int]) -> list[dict[str, Any]]:  # the real reader
+            async with account_service.session(db, settings, account_rt) as gw:
+                return await gw.message_stats(channel, ids)
+    evs = list(db.scalars(select(NdEvent).where(NdEvent.tg_message_id.is_not(None), NdEvent.released_at >= now - timedelta(days=DAYS))))
+    by_chat: dict[str, list[Any]] = {}
+    for e in evs:
+        tp = db.get(NdTelegramPost, e.tg_post_id) if e.tg_post_id else None
+        chat = (tp.chat if tp is not None else "") or ""
+        if chat:
+            by_chat.setdefault(chat, []).append(e)
+    n = 0
+    for chat, items in by_chat.items():
+        stats = {int(s["id"]): s for s in await fetch(chat, [int(e.tg_message_id) for e in items])}
+        for e in items:
+            s = stats.get(int(e.tg_message_id))
+            if not s:
+                continue
+            record(db, platform="telegram", post_ref=f"{chat}/{e.tg_message_id}", event_id=e.id, published_at=e.released_at, now=now,
+                   views=int(s.get("views") or 0), shares=int(s.get("forwards") or 0), replies=int(s.get("replies") or 0),
+                   reactions=int(s.get("reactions") or 0), features=features_for(e), raw=dict(s))
+            n += 1
+    db.commit()
+    return {"connected": True, "updated": n}
+
+
+def _rows(db: Session, now: datetime) -> list[Any]:
+    from app.models.newsdesk import NdEngagement
+
+    return list(db.scalars(select(NdEngagement).where(NdEngagement.measured_at >= now - timedelta(days=DAYS))))
+
+
+def _median(xs: list[float]) -> float:
+    s = sorted(xs)
+    if not s:
+        return 0.0
+    m = len(s) // 2
+    return s[m] if len(s) % 2 else (s[m - 1] + s[m]) / 2
+
+
+def indexed(db: Session, now: datetime) -> list[tuple[Any, float]]:
+    """(row, index) for every measured row: its rate against its own platform's median (1.0 = a typical post on that platform)."""
+    rows = [r for r in _rows(db, now) if r.rate is not None]
+    med = {p: _median([r.rate for r in rows if r.platform == p]) for p in {r.platform for r in rows}}
+    return [(r, round(r.rate / med[r.platform], 3)) for r in rows if med.get(r.platform)]
+
+
+def _learn(groups: dict[str, list[float]]) -> dict[str, float]:
+    out = {}
+    for k, xs in groups.items():
+        shrunk = (sum(xs) + PRIOR * 1.0) / (len(xs) + PRIOR)
+        out[k] = round(max(-BEAT_SPAN, min(BEAT_SPAN, BEAT_SPAN * (shrunk - 1))), 1)
+    return out
+
+
+def _grouped(db: Session, now: datetime, name: str) -> dict[str, float]:
+    ix = indexed(db, now)
+    if len(ix) < LEARN_MIN:
+        return {}
+    by: dict[str, list[float]] = {}
+    for r, i in ix:
+        v = str((r.features or {}).get(name) or "")
+        if v:
+            by.setdefault(v, []).append(i)
+    return _learn(by)
+
+
+def beat_points(db: Session, now: datetime) -> dict[str, float]:
+    """{beat: points} for the scorecard's audience part; {} until LEARN_MIN posts are measured across both platforms."""
+    return _grouped(db, now, "beat")
+
+
+def strategy_points(db: Session, now: datetime) -> dict[str, float]:
+    """{hook strategy: points} for hooks.engagement; {} until LEARN_MIN posts are measured."""
+    return _grouped(db, now, "hook_strategy")
+
+
+def performance(db: Session, now: datetime, settings: Any = None) -> dict[str, Any]:
+    """Admin's analytics: per platform (posts, median rate, views), the normalized index per beat, hook strategy, picture format and
+    question, the best and worst posts, what the learner currently adds, and which sources are connected."""
+    rows = _rows(db, now)
+    ix = indexed(db, now)
+    plat = {}
+    for p in ("telegram", "x"):
+        mine = [r for r in rows if r.platform == p]
+        rated = [r.rate for r in mine if r.rate is not None]
+        plat[p] = {"posts": len(mine), "rated": len(rated), "median_rate": round(_median(rated), 5) if rated else None,
+                   "median_views": int(_median([float(r.views) for r in mine])) if mine else None,
+                   "views": sum(r.views for r in mine), "shares": sum(r.shares for r in mine), "replies": sum(r.replies for r in mine),
+                   "reactions": sum(r.reactions for r in mine)}
+    tables: dict[str, dict[str, dict[str, Any]]] = {}
+    for name in ("beat", "hook_strategy", "format", "question"):
+        by: dict[str, list[float]] = {}
+        for r, i in ix:
+            v = (r.features or {}).get(name)
+            if v not in ("", None):
+                by.setdefault(str(v), []).append(i)
+        tables[name] = {k: {"posts": len(v), "index": round(sum(v) / len(v), 2)} for k, v in sorted(by.items())}
+    ranked = sorted(ix, key=lambda x: -x[1])
+
+    def row_out(r: Any, i: float) -> dict[str, Any]:
+        return {"platform": r.platform, "event": r.event_id, "index": i, "views": r.views, "shares": r.shares, "replies": r.replies,
+                "reactions": r.reactions, "beat": (r.features or {}).get("beat") or ""}
+
+    has_x = any(r.platform == "x" for r in rows)
+    x_conn = {"connected": has_x, "why": "impressions, reposts, replies and likes from X's API (engine.collect_metrics, daily)" if has_x
+              else "no measured X posts in the window (X metrics are read daily for published posts; dry-run posts have none)"}
+    return {"days": DAYS, "measured": len(ix), "learning": len(ix) >= LEARN_MIN, "learn_min": LEARN_MIN, "platforms": plat, "tables": tables,
+            "top": [row_out(r, i) for r, i in ranked[:5]], "bottom": [row_out(r, i) for r, i in ranked[-5:][::-1]] if len(ranked) > 5 else [],
+            "beat_points": beat_points(db, now), "strategy_points": strategy_points(db, now),
+            "connections": {"telegram": telegram_connection(settings), "x": x_conn}}

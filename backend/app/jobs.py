@@ -517,7 +517,22 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
     async def newsdesk_metrics(ctx: JobContext) -> dict[str, Any]:
         from app.newsdesk import engine as desk
 
-        return await desk.collect_metrics(ctx.db, s, runtime.x, ctx.now)
+        out = await desk.collect_metrics(ctx.db, s, runtime.x, ctx.now)
+        # the media engine (2026-11-13): both platforms into nd_engagement, normalized for the learner. Telegram only when the owner's
+        # Telegram account is logged in (MTProto, read-only); otherwise it reports "not connected" and nothing is estimated.
+        from app.newsdesk import engagement as nd_engagement
+
+        try:
+            out["x_engagement"] = nd_engagement.ingest_x(ctx.db, ctx.now)
+        except Exception as e:  # noqa: BLE001 - the learner is optional
+            ctx.db.rollback()
+            out["x_engagement"] = f"skipped ({type(e).__name__})"
+        try:
+            out["telegram_engagement"] = await nd_engagement.collect_telegram(ctx.db, s, runtime.telegram_account, ctx.now)
+        except Exception as e:  # noqa: BLE001
+            ctx.db.rollback()
+            out["telegram_engagement"] = f"skipped ({type(e).__name__})"
+        return out
 
     async def x_opps(ctx: JobContext) -> dict[str, Any]:
         agent_id = get_agent_config(ctx.db).id
