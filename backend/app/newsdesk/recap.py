@@ -150,7 +150,9 @@ def compose(lines: list[dict[str, Any]], stories: list[NdEvent], slot_local: str
     macro = [r for r in lines if r["source"] != "Hyperliquid"]
     fund = _funding(lines)
     told = (" ".join(f"{_price(r['price'])} {_pct(r['pct'])} {abs(r['pct']):.1f}%" for r in lines) + " " + " ".join(f"{e.headline} {e.title}" for e in stories)
-            + f" {fund} {slot_local} {as_of:%H:%M} 24")
+            + f" {fund} {slot_local} {as_of:%H:%M} 24"
+            # the assets measured here (their own verified prices) establish their tickers for the ticker check
+            + " " + " ".join(f"{r['name']} {r.get('tag') or ''}" for r in lines))
     tg = [f"<b>{escape(head)}</b>", "", " · ".join(f"{escape(r['name'])} ${_price(r['price'])} ({_pct(r['pct'])})" for r in crypto)]
     if macro:
         tg.append(" · ".join(f"{escape(r['name'])} {_price(r['price'])} ({_pct(r['pct'])})" for r in macro))

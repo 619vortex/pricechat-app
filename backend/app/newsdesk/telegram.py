@@ -260,6 +260,13 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         from app.newsdesk import clean
 
         pkg.telegram_html, pkg.telegram_plain = clean.with_credit(pkg.telegram_html, pkg.telegram_plain, meta)
+    # the final-output gate (owner, 2026-11-13): the caption exactly as it will go out and the chart beside it, against the sources
+    final_plain = pkg.telegram_plain if pkg is not None else plain
+    told_all = f"{network.source_text_of(ev, rows if ev.kind != 'recap' else [])} {f.get('told') or ''} {ev.title} {ev.summary}"
+    problems = checks.final_gate(final_plain, told_all, str(meta.get("symbol") or ""))
+    if problems:
+        logger.warning("tgnews: event %s held by the final check: %s", ev.id, "; ".join(problems))
+        return None, "final check: " + "; ".join(problems)
     if pkg is not None:
         srcs = [{"name": x.name, "url": x.url} for x in pkg.links if x.kind != "pricechat"]
         return {"headline": pkg.copy.headline, "summary": pkg.copy.context, "html": pkg.telegram_html, "plain": pkg.telegram_plain, "sources": srcs,
