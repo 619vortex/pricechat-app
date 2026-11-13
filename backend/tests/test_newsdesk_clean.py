@@ -342,3 +342,30 @@ def test_classic_brief_tickers_follow_the_same_rule() -> None:
     assert brief.tickers("Coinbase shares fall 8% after the outage") == ["COIN"]
     assert brief.tickers("BNB falls 5% after the Binance hack") == ["BNB"]
     assert brief.tickers("Hackers steal $40M in Ether from Bybit") == ["ETH"]
+
+
+# ---------------------------------------------------------------- the final-output gate (owner, 2026-11-13)
+def test_final_gate_holds_a_caption_whose_ticker_the_sources_dont_establish() -> None:
+    from app.newsdesk import checks
+
+    src = "The US Justice Department seized $1.2 billion stolen by North Korean hackers in the Binance hack."
+    assert checks.final_gate("BREAKING: US seizes $1.2B of North Korea's stolen Binance $BNB crypto", src) == [
+        "tickers the sources don't establish: $BNB"]
+    assert checks.final_gate("BREAKING: US seizes $1.2B of North Korea's stolen Binance crypto", src) == []
+    assert checks.final_gate("BREAKING: US seizes $1.2B of North Korea's stolen Binance crypto", src, "BNB-USD") == [
+        "a $BNB price chart the sources don't establish"]
+    # established by the sources: allowed
+    assert checks.final_gate("$BNB falls 5% after the hack", "BNB fell 5% after the Binance hack", "BNB-USD") == []
+    assert checks.final_gate("Hackers took $40M in Ether $ETH", "Hackers stole $40 million in Ether from the exchange") == []
+    assert checks.final_gate("Coinbase $COIN shares fall 8%", "Coinbase shares fell 8% on Thursday") == []
+    assert checks.final_gate("Coinbase $COIN hit by outage", "Coinbase was down for six hours") == ["tickers the sources don't establish: $COIN"]
+
+
+def test_check_post_fails_an_unsupported_ticker_and_dollar_amounts_are_not_tickers() -> None:
+    from app.newsdesk import checks
+
+    src = "Reuters: The US seized $1.2 billion stolen in the Binance hack."
+    bad = checks.check_post("US seizes $1.2B stolen in the Binance $BNB hack. Reuters", source_text=src, source_names=["Reuters"])
+    assert not bad.ok and any(c["check"] == "tickers" and not c["passed"] for c in bad.checks)
+    good = checks.check_post("US seizes $1.2B stolen in the Binance hack. Reuters", source_text=src, source_names=["Reuters"])
+    assert next(c for c in good.checks if c["check"] == "tickers")["passed"]

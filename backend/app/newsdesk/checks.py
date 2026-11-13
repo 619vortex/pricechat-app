@@ -94,4 +94,37 @@ def check_post(text: str, *, source_text: str, source_names: list[str], breaking
     if not as_edited:
         extra = numbers(bare) - numbers(source_text)
         add("figures", not extra, f"Figures no source gave: {', '.join(sorted(extra))}")
+    unsupported = unsupported_tickers(t, source_text)
+    add("tickers", not unsupported, f"Tickers the sources don't establish: {', '.join(unsupported)} (a company's name never brings its token or stock)")
     return Result(all(c["passed"] for c in checks), checks)
+
+
+CASHTAG = re.compile(r"(?<![\w$])\$([A-Z]{2,6})\b")
+
+
+def unsupported_tickers(text: str, source_text: str) -> list[str]:
+    """Cashtags in the text that the sources don't establish (owner, 2026-11-13, after "stolen Binance $BNB crypto"): a tag passes only when
+    the source text names the symbol itself or clean.established() finds the asset there (Bitcoin; Nvidia's shares...)."""
+    from app.newsdesk import clean
+
+    tags = list(dict.fromkeys(f"${m.group(1)}" for m in CASHTAG.finditer(text or "")))
+    if not tags:
+        return []
+    src = source_text or ""
+    ok = {tag for _, tag in clean.established(src)}
+    return [tag for tag in tags if tag not in ok and not re.search(rf"(?<![\w$])\$?{tag[1:]}\b", src)]
+
+
+def final_gate(text: str, source_text: str, chart_symbol: str = "") -> list[str]:
+    """The last check on what actually goes out, after every formatting step (cashtags, credits, labels): the problems, or [] to send.
+    A hard gate, whatever wrote the words (the desk's writer, a person, the viral hooks) and whatever the story's score."""
+    from app.newsdesk import clean
+
+    problems = []
+    bad = unsupported_tickers(text, source_text)
+    if bad:
+        problems.append(f"tickers the sources don't establish: {', '.join(bad)}")
+    tag = next((t for t, sym in clean.CHARTED.items() if sym == chart_symbol), "") if chart_symbol else ""
+    if tag and tag not in {t for _, t in clean.established(source_text or "")} and not re.search(rf"\b{tag[1:]}\b", source_text or ""):
+        problems.append(f"a {tag} price chart the sources don't establish")
+    return problems
