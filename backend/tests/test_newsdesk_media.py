@@ -411,3 +411,29 @@ def test_hooks_questions_and_admin_picks_run_through_the_production_final_gate(m
     hooks.fact_check("DOJ seizes $1.2B stolen in the Binance hack", SOURCE)
     hooks.question_problems("Right call by DOJ, or a mistake?", SOURCE)
     assert calls == ["DOJ seizes $1.2B stolen in the Binance hack", "Right call by DOJ, or a mistake?"]
+
+
+ANTHROPIC_SRC = ("Anthropic Perp Trades Above IPO Range on Hyperliquid. Anthropic Sets IPO Price Range at $70 to $78, Valuing Company at Up to "
+                 "$1.4 Trillion. The Claude developer is also lining up $26 billion from Nvidia, Google and other tech giants in a private "
+                 "placement alongside the listing.")
+
+
+def test_a_hook_cannot_turn_a_plan_alongside_into_backing_or_a_done_deal() -> None:
+    """Owner review 2026-11-13, example #6: '$26 billion private placement backs Anthropic's $70-$78 IPO range' (the source: 'lining up
+    $26 billion ... alongside the listing'). Every figure is right; the link and the completion are invented."""
+    bad = "$26 billion private placement backs Anthropic's $70–$78 IPO range"
+    assert any("backs" in p for p in claims.link_problems(bad, ANTHROPIC_SRC))
+    assert any("backs" in p for p in claims.check(bad, ANTHROPIC_SRC, numbers=False))
+    problems, _ = hooks.fact_check(bad, ANTHROPIC_SRC)
+    assert any("backs" in p for p in problems)
+    assert claims.link_problems("Anthropic secured $26 billion from Nvidia and Google", ANTHROPIC_SRC)
+    assert not claims.link_problems("Anthropic lines up $26 billion from Nvidia and Google alongside its IPO", ANTHROPIC_SRC)
+
+
+def test_support_words_pass_in_the_form_the_sources_use_and_every_cause_word_is_checked() -> None:
+    src = "Poland's lower house backs sanctions bill covering crypto freezes. The vote raises doubts for exchanges."
+    assert not claims.link_problems("Poland's lower house backs crypto freezes under sanctions bill", src)
+    assert not claims.link_problems("Binance hack raises doubts on hot-wallet safeguards", src)  # 'raises' is not a completion word
+    src2 = "Oil fell after the report sparked selling."
+    assert not claims.link_problems("Report sparked selling", src2)
+    assert any("triggered" in p for p in claims.link_problems("Report sparked selling and triggered a crash", src2))  # not only the first

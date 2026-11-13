@@ -252,6 +252,7 @@ def fact_check(text: str, source_text: str, *, evidence: str = "", outlets: int 
     from app.newsdesk import claims
 
     problems += claims.ticker_problems(h, src) + claims.people_problems(h, src) + claims.legal_problems(h, src)
+    problems += claims.link_problems(h, src)  # every cause / support / completion word, not just the first
     problems += [f"final gate: {p}" for p in checks.final_gate(h, src)]  # the production gate (checks.final_gate) on the hook itself
     problems = list(dict.fromkeys(problems))
     for q in re.findall(r"[\"“]([^\"”]{6,})[\"”]|(?<!\w)['‘]([^'’]{6,})['’](?!\w)", h):

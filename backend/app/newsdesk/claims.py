@@ -14,7 +14,8 @@ Deterministic, no model involved. A text fails when it has
   - a named person the sources don't name
   - an accusation, a legal action or a crime word (stole, charged, seized, sued, arrested, indicted, fraud, laundering, hacked...) the
     sources don't use
-  - a cause the sources don't state (sparks, triggers, because, due to, sends...)
+  - a cause the sources don't state (sparks, triggers, because, due to, sends...), or a support / completion word in a form they don't
+    use (backs, underpins, secured, completed: "lining up $26B" is not "secured $26B")
   - a quote that isn't verbatim in the sources
   - legal actions and accusations without a reliable source (`reliable_problems`): an official source (court, DOJ, SEC, a regulator),
     two independent outlets, or one major outlet; an accusation about an identifiable person also needs attribution and an official
@@ -63,6 +64,10 @@ LEGAL_ACTION = _rx(r"\b(charged|charges|seized|seizes|seizure|sued|sues|suing|la
                    r"launder\w*|stole|stolen|theft|embezzl\w*|brib\w*)\b")
 CAUSAL = _rx(r"\b(sparks?|sparked|triggers?|triggered|causes?|caused|drives? (?:\w+ )?(?:up|down|higher|lower)|drove (?:\w+ )?(?:up|down|higher|lower)|fuels?|fueled|fuelled|sends? (?:\w+ ){0,3}(?:higher|lower|soaring|tumbling|plunging|up|down)|sent (?:\w+ ){0,3}(?:higher|lower|soaring|tumbling|plunging)|forces?|forced|"
              r"leads? to|led to|because(?: of)?|due to|blamed on|thanks to|in response to|prompts?|prompted|on the back of)\b")
+# one fact holding up another, or a plan turned into a done deal (owner review 2026-11-13: "lining up $26 billion ... alongside the
+# listing" became "$26 billion private placement backs Anthropic's IPO range"): only in the form the sources use
+SUPPORT = _rx(r"\b(backs|backed|backing|underpins?|underpinned|props? up|propped up|bankrolls?|bankrolled|powers|powered|"
+              r"secures?|secured|clinch(?:es|ed)|completes|completed|finali[sz]es|finali[sz]ed|seals?|sealed)\b")
 # major outlets whose own reporting carries a legal action or an accusation on its own
 RELIABLE = ("reuters", "bloomberg", "associated press", "ap news", "ap", "afp", "financial times", "ft", "wall street journal", "wsj",
             "new york times", "nyt", "bbc", "cnbc", "the guardian", "guardian", "washington post", "the economist", "axios", "politico",
@@ -155,6 +160,18 @@ def reliable_problems(text: str, *, evidence: str = "", outlets: list[str] | Non
     return out
 
 
+def link_problems(text: str, source_text: str) -> list[str]:
+    """Every cause word (CAUSAL) and support / completion word (SUPPORT) in the text that the sources don't use in that form."""
+    low = (source_text or "").lower()
+    out = []
+    for rx, what in ((CAUSAL, "a cause the sources don't state"), (SUPPORT, "a link or outcome the sources don't state")):
+        for m in rx.finditer(text or ""):
+            w = re.sub(r"\s+", " ", m.group(0).lower())
+            if not re.search(rf"\b{re.escape(w)}\b", low):
+                out.append(f"{what}: '{w}'")
+    return list(dict.fromkeys(out))
+
+
 def check(text: str, source_text: str, *, evidence: str = "", outlets: list[str] | None = None, attributed: bool = True,
           numbers: bool = True) -> list[str]:
     """Everything `text` claims that `source_text` doesn't establish ([] = publishable on accuracy)."""
@@ -168,9 +185,7 @@ def check(text: str, source_text: str, *, evidence: str = "", outlets: list[str]
     probs += ticker_problems(t, src)
     probs += people_problems(t, src)
     probs += legal_problems(t, src)
-    c = CAUSAL.search(t)
-    if c and not re.search(rf"\b{re.escape(c.group(0).lower())}", src.lower()):
-        probs.append(f"a cause the sources don't state: '{c.group(0).lower()}'")
+    probs += link_problems(t, src)
     for q in re.findall(r"[\"“]([^\"”]{6,})[\"”]", t):
         if q.lower() not in src.lower():
             probs.append(f"a quote not in the sources: '{q[:40]}'")
@@ -184,4 +199,4 @@ def for_event(ev: Any, text: str, source_text: str, outlets: list[str] | None = 
     return check(text, source_text, evidence=getattr(ev, "evidence", "") or "", outlets=names, attributed=attributed, numbers=numbers)
 
 
-__all__ = ["check", "for_event", "legal_problems", "people_problems", "reliable_problems", "ticker_problems"]
+__all__ = ["check", "for_event", "legal_problems", "link_problems","people_problems", "reliable_problems", "ticker_problems"]

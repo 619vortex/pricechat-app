@@ -223,7 +223,11 @@ Generated 2026-11-13 06:28 UTC on branch `feat/newsdesk-viral` from the restored
 | 5 | Anthropic sets IPO price $70‑$78, targeting $1.4 trillion valuation | writer | 73 | 75 | 0 | doesn't say who the story is about (above, hyperliquid, perp) |
 | 6 | Nvidia and Google bankroll Anthropic’s $1.4 trillion IPO target | model | 75 | 59 | 0 | doesn't say who the story is about (above, hyperliquid, perp) |
 
-- **Chosen hook:** $26 billion private placement backs Anthropic’s $70‑$78 IPO range — rank 1 of 6: engagement 73, accuracy 100
+- **Chosen hook:** Anthropic’s IPO price range sets stage for $1.4 trillion valuation — rank 2 of 6: engagement 65, accuracy 100
+- **Review correction (2026-11-13):** the first run chose rank 1, "$26 billion private placement backs Anthropic’s $70‑$78 IPO range".
+  Every figure is right, but the source says Anthropic is *lining up* $26 billion in a private placement *alongside* the listing: it
+  doesn't "back" the price range and isn't done. `claims.link_problems` now rejects support and completion words (backs, underpins,
+  bankrolls, secured, completed...) the sources don't use, so rank 1 and rank 6 ("bankroll") fail and rank 2 is chosen.
 - **Debate question:** none (no question: discussion 4 under 10)
 - **Visual:** photo (order photo → graphic → artwork). a licensed news photo of the person, place or company the story is about; generic stock is rejected Subject searched: anthropic headquarters, anthropic office building.
 
