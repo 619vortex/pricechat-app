@@ -38,7 +38,9 @@ def photo(w: int = 1200, h: int = 1500) -> Image.Image:
 
 # ---------------------------------------------------------------- words
 @pytest.mark.parametrize("text,want,tags", [
-    ("MSCI to remove Michael Saylor's Strategy from its indexes", "MSCI to remove Michael Saylor's Strategy $MSTR from its indexes", ["$MSTR"]),
+    # an index decision about the company is not established as a stock story by the sentence: no tag (owner, 2026-11-13)
+    ("MSCI to remove Michael Saylor's Strategy from its indexes", "MSCI to remove Michael Saylor's Strategy from its indexes", []),
+    ("Michael Saylor's Strategy shares fall 6%", "Michael Saylor's Strategy $MSTR shares fall 6%", ["$MSTR"]),
     ("Nvidia falls 4% after hours", "Nvidia $NVDA falls 4% after hours", ["$NVDA"]),
     ("Bitcoin falls 3% as XRP jumps", "Bitcoin $BTC falls 3% as $XRP jumps", ["$BTC", "$XRP"]),
     ("Mercado Bitcoin to resume withdrawals", "Mercado Bitcoin to resume withdrawals", []),  # a company's name is not the asset
@@ -127,7 +129,8 @@ def test_photo_credit_carries_the_licence() -> None:
 
 def test_chart_subject_and_people() -> None:
     assert clean.chart_subject("Nvidia falls 4%")[:2] == ("NVDA", "$NVDA")
-    assert clean.chart_subject("Binance’s hack")[0] == "BNB-USD"  # a possessive still names the asset for the chart
+    assert clean.chart_subject("Binance’s hack") is None  # an exchange's hack is not a BNB price story: no BNB chart (2026-11-13)
+    assert clean.chart_subject("Nvidia’s shares fall 4%")[0] == "NVDA"  # a possessive still names the asset when its shares are the story
     assert clean.chart_subject("Oil jumps after missile strike")[0] == "BZ=F"
     assert clean.chart_subject("US inflation higher than expected")[:3] == ("^GSPC", "S&P 500", "S&P 500")
     assert clean.chart_subject("Mercado Bitcoin reopens") is None
@@ -285,3 +288,57 @@ async def test_a_market_move_gets_its_markets_photo_beside_the_verified_chart(fo
     data, meta = await clean.picture(e, now=AT)
     assert meta["layout"] == "collage" and meta["number_check"] == {"ok": True} and len(meta["bars"]) == 96
     assert found[0]["terms"] == ["stock exchange"]  # the New York Stock Exchange for an S&P 500 move
+
+
+# ---------------------------------------------------------------- tickers only where the sentence establishes the asset (2026-11-13)
+# Published 2026-11-13: "...$1.2B of North Korea's stolen Binance $BNB crypto". Binance being involved never means BNB was involved.
+@pytest.mark.parametrize("text", [
+    "US seizes $1.2B of North Korea's stolen Binance crypto",
+    "North Korean hackers launder loot from the $6.3B Binance hack through memecoins",
+    "Binance CFO steps down after record hack",
+    "Binance fined $4.3B by US regulators",
+    "Coinbase suffers a six-hour outage as traders pile in",
+    "Coinbase sued by the SEC over staking",
+    "Hackers drain $40M from Hyperliquid vault",
+    "Nvidia hires Wachtell to investigate CEO Jensen Huang's affair",
+    "Tesla recalls 200,000 cars over steering fault",
+    "Apple unveils a new iPhone",
+    "Kraken and Binance freeze accounts tied to the exploit",
+])
+def test_a_company_or_exchange_name_alone_never_brings_its_ticker(text: str) -> None:
+    out, tags = clean.cashtag(text)
+    assert (out, tags) == (text, [])
+    assert clean.chart_subject(text) is None
+
+
+@pytest.mark.parametrize("text,want,tags", [
+    ("BNB falls 5% after the Binance hack", "$BNB falls 5% after the Binance hack", ["$BNB"]),  # the token itself is the subject
+    ("Binance's BNB token hits a record", "Binance's $BNB token hits a record", ["$BNB"]),
+    ("Coinbase shares fall 8% after the outage", "Coinbase $COIN shares fall 8% after the outage", ["$COIN"]),
+    ("Coinbase falls 8% after hours", "Coinbase $COIN falls 8% after hours", ["$COIN"]),
+    ("Hyperliquid's HYPE token jumps 12%", "Hyperliquid's $HYPE token jumps 12%", ["$HYPE"]),
+    ("Hackers steal $40M in Ether from Bybit", "Hackers steal $40M in Ether $ETH from Bybit", ["$ETH"]),  # the stolen asset is named
+    ("Exchange hack: $30M of Solana drained", "Exchange hack: $30M of Solana $SOL drained", ["$SOL"]),
+    ("Shares of Tesla slide after the recall", "Shares of Tesla $TSLA slide after the recall", ["$TSLA"]),
+])
+def test_tickers_only_where_the_sentence_establishes_the_asset(text: str, want: str, tags: list[str]) -> None:
+    assert clean.cashtag(text) == (want, tags)
+
+
+def test_the_published_binance_story_caption_carries_no_bnb() -> None:
+    c = Copy(headline="US seizes $1.2B of North Korea's stolen Binance crypto", short="US seizes $1.2B",
+             context="Prosecutors said the funds were stolen in the Binance hack.", stakes="", question="")
+    html, plain, _ = clean.telegram_caption(c, LINKS, prefix="BREAKING:")
+    assert "$BNB" not in html and "$BNB" not in plain and "BNB" not in plain
+    assert "$BNB" not in clean.x_caption(c, LINKS, prefix="BREAKING:")
+
+
+def test_classic_brief_tickers_follow_the_same_rule() -> None:
+    from app.newsdesk import brief
+
+    assert brief.tickers("US seizes $1.2B of North Korea's stolen Binance crypto") == []
+    assert brief.tickers("Coinbase sued by the SEC over staking") == []
+    assert brief.tickers("Hackers drain $40M from Hyperliquid vault") == []
+    assert brief.tickers("Coinbase shares fall 8% after the outage") == ["COIN"]
+    assert brief.tickers("BNB falls 5% after the Binance hack") == ["BNB"]
+    assert brief.tickers("Hackers steal $40M in Ether from Bybit") == ["ETH"]

@@ -53,17 +53,38 @@ X_LIMIT = 280
 
 PREFIX = {"🚨 BREAKING": "BREAKING:", "🔴 ALERT": "ALERT:", "⚡ JUST IN": "JUST IN:", "🔄 UPDATE": "UPDATE:"}
 
-# (the name as a sentence says it, the cashtag): only these, only when the sentence names them. "Strategy" alone is too common a word:
-# it counts only next to Saylor or as MicroStrategy.
-CASHTAGS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bMicroStrategy\b"), "$MSTR"), (re.compile(r"\bNvidia\b"), "$NVDA"), (re.compile(r"\bTesla\b"), "$TSLA"),
-    (re.compile(r"\bApple\b"), "$AAPL"), (re.compile(r"\bCoinbase\b"), "$COIN"), (re.compile(r"\bMeta\b(?! Platforms)"), "$META"),
-    (re.compile(r"\bAmazon\b"), "$AMZN"), (re.compile(r"\bMicrosoft\b"), "$MSFT"), (re.compile(r"\b(?:Alphabet|Google)\b"), "$GOOGL"),
+# Cashtags, owner 2026-11-13 after "$1.2B of North Korea's stolen Binance $BNB crypto": a ticker only where the sentence itself establishes
+# the asset. Two kinds:
+# * ASSETS: the name IS the asset (Bitcoin, Ether, Solana, XRP): the name is enough.
+# * LISTED: a company or exchange. Its name never implies its token or stock (a Binance hack is not a BNB story, a Coinbase outage is not a
+#   COIN story). The tag goes on only when the sentence names the ticker itself (BNB, HYPE, COIN) or the company's shares/stock, or a
+#   stock-style move ("Nvidia falls 4%"). "Strategy" counts only as MicroStrategy or next to Saylor, and then under the same rule.
+ASSETS: list[tuple[re.Pattern[str], str]] = [
     # "Bitcoin" inside a company's name (Mercado Bitcoin, Bitcoin Depot) is not the asset: 2026-11-12, an exchange hack story got a $BTC tag
     (re.compile(r"(?<!Mercado )(?<!Strike )\bBitcoin\b(?! (?:Depot|Suisse|Magazine|Core|Policy|Treasury Corp|Well|Group|Inc))(?!\.com)", re.I), "$BTC"),
     (re.compile(r"\b(?:Ethereum|Ether)\b(?! Foundation)"), "$ETH"), (re.compile(r"\bSolana\b(?! (?:Foundation|Labs))"), "$SOL"),
-    (re.compile(r"\bXRP\b"), "$XRP"), (re.compile(r"\bHyperliquid\b"), "$HYPE"), (re.compile(r"\bBinance\b"), "$BNB"),
+    (re.compile(r"\bXRP\b"), "$XRP"),
 ]
+_MOVE = r"(?:falls?|rises?|jumps?|drops?|slides?|soars?|surges?|plunges?|tumbles?|gains?|rall(?:y|ies)|sinks?|climbs?|slumps?)\s+(?:about\s+|nearly\s+|over\s+)?\d+(?:\.\d+)?\s?%"
+
+
+def _stock(name: str, ticker: str) -> re.Pattern[str]:
+    """Evidence that a sentence is about a listed company's shares: its ticker, '<name> shares/stock', 'shares of <name>', or '<name> falls 4%'."""
+    return re.compile(rf"\b(?:{ticker})\b|\b(?:{name})(?:[’']s)?\s+(?i:shares|stock)\b|\b(?i:shares\s+(?:of|in))\s+(?:{name})\b|\b(?:{name})\s+(?i:{_MOVE})")
+
+
+LISTED: list[tuple[re.Pattern[str], str, re.Pattern[str]]] = [  # (the name, the cashtag, what must also be in the sentence)
+    (re.compile(r"\bMicroStrategy\b"), "$MSTR", _stock("MicroStrategy|Strategy", "MSTR")),
+    (re.compile(r"\bNvidia\b"), "$NVDA", _stock("Nvidia", "NVDA")), (re.compile(r"\bTesla\b"), "$TSLA", _stock("Tesla", "TSLA")),
+    (re.compile(r"\bApple\b"), "$AAPL", _stock("Apple", "AAPL")), (re.compile(r"\bCoinbase\b"), "$COIN", _stock("Coinbase", "COIN")),
+    (re.compile(r"\bMeta\b(?! Platforms)"), "$META", _stock("Meta", "META")), (re.compile(r"\bAmazon\b"), "$AMZN", _stock("Amazon", "AMZN")),
+    (re.compile(r"\bMicrosoft\b"), "$MSFT", _stock("Microsoft", "MSFT")),
+    (re.compile(r"\b(?:Alphabet|Google)\b"), "$GOOGL", _stock("Alphabet|Google", "GOOGL|GOOG")),
+    # exchanges / protocols with a token: only the token's own symbol establishes it
+    (re.compile(r"\bHyperliquid\b"), "$HYPE", re.compile(r"\bHYPE\b")), (re.compile(r"\bBinance\b"), "$BNB", re.compile(r"\bBNB\b")),
+]
+# every (name, cashtag) the desk knows, for code that only needs the table (never for deciding a tag: see established())
+CASHTAGS: list[tuple[re.Pattern[str], str]] = [*ASSETS, *[(rx, tag) for rx, tag, _ in LISTED]]
 SAYLOR_STRATEGY = re.compile(r"\b(?:Saylor's |Michael Saylor's )?Strategy\b")
 # the symbol a cashtag is charted from (Yahoo)
 CHARTED = {"$MSTR": "MSTR", "$NVDA": "NVDA", "$TSLA": "TSLA", "$AAPL": "AAPL", "$COIN": "COIN", "$META": "META", "$AMZN": "AMZN", "$MSFT": "MSFT",
@@ -97,28 +118,37 @@ def prefix_for(ev: Any) -> str:
     return PREFIX.get(str(getattr(ev, "label", "") or ""), "")
 
 
+def established(text: str) -> list[tuple[re.Pattern[str], str]]:
+    """The (name, cashtag) pairs this text establishes as an asset it is about (see ASSETS / LISTED)."""
+    out = [(rx, tag) for rx, tag in ASSETS if rx.search(text)]
+    for rx, tag, evidence in LISTED:
+        if evidence.search(text) and (rx.search(text) or re.search(rf"\b{re.escape(tag[1:])}\b", text)):
+            out.append((rx, tag))
+    if re.search(r"\bSaylor\b", text) and SAYLOR_STRATEGY.search(text) and _stock("MicroStrategy|Strategy", "MSTR").search(text):
+        out.append((SAYLOR_STRATEGY, "$MSTR"))
+    return out
+
+
 def cashtag(text: str) -> tuple[str, list[str]]:
-    """The text with a cashtag after the first mention of each listed asset it names (XRP becomes $XRP), and the cashtags used."""
+    """The text with a cashtag after the first mention of each asset it establishes (XRP becomes $XRP), and the cashtags used. A company's or
+    exchange's name alone never brings its ticker: "stolen Binance crypto" stays as written (2026-11-13: it became "Binance $BNB crypto")."""
     used: list[str] = []
     out = text
-    if "$MSTR" not in out and re.search(r"\bSaylor\b", out):
-        m = SAYLOR_STRATEGY.search(out)
-        if m:
-            out = out[:m.end()] + " $MSTR" + out[m.end():]
-            used.append("$MSTR")
-    for rx, tag in CASHTAGS:
+    for rx, tag in established(text):
         if tag in out:
             if tag not in used:
                 used.append(tag)
             continue
+        bare = re.search(rf"(?<!\$)\b{re.escape(tag[1:])}\b", out)
+        if bare:  # the symbol itself is in the text ("BNB falls", "Hyperliquid's HYPE token"): the symbol becomes the tag
+            out = out[:bare.start()] + tag + out[bare.end():]
+            used.append(tag)
+            continue
         # the first mention that isn't a possessive ("Binance's $6.3B hack" can't take a tag inside it); none: no tag
-        m = next((x for x in rx.finditer(out) if tag == "$XRP" or not re.match(r"[’']s\b", out[x.end():])), None)
+        m = next((x for x in rx.finditer(out) if not re.match(r"[’']s\b", out[x.end():])), None)
         if not m:
             continue
-        if tag == "$XRP":
-            out = out[:m.start()] + "$XRP" + out[m.end():]
-        else:
-            out = out[:m.end()] + f" {tag}" + out[m.end():]
+        out = out[:m.end()] + f" {tag}" + out[m.end():]
         used.append(tag)
     return out, used
 
@@ -412,9 +442,8 @@ def charted_story(ev: Any, symbol: str) -> bool:
 
 def chart_subject(text: str) -> tuple[str, str, str] | None:
     """(Yahoo symbol, cashtag or name, how the chart is labelled) for the asset a headline names, or None."""
-    _, tags = cashtag(text)
-    named = [tag for rx, tag in CASHTAGS if rx.search(text)]  # a possessive mention ("Binance's hack") still names the asset
-    for tag in dict.fromkeys([*tags, *named]):
+    # only an asset the text establishes (a possessive counts: "Nvidia's shares fall"); never a company's token or stock from its name alone
+    for tag in dict.fromkeys(tag for _, tag in established(text)):
         if tag in CHARTED:
             return CHARTED[tag], tag, tag
     for rx, sym, name in COMMODITY:

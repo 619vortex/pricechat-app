@@ -116,8 +116,20 @@ def _amount_usd(text: str) -> float:
     return best
 
 
+_SHARES = r"(?:[’']s)?\s+(?i:shares|stock|falls?|rises?|jumps?|drops?|slides?|soars?|surges?|plunges?|tumbles?|gains?|sinks?|climbs?)\b"
+# Companies, exchanges and protocols: their name never brings their ticker (owner, 2026-11-13: a Binance hack story was tagged $BNB).
+# Shown only when the story names the ticker itself or talks about the company's shares / a move in them. Scoring (TICKERS weights) is unchanged.
+NEEDS_EVIDENCE: dict[str, re.Pattern[str]] = {
+    "MSTR": re.compile(rf"\bMSTR\b|\b(?i:MicroStrategy|Strategy){_SHARES}"), "COIN": re.compile(rf"\bCOIN\b|\b(?i:Coinbase){_SHARES}"),
+    "CRCL": re.compile(rf"\bCRCL\b|\bCircle{_SHARES}"), "HOOD": re.compile(rf"\bHOOD\b|\b(?i:Robinhood){_SHARES}"),
+    "NVDA": re.compile(rf"\bNVDA\b|\b(?i:Nvidia){_SHARES}"), "TSLA": re.compile(rf"\bTSLA\b|\b(?i:Tesla){_SHARES}"),
+    "AAPL": re.compile(rf"\bAAPL\b|\bApple{_SHARES}"), "HYPE": re.compile(r"\bHYPE\b"), "BNB": re.compile(r"\bBNB\b"),
+}
+
+
 def tickers(story_text: str, limit: int = 3) -> list[str]:
-    found = [(m.start(), tk) for pattern, tk, _ in TICKERS for m in [pattern.search(story_text)] if m]
+    found = [(m.start(), tk) for pattern, tk, _ in TICKERS for m in [pattern.search(story_text)] if m
+             and (tk not in NEEDS_EVIDENCE or NEEDS_EVIDENCE[tk].search(story_text))]
     explicit = [(m.start(), m.group(1).upper()) for m in re.finditer(r"\$([A-Za-z]{2,6})\b", story_text)]
     out: list[str] = []
     for _, tk in sorted(found + explicit):
