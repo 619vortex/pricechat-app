@@ -270,7 +270,8 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     told_all = f"{network.source_text_of(ev, rows if ev.kind != 'recap' else [])} {f.get('told') or ''} {ev.title} {ev.summary}"
     problems = checks.final_gate(final_plain, told_all, str(meta.get("symbol") or ""))
     if pkg is not None and not problems:  # the media engine's claim checker on the same final texts (numbers were checked before the credit)
-        problems = network.final_accuracy(ev, pkg.x_text, final_plain, told_all, [x.name for x in pkg.links if x.kind != "pricechat"], numbers=False)
+        problems = network.final_accuracy(ev, pkg.x_text, final_plain, told_all, [x.name for x in pkg.links if x.kind != "pricechat"], numbers=False,
+                                              rows=rows if ev.kind != "recap" else [])
     if problems:  # the reason is kept on the event for Admin (Editorial scores > Accuracy gate)
         ev.facts = {**(ev.facts or {}), "accuracy": {"ok": False, "problems": problems[:8], "telegram_plain": final_plain[:1200]}}
         logger.warning("tgnews: event %s held by the final check: %s", ev.id, "; ".join(problems))

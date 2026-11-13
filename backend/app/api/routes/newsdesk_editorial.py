@@ -172,11 +172,14 @@ def headline_variant(payload: HeadlineInput, db: DbSession) -> dict[str, Any]:
 
         rows = [r for r in (db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:6]) if r is not None]
         src = network.source_text_of(ev, rows)
+        from app.newsdesk import viral
+
+        sents = viral.sentences(ev, rows)
         problems, accuracy = hooks.fact_check(text, src, evidence=ev.evidence or "", outlets=len({str(s.get("name") or "") for s in ev.sources or []}) or 1,
-                                              who=hooks.subjects(ev.title or ""))
+                                              sentences=sents, who=hooks.subjects(ev.title or ""))
         names = [str(s_.get("name") or "") for s_ in ev.sources or []]
         # attribution comes from the post's sources line, which every caption carries; the final caption is checked for it again
-        problems += [p for p in claims.check(text, src, evidence=ev.evidence or "", outlets=names, attributed=True) if p not in problems]
+        problems += [p for p in claims.check(text, src, evidence=ev.evidence or "", outlets=names, attributed=True, sentences=sents) if p not in problems]
         from app.newsdesk import checks
 
         problems += [f"final gate: {p}" for p in checks.final_gate(text, src) if f"final gate: {p}" not in problems]

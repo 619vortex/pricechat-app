@@ -758,7 +758,7 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     empty = viral.substance(c) if getattr(ev, "kind", "") in ("news", "update") else ""
     if empty:
         all_checks.append({"check": "substance", "passed": False, "detail": empty, "platform": "both"})
-    accuracy = final_accuracy(ev, x, checked, src, names)
+    accuracy = final_accuracy(ev, x, checked, src, names, rows=rows)
     for prob in accuracy:
         all_checks.append({"check": "accuracy", "passed": False, "detail": prob, "platform": "both"})
     return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty and not accuracy, empty, accuracy)
@@ -767,18 +767,20 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
 URL = re.compile(r"https?://\S+|\b[\w.-]+\.(?:com|org|net|io|co|uk|xyz)/\S*")
 
 
-def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets: list[str], numbers: bool = True) -> list[str]:
+def final_accuracy(ev: Any, x_text: str, tg_text: str, source_text: str, outlets: list[str], numbers: bool = True,
+                   rows: list[Any] | None = None) -> list[str]:
     """The claim checker (app/newsdesk/claims) on the exact texts both platforms would post, after cashtags and every other step. Market
     moves, recaps and data posts are built from our own measured numbers and keep their own checks."""
     if getattr(ev, "kind", "") not in ("news", "update"):
         return []
-    from app.newsdesk import claims
+    from app.newsdesk import claims, viral
 
+    sentences = viral.sentences(ev, rows)  # each report's own sentences: the qualifier checks compare against what one outlet wrote
     out: list[str] = []
     for platform, text in (("X", x_text), ("Telegram", tg_text)):
         bare = URL.sub(" ", text or "").replace("@thepricechat", " ")
         out += [f"{platform}: {p}" for p in claims.for_event(ev, bare, source_text, [*outlets, *[str(s.get("name") or "") for s in getattr(ev, "sources", None) or []]],
-                                                             numbers=numbers)]
+                                                             numbers=numbers, sentences=sentences)]
         if numbers:  # the production final gate on the same text (compose_visual runs it again after the credit)
             out += [f"{platform}: final gate: {p}" for p in checks.final_gate(bare, source_text)]
     return list(dict.fromkeys(out))

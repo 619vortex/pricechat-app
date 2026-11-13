@@ -14,7 +14,7 @@ NYT = "https://www.nytimes.com/2026/11/10/business/nvidia-wachtell-lipton-jensen
 BBC = "https://www.bbc.co.uk/news/articles/ck1wvwwl3x0go"
 ROWS = [NS(source="New York Times", link=NYT + "?smid=nytcore-ios-share", title="Nvidia Hires Wachtell Lipton to Investigate CEO Jensen Huang's Affair With Chinese Executive",
            summary="The chip giant has hired the law firm Wachtell, Lipton, Rosen & Katz to look into the relationship. Nvidia's board said it had full confidence in the review."),
-        NS(source="BBC", link=BBC + "?at_medium=RSS&at_campaign=rss", title="Nvidia hires major US law firm to investigate alleged Chinese spy affair",
+        NS(source="BBC", link=BBC + "?at_medium=RSS&at_campaign=rss", title="Nvidia hires major US law firm to investigate CEO's affair with alleged Chinese spy",
            summary="Nvidia has hired a major US law firm to investigate claims its boss had an affair with an alleged Chinese spy."),
         NS(source="CNBC", link="https://www.cnbc.com/2026/11/11/alibaba-pr.html", title="Alibaba announces plans to list T-Head, its chip rival", summary="")]
 

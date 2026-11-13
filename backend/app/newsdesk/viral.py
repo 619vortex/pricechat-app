@@ -252,7 +252,8 @@ def draft_problems(ev: Any, c: network.Copy, rows: list[Any] | None) -> list[str
         names.add(bare)
     if names and not any(n.lower() in c.headline.lower() for n in names):
         out.append(f"the headline doesn't say who ({', '.join(sorted(names)[:3])})")
-    src = " ".join(f"{getattr(r, 'title', '')} {getattr(r, 'summary', '')}" for r in rows or []) + f" {getattr(ev, 'title', '')} {getattr(ev, 'summary', '')} {(ev.facts or {}).get('told') or ''}"
+    # a full stop after each title: "...an alleged Chinese spy" + "Nvidia has hired..." must not read "alleged Chinese spy Nvidia"
+    src = " ".join(f"{getattr(r, 'title', '')}. {getattr(r, 'summary', '')}" for r in rows or []) + f" {getattr(ev, 'title', '')}. {getattr(ev, 'summary', '')} {(ev.facts or {}).get('told') or ''}"
     said = f"{c.headline} {c.context}"
     hedged = {w.lower() for m in re.finditer(r"\b(?:alleged(?:ly)?|accused(?: of)?|suspected|purported)\s+((?:[\w'’-]+\s+){0,2}[\w'’-]+)", src, re.I)
               for w in m.group(1).split() if len(w) > 3}

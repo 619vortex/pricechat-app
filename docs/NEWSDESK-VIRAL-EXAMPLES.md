@@ -12,6 +12,34 @@ Generated 2026-11-13 06:28 UTC on branch `feat/newsdesk-viral` from the restored
 
 **Result: 9 selected, 11 rejected.**
 
+## Re-verification, 2026-11-13 (meaning and qualifier checks)
+
+Every selected headline was checked by hand against its source sentences, and the ranking was re-run with the meaning checks added
+after the owner's review ("'Up to $1.4T' must never become '$1.4T'... verification checks meaning and factual support, not just
+matching words"): `app/newsdesk/meaning.py` (figure qualifiers, hedges, negation, direction, superlatives, one source sentence
+carrying each claim, qualifiers any outlet puts on a term) and `claims.link_problems` (support and completion words). Same database
+copy, same stories, same saved model hooks: no model was re-run, so every change below comes from the checks alone.
+
+| # | Then chosen | Now | Why |
+|---|---|---|---|
+| 1 | Binance hack drains $6.3B, raises doubts on hot‑wallet safeguards | same | "$6.3B hack leaves questions over hot wallet safeguards"; "repeated wallet drains" |
+| 2 | North Korean hackers use memecoins to clean Binance loot | same | CoinDesk's own headline says it in its own voice (Elliptic's attribution is in its story) |
+| 5 | Poland’s lower house backs crypto freezes under sanctions bill | same | the outlet's wording |
+| 6 | $26 billion private placement backs Anthropic’s $70‑$78 IPO range | **outlet headline** ("Anthropic Perp Trades Above IPO Range on Hyperliquid") | the source: "lining up $26 billion ... alongside the listing", not backing the range; every other hook dropped "up to" from "up to $1.4 trillion" |
+| 9 | Oil falls below $92 as Trump signals no Iran attack | **Oil slides under $92 amid Trump’s Iran restraint stance** | the sources: not planning to attack "at this point", more attacks "highly unlikely"; the new hook follows "Oil Prices Plunge Below $92 as Trump Signals Restraint on Iran" |
+| 11 | Nvidia CEO faces probe over alleged ties to Chinese spy | same | keeps "alleged"; FBI inquiry and shareholder suit in the sources |
+| 14 | Barr jailed 8 years for prison‑cell crypto theft plot | same | "Robert Barr was jailed for eight years ... from his prison cell" |
+| 16 | Saudi output jumps 26%, highest since pre‑war levels | same | "climbed by 26% ... to the highest since before the outbreak of the war" (Saudi Arabia's own report to OPEC, and Saudi is named) |
+| 20 | Sanctions waiver fails to secure US diesel | **held by the accuracy gate** | no hook passes ("fails to secure" is not in the sources), and the outlet's own headline "after Trump lifts sanctions" is now held: another outlet calls it "Trump's temporary waiver of some sanctions" |
+
+So 8 of the 9 selected stories would post, and #20 would be held for accuracy, not posted with a misleading line. Among the rejected
+stories, hooks that changed their source's meaning are now refused too (#8 dropped "fears", #10 and #17 turned "will" into a done
+thing, #12 dropped "short-term", #18 dropped "alleged"). Those stories were rejected on editorial grounds anyway.
+
+What it still can't see: a sentence whose words all come from one source sentence but whose verb is new and loaded ("restraint
+stance" is the outlet's "signals restraint", which passes; a model's "rush to fund" would need 60% of its words from one sentence to
+pass). The checks never rewrite: a headline that fails is refused, and the outlet's own headline is used.
+
 | # | Event | Then | Original headline | Editorial | Decision |
 |---|---|---|---|---|---|
 | 1 | 1 | released | BINANCE’S $6.3B HACK LEAVES QUESTIONS OVER HOT WALLET SAFEGUARDS | 59 | SELECTED |

@@ -173,7 +173,7 @@ def link_problems(text: str, source_text: str) -> list[str]:
 
 
 def check(text: str, source_text: str, *, evidence: str = "", outlets: list[str] | None = None, attributed: bool = True,
-          numbers: bool = True) -> list[str]:
+          numbers: bool = True, sentences: list[str] | None = None) -> list[str]:
     """Everything `text` claims that `source_text` doesn't establish ([] = publishable on accuracy)."""
     src = source_text or ""
     t = text or ""
@@ -186,6 +186,9 @@ def check(text: str, source_text: str, *, evidence: str = "", outlets: list[str]
     probs += people_problems(t, src)
     probs += legal_problems(t, src)
     probs += link_problems(t, src)
+    from app.newsdesk import meaning
+
+    probs += meaning.problems(checks.story_of(t), src, sentences, strict=False)  # qualifiers ("up to", "allegedly", "could"), negation, direction
     for q in re.findall(r"[\"“]([^\"”]{6,})[\"”]", t):
         if q.lower() not in src.lower():
             probs.append(f"a quote not in the sources: '{q[:40]}'")
@@ -193,10 +196,12 @@ def check(text: str, source_text: str, *, evidence: str = "", outlets: list[str]
     return list(dict.fromkeys(probs))
 
 
-def for_event(ev: Any, text: str, source_text: str, outlets: list[str] | None = None, numbers: bool = True) -> list[str]:
+def for_event(ev: Any, text: str, source_text: str, outlets: list[str] | None = None, numbers: bool = True,
+              sentences: list[str] | None = None) -> list[str]:
     names = outlets if outlets is not None else [str(s.get("name") or "") for s in (getattr(ev, "sources", None) or [])]
     attributed = any(n and n.lower() in (text or "").lower() for n in names) or bool(re.search(r"\b(says?|said|according to|reports?|reported)\b", text or "", re.I))
-    return check(text, source_text, evidence=getattr(ev, "evidence", "") or "", outlets=names, attributed=attributed, numbers=numbers)
+    return check(text, source_text, evidence=getattr(ev, "evidence", "") or "", outlets=names, attributed=attributed, numbers=numbers,
+                 sentences=sentences)
 
 
 __all__ = ["check", "for_event", "legal_problems", "link_problems","people_problems", "reliable_problems", "ticker_problems"]
