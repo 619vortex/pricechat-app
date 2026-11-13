@@ -369,3 +369,26 @@ def test_check_post_fails_an_unsupported_ticker_and_dollar_amounts_are_not_ticke
     assert not bad.ok and any(c["check"] == "tickers" and not c["passed"] for c in bad.checks)
     good = checks.check_post("US seizes $1.2B stolen in the Binance hack. Reuters", source_text=src, source_names=["Reuters"])
     assert next(c for c in good.checks if c["check"] == "tickers")["passed"]
+
+
+def test_final_gate_checks_figures_people_accusations_and_quotes() -> None:
+    from app.newsdesk import checks
+
+    src = ("The US Justice Department said on Thursday it seized $1.2 billion in cryptocurrency stolen by North Korean hackers in the "
+           "Binance hack. \"We will follow the money wherever it goes,\" Attorney General Pam Bondi said.")
+    good = ("BREAKING: US seizes $1.2B of North Korea's stolen Binance crypto. \"We will follow the money wherever it goes,\" Pam Bondi said."
+            "\n\n🔗 Reuters\n\nPhoto: Jane Doe / Wikimedia Commons, CC BY-SA 4.0\n\n@thepricechat")
+    assert checks.final_gate(good, src) == []  # the credit's "4.0" and the photographer are not claims
+    assert checks.final_gate("US seizes $2.4B of North Korea's stolen crypto", src) == ["figures no source gave: 2.4"]
+    assert checks.final_gate("US seizes $1.2B stolen by hackers, Elon Musk says", src) == ["people no source names: Elon Musk"]
+    assert checks.final_gate("Binance charged with laundering $1.2B for North Korea", src) == [
+        "accusations or legal actions no source makes: launder, charge"]
+    assert checks.final_gate("\"Binance helped North Korea hide the money,\" officials said", src) == [
+        "quotations not in the sources: Binance helped North Korea hide the money,"]
+
+
+def test_final_gate_story_excludes_sources_credit_and_signature() -> None:
+    from app.newsdesk import checks
+
+    cap = "Nvidia shares fall 4%.\n\nSource: Reuters · CNBC\n\nPhoto: John Smith / Getty Images 2024\n\n@thepricechat"
+    assert checks.story_of(cap) == "Nvidia shares fall 4%."
