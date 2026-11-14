@@ -184,16 +184,16 @@ class OwnerAlertsIn(StrictInput):
 
 
 @router.get("/system/alerts")
-def owner_alerts(db: DbSession) -> dict[str, Any]:
+def owner_alerts(db: DbSession, runtime: Runtime) -> dict[str, Any]:
     from app import alerts
 
-    out = alerts.settings_out(db)
+    out = alerts.settings_out(db, runtime.settings)
     db.commit()
     return out
 
 
 @router.put("/system/alerts")
-def update_owner_alerts(payload: OwnerAlertsIn, db: DbSession) -> dict[str, Any]:
+def update_owner_alerts(payload: OwnerAlertsIn, db: DbSession, runtime: Runtime) -> dict[str, Any]:
     from app import alerts
 
     row = alerts.settings_row(db)
@@ -202,7 +202,7 @@ def update_owner_alerts(payload: OwnerAlertsIn, db: DbSession) -> dict[str, Any]
     if payload.telegram_chat is not None:
         row.telegram_chat = payload.telegram_chat.strip()
     db.commit()
-    return alerts.settings_out(db)
+    return alerts.settings_out(db, runtime.settings)
 
 
 @router.post("/system/alerts/test")

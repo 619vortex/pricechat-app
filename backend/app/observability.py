@@ -425,6 +425,10 @@ class Watchdog:
                 if not m["notify"]:
                     continue
                 if m["status"] == "alert":
+                    from app import alerts
+
+                    if m["key"] == "backup" and alerts._is_open(db, alerts.BACKUP_KEY):
+                        continue  # system.backup_check already told the owner about this incident (one message, not two)
                     out["alerts"] += await self._problem(db, KEY_SILENCE + m["key"], m["alert"])
                 elif m["status"] == "ok":
                     out["recovered"] += await self._fixed(db, KEY_SILENCE + m["key"], f"Price Chat: recovered\n{m['label']}: "
@@ -568,6 +572,16 @@ def deep_checks(db: Session, runtime: Any, watchdog: Any = None, window: ErrorWi
         db.rollback()
         out["vpn_servers"] = _c("warn", f"couldn't read ({type(exc).__name__})")
 
+    try:
+        from app.alerts import delivery_problem
+
+        why = delivery_problem(db, runtime.settings)
+        loud = "fail" if runtime.settings.is_production else "warn"  # production: nobody hears about a failed backup
+        out["owner_alerts"] = _c("ok", "delivered by Telegram") if why is None else _c(loud, why)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out["owner_alerts"] = _c("warn", f"couldn't read ({type(exc).__name__})")
+
     if watchdog is not None:
         if watchdog._task is None:
             out["watchdog"] = _c("off", "not running on this server")
@@ -634,13 +648,13 @@ def startup_self_check(settings: Any, job_names: list[str], db: Session | None =
                     prefix = job.split(".")[0] + "."
                     problems.append(f"SCHEDULER_ONLY_JOBS leaves out {job} although {why} (add '{job}' or '{prefix}')")
         if settings.is_production and not settings.telegram_configured:
-            problems.append("no Telegram bot token: owner alerts can't be delivered")
-        elif db is not None:
-            from app.models.alerts import OwnerAlertSettings
+            problems.append("OWNER ALERTS GO NOWHERE: no Telegram bot token, owner alerts can't be delivered")
+        elif db is not None and settings.is_production:
+            from app.alerts import delivery_problem
 
-            row = db.get(OwnerAlertSettings, 1)
-            if settings.is_production and not (row and row.enabled and row.telegram_chat.strip()):
-                problems.append("owner alerts have no Telegram chat (Admin > Settings > Background jobs > Owner alerts): alerts are only logged")
+            why = delivery_problem(db, settings)
+            if why is not None:  # e.g. 2026-10-22..11-12: 21 failed backups reached only the logs
+                problems.append(why.upper().split(":", 1)[0] + ":" + why.split(":", 1)[1])
     except Exception as exc:  # noqa: BLE001
         problems.append(f"self-check itself failed ({type(exc).__name__})")
     if problems:

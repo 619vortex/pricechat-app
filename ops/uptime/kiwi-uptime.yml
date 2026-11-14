@@ -1,0 +1,143 @@
+# Kiwi VPN / Price Chat external uptime monitor (DRAFT, not active anywhere).
+#
+# Runs outside Railway, so it still speaks when the backend, its scheduler or its own owner alerts are down.
+# To use it: copy this file to .github/workflows/kiwi-uptime.yml in a GitHub repository you own, then add two repository
+# secrets (Settings > Secrets and variables > Actions):
+#   UPTIME_TELEGRAM_BOT_TOKEN  a bot token (a separate bot is best, so a problem with the main bot can't silence this one)
+#   UPTIME_TELEGRAM_CHAT_ID    your numeric Telegram user id (press Start in a private chat with that bot once)
+# Optional repository variable UPTIME_PROXIES (space-separated host:port list) overrides the proxies checked below.
+#
+# Every check is a read-only request to a public address; nothing here logs in or changes anything.
+# A failing run also exits 1, so GitHub e-mails the repository owner as a second channel.
+# Cost: public repository free; private repository about 1,440 Actions minutes a month at */30 (free plan: 2,000).
+# See docs/hardening/MONITORING.md.
+
+name: Kiwi uptime
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"  # GitHub may delay scheduled runs by several minutes; a public repo can use */10 for free
+  workflow_dispatch: {}
+
+permissions:
+  contents: read  # nothing else: actions/cache (the failure state between runs) needs no token permission to save/restore
+
+concurrency:
+  group: kiwi-uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # worst case (everything down): ~3 GETs x 3 tries x 20 s + proxies + TLS, about 6 min
+    env:
+      SITE: https://pricechat.live
+      API: https://api.pricechat.live
+      PROXIES: ${{ vars.UPTIME_PROXIES || 'hel1.vpn.pricechat.live:443 ash1.vpn.pricechat.live:443' }}
+      TLS_HOSTS: pricechat.live api.pricechat.live hel1.vpn.pricechat.live ash1.vpn.pricechat.live
+      TLS_MIN_DAYS: "21"
+      REMIND_HOURS: "6"
+      TG_TOKEN: ${{ secrets.UPTIME_TELEGRAM_BOT_TOKEN }}
+      TG_CHAT: ${{ secrets.UPTIME_TELEGRAM_CHAT_ID }}
+      TG_API: https://api.telegram.org  # ops/uptime/selftest.py points this at a local fake Bot API
+    steps:
+      - name: Restore last state
+        uses: actions/cache/restore@v4
+        with:
+          path: .uptime-state
+          key: kiwi-uptime-${{ github.run_id }}
+          restore-keys: kiwi-uptime-
+
+      - name: Check
+        id: check
+        shell: bash
+        run: |
+          set -uo pipefail
+          fails=()
+          fail() { fails+=("$1"); echo "FAIL: $1"; }
+          ok() { echo "ok:   $1"; }
+          get() { curl -sS -m 20 --retry 2 --retry-delay 5 -A "kiwi-uptime/1" -o body.txt -w "%{http_code}" "$1" 2>err.txt; true; }  # 000 = no answer
+
+          # 1. the website
+          code=$(get "$SITE/")
+          [ "$code" = "200" ] && ok "website $code" || fail "website $SITE answered $code $(head -c 120 err.txt)"
+
+          # 2. the backend's public health: database, scheduler, failing jobs, nightly backup (26 h)
+          code=$(get "$API/api/health/public")
+          if [ "$code" = "200" ] || [ "$code" = "503" ]; then
+            for f in ok db scheduler jobs backup; do declare "h_$f=$(jq -r ".$f | tostring" body.txt 2>/dev/null || echo '?')"; done
+            [ "$h_ok" = "true" ] && ok "api health" || fail "API health: ok=$h_ok db=$h_db scheduler=$h_scheduler"
+            [ "$h_jobs" = "failing" ] && fail "API: a background job has failed 3+ runs in a row (Admin > Background jobs)"
+            [ "$h_backup" = "old" ] && fail "API: no successful database backup for over 26 h"
+          else
+            fail "API health answered $code $(head -c 120 err.txt)"
+          fi
+
+          # 3. Kiwi VPN public endpoints and each public server's online flag (set by the 5-minute agent sync)
+          code=$(get "$API/api/members/vpn/public")
+          [ "$code" = "200" ] && jq -e 'has("enabled")' body.txt >/dev/null 2>&1 && ok "vpn public" || fail "VPN /public answered $code"
+          code=$(get "$API/api/members/vpn/stats")
+          if [ "$code" = "200" ] && jq -e '.servers' body.txt >/dev/null 2>&1; then
+            offline=$(jq -r '[.servers[] | select(.online != true) | .name] | join(", ")' body.txt)
+            [ -z "$offline" ] && ok "vpn servers online ($(jq '.servers | length' body.txt))" || fail "VPN server(s) offline: $offline"
+          else
+            fail "VPN /stats answered $code"
+          fi
+          # The agent's last-sync time is not public; a stopped sync shows up as scheduler=stale / jobs=failing above.
+
+          # 4. browser proxies: an unauthenticated CONNECT must get 407 (the proxy is up and still asks for a key)
+          for p in $PROXIES; do
+            pc=$(curl -sS -m 20 -o /dev/null -w "%{http_connect}" -p -x "https://$p" https://example.com 2>/dev/null || true)
+            [ "$pc" = "407" ] && ok "proxy $p 407" || fail "proxy $p: CONNECT answered '${pc:-nothing}', expected 407"
+          done
+
+          # 5. TLS certificates: fail when one expires in fewer than TLS_MIN_DAYS days
+          for h in $TLS_HOSTS; do
+            end=$(echo | timeout 20 openssl s_client -connect "$h:443" -servername "$h" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+            if [ -z "$end" ]; then fail "TLS $h: no certificate read"; continue; fi
+            days=$(( ( $(date -d "$end" +%s) - $(date +%s) ) / 86400 ))
+            [ "$days" -ge "$TLS_MIN_DAYS" ] && ok "tls $h ${days}d" || fail "TLS $h expires in $days day(s) ($end)"
+          done
+
+          printf '%s\n' "${fails[@]}" | sed '/^$/d' | sort > now.txt
+          echo "count=${#fails[@]}" >> "$GITHUB_OUTPUT"
+
+      - name: Alert on Telegram (on change, and every REMIND_HOURS while failing)
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p .uptime-state
+          touch .uptime-state/last.txt .uptime-state/sent_at
+          prev=$(cat .uptime-state/last.txt); cur=$(cat now.txt); last_sent=$(cat .uptime-state/sent_at); last_sent=${last_sent:-0}
+          now=$(date +%s); msg=""
+          if [ "$cur" != "$prev" ]; then
+            if [ -n "$cur" ]; then msg=$(printf 'Kiwi uptime: PROBLEM\n%s' "$cur")
+            else msg=$(printf 'Kiwi uptime: recovered, every check passes again'); fi
+          elif [ -n "$cur" ] && [ $(( now - last_sent )) -ge $(( REMIND_HOURS * 3600 )) ]; then
+            msg=$(printf 'Kiwi uptime: STILL FAILING\n%s' "$cur")
+          fi
+          if [ -n "$msg" ]; then
+            if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+              echo "::warning::UPTIME_TELEGRAM_BOT_TOKEN / UPTIME_TELEGRAM_CHAT_ID not set: alert not sent"
+            else
+              msg="$msg"$'\n'"Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              if curl -sS -m 20 -o /dev/null -w "%{http_code}" "${TG_API}/bot${TG_TOKEN}/sendMessage" \
+                   --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${msg}" -d disable_web_page_preview=true | grep -q 200; then
+                echo "$now" > .uptime-state/sent_at
+              else
+                echo "::warning::Telegram did not accept the alert"
+              fi
+            fi
+          fi
+          cp now.txt .uptime-state/last.txt
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .uptime-state
+          key: kiwi-uptime-${{ github.run_id }}
+
+      - name: Fail the run when a check failed (GitHub e-mails the owner too)
+        if: steps.check.outputs.count != '0'
+        run: exit 1

@@ -3,6 +3,8 @@ Smart Connect uses."""
 import asyncio
 import datetime as dt
 
+import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -77,12 +79,13 @@ def test_admin_sets_the_allowance_and_sees_this_months_traffic(client: TestClien
     assert client.patch(f"/api/vpn/admin/servers/{s.id}", json={"traffic_included_gb": -1}).status_code == 422
 
 
-def test_one_blip_neither_alerts_nor_hides_the_server_but_two_in_a_row_do(db: Session, fake: FakeNode) -> None:  # noqa: F811
+def test_one_blip_neither_alerts_nor_hides_the_server_but_two_in_a_row_do(db: Session, fake: FakeNode, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     """The flap guard: one sync that can't reach the agent keeps the server online (no owner alert, still counted for
     Smart Connect); OFFLINE_AFTER in a row mark it offline and alert once; a good sync brings it back with "recovered"."""
     from app import alerts
     from tests.test_owner_alerts import SETTINGS, Bot
 
+    monkeypatch.setattr(alerts, "VPN_MIN_HEALTHY", 0)  # one server here; the fleet redundancy alert has its own tests
     tg = Bot()
     alerts.settings_row(db).telegram_chat = "424242"
     db.commit()
