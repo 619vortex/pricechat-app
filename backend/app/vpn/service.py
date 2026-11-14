@@ -47,7 +47,8 @@ ROYAL_LEVEL = 7  # Royal Kiwi on the rank ladder; higher ranks count too
 LIVE_WINDOW = timedelta(minutes=10)  # the server reads handshakes and proxy use every 5 minutes
 SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0, "payments_enabled": False, "trial_enabled": True,  # min_rank: unused column, kept
                      "trial_one_per_identity": True, "trial_min_account_age_hours": 24, "trial_min_xp": 0, "trial_per_ip_day": 3,
-                     "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False}
+                     "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False, "trial_guard_mode": "monitor"}
+GUARD_MODES = ("off", "monitor", "enforce")  # off: guards not evaluated; monitor: evaluated and recorded, never refused; enforce: refused
 # Admin-settable trial guards: (lowest, highest). 0 switches that check off. See app/vpn/trial_guard.py and docs/hardening/TRIAL-AND-LIMITS.md.
 TRIAL_GUARDS = {"trial_min_account_age_hours": (0, 24 * 90), "trial_min_xp": (0, 1_000_000), "trial_per_ip_day": (0, 1000), "trial_per_network_day": (0, 10_000)}
 SWITCHES = ("enabled", "trial_enabled", "payments_enabled", "trial_one_per_identity", "sync_enforce_limits", "count_pc_once")
@@ -99,7 +100,7 @@ def settings_out(s: VpnSettings) -> dict[str, Any]:
     return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "trial_enabled": s.trial_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb,
             "trial_one_per_identity": s.trial_one_per_identity, "trial_min_account_age_hours": s.trial_min_account_age_hours, "trial_min_xp": s.trial_min_xp,
             "trial_per_ip_day": s.trial_per_ip_day, "trial_per_network_day": s.trial_per_network_day, "sync_enforce_limits": s.sync_enforce_limits,
-            "count_pc_once": s.count_pc_once}
+            "count_pc_once": s.count_pc_once, "trial_guard_mode": s.trial_guard_mode}
 
 
 def _entitlement(db: Session) -> Entitlement | None:
@@ -181,8 +182,8 @@ def no_access_reason(db: Session, acct: VpnAccount) -> str:
     s = settings(db)
     if s.trial_enabled and acct.member_id is not None and acct.trial_started_at is None:
         member = _member_of(db, acct)
-        why = _trial_guard(db, member, s) if member is not None else None
-        return why[1] if why is not None else START_TRIAL
+        why = _trial_guards(db, member, s) if member is not None and s.trial_guard_mode == "enforce" else []
+        return why[0][1] if why else START_TRIAL
     if not s.payments_enabled:
         return PAID_UNAVAILABLE
     return TIME_ENDED if acct.paid_until is not None else TRIAL_ENDED if acct.trial_started_at is not None else NOT_SUBSCRIBED
@@ -230,23 +231,24 @@ TRIAL_OFF = "The free trial isn't available right now."
 TRIAL_USED = "You've already used your free trial."
 
 
-def _trial_guard(db: Session, member: Member, s: VpnSettings, now: datetime | None = None) -> tuple[str, str] | None:
-    """(code, message) when an abuse guard stops this Passport starting a trial, else None: one trial per identity, the
-    account's age, its XP. The per-address throttle is separate (it needs the request: trial_guard.ip_wait)."""
+def _trial_guards(db: Session, member: Member, s: VpnSettings, now: datetime | None = None) -> list[tuple[str, str]]:
+    """Every (code, message) of an abuse guard that would stop this Passport starting a trial: one trial per identity,
+    the account's age, its XP. The per-address throttle is separate (it needs the request: trial_guard.ip_wait)."""
     now = now or utcnow()
+    out: list[tuple[str, str]] = []
     if s.trial_one_per_identity and (label := trial_guard.used_identity(db, member)) is not None:
-        return "identity_used", f"A free trial has already been used with this {label}. It's one free trial per person."
+        out.append(("identity_used", f"A free trial has already been used with this {label}. It's one free trial per person."))
     if s.trial_min_account_age_hours > 0 and (made := _aware(member.created_at)) is not None:
         ready = made + timedelta(hours=s.trial_min_account_age_hours)
         if ready > now:
             hours = max(1, -((now - ready) // timedelta(hours=1)))
-            return "account_too_new", (f"Free trials open once a Kiwi Passport is {s.trial_min_account_age_hours} hours old. "
-                                       f"Yours can start one in about {hours} hour{'s' if hours != 1 else ''}.")
+            out.append(("account_too_new", (f"Free trials open once a Kiwi Passport is {s.trial_min_account_age_hours} hours old. "
+                                            f"Yours can start one in about {hours} hour{'s' if hours != 1 else ''}.")))
     if s.trial_min_xp > 0:
         xp = 0 if member.xp_suspended else int(member.xp_total or 0)
         if xp < s.trial_min_xp:
-            return "needs_xp", f"Free trials need {s.trial_min_xp} XP on your Kiwi Passport. You have {xp}."
-    return None
+            out.append(("needs_xp", f"Free trials need {s.trial_min_xp} XP on your Kiwi Passport. You have {xp}."))
+    return out
 
 
 def trial_unavailable(db: Session, acct: VpnAccount, s: VpnSettings, preview: bool = False, now: datetime | None = None) -> tuple[str, str, int] | None:
@@ -263,8 +265,10 @@ def trial_unavailable(db: Session, acct: VpnAccount, s: VpnSettings, preview: bo
         return "has_access", "You already have Kiwi VPN.", 409
     if state != "lapsed":
         return "blocked", "Your account can't use Kiwi VPN.", 403
-    why = _trial_guard(db, member, s, now)
-    return (why[0], why[1], 403) if why is not None else None
+    if s.trial_guard_mode != "enforce":
+        return None  # off or monitor: the abuse guards never refuse
+    why = _trial_guards(db, member, s, now)
+    return (why[0][0], why[0][1], 403) if why else None
 
 
 def start_trial(db: Session, who: Member, preview: bool = False, ip: str | None = None, charge: Callable[[], None] | None = None) -> None:
@@ -279,9 +283,16 @@ def start_trial(db: Session, who: Member, preview: bool = False, ip: str | None 
     why = trial_unavailable(db, acct, s, preview)
     if why is not None:
         raise VpnError(why[1], why[2], code=why[0])
-    wait = trial_guard.ip_wait(ip, s.trial_per_ip_day, s.trial_per_network_day)
-    if wait is not None:
-        raise VpnError("Too many free trials have started from your network today. Please try again later.", 429, code="network_limit", retry_after=wait)
+    mode = s.trial_guard_mode
+    would: list[str] = []  # monitor: what enforce would have refused for
+    if mode != "off":
+        if mode == "monitor":
+            would = [code for code, _ in _trial_guards(db, who, s)]
+        ip_wait, net_wait = trial_guard.ip_waits(ip, s.trial_per_ip_day, s.trial_per_network_day)
+        if mode == "enforce" and (ip_wait or net_wait):
+            raise VpnError("Too many free trials have started from your network today. Please try again later.", 429, code="network_limit",
+                           retry_after=max(w for w in (ip_wait, net_wait) if w))
+        would += (["ip_limit"] if ip_wait else []) + (["network_limit"] if net_wait else [])
     if charge is not None:
         charge()
     now = utcnow()
@@ -290,9 +301,12 @@ def start_trial(db: Session, who: Member, preview: bool = False, ip: str | None 
     if done.rowcount != 1:
         db.commit()
         raise VpnError(TRIAL_USED, 409, code="used")
-    trial_guard.mark(db, who)
+    trial_guard.mark(db, who)  # in every mode: enforcing later must know who has had a trial
+    if would:
+        trial_guard.record_signals(db, who.id, would, ip)
     db.commit()
-    trial_guard.ip_record(ip)
+    if mode != "off":
+        trial_guard.ip_record(ip)
     db.refresh(acct)
 
 
@@ -390,6 +404,10 @@ def update_settings(db: Session, changes: dict[str, Any]) -> dict[str, Any]:
             if not low <= n <= high:
                 raise VpnError(f"{key}: {low} (off) to {high}.", 400)
             setattr(s, key, n)
+    if changes.get("trial_guard_mode") is not None:
+        if changes["trial_guard_mode"] not in GUARD_MODES:
+            raise VpnError("trial_guard_mode: off, monitor or enforce.", 400)
+        s.trial_guard_mode = changes["trial_guard_mode"]
     for key in SWITCHES:  # payments_enabled: the next sync switches off whoever has no time left, and back on
         if changes.get(key) is not None:
             setattr(s, key, bool(changes[key]))
@@ -1017,7 +1035,7 @@ def admin_overview(db: Session) -> dict[str, Any]:
            "totals": {"devices": sum(counts.values()),
                       "members": db.scalar(select(func.count(func.distinct(VpnDevice.account_id)))) or 0,
                       "active_24h": sum(active.values())},
-           "billing": billing.totals(db)}
+           "billing": billing.totals(db), "trial_signals": trial_guard.signals_out(db)}
     db.commit()
     return out
 

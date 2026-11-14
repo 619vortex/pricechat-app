@@ -3,7 +3,8 @@
 Security audit M4 / L6 / L7 / L9 / L8 (docs/hardening/TRIAL-AND-LIMITS.md):
 - vpn_trial_claims: salted hashes of identities that have had a free trial (app.vpn.trial_guard), backfilled here for every
   trial started before this migration (the account's verified email and linked Google / X / Telegram accounts).
-- vpn_settings: the trial guards, sync_enforce_limits and count_pc_once (both off), reviewer_member_id.
+- vpn_trial_signals: monitor mode's would-be refusals (reason, time, member; a hashed /24 at most), kept 30 days.
+- vpn_settings: trial_guard_mode (default monitor), the trial guards, sync_enforce_limits and count_pc_once (both off), reviewer_member_id.
 - vpn_devices.created_via: app | web | anon | admin | bot (NULL for devices made before this).
 
 Rechained on release/kiwi-hardening: revises 0112_vpn_server_checks (feat/kiwi-hardening-monitoring), one head, no data change.
@@ -54,6 +55,18 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_vpn_trial_claims")),
         sa.UniqueConstraint("claim_hash", name=op.f("uq_vpn_trial_claims_claim_hash")),
     )
+    op.create_table(
+        "vpn_trial_signals",
+        sa.Column("member_id", sa.Integer(), nullable=True),
+        sa.Column("code", sa.String(length=24), nullable=False),
+        sa.Column("net_hash", sa.String(length=64), nullable=True),
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["member_id"], ["members.id"], name=op.f("fk_vpn_trial_signals_member_id_members"), ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_vpn_trial_signals")),
+    )
+    op.create_index(op.f("ix_vpn_trial_signals_member_id"), "vpn_trial_signals", ["member_id"])
     with op.batch_alter_table("vpn_settings") as batch:
         batch.add_column(sa.Column("trial_one_per_identity", sa.Boolean(), server_default=sa.true(), nullable=False))
         batch.add_column(sa.Column("trial_min_account_age_hours", sa.Integer(), server_default="24", nullable=False))
@@ -62,6 +75,7 @@ def upgrade() -> None:
         batch.add_column(sa.Column("trial_per_network_day", sa.Integer(), server_default="10", nullable=False))
         batch.add_column(sa.Column("sync_enforce_limits", sa.Boolean(), server_default=sa.false(), nullable=False))
         batch.add_column(sa.Column("count_pc_once", sa.Boolean(), server_default=sa.false(), nullable=False))
+        batch.add_column(sa.Column("trial_guard_mode", sa.String(length=8), server_default="monitor", nullable=False))
         batch.add_column(sa.Column("reviewer_member_id", sa.Integer(), nullable=True))
     with op.batch_alter_table("vpn_devices") as batch:
         batch.add_column(sa.Column("created_via", sa.String(length=8), nullable=True))
@@ -93,7 +107,8 @@ def downgrade() -> None:
     with op.batch_alter_table("vpn_devices") as batch:
         batch.drop_column("created_via")
     with op.batch_alter_table("vpn_settings") as batch:
-        for name in ("reviewer_member_id", "count_pc_once", "sync_enforce_limits", "trial_per_network_day", "trial_per_ip_day",
+        for name in ("reviewer_member_id", "trial_guard_mode", "count_pc_once", "sync_enforce_limits", "trial_per_network_day", "trial_per_ip_day",
                      "trial_min_xp", "trial_min_account_age_hours", "trial_one_per_identity"):
             batch.drop_column(name)
+    op.drop_table("vpn_trial_signals")
     op.drop_table("vpn_trial_claims")

@@ -35,6 +35,8 @@ class VpnSettings(Base):
     sync_enforce_limits: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     # The Windows app's devices on several servers ("<PC> (<server id>)") count as one device slot
     count_pc_once: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    # off: the trial guards aren't evaluated | monitor: evaluated and recorded (vpn_trial_signals), never refused | enforce: refused
+    trial_guard_mode: Mapped[str] = mapped_column(String(8), default="monitor", server_default="monitor", nullable=False)
     reviewer_member_id: Mapped[int | None] = mapped_column(Integer)  # the store-review account's member (app/vpn/reviewer.py), bound on its first sign-in
 
 
@@ -173,6 +175,17 @@ class VpnTrialClaim(IdMixin, TimestampMixin, Base):
     __tablename__ = "vpn_trial_claims"
 
     claim_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+
+
+class VpnTrialSignal(IdMixin, TimestampMixin, Base):
+    """Monitor mode (vpn_settings.trial_guard_mode): a trial start that enforcing would have refused, one row per reason.
+    No address: the per-address reasons keep only a salted hash of the caller's /24 (/48). Kept 30 days (app.vpn.trial_guard)."""
+
+    __tablename__ = "vpn_trial_signals"
+
+    member_id: Mapped[int | None] = mapped_column(ForeignKey("members.id", ondelete="SET NULL"), index=True)
+    code: Mapped[str] = mapped_column(String(24), nullable=False)  # identity_used | account_too_new | needs_xp | ip_limit | network_limit
+    net_hash: Mapped[str | None] = mapped_column(String(64))
 
 
 class VpnSupportReport(IdMixin, TimestampMixin, Base):

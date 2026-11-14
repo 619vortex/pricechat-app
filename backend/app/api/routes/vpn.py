@@ -358,7 +358,7 @@ def anon_device(payload: DeviceInput, request: Request, db: DbSession, acct: Vpn
         service.device_precheck(db, acct, payload.name, payload.server_id, preview)
     except VpnError as e:
         raise _fail(e) from e
-    ip = trial_guard.real_ip(request)
+    ip = trial_guard.real_ip(request) if service.settings(db).trial_guard_mode == "enforce" else None  # monitor/off: no extra limit beyond main's
     if ip is not None:
         _too_many(LIMITS["vpn_anon_ip"].hit(client_ip.bucket(ip)), "Too many new devices. Please wait a few minutes.")
     _too_many(LIMITS["vpn_anon_device"].hit(f"a{acct.id}"), "Too many new devices. Please wait a few minutes.")
@@ -421,6 +421,7 @@ class SettingsUpdate(StrictInput):
     max_devices: int | None = Field(None, ge=1, le=service.MAX_DEVICES_LIMIT)
     monthly_cap_gb: int | None = Field(None, ge=0, le=service.MAX_CAP_GB)  # per member per month, 0 = unlimited
     # free-trial guards (app/vpn/trial_guard.py); each number 0 = that check off
+    trial_guard_mode: Literal["off", "monitor", "enforce"] | None = None  # monitor: evaluated and recorded, never refused
     trial_one_per_identity: bool | None = None
     trial_min_account_age_hours: int | None = Field(None, ge=0, le=service.TRIAL_GUARDS["trial_min_account_age_hours"][1])
     trial_min_xp: int | None = Field(None, ge=0, le=service.TRIAL_GUARDS["trial_min_xp"][1])

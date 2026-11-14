@@ -18,14 +18,17 @@ import ipaddress
 import threading
 import time
 from collections import OrderedDict, deque
+from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.members import LinkedIdentity, Member
-from app.models.vpn import VpnAccount, VpnTrialClaim
+from app.db.base import utcnow
+from app.models.vpn import VpnAccount, VpnTrialClaim, VpnTrialSignal
 from app.security import client_ip
 
 SALT = "kiwi-vpn-trial-v1"  # migration 0113 repeats this and normalise_email(): keep them identical
@@ -165,12 +168,50 @@ class Starts:
 STARTS = Starts()
 
 
-def ip_wait(ip: str | None, per_ip: int, per_network: int) -> int | None:
-    """Seconds until this address may start a trial, or None. No real address: never throttled."""
+def ip_waits(ip: str | None, per_ip: int, per_network: int) -> tuple[int | None, int | None]:
+    """(seconds until this address, seconds until its network, may start a trial), None = allowed. No real address: never throttled."""
     if ip is None:
-        return None
-    waits = [w for w in (STARTS.wait("ip:" + client_ip.bucket(ip), per_ip), STARTS.wait("net:" + network_of(ip), per_network)) if w is not None]
+        return None, None
+    return STARTS.wait("ip:" + client_ip.bucket(ip), per_ip), STARTS.wait("net:" + network_of(ip), per_network)
+
+
+def ip_wait(ip: str | None, per_ip: int, per_network: int) -> int | None:
+    waits = [w for w in ip_waits(ip, per_ip, per_network) if w is not None]
     return max(waits) if waits else None
+
+
+# --- monitor mode: what enforcing would have refused ----------------------------------------------------------------
+
+SIGNAL_DAYS = 30  # rows older than this are deleted whenever a new one is written
+
+
+def network_hash(ip: str) -> str:
+    """The caller's /24 (IPv4) or /48 (IPv6), salted and hashed: enough to see repeats from one network (CGNAT), no address kept."""
+    return hashlib.sha256(f"{SALT}|net|{network_of(ip)}".encode()).hexdigest()
+
+
+def record_signals(db: Session, member_id: int, codes: list[str], ip: str | None) -> None:
+    """Monitor mode: one row per guard that would have refused this trial start. The caller commits."""
+    now = utcnow()
+    db.execute(delete(VpnTrialSignal).where(VpnTrialSignal.created_at < now - timedelta(days=SIGNAL_DAYS)))
+    net = network_hash(ip) if ip is not None and any(c in ("ip_limit", "network_limit") for c in codes) else None
+    for code in codes:
+        db.add(VpnTrialSignal(member_id=member_id, code=code, net_hash=net if code in ("ip_limit", "network_limit") else None))
+
+
+def signals_out(db: Session, now: datetime | None = None, recent: int = 20) -> dict[str, Any]:
+    """For Admin: counts per reason over 7 and 30 days, the networks seen more than once, and the latest rows."""
+    now = now or utcnow()
+    counts: dict[str, dict[str, int]] = {}
+    for days in (7, SIGNAL_DAYS):
+        for code, n in db.execute(select(VpnTrialSignal.code, func.count()).where(VpnTrialSignal.created_at >= now - timedelta(days=days))
+                                  .group_by(VpnTrialSignal.code)).all():
+            counts.setdefault(code, {"7d": 0, "30d": 0})["7d" if days == 7 else "30d"] = int(n)
+    nets = db.scalar(select(func.count()).select_from(select(VpnTrialSignal.net_hash).where(VpnTrialSignal.net_hash.is_not(None))
+                                                      .group_by(VpnTrialSignal.net_hash).having(func.count() > 1).subquery())) or 0
+    rows = db.scalars(select(VpnTrialSignal).order_by(VpnTrialSignal.id.desc()).limit(recent))
+    return {"counts": counts, "repeat_networks": int(nets), "retention_days": SIGNAL_DAYS,
+            "recent": [{"code": r.code, "at": r.created_at.isoformat(), "member_id": r.member_id} for r in rows]}
 
 
 def ip_record(ip: str | None) -> None:
