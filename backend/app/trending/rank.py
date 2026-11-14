@@ -26,7 +26,14 @@ WORLD = {"earthquake": 2.5, "hurricane": 2.5, "typhoon": 2.5, "wildfire": 2.0, "
 SPORT = {"league": 1.5, "premier league": 2.0, "super league": 2.0, "champions league": 2.0, "football": 1.5, "soccer": 1.5, "match": 0.5, "fixture": 1.5,
          "head-to-head": 2.0, "goal": 0.5, "striker": 2.0, "midfielder": 2.0, "nba": 2.0, "nfl": 2.0, "nhl": 2.0, "mlb": 2.0, "ufc": 2.0, "tennis": 2.0,
          "golf": 2.0, "cricket": 2.0, "grand prix": 2.0, "f1": 2.0, "bandy": 2.5, "world cup": 2.0, "playoff": 2.0, "quarterback": 2.0, "coach": 1.0,
-         "transfer window": 2.0, "olympic": 1.5, "rugby": 2.0, "boxing": 2.0, "wrestling": 2.0, "derby": 1.0, "real madrid": 2.0, "stats": 0.5}
+         "transfer window": 2.0, "olympic": 1.5, "rugby": 2.0, "boxing": 2.0, "wrestling": 2.0, "derby": 1.0, "real madrid": 2.0, "stats": 0.5,
+         "all blacks": 2.5, "six nations": 2.5, "autumn nations": 2.5, "springboks": 2.5, "wallabies": 2.5, "game day": 2.0, "gameday": 2.0,
+         "kick-off": 2.0, "kickoff": 2.0, "test match": 2.0, "squad": 1.0, "touchdown": 2.0, "super bowl": 2.5, "ryder cup": 2.5, "wimbledon": 2.5,
+         "march madness": 2.5, "fantasy football": 2.5, "line-up": 1.0, "lineup": 1.0, "manager sacked": 2.0, "hat-trick": 2.0,
+         # entertainment and celebrity: not this account's beat either
+         "elton john": 2.0, "celebrity": 2.0, "chat show": 2.0, "talk show": 2.0, "radio show": 1.5, "red carpet": 2.5, "box office": 2.0,
+         "album": 1.5, "concert": 1.5, "tour dates": 2.0, "oscars": 2.5, "grammys": 2.5, "emmys": 2.5, "strictly come dancing": 2.5,
+         "eurovision": 2.5, "reality show": 2.0, "royal family": 1.5, "king charles": 1.5, "jokes": 1.0, "sitcom": 2.0, "tv series": 1.5}
 STEMS = {"evacuat"}  # matched as a word start; every other word must match whole ("ai" is not "aid", "meta" is not "metal")
 
 
@@ -50,10 +57,22 @@ def classify(title: str, summary: str = "", hint: str | None = None) -> tuple[st
         s = min(_strength(f"{title} {summary}", words), 4.0)
         if s > strength or (best == "world" and cat == "technology" and s >= strength and s > 0):
             best, strength = cat, s
-    sport = _strength(f"{title} {summary}", SPORT) + (1.0 if re.search(r"\b\w+ vs\.? \w+", title, re.I) else 0.0)
-    if sport >= 2.0 and sport >= strength:
-        return None, 0.0  # a match, a league, a player: not this account's beat, whatever else the headlines mention
+    if _vetoed(title, summary, strength):
+        return None, 0.0  # a match, a league, a player, a celebrity: not this account's beat, whatever else the headlines mention
     return best, strength
+
+
+def _vetoed(title: str, summary: str, strength: float) -> bool:
+    fixture = re.search(r"\b\w+ vs\.? \w+", title, re.I) or re.search(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)? v [A-Z][a-z]+", title)  # "Wales v New Zealand"
+    sport = _strength(f"{title} {summary}", SPORT) + (1.5 if fixture else 0.0)
+    return sport >= 2.0 and sport >= strength
+
+
+def off_topic(title: str, summary: str = "") -> bool:
+    """Sport or entertainment beyond what any market words in it weigh (classify's veto). Merely unclassified news is not off-topic."""
+    if classify(title, summary)[0] is not None:
+        return False
+    return _vetoed(title, summary, 0.0)
 
 
 @dataclass
@@ -211,6 +230,17 @@ def cluster(signals: list[Sig]) -> list[Cluster]:
             groups[home].extend(unit)
     out = []
     for g in groups:
+        # 2026-11-14 production: a rugby fixture and a royal chat-show story led "stocks" topics because the cluster's category came from
+        # all its members' headlines together. A reliable news item that is off-topic on its own (sport, celebrities: classify() -> None)
+        # never sits in a topic; a topic whose reliable items are mostly off-topic is dropped. Google/Reddit/X items keep their place
+        # (a trend query has no category of its own; its articles decide).
+        news = [x for x in g if x.reliable]
+        on = [x for x in news if not off_topic(x.title, x.summary)]
+        if news and len(on) * 2 < len(news):
+            continue
+        g = [x for x in g if not x.reliable or x in on]
+        if not g:
+            continue
         text = " ".join(x.title for x in g[:6])
         hint = next((x.category for x in g if x.category), None)
         cat, strength = classify(text, " ".join(x.summary for x in g[:3])[:600], hint)

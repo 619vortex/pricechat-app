@@ -556,7 +556,8 @@ def scan_log_lines(db: Session, s: TtSettings, read: dict[str, Any], topics: lis
         sens = pa.get("sensitive") or {}
         p = posts.get(t.id)
         if p is None:
-            tw = "no tweet" + (f" (below {s.suggest_score:g})" if t.score < s.suggest_score else "")
+            tw = "no tweet" + (f" (below {s.suggest_score:g})" if t.score < s.suggest_score
+                               else f" ({pa['skip']})" if pa.get("skip") else " (over this scan's limit of new suggestions)")
         else:
             why = p.hold_reason if p.status == "held" else p.note
             tw = f"tweet {p.status}" + (f" ({_safe(why, 70)})" if why else "")
@@ -603,7 +604,10 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
     for t in sorted(topics, key=lambda t: -t.score):
         if made >= MAX_NEW_PER_SCAN or t.score < s.suggest_score:
             break
-        if t.status != "active" or _has_post(db, t, s, now) or _recent_duplicate(db, t, s, now):
+        skip = ("not active" if t.status != "active" else "already has a tweet" if _has_post(db, t, s, now)
+                else "same story as another topic's tweet" if _recent_duplicate(db, t, s, now) else "")
+        if skip:
+            t.parts = {**(t.parts or {}), "skip": skip}  # the scan log says why a hot topic has no tweet
             continue
         await suggest(db, s, settings, t, now, writer_transport=writer_transport)
         made += 1

@@ -826,3 +826,30 @@ async def test_each_scan_logs_sources_topics_top_five_and_the_decision_with_no_s
     for x in lines:
         assert not SECRETISH.search(x), x
     assert engine._safe("Authorization: Bearer abc.def.ghi token=xyz sk-ant-12345678 owner@example.com").count("[redacted]") >= 3
+
+
+# --- 2026-11-14 production scan: off-topic stories led "stocks" topics -------------------------------------------------------------
+
+
+def test_sport_and_celebrity_headlines_from_the_production_scan_are_off_topic() -> None:
+    for title in ("Wales v New Zealand: Chance to make a statement against All Blacks", "where is game day this week",
+                  "‘Still standing’: king jokes as he appears on Elton John’s Rocket Hour"):
+        assert rank.classify(title, "", "stocks") == (None, 0.0), title
+    assert rank.classify("BoE chief economist says further rate rises needed to combat inflation")[0] == "markets"
+    assert not rank.off_topic("Senator accused of taking bribes from crypto firm, prosecutors say")  # unclassified is not off-topic
+
+
+def test_an_off_topic_news_item_never_sits_in_or_leads_a_topic() -> None:
+    rugby = _sig(1, "Wales v New Zealand: Chance to make a statement against All Blacks", outlet="BBC", eng=50.0)
+    stocks = [_sig(2, "Nvidia shares fall 4% after export curbs on chips", outlet="Reuters"),
+              _sig(3, "Nvidia stock drops 4% as chip export curbs bite", outlet="CNBC")]
+    for c in rank.cluster([rugby, *stocks]):
+        assert all(s.id != 1 for s in c.signals)
+        assert "Wales" not in c.lead.title
+
+
+def test_a_topic_whose_reliable_items_are_mostly_off_topic_is_dropped() -> None:
+    items = [_sig(1, "Wales v New Zealand: All Blacks name squad for Cardiff test match", outlet="BBC"),
+             _sig(2, "All Blacks squad for Wales test match named", outlet="Guardian"),
+             _sig(3, "wales v new zealand", source="google", outlet="Google Trends", reliable=False, eng=50_000, query="wales v new zealand")]
+    assert all("All Blacks" not in s.title for c in rank.cluster(items) for s in c.signals)
