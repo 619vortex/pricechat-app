@@ -81,6 +81,9 @@ async def api(r, w):
         elif path == "/__refuse":
             STATE["refuse_new"] = True
             out = http("200 OK", {"ok": True})
+        elif path == "/__allow":
+            STATE["refuse_new"] = False
+            out = http("200 OK", {"ok": True})
         elif path == "/__revoke_all":
             set_users({})
             out = http("200 OK", {"ok": True})

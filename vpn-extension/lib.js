@@ -106,6 +106,33 @@ export function flag(cc) {
 /** What the toolbar badge shows for a state: off (nothing), connected, or a problem while traffic is held back. */
 export function badge(state) {
   if (!state.on) return { text: "", color: "#000000", title: "Kiwi VPN: off" };
+  if (state.conflict) return { text: "!", color: "#d92d20", title: `Kiwi VPN: not protected. ${state.conflict.text}` };
   if (state.problem) return { text: "!", color: "#d92d20", title: `Kiwi VPN: ${state.problem}` };
   return { text: "ON", color: "#00a86b", title: "Kiwi VPN: connected" };
+}
+
+// ----- who really holds the browser's proxy and WebRTC settings -----
+// Chrome gives a setting to one extension at a time (the most recently installed one that set it), or to the
+// organization's policy. If someone else holds either, Kiwi VPN must not say the browser is protected.
+export const HELD = "controlled_by_this_extension";
+export const FREE = "controllable_by_this_extension";
+
+const PROXY_TAKEN = "Another extension controls this browser's proxy settings, so Kiwi VPN can't protect it. Turn that extension off in chrome://extensions.";
+const PROXY_POLICY = "This browser's proxy settings are managed by your organization, so Kiwi VPN can't protect it.";
+const WEBRTC_TAKEN = "Another extension controls this browser's WebRTC setting, so websites may see your real IP address through WebRTC. Turn that extension off in chrome://extensions.";
+const WEBRTC_POLICY = "This browser's WebRTC setting is managed by your organization, so websites may see your real IP address through WebRTC.";
+
+/** One setting's levelOfControl -> is it a problem? While off we only need to be able to take it; while on we must hold it. */
+function lost(level, on) {
+  if (level === HELD) return false;
+  if (level === FREE) return on; // on, but our value isn't the one in force
+  return true; // controlled_by_other_extensions, not_controllable, or unreadable
+}
+
+/** What stops Kiwi VPN from protecting this browser, from the two settings' levelOfControl. null = nothing.
+ *  kind "proxy": nothing is protected (connecting is refused). kind "webrtc": traffic is proxied, but WebRTC may leak. */
+export function controlConflict({ on, proxy, webrtc }) {
+  if (lost(proxy, on)) return { kind: "proxy", text: proxy === "not_controllable" ? PROXY_POLICY : PROXY_TAKEN };
+  if (lost(webrtc, on)) return { kind: "webrtc", text: webrtc === "not_controllable" ? WEBRTC_POLICY : WEBRTC_TAKEN };
+  return null;
 }

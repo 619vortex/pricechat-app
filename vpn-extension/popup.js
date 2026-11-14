@@ -67,10 +67,21 @@ function view(s) {
     appOnly(s.account),
     el("div", { class: "stats" },
       el("span", {}, el("b", {}, bytes(used?.used_bytes ?? 0)), used?.cap_bytes ? ` of ${bytes(used.cap_bytes)} this month` : " this month"),
-      s.exitIp && s.on ? el("span", {}, "IP ", el("b", {}, s.exitIp)) : null),
+      s.exitIp && s.on && s.conflict?.kind !== "proxy" ? el("span", {}, "IP ", el("b", {}, s.exitIp)) : null),
     el("p", { class: "note" }, "Covers this browser only; the Kiwi VPN apps cover your whole device. We don't log the sites you visit."),
+    help(),
     el("button", { class: "link", onclick: () => { if (confirm("Switch off and remove this browser from your account?")) void act("forget"); } }, "Remove this browser"),
   ];
+}
+
+/** What it doesn't cover, said where people look, not only in the store listing. */
+function help() {
+  return el("details", { class: "help" }, el("summary", {}, "What isn't covered"),
+    el("ul", {},
+      el("li", {}, "pricechat.live always uses your normal connection, so the extension can still reach your account when the VPN is down. Price Chat sees your real IP address."),
+      el("li", {}, "Incognito windows aren't covered unless you allow Kiwi VPN in incognito (chrome://extensions > Kiwi VPN > Details)."),
+      el("li", {}, "Addresses on your own network (like your router) and other apps on this device aren't covered."),
+      el("li", {}, "If another extension controls the proxy or WebRTC settings, Kiwi VPN says so and doesn't claim to protect you.")));
 }
 
 /** Servers the account has in the apps but not here yet (no browser proxy on them), so they don't look lost. */
@@ -80,15 +91,18 @@ function appOnly(account) {
 }
 
 function statusBlock(s, server) {
-  const bad = s.on && !!s.problem;
-  const title = bad ? "Connection problem" : s.on ? "Connected" : "Not connected";
-  const sub = bad ? s.problem : s.on ? "Your browser's traffic is going through Kiwi VPN." : "Your browser is using its normal connection.";
+  // Another extension (or policy) holding the proxy or WebRTC setting: never "Connected", whatever else is true.
+  const taken = s.on && s.conflict ? s.conflict : null;
+  const bad = s.on && (!!s.problem || !!taken);
+  const title = taken ? (taken.kind === "proxy" ? "Not protected" : "Not fully protected") : bad ? "Connection problem" : s.on ? "Connected" : "Not connected";
+  const sub = taken ? taken.text : bad ? s.problem : s.on ? "Your browser's traffic is going through Kiwi VPN." : "Your browser is using its normal connection.";
   const click = s.on ? () => act("disconnect") : () => act("connect", { serverId: server?.() });
   return el("section", { class: `switch${bad ? " is-bad" : s.on ? " is-on" : ""}` },
     powerButton(s.on ? "Switch off" : "Connect", click),
     el("div", { class: "state" }, busy ? (s.on ? "Switching off…" : "Connecting…") : title),
     el("p", { class: "sub" }, sub),
-    bad ? el("button", { class: "button ghost", onclick: () => act("retry") }, "Try again") : null);
+    bad && !taken ? el("button", { class: "button ghost", onclick: () => act("retry") }, "Try again") : null,
+    !s.on && s.conflict ? el("p", { class: "error", role: "alert" }, s.conflict.text) : null);
 }
 
 function powerButton(label, onclick) {

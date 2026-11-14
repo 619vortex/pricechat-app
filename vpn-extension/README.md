@@ -5,8 +5,10 @@ Browsers can't run WireGuard, so this covers the browser only; the WireGuard app
 
 - **Sign-in:** the Kiwi Passport session on pricechat.live. The extension gets a login for one server from `POST /api/members/vpn/browser`; only its hash is stored on our side.
 - **Fails closed:** while on, a lost connection stops traffic and shows a red badge. Only switching off goes back to the normal connection.
-- **Goes direct:** `pricechat.live` and local addresses, so the extension can still reach the account API and explain a problem.
-- **Doesn't cover:** other apps, private windows unless allowed in the extension's settings, and anything that runs outside the browser.
+- **Goes direct:** `pricechat.live` and local addresses, so the extension can still reach the account API and explain a problem. Price Chat sees the real IP.
+- **Doesn't cover:** other apps, incognito windows unless allowed in the extension's settings, and anything that runs outside the browser. The popup's "What isn't covered" says so.
+- **Someone else's setting:** if another extension (or policy) holds the proxy or WebRTC setting (`levelOfControl`), the popup says "Not protected" / "Not fully protected" and the badge shows "!"; with the proxy taken, connecting is refused.
+- **Password in memory only:** the proxy password lives in `chrome.storage.session`; `chrome.storage.local` keeps the login name and server. After a browser restart traffic is held at once and a fresh login is minted (replacing the old one).
 
 ## Files
 

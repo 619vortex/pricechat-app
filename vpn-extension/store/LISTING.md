@@ -34,6 +34,7 @@ Features:
 - Works with your Kiwi Passport, your Price Chat account.
 - Limits WebRTC while connected, so it can't reveal your real address outside the proxy.
 - If the connection is lost, browser traffic stops until it's back or you switch off.
+- If another extension takes over the browser's proxy or WebRTC setting, Kiwi VPN tells you and doesn't claim to protect you.
 - On public Wi-Fi, the network can't read browser traffic sent through this encrypted connection.
 
 How it works:
@@ -46,7 +47,8 @@ Kiwi VPN must be open to your account. Each account gets one free 30-day trial, 
 
 Important:
 - Kiwi VPN covers this browser only, not other apps. For a whole device, use the Kiwi VPN apps.
-- pricechat.live and addresses on your own network don't go through it. Private windows are covered only if you allow the extension in them.
+- pricechat.live always uses your normal connection, so the extension can reach your account and explain a problem even when the VPN is down. Price Chat therefore sees your real IP address. Addresses on your own network don't go through it either.
+- Incognito (private) windows aren't covered unless you allow Kiwi VPN in incognito in the browser's extension settings.
 - Your traffic passes through our server. Pages on plain http aren't encrypted beyond our server.
 - It doesn't guarantee complete anonymity, and it doesn't protect you from malware or from websites you sign in to.
 
@@ -78,7 +80,7 @@ Sends the browser's web traffic through an encrypted proxy on a Kiwi VPN server,
 | `webRequest` | Listens for the proxy's password request and for request results, so the extension can sign in and detect a refused login. It doesn't read or change page content. |
 | `webRequestAuthProvider` | Answers that password request with the login issued to this browser. Only the proxy's own challenge is answered, never a website's. |
 | `privacy` | Sets WebRTC to use only the proxy while connected, so it can't reveal the user's real address, and restores it on disconnect. |
-| `storage` | Keeps the on/off state, chosen server and this browser's proxy login on the device, so the connection survives a browser restart. |
+| `storage` | Keeps the on/off state and chosen server on the device, so the connection comes back after a browser restart. The proxy password is kept only in session storage (memory, cleared when the browser closes); after a restart a fresh login is requested with the user's Price Chat session. |
 | Host access `<all_urls>` | Chrome only passes the proxy's password request, and a refused login, to an extension for sites it has access to. The proxy carries every site, so the extension needs access to every site to sign in to it and to notice when the login is refused (otherwise it can't tell the user the connection stopped). It also reaches the Kiwi VPN account API on pricechat.live, and `http://check.kiwi-vpn.invalid/`, an address that exists only inside the proxy, to confirm traffic goes through it and show the exit IP. It doesn't read or change page content, and no content scripts run on any page. |
 
 **Remote code:** No, I am not using remote code.
@@ -89,7 +91,7 @@ The owner certifies these, so read them against https://pricechat.live/vpn/priva
 
 | Dashboard category | Tick? | Why |
 |---|---|---|
-| Authentication information | Yes | Sends the Kiwi Passport session cookie to pricechat.live, and stores and uses a proxy login. |
+| Authentication information | Yes | Sends the Kiwi Passport session cookie to pricechat.live, and uses a proxy login (its password held in memory only). |
 | Web history | Yes | The address of each site passes through the proxy in transit. The proxy code doesn't record it. |
 | Website content | Yes | Page traffic passes through the proxy in transit: encrypted for https, readable by the server for plain http. The proxy code doesn't store it. |
 | Location | Yes, if its definition includes IP address | The server necessarily sees the user's IP address to carry traffic, and system or firewall logs can record it. |
@@ -124,7 +126,7 @@ npx @railway/cli variables --project c2a48c3b-60de-4eec-80a3-1e7cf5ff3e26 --envi
 
 ## Microsoft Edge Add-ons
 
-- **Package:** `dist/kiwi-vpn-edge-1.0.0.zip`
+- **Package:** `dist/kiwi-vpn-edge-<version>.zip` (built by `python vpn-extension/build.py`; same code as the Chrome ZIP)
 - **Description:** the one above works, as it doesn't reference another browser.
 - **Category:** Productivity, or the closest privacy category offered
 - **Logo:** `assets/logo-300x300.png`

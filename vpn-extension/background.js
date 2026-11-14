@@ -1,7 +1,7 @@
 // Kiwi VPN's service worker: owns the proxy setting, answers the proxy's login request, and watches the connection.
 // Fails closed: while switched on, a lost connection stops traffic and shows a red badge instead of quietly going around the VPN.
 // Only "off" (always one click, needs no network) puts traffic back on the normal connection.
-import { API, CHECK_URL, SMART, badge, browserServers, isOurChallenge, median, proxyConfig, refusal, smartPick } from "./lib.js";
+import { API, CHECK_URL, SMART, badge, browserServers, controlConflict, isOurChallenge, median, proxyConfig, refusal, smartPick } from "./lib.js";
 
 class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -20,8 +20,50 @@ async function api(path, init = {}) {
   return body;
 }
 
-const read = () => chrome.storage.local.get({ on: false, login: null, problem: null, lastServer: null, exitIp: null, choice: SMART, smart: null });
 const write = (v) => chrome.storage.local.set(v);
+
+// The proxy password lives only in chrome.storage.session: in memory, gone when the browser closes, never on disk.
+// chrome.storage.local keeps the rest of the login (name, server), so after a restart traffic is held at once and a fresh
+// login is asked for with the Price Chat session (the old one is replaced, not left behind).
+async function read() {
+  const [s, { secret }] = await Promise.all([
+    chrome.storage.local.get({ on: false, login: null, problem: null, lastServer: null, exitIp: null, choice: SMART, smart: null, conflict: null }),
+    chrome.storage.session.get({ secret: null }),
+  ]);
+  if (s.login?.password) { // saved by 1.0.4 or earlier: move the password off the disk
+    const { password, ...rest } = s.login;
+    await chrome.storage.session.set({ secret: { username: rest.username, password } });
+    await write({ login: rest });
+    return { ...s, login: s.login };
+  }
+  if (s.login) s.login = { ...s.login, password: secret?.username === s.login.username ? secret.password : null };
+  return s;
+}
+
+async function saveLogin(login, extra = {}) {
+  if (!login) {
+    await chrome.storage.session.remove("secret");
+    return write({ login: null, ...extra });
+  }
+  const { password, ...rest } = login;
+  await chrome.storage.session.set({ secret: { username: login.username, password } });
+  return write({ login: rest, ...extra });
+}
+
+const setting = (s) => s.get({}).then((d) => d?.levelOfControl ?? null, () => null);
+
+/** Whether another extension (or policy) holds the proxy or WebRTC setting, saved so the badge and popup show it. */
+async function conflictNow(on) {
+  const [proxy, webrtc] = await Promise.all([setting(chrome.proxy.settings), setting(chrome.privacy.network.webRTCIPHandlingPolicy)]);
+  return controlConflict({ on, proxy, webrtc });
+}
+
+async function refreshConflict() {
+  const { on, conflict: was } = await chrome.storage.local.get({ on: false, conflict: null });
+  const conflict = await conflictNow(on);
+  if (JSON.stringify(conflict) !== JSON.stringify(was)) await write({ conflict });
+  return conflict;
+}
 
 async function paint() {
   const b = badge(await read());
@@ -58,7 +100,7 @@ async function check() {
 
 async function newLogin(serverId, replace) {
   const login = await api("/browser", { method: "POST", body: JSON.stringify({ server_id: serverId, replace: replace ?? null }) });
-  await write({ login, lastServer: serverId });
+  await saveLogin(login, { lastServer: serverId });
   return login;
 }
 
@@ -90,13 +132,15 @@ async function connect(serverId) {
   const account = await api("");
   const no = refusal(account);
   if (no) throw new ApiError(403, no);
+  const before = await conflictNow(false);
+  if (before?.kind === "proxy") { await write({ conflict: before }); throw new ApiError(409, before.text); }
   await write({ choice: serverId === SMART ? SMART : serverId }); // remembered for next time: Smart, or the server picked by hand
   if (serverId === SMART) {
     serverId = await smartChoice(account);
     if (serverId == null) throw new ApiError(503, "No server is online right now. Try again in a minute.");
   }
   const { login: old } = await read();
-  let login = old?.server_id === serverId ? old : await newLogin(serverId, old?.username);
+  let login = old?.server_id === serverId && old.password ? old : await newLogin(serverId, old?.username);
   await applyProxy(login);
   await write({ problem: null, lastServer: serverId });
   let ok = await check();
@@ -111,13 +155,20 @@ async function connect(serverId) {
     await paint();
     throw new ApiError(503, "Couldn't connect to that server. Your browser is using its normal connection.");
   }
-  await write({ on: true, problem: null, exitIp: ok.ip });
+  const conflict = await conflictNow(true);
+  if (conflict?.kind === "proxy") { // someone else's proxy setting is the one in force: nothing here is ours to protect
+    await clearProxy();
+    await write({ on: false, exitIp: null, conflict });
+    await paint();
+    throw new ApiError(409, conflict.text);
+  }
+  await write({ on: true, problem: null, exitIp: ok.ip, conflict }); // a WebRTC conflict stays on, shown as "not fully protected"
   await paint();
 }
 
 async function disconnect() {
   await clearProxy();
-  await write({ on: false, problem: null, exitIp: null });
+  await write({ on: false, problem: null, exitIp: null, conflict: await conflictNow(false) });
   await paint();
 }
 
@@ -125,7 +176,7 @@ async function disconnect() {
 async function forget() {
   const { login } = await read();
   await disconnect();
-  await write({ login: null });
+  await saveLogin(null);
   if (login) await api(`/browser/${login.username}`, { method: "DELETE" }).catch(() => undefined);
 }
 
@@ -135,7 +186,8 @@ function recheck() {
   rechecking ??= (async () => {
     const state = await read();
     if (!state.on) return;
-    let ok = await check();
+    await refreshConflict();
+    let ok = state.login?.password ? await check() : null; // no password = the browser was restarted: straight to a new login
     let problem = "Connection lost. Traffic is stopped until it's back, or you switch off.";
     if (!ok && state.login) {
       try {
@@ -159,6 +211,11 @@ const asked = new Set(); // requests we've already answered: asked again means t
 chrome.webRequest.onAuthRequired.addListener((details, reply) => {
   void read().then(({ login }) => {
     if (!isOurChallenge(details, login)) return reply({});
+    if (!login.password) { // after a browser restart, until the fresh login arrives: held, not sent around the VPN
+      reply({ cancel: true });
+      void recheck();
+      return;
+    }
     if (asked.has(details.requestId)) {
       asked.delete(details.requestId);
       reply({ cancel: true });
@@ -182,12 +239,18 @@ chrome.webRequest.onErrorOccurred.addListener(({ requestId, error }) => {
 // One site failing also lands here, so this only triggers a check: the check decides whether the connection is really down.
 chrome.proxy.onProxyError.addListener(() => { void recheck(); });
 
+// Another extension taking (or giving back) the proxy or WebRTC setting: the badge and popup must say so straight away.
+const onControlChange = () => { void refreshConflict().then(paint); };
+chrome.proxy.settings.onChange.addListener(onControlChange);
+chrome.privacy.network.webRTCIPHandlingPolicy.onChange.addListener(onControlChange);
+
 async function resume() {
   const { on, login } = await read();
   if (on && login) {
     await applyProxy(login); // closed from the very first request after a restart
     void recheck();
   }
+  await refreshConflict();
   await paint();
 }
 chrome.runtime.onStartup.addListener(() => { void resume(); });
@@ -195,6 +258,7 @@ chrome.runtime.onInstalled.addListener(() => { void resume(); });
 
 const ACTIONS = {
   state: async () => {
+    await refreshConflict(); // always the live answer, not the last one seen
     const state = await read();
     let account = null, signedIn = true, error = null;
     try {
