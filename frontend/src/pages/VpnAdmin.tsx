@@ -9,7 +9,13 @@ import "./VpnAdmin.css";
 /* Kiwi VPN (OWNER ONLY): who can use it, whether it costs anything, devices made here, the WireGuard servers, customers and payments.
    An anonymous customer is only a number here. Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
 
-export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number };
+export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number } & Partial<TrialGuards>;
+/** Free-trial abuse guards and the opt-in sync rules (backend app/vpn/trial_guard.py, docs/hardening/TRIAL-AND-LIMITS.md). Numbers: 0 = that check off. */
+export type TrialGuards = {
+  trial_one_per_identity: boolean; trial_min_account_age_hours: number; trial_min_xp: number; trial_per_ip_day: number; trial_per_network_day: number;
+  sync_enforce_limits: boolean; count_pc_once: boolean;
+};
+const GUARD_KEYS = ["trial_one_per_identity", "trial_min_account_age_hours", "trial_min_xp", "trial_per_ip_day", "trial_per_network_day", "sync_enforce_limits", "count_pc_once"] as const;
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string;
@@ -112,6 +118,58 @@ function LimitsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
         </div>
         <div className="btn-group">
           <button className="btn btn-primary" disabled={busy || !dirty} onClick={() => void save()}>Save limits</button>
+          {msg && <Badge tone={msg.ok ? "good" : "bad"}>{msg.text}</Badge>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function pickGuards(s: VpnSettings): TrialGuards {
+  return Object.fromEntries(GUARD_KEYS.map((k) => [k, s[k]])) as TrialGuards;
+}
+
+function TrialGuardsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
+  const [v, setV] = useState<TrialGuards>(pickGuards(s));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => setV(pickGuards(s)), [s]);
+  const changed = GUARD_KEYS.filter((k) => v[k] !== s[k]);
+  const num = (k: "trial_min_account_age_hours" | "trial_min_xp" | "trial_per_ip_day" | "trial_per_network_day", max: number) => (
+    <input className="input" type="number" min={0} max={max} aria-label={k} value={v[k] ?? 0}
+           onChange={(e) => setV({ ...v, [k]: Math.max(0, Math.min(max, Math.floor(Number(e.target.value) || 0))) })} />
+  );
+  const box = (k: "trial_one_per_identity" | "sync_enforce_limits" | "count_pc_once", label: string) => (
+    <label className="small"><input type="checkbox" aria-label={k} checked={!!v[k]} onChange={(e) => setV({ ...v, [k]: e.target.checked })} /> {label}</label>
+  );
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await request("/vpn/admin/settings", { method: "PUT", body: JSON.stringify(Object.fromEntries(changed.map((k) => [k, v[k]]))) });
+      setMsg({ ok: true, text: "Saved" });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: errText(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Free trial guards and device rules">
+      <div className="form">
+        {box("trial_one_per_identity", "One free trial per email, Google, X or Telegram account (even after the account is deleted)")}
+        <div className="row-fields">
+          <Field label="Passport age before a trial (hours)" hint="0 = off.">{num("trial_min_account_age_hours", 2160)}</Field>
+          <Field label="XP needed for a trial" hint="0 = off.">{num("trial_min_xp", 1000000)}</Field>
+        </div>
+        <div className="row-fields">
+          <Field label="Trials per address per day" hint="Only real addresses (apps, and the website when Vercel reports the visitor). 0 = off.">{num("trial_per_ip_day", 1000)}</Field>
+          <Field label="Trials per network per day" hint="IPv4 /24, IPv6 /48. 0 = off.">{num("trial_per_network_day", 10000)}</Field>
+        </div>
+        {box("sync_enforce_limits", "Sync switches off (never deletes) devices over the limit and non-testers' devices on testers-only servers")}
+        {box("count_pc_once", "The Windows app's devices on several servers count as one device")}
+        <div className="btn-group">
+          <button className="btn btn-primary" disabled={busy || !changed.length} onClick={() => void save()}>Save trial rules</button>
           {msg && <Badge tone={msg.ok ? "good" : "bad"}>{msg.text}</Badge>}
         </div>
       </div>
@@ -594,6 +652,7 @@ export function VpnAdminPage() {
           )}
           <MakeDevice servers={d.servers} onMade={r.reload} />
           <LimitsCard s={d.settings} onSaved={() => void r.reload()} />
+          {d.settings.trial_min_account_age_hours !== undefined && <TrialGuardsCard s={d.settings} onSaved={() => void r.reload()} />}
         </>}
         {tab === "servers" && <>
         <Card title={`Servers (${d.servers.length})`}>

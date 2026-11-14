@@ -89,13 +89,24 @@ def my_sessions(db: DbSession, pc_session: SessionToken = None) -> dict[str, int
     return {"count": count}
 
 
+class RevokeInput(StrictInput):
+    remove_devices: bool = False  # also delete the WireGuard devices the app made, so a stolen PC's keys stop working (audit L8)
+
+
 @router.post("/members/desktop/sessions/revoke")
-def revoke_sessions(db: DbSession, pc_session: SessionToken = None) -> dict[str, int]:
-    """Signs the Kiwi VPN app out on every PC, leaving browsers signed in. A lost PC is the reason to press this."""
+def revoke_sessions(db: DbSession, pc_session: SessionToken = None, payload: RevokeInput | None = None) -> dict[str, int]:
+    """Signs the Kiwi VPN app out on every PC, leaving browsers signed in. A lost PC is the reason to press this.
+    With {"remove_devices": true} the app's WireGuard devices go too (app.vpn.service.remove_app_devices); without a body
+    nothing but the sessions changes, as before."""
     member = _require(db, pc_session)
     removed = db.query(MemberSession).filter(MemberSession.member_id == member.id, MemberSession.kind == "desktop").delete(synchronize_session=False)
     db.commit()
-    return {"removed": removed}
+    devices = 0
+    if payload is not None and payload.remove_devices:
+        from app.vpn import service as vpn
+
+        devices = vpn.remove_app_devices(db, member)
+    return {"removed": removed, "devices_removed": devices}
 
 
 @router.post("/members/desktop/refresh", dependencies=[Depends(rate_limit.limit("signin"))])

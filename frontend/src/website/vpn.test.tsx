@@ -1073,6 +1073,16 @@ describe("The redesigned page", () => {
     expect(screen.getByRole("status").textContent).toMatch(/signed out on every PC/);
   });
 
+  it("can delete the app's devices when signing out on every PC", async () => {
+    serve({ ...member({ devices: [DEVICE] }), "GET /api/members/desktop/sessions": [200, { count: 1 }], "POST /api/members/desktop/sessions/revoke": [200, { removed: 1, devices_removed: 2 }] });
+    render(<VpnDevicesPage />);
+    await settle();
+    fireEvent.click(screen.getByLabelText(/Also delete the app's VPN devices/));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out on every PC" }));
+    await settle();
+    expect(calls).toContain('POST /api/members/desktop/sessions/revoke {"remove_devices":true}');
+  });
+
   it("explains why an account that can't add a device can't, with the way forward", async () => {
     serve(member({ eligible: false, reason: "Your time has run out.", billing: BILL }));
     const { container } = render(<VpnDevicesPage />);

@@ -95,6 +95,7 @@ def member_at(db: Session, rank_key: str, name: str = "kiwi", paid: bool = True)
     ensure_catalog(db)
     m = members.create_member(db)
     m.username, m.username_key = name, name.lower()
+    m.created_at = utcnow() - dt.timedelta(days=30)  # past the trial's minimum account age (app/vpn/trial_guard.py)
     db.commit()
     need = next(r.min_xp for r in ledger.ranks(db) if r.key == rank_key)
     if need:
@@ -204,11 +205,9 @@ def test_device_limit_and_offline_server(client: TestClient, db: Session, fake: 
     server.online = False
     db.commit()
     assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": server.id}).status_code == 503
-    tries = int(LIMITS["vpn_device"].burst) - 5  # 5 tries so far, each charged (none of them reused a key)
+    # refusals that need no node (an unknown server, over the limit) are checked before the rate limit and cost nothing (audit M1)
+    tries = int(LIMITS["vpn_device"].burst) * 2
     assert [c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code for _ in range(tries)] == [404] * tries
-    assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code == 429  # then slow down
-    LIMITS["vpn_device"].clear()
-    assert c.post("/api/members/vpn/devices", json={"name": "d3", "server_id": 999}).status_code == 404
     assert c.post("/api/members/vpn/devices", json={"name": "", "server_id": server.id}).status_code == 422
 
 
@@ -273,11 +272,13 @@ def test_admin_routes(client: TestClient, db: Session, fake: FakeNode) -> None:
     assert row.cert_sha256 == FP and TOKEN not in row.agent_token_enc and vpn.agent_token(row) == TOKEN
     assert row.public_key == fake.server_key and row.address == "10.66.0.1/16"
     o = client.get("/api/vpn/admin/overview").json()
-    assert o["settings"] == {"enabled": False, "payments_enabled": False, "trial_enabled": True, "max_devices": 3, "monthly_cap_gb": 0} and "ranks" not in o
+    assert o["settings"] == {"enabled": False, "payments_enabled": False, "trial_enabled": True, "max_devices": 3, "monthly_cap_gb": 0,
+                             "trial_one_per_identity": True, "trial_min_account_age_hours": 24, "trial_min_xp": 0, "trial_per_ip_day": 3,
+                             "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False} and "ranks" not in o
     assert o["servers"][0]["online"] is True and o["servers"][0]["capacity"] == 50 and "agent_token" not in json.dumps(o)
     assert o["totals"] == {"devices": 0, "members": 0, "active_24h": 0}
     assert client.put("/api/vpn/admin/settings", json={"max_devices": 5, "enabled": True}).json() == \
-        {"enabled": True, "payments_enabled": False, "trial_enabled": True, "max_devices": 5, "monthly_cap_gb": 0}
+        {**o["settings"], "enabled": True, "max_devices": 5}
     assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": 50}).json()["monthly_cap_gb"] == 50
     assert client.put("/api/vpn/admin/settings", json={"monthly_cap_gb": -1}).status_code == 422
     assert client.put("/api/vpn/admin/settings", json={"min_rank": "knight"}).status_code == 422  # no such setting any more

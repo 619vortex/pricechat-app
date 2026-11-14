@@ -244,6 +244,30 @@ describe("VPN admin", () => {
     expect(screen.getByText("Saved")).toBeTruthy();
   });
 
+  it("saves the free trial guards, only what changed", async () => {
+    const guards = { trial_one_per_identity: true, trial_min_account_age_hours: 24, trial_min_xp: 0, trial_per_ip_day: 3, trial_per_network_day: 10, sync_enforce_limits: false, count_pc_once: false };
+    let s = overview({ settings: { enabled: false, payments_enabled: false, max_devices: 3, monthly_cap_gb: 0, ...guards } });
+    serve((key, body) => {
+      if (key === "PUT /api/vpn/admin/settings") { s = { ...s, settings: { ...s.settings, ...JSON.parse(body!) } }; return [200, s.settings]; }
+      return [200, s];
+    });
+    render(<VpnAdminPage />);
+    await flush();
+    expect((screen.getByLabelText("sync_enforce_limits") as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByLabelText("trial_min_account_age_hours"), { target: { value: "48" } });
+    fireEvent.click(screen.getByLabelText("count_pc_once"));
+    fireEvent.click(screen.getByRole("button", { name: "Save trial rules" }));
+    await flush();
+    expect(calls).toContain('PUT /api/vpn/admin/settings {"trial_min_account_age_hours":48,"count_pc_once":true}');
+  });
+
+  it("hides the trial guards for a backend without them", async () => {
+    serve(() => [200, overview()]);
+    render(<VpnAdminPage />);
+    await flush();
+    expect(screen.queryByRole("button", { name: "Save trial rules" })).toBeNull();
+  });
+
   it("adds a server and shows the agent error when it can't be verified", async () => {
     let servers = [SERVER];
     let fail = true;

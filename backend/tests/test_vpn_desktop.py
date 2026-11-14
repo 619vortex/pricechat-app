@@ -124,7 +124,7 @@ def test_public_beta_a_new_customer_needs_no_admin_and_no_tester_listing(client:
     client.cookies.clear()
     client.cookies.set("pc_session", members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop"))
     first = client.get("/api/members/vpn").json()
-    assert first["enabled"] is True and first["eligible"] is False and first["trial"] == {"available": True, "days": 30} and [s["id"] for s in first["servers"]] == [server.id]
+    assert first["enabled"] is True and first["eligible"] is False and first["trial"] == {"available": True, "days": 30, "code": None, "reason": None} and [s["id"] for s in first["servers"]] == [server.id]
     # the same call the app makes by itself, with the app's limited session
     started = client.post("/api/members/vpn/trial")
     assert started.status_code == 200, started.text
@@ -226,7 +226,7 @@ def test_app_sessions_are_recorded_apart_and_can_be_revoked_without_touching_bro
     app = members.new_session(db, m, 7, DESKTOP_TOKEN_PREFIX, kind="desktop")
     client.cookies.set("pc_session", browser)
     assert client.get("/api/members/desktop/sessions").json() == {"count": 1}
-    assert client.post("/api/members/desktop/sessions/revoke").json() == {"removed": 1}
+    assert client.post("/api/members/desktop/sessions/revoke").json() == {"removed": 1, "devices_removed": 0}
     assert client.get("/api/members/me").status_code == 200, "the browser stays signed in"
     client.cookies.set("pc_session", app)
     assert client.get("/api/members/vpn").status_code == 401, "the app doesn't"

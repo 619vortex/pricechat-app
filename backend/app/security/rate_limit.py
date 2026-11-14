@@ -84,6 +84,9 @@ LIMITS = {
     "vpn_trial": Bucket(burst=3, every=600, shared_burst=30, shared_every=10),
     # a device made with an anonymous key (X-Kiwi-Key), per account
     "vpn_anon_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),
+    # ... and per client address (real addresses only, app.vpn.trial_guard.real_ip), so many keys from one place can't
+    # drain the shared bucket above. Every route charges only after its checks pass (audit M1)
+    "vpn_anon_ip": Bucket(burst=10, every=600, shared_burst=100_000, shared_every=0.001),
     "vpn_support": Bucket(burst=5, every=720, shared_burst=60, shared_every=10),  # Kiwi VPN bug reports / feedback, per member: 5 an hour
     "vpn_key": Bucket(burst=30, every=5, shared_burst=600, shared_every=0.1),  # anonymous key requests, per client
     "vpn_new": Bucket(burst=5, every=600, shared_burst=120, shared_every=5),  # new anonymous keys, per client
@@ -189,3 +192,6 @@ def reset_for_tests() -> None:
     for b in LIMITS.values():
         b.clear()
     FREED.clear()
+    from app.vpn import trial_guard
+
+    trial_guard.reset_for_tests()
