@@ -105,6 +105,8 @@ if [ "${1:-}" = "--rollback" ]; then
   BEFORE="$(wg_digest)"
   restore "$2"
   [ "$(wg_digest)" = "$BEFORE" ] || die "WireGuard changed during the rollback: investigate"
+  echo "note: devices whose config was downloaded after the switch use DNS $WG_ADDR, which no longer answers: they need a new" >&2
+  echo "      config (or re-apply). The backend hands out DNS 1.1.1.1 again after its next sync." >&2
   exit 0
 fi
 

@@ -421,8 +421,6 @@ class FakeResolver(asyncio.DatagramProtocol):
 
     async def start(self):
         loop = asyncio.get_running_loop()
-        await loop.create_datagram_endpoint(lambda: self, local_addr=("127.0.0.1", 0))
-        self.port = self.transport.get_extra_info("sockname")[1]
 
         async def tcp(r, w):
             self.tcp += 1
@@ -431,8 +429,16 @@ class FakeResolver(asyncio.DatagramProtocol):
             w.write(len(ans).to_bytes(2, "big") + ans)
             await w.drain()
             w.close()
-        self.tcp_server = await asyncio.start_server(tcp, "127.0.0.1", self.port)
-        return self
+        # UDP and TCP on the same port, like a real resolver; Windows may refuse the TCP side for some ports, so try again
+        for _ in range(30):
+            await loop.create_datagram_endpoint(lambda: self, local_addr=("127.0.0.1", 0))
+            self.port = self.transport.get_extra_info("sockname")[1]
+            try:
+                self.tcp_server = await asyncio.start_server(tcp, "127.0.0.1", self.port)
+                return self
+            except OSError:
+                self.transport.close()
+        raise RuntimeError("no free port for both UDP and TCP")
 
     def stop(self):
         self.transport.close()
