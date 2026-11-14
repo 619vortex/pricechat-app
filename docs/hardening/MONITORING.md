@@ -147,3 +147,84 @@ Then check that `alembic heads` shows exactly one head. `tests/test_migrations.p
 - The restore test and freshness check against the real Railway bucket. They were tested with a fake bucket and real SQLite and gzip files.
 - A real Telegram delivery (tests use a fake Bot API).
 - The workflow on GitHub's runners. Its check step was dry-run locally with Git Bash and a jq stand-in; the actions/cache state and the Telegram send were not exercised.
+
+
+## Follow-up (pre-deploy checklist, 2026-11-14)
+
+### Backup edge cases: test and alert text
+All of the tests below are in `backend/tests/test_backup_monitoring.py` (TBM) or `test_monitoring_delivery.py` (TMD).
+
+| Case | Test | Owner message, or restore-test error |
+|---|---|---|
+| no backups at all | TMD `test_no_backups_at_all_alerts_once`; TBM `test_stale_backup_alerts_once_then_recovers`; TBM `test_restore_test_fails_loudly` ("No backup") | "database backups are STALE / There is no backup in the bucket (backups/db/ is empty)." |
+| newest older than 26 h | TMD `test_hourly_backup_check_while_stale_sends_once_then_recovers_once`; TBM `test_newest_backup_and_its_age` | "...STALE / The newest backup is 40 h old (price_chat-....db.gz); one should land every 24 h." |
+| truncated gzip | TBM `test_restore_test_fails_loudly[...]` | "Weekly backup restore test FAILED ... Error: <key> doesn't gunzip: EOFError ..." |
+| gzip of non-SQLite bytes | same | "... is not a sound SQLite database: file is not a database" |
+| fails integrity_check | same (`_corrupt_db_bytes`: the index no longer matches its table) | "... failed PRAGMA integrity_check: row 1 missing from index ix_members_name; ..." |
+| missing alembic_version | same | "... has no alembic_version table (no such table: alembic_version)" |
+| bucket auth error | TMD `test_unreadable_bucket_auth_error_or_timeout_alerts_once[ClientError]`, run through the real scheduler | "...STALE / The backup bucket can't be read: ClientError: An error occurred (InvalidAccessKeyId) when calling the ListObjectsV2 operation..." |
+| network timeout | same `[ConnectTimeoutError]` | "... can't be read: ConnectTimeoutError: Connect timeout on endpoint URL: ..." |
+| zero-byte object (**was a gap: counted as a fresh backup; fixed**) | TBM `test_a_zero_byte_object_is_not_a_backup`, `test_a_zero_byte_object_alerts`; a gzip of empty bytes fails with "unpacks to 0 bytes" | "...STALE / The newest backup object is empty (0 bytes): price_chat-....db.gz." The restore test fails with: "The newest backup object is empty (0 bytes): ..." |
+
+### Deduplication: how each path behaves
+The mechanism lives in `backend/app/alerts.py`:
+- `notify_owner` (l.76) skips a key sent within `COOLDOWN` = 6 h (l.30), or within the `cooldown` passed in. A send that fails stamps nothing, so it is retried.
+- An open problem gets one "recovered" message via `<key>:recovered`, with no cooldown.
+- The watchdog (`observability.py` `_problem`/`_fixed`, l.360/371) sends once per incident. When it can't send, it retries after `RETRY_AFTER` = 15 min (l.51).
+
+| Path | Before | Now |
+|---|---|---|
+| `system.backup_check` hourly while stale | 6 h reminders (4 a day). On top of that, the same incident also triggered `job:system.backup` (every 6 h) and the watchdog's `ops:silence:backup` (once): **up to 3 streams for one incident** | once, then a daily reminder (`DAILY`, l.32). Silent while `job:system.backup` or `ops:silence:backup` is open (`check_backup_freshness`, l.252). The watchdog skips its backup alert while `backup:stale` is open (observability l.430). One "recovered" |
+| `system.restore_test` failing | the 6 h cooldown and a 6 h retry meant about 4 alerts a day | `REMIND_JOB` (l.33) gives a 24 h reminder, and `retry_failed_seconds` = 86400 (jobs.py l.1048). Then "working again" once |
+| per-server offline (`check_vpn_servers`, l.304) | once per incident plus one "online again" | unchanged |
+| fleet redundancy / capacity (`_check_vpn_fleet`, l.355) | once, then **closed silently** (no recovered message) | once, plus one "recovered" through `_recovered` (l.343). The problem is closed without a message only when there is no owner chat or the VPN is closed |
+| traffic pace (l.395) | once per server per month | unchanged |
+| owner_alerts self-check (`startup_self_check`, observability l.635) | log line only | unchanged. It never sends to Telegram (`test_owner_alerts_self_check_at_every_restart_sends_nothing`) |
+| `system.backup` job failing | the first failure, then every 6 h while its hourly retries fail | unchanged: this is the existing designed behaviour |
+
+The tests that run each path repeatedly in a failing state and assert exactly one message and then one recovery are all in TMD:
+- `test_hourly_backup_check_while_stale_sends_once_then_recovers_once` (6 failing runs: 1 message; 4 fresh runs: 1 recovery)
+- `test_unreadable_bucket_auth_error_or_timeout_alerts_once` (x2)
+- `test_no_backups_at_all_alerts_once`
+- `test_stale_backup_reminds_once_a_day_not_every_6_hours` (48 hourly checks: 2 messages)
+- `test_backup_check_stays_quiet_while_the_backup_jobs_own_alert_is_open`
+- `test_watchdog_backup_monitor_stays_quiet_while_backup_check_reported_it`
+- `test_weekly_restore_test_failing_sends_once_then_working_again_once` (5 failing runs through the real scheduler: 1 message; 3 passing runs: 1 "working again")
+- `test_restore_test_failures_remind_daily_and_retry_daily`
+- `test_fleet_alerts_repeated_sync_failures_one_message_each_then_one_recovery` (6 failing syncs: offline + redundancy, 2 messages; 4 recovered syncs: 2 recoveries)
+- `test_owner_alerts_self_check_at_every_restart_sends_nothing`
+
+### Controlled delivery
+- **The real send path against a fake Bot API.** The fake is a `ThreadingHTTPServer` on 127.0.0.1, with `telegram_api_base` pointed at it. Tests:
+  - `test_owner_alert_reaches_a_local_bot_api_with_the_right_shape`: POST `/bot<token>/sendMessage` as JSON with `{"chat_id": 424242, "text": ..., "disable_web_page_preview": true}`. There is no parse_mode: alerts are plain text.
+  - `test_telegram_429_or_500_is_logged_not_marked_sent_and_retried[429|500]`: `notify_owner` returns False and never raises. No OwnerAlert row is written, so no cooldown starts and the problem is not marked open. A warning names `TelegramRateLimitError` or `TelegramUnavailableError`, and never the token. The next attempt goes out.
+  - `test_test_alert_endpoint_uses_the_same_path`: 200 `{"sent": true}` with the exact test text. When the fake returns 500, the endpoint returns 400 "Telegram didn't deliver it", with no token in it.
+- **The uptime checker end to end.** `ops/uptime/selftest.py` takes the workflow's own Check and Alert scripts and runs them 6 times. The state folder is kept between runs, the checks hit the real public endpoints, and `TG_API` points at a 127.0.0.1 fake. Result: **ALL PASS**.
+
+  | Runs | Situation | Messages sent |
+  |---|---|---|
+  | 1-2 | healthy | 0 |
+  | 3 | `unreachable.invalid:443` added as a proxy | 1, "Kiwi uptime: PROBLEM / proxy unreachable.invalid:443: CONNECT answered '000', expected 407" |
+  | 4 | same failure | 0 |
+  | 5 | failure removed | 1, "Kiwi uptime: recovered, every check passes again" |
+  | 6 | healthy | 0 |
+
+  The workflow's Telegram URL is now `${TG_API}`, which defaults to `https://api.telegram.org`.
+- **Workflow validation.** actionlint and shellcheck are not installed here, so the YAML was checked instead:
+  - The YAML parses (PyYAML), and `bash -n` passes on all three run blocks.
+  - Cron `*/30 * * * *` is valid; GitHub may delay a run by several minutes.
+  - Permissions were reduced to `contents: read`, since the `actions: write` was unnecessary for actions/cache.
+  - Concurrency group `kiwi-uptime` with `cancel-in-progress: false`, so runs never overlap.
+  - `timeout-minutes` was raised from 5 to 10, because the worst case with everything down is about 6 min.
+  - Save state runs `if: always()`. The last step exits 1 when a check failed, so GitHub e-mails the owner.
+
+### Follow-up test counts
+- TBM + TMD: **20 + 15 passed**.
+- The VPN, alerts, observability, audit-ops, migrations and backup set (`test_vpn*.py test_owner_alerts.py test_migrations.py test_audit_vpn_payments.py test_audit_ops.py test_observability.py test_backup_monitoring.py test_monitoring_delivery.py test_seo_edge_backup.py`): **302 passed**.
+- Full suite: **2633 passed, 5 failed**, the same 5 as before: the 4 known-unrelated ones plus `test_tg_trading`, which fails on main too (`/pnl` makes a real network call).
+
+### Still unproven
+- The real Railway bucket was not read, by design.
+- No delivery to real Telegram.
+- The workflow has not run on GitHub's runners: actions/cache persistence there, and `vars`/`secrets` resolution, are untested.
+- The restore test's run time and disk use on the production-size database are not measured.

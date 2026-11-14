@@ -20,8 +20,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
-  actions: write  # actions/cache: remembers what was failing last time, so a problem is announced once (re-sent every 6 h)
+  contents: read  # nothing else: actions/cache (the failure state between runs) needs no token permission to save/restore
 
 concurrency:
   group: kiwi-uptime
@@ -30,7 +29,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10  # worst case (everything down): ~3 GETs x 3 tries x 20 s + proxies + TLS, about 6 min
     env:
       SITE: https://pricechat.live
       API: https://api.pricechat.live
@@ -40,6 +39,7 @@ jobs:
       REMIND_HOURS: "6"
       TG_TOKEN: ${{ secrets.UPTIME_TELEGRAM_BOT_TOKEN }}
       TG_CHAT: ${{ secrets.UPTIME_TELEGRAM_CHAT_ID }}
+      TG_API: https://api.telegram.org  # ops/uptime/selftest.py points this at a local fake Bot API
     steps:
       - name: Restore last state
         uses: actions/cache/restore@v4
@@ -121,7 +121,7 @@ jobs:
               echo "::warning::UPTIME_TELEGRAM_BOT_TOKEN / UPTIME_TELEGRAM_CHAT_ID not set: alert not sent"
             else
               msg="$msg"$'\n'"Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-              if curl -sS -m 20 -o /dev/null -w "%{http_code}" "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+              if curl -sS -m 20 -o /dev/null -w "%{http_code}" "${TG_API}/bot${TG_TOKEN}/sendMessage" \
                    --data-urlencode "chat_id=${TG_CHAT}" --data-urlencode "text=${msg}" -d disable_web_page_preview=true | grep -q 200; then
                 echo "$now" > .uptime-state/sent_at
               else
