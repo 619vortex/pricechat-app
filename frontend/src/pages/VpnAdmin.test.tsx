@@ -244,7 +244,7 @@ describe("VPN admin", () => {
   });
 
   it("saves the free trial guards, only what changed", async () => {
-    const guards = { trial_one_per_identity: true, trial_min_account_age_hours: 24, trial_min_xp: 0, trial_per_ip_day: 3, trial_per_network_day: 10, sync_enforce_limits: false, count_pc_once: false };
+    const guards = { trial_guard_mode: "monitor" as const, trial_one_per_identity: true, trial_min_account_age_hours: 24, trial_min_xp: 0, trial_per_ip_day: 3, trial_per_network_day: 10, sync_enforce_limits: false, count_pc_once: false };
     let s = overview({ settings: { enabled: false, payments_enabled: false, max_devices: 3, monthly_cap_gb: 0, ...guards } });
     serve((key, body) => {
       if (key === "PUT /api/vpn/admin/settings") { s = { ...s, settings: { ...s.settings, ...JSON.parse(body!) } }; return [200, s.settings]; }
@@ -258,6 +258,27 @@ describe("VPN admin", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save trial rules" }));
     await flush();
     expect(calls).toContain('PUT /api/vpn/admin/settings {"trial_min_account_age_hours":48,"count_pc_once":true}');
+  });
+
+  it("shows the monitor counts and switches to enforce", async () => {
+    const guards = { trial_guard_mode: "monitor" as const, trial_one_per_identity: true, trial_min_account_age_hours: 24, trial_min_xp: 0, trial_per_ip_day: 3, trial_per_network_day: 10, sync_enforce_limits: false, count_pc_once: false };
+    const trial_signals = { counts: { account_too_new: { "7d": 4, "30d": 9 }, ip_limit: { "7d": 1, "30d": 2 } }, repeat_networks: 1, retention_days: 30,
+      recent: [{ code: "ip_limit", at: new Date().toISOString(), member_id: 12 }] };
+    let s = { ...overview({ settings: { enabled: false, payments_enabled: false, max_devices: 3, monthly_cap_gb: 0, ...guards } }), trial_signals };
+    serve((key, body) => {
+      if (key === "PUT /api/vpn/admin/settings") { s = { ...s, settings: { ...s.settings, ...JSON.parse(body!) } }; return [200, s.settings]; }
+      return [200, s];
+    });
+    render(<VpnAdminPage />);
+    await flush();
+    const box = screen.getByLabelText("Trial guard signals").textContent!;
+    expect(box).toContain("Passport too new: 4 / 9");
+    expect(box).toContain("Networks seen more than once: 1");
+    expect(box).toContain("(member #12)");
+    fireEvent.change(screen.getByLabelText("trial_guard_mode"), { target: { value: "enforce" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save trial rules" }));
+    await flush();
+    expect(calls).toContain('PUT /api/vpn/admin/settings {"trial_guard_mode":"enforce"}');
   });
 
   it("hides the trial guards for a backend without them", async () => {

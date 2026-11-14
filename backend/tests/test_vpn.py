@@ -274,7 +274,8 @@ def test_admin_routes(client: TestClient, db: Session, fake: FakeNode) -> None:
     o = client.get("/api/vpn/admin/overview").json()
     assert o["settings"] == {"enabled": False, "payments_enabled": False, "trial_enabled": True, "max_devices": 3, "monthly_cap_gb": 0,
                              "trial_one_per_identity": True, "trial_min_account_age_hours": 24, "trial_min_xp": 0, "trial_per_ip_day": 3,
-                             "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False} and "ranks" not in o
+                             "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False,
+                             "trial_guard_mode": "monitor"} and "ranks" not in o
     assert o["servers"][0]["online"] is True and o["servers"][0]["capacity"] == 50 and "agent_token" not in json.dumps(o)
     assert o["totals"] == {"devices": 0, "members": 0, "active_24h": 0}
     assert client.put("/api/vpn/admin/settings", json={"max_devices": 5, "enabled": True}).json() == \

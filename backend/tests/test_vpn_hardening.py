@@ -24,7 +24,7 @@ from app.members import service as members
 from app.members import xp as ledger
 from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.members import Member
-from app.models.vpn import VpnDevice, VpnTrialClaim
+from app.models.vpn import VpnDevice, VpnTrialClaim, VpnTrialSignal
 from app.security import client_ip
 from app.security.rate_limit import LIMITS
 from app.vpn import billing, reviewer, trial_guard
@@ -36,7 +36,8 @@ TRIAL = "/api/members/vpn/trial"
 
 
 def trial_on(db: Session, **over: Any) -> None:
-    open_vpn(db, payments_enabled=False, trial_enabled=True, **over)
+    """The trial on, with the guards enforced unless a test says otherwise (the default mode is "monitor")."""
+    open_vpn(db, payments_enabled=False, trial_enabled=True, **{"trial_guard_mode": "enforce", **over})
 
 
 def fresh(db: Session, name: str, email: str | None = None, age_days: float = 30) -> Member:
@@ -122,13 +123,23 @@ def _anon(db: Session) -> dict[str, str]:
 
 def test_anonymous_devices_are_also_limited_per_real_address(client: TestClient, db: Session, fake: FakeNode, edge: None) -> None:  # noqa: F811
     server = add_server(db, fake)
-    open_vpn(db, max_devices=10)
+    open_vpn(db, max_devices=10, trial_guard_mode="enforce")  # only when enforcing: monitor mode adds no limit main doesn't have
     per_ip = int(LIMITS["vpn_anon_ip"].burst)
     codes = []
     for k in range(3):  # three keys from one address: each key's own bucket (5) isn't the limit, the address is
         head = {**_anon(db), **direct("198.51.100.7")}
         codes += [client.post("/api/members/vpn/anon/devices", json={"name": f"k{k} {i}", "server_id": server.id}, headers=head).status_code for i in range(5)]
     assert codes == [201] * per_ip + [429] * (15 - per_ip)
+
+
+def test_monitor_mode_adds_no_per_address_device_limit(client: TestClient, db: Session, fake: FakeNode, edge: None) -> None:  # noqa: F811
+    server = add_server(db, fake)
+    open_vpn(db, max_devices=10)
+    codes = []
+    for k in range(3):
+        head = {**_anon(db), **direct("198.51.100.7")}
+        codes += [client.post("/api/members/vpn/anon/devices", json={"name": f"k{k} {i}", "server_id": server.id}, headers=head).status_code for i in range(5)]
+    assert codes == [201] * 15
 
 
 def test_website_visitors_on_shared_egress_are_not_limited_together(client: TestClient, db: Session, fake: FakeNode, edge: None) -> None:  # noqa: F811
@@ -262,9 +273,67 @@ def test_existing_trials_and_access_are_untouched(db: Session, fake: FakeNode) -
     assert len(fake.peers) == 1
 
 
+# --- guard modes: off / monitor (the default) / enforce ----------------------------------------------------------------
+
+
+def test_the_default_mode_is_monitor() -> None:
+    assert vpn.SETTINGS_DEFAULTS["trial_guard_mode"] == "monitor"
+
+
+def test_monitor_mode_never_refuses_but_records_what_enforce_would_have(client: TestClient, db: Session, edge: None) -> None:
+    open_vpn(db, payments_enabled=False, trial_enabled=True, trial_per_ip_day=1, trial_min_xp=100)
+    assert vpn.settings(db).trial_guard_mode == "monitor"
+    first = fresh(db, "first", "dup@example.com")
+    assert as_member(client, db, first).post(TRIAL, headers=direct("203.0.113.5")).status_code == 200
+    members.delete_member(db, first)
+    twin = fresh(db, "twin", "dup@example.com", age_days=0.1)  # same email, 2 hours old, no XP, same address
+    c = as_member(client, db, twin)
+    me = c.get("/api/members/vpn").json()
+    assert me["trial"] == {"available": True, "days": 30, "code": None, "reason": None} and me["reason"] == vpn.START_TRIAL
+    assert c.post(TRIAL, headers=direct("203.0.113.5")).status_code == 200  # enforce would have refused it four ways
+    rows = db.scalars(select(VpnTrialSignal).order_by(VpnTrialSignal.id)).all()
+    assert [(r.code, r.member_id) for r in rows[:1]] == [("needs_xp", None)]  # the first start: its member deleted since (SET NULL)
+    rows = rows[1:]
+    by_code = {r.code: r for r in rows}
+    assert set(by_code) == {"needs_xp", "identity_used", "account_too_new", "ip_limit"} and all(r.member_id == twin.id for r in rows)
+    assert by_code["ip_limit"].net_hash == trial_guard.network_hash("203.0.113.5") and "203.0.113" not in by_code["ip_limit"].net_hash
+    assert by_code["identity_used"].net_hash is None
+    assert trial_guard.used_identity(db, twin) == "email address"  # claims still written: enforcing later works
+    sig = client.get("/api/vpn/admin/overview").json()["trial_signals"]
+    assert sig["counts"]["identity_used"] == {"7d": 1, "30d": 1} and sig["counts"]["needs_xp"]["30d"] == 2
+    assert sig["recent"][0]["member_id"] == twin.id and sig["retention_days"] == 30
+    assert untouched("vpn_trial") is False  # successful starts are charged as on main
+
+
+def test_monitor_rows_expire(db: Session) -> None:
+    from app.models.vpn import VpnTrialSignal as Row
+    old = Row(member_id=None, code="needs_xp", created_at=utcnow() - dt.timedelta(days=31))
+    db.add(old)
+    db.commit()
+    trial_guard.record_signals(db, None, ["account_too_new"], None)  # type: ignore[arg-type]
+    db.commit()
+    assert [r.code for r in db.scalars(select(Row))] == ["account_too_new"]
+
+
+def test_off_mode_evaluates_nothing_but_still_remembers_trials(client: TestClient, db: Session, edge: None) -> None:
+    open_vpn(db, payments_enabled=False, trial_enabled=True, trial_guard_mode="off", trial_per_ip_day=1)
+    a = fresh(db, "off-a", "same@example.com", age_days=0)
+    assert as_member(client, db, a).post(TRIAL, headers=direct("203.0.113.5")).status_code == 200
+    members.delete_member(db, a)
+    b = fresh(db, "off-b", "same@example.com", age_days=0)
+    assert as_member(client, db, b).post(TRIAL, headers=direct("203.0.113.5")).status_code == 200
+    assert db.scalar(select(VpnTrialSignal.id)) is None and trial_guard.used_identity(db, b) == "email address"
+    vpn.update_settings(db, {"trial_guard_mode": "enforce"})
+    members.delete_member(db, b)
+    c = fresh(db, "off-c", "same@example.com")
+    assert as_member(client, db, c).post(TRIAL, headers=direct("198.51.100.1")).headers["X-Kiwi-Reason"] == "identity_used"
+
+
 def test_trial_guard_settings_are_validated(client: TestClient, db: Session) -> None:
     assert client.put("/api/vpn/admin/settings", json={"trial_min_account_age_hours": -1}).status_code == 422
     assert client.put("/api/vpn/admin/settings", json={"trial_per_ip_day": 1001}).status_code == 422
+    assert client.put("/api/vpn/admin/settings", json={"trial_guard_mode": "strict"}).status_code == 422
+    assert client.put("/api/vpn/admin/settings", json={"trial_guard_mode": "enforce"}).json()["trial_guard_mode"] == "enforce"
     out = client.put("/api/vpn/admin/settings", json={"trial_min_xp": 50, "trial_per_network_day": 0, "trial_one_per_identity": False}).json()
     assert out["trial_min_xp"] == 50 and out["trial_per_network_day"] == 0 and out["trial_one_per_identity"] is False
     assert out["payments_enabled"] is False  # untouched

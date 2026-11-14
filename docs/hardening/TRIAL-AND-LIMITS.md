@@ -21,7 +21,46 @@ shared site-wide backstop, so only accounts that would actually succeed can drai
 | Telegram `/vpn add` | `device_precheck` | `vpn_device` |
 
 The anonymous-device bucket is keyed by client address only when the address is real (see "Real address" below). That
-way website visitors who share Vercel's egress addresses are never limited together.
+way website visitors who share Vercel's egress addresses are never limited together. The per-address `vpn_anon_ip`
+bucket applies **only in `enforce` mode**, so in `monitor` and `off` modes no request is refused or charged that main
+wouldn't refuse or charge. The check-then-charge ordering itself is a fix and stays on in every mode.
+
+### Trial guard modes (`trial_guard_mode`)
+The owner wants the restrictions off at first. Every M4 guard below runs under one switch. The default is **`monitor`**,
+both for new settings rows and for the existing row (set by migration 0113's server default).
+
+| Mode | Guards evaluated | Refuses | Records would-be refusals | Writes `vpn_trial_claims` | Counts starts for the address throttle |
+|---|---|---|---|---|---|
+| `off` | no | no | no | **yes** (see below) | no |
+| `monitor` (default) | all: identity, age, XP, per address, per /24 | **never** | yes, in `vpn_trial_signals` | yes | yes |
+| `enforce` | all | yes, with the reasons below | no | yes | yes |
+
+- **What monitor records.** One `vpn_trial_signals` row for each guard that would have refused a trial start that went
+  through. Each row holds:
+  - `code`: `identity_used`, `account_too_new`, `needs_xp`, `ip_limit` or `network_limit`;
+  - the time (`created_at`);
+  - `member_id` (set to NULL if the member is deleted);
+  - for `ip_limit` and `network_limit` only, `net_hash`: a salted SHA-256 of the caller's IPv4 /24 or IPv6 /48. This is
+    enough to spot many starts from one network, such as CGNAT or an office. **No IP address is stored**, not even
+    truncated.
+
+  Rows older than **30 days** are deleted whenever a new row is written. The address counters themselves stay in memory
+  only, as before.
+- **Why `off` still writes claims.** Writing claims refuses nobody. It only records "this identity has had a trial". If
+  `off` skipped it, every trial started while the guards were off would be invisible to `enforce` later. That is the
+  only thing `off` writes.
+- **Users see nothing in `monitor`.** `GET /members/vpn` reports the trial as available whenever only the guards would
+  object, and the apps keep showing "Start your free trial". The only refusals are main's own: trial off or closed,
+  already used, already has access, blocked.
+- **Switching to enforce later:**
+  1. Check the counts in the Admin card. Watch especially "networks seen more than once" and the `ip_limit` and
+     `network_limit` counts, since those show shared addresses that would be false positives.
+  2. Set the thresholds.
+  3. Pick **Enforce** in Admin › Kiwi VPN › "Free trial guards" and save. Or send
+     `PUT /api/vpn/admin/settings {"trial_guard_mode": "enforce"}`.
+
+  It takes effect on the next trial start. No migration or deploy is needed, and existing trials are untouched. Trials
+  started while in `monitor` or `off` mode already have their claims, so their identities can't start a second one.
 
 ### M4: one free trial per person
 - **One trial per verified identity** (`trial_one_per_identity`, default **on**). The table `vpn_trial_claims` keeps a
@@ -111,7 +150,13 @@ The review account's trial is marked used (and over), and its email is added to 
 
 ### Admin
 Admin › Kiwi VPN has a new card, "Free trial guards and device rules", with every setting above. It saves only what
-changed, and it is hidden if the backend doesn't send these fields. All the settings are also accepted by
+changed, and it is hidden if the backend doesn't send these fields. The card shows:
+- the mode selector (Off, Monitor only, Enforce);
+- "Would have been refused": a count per reason for the last 7 and 30 days;
+- "Networks seen more than once": the number of distinct hashed /24s with more than one `ip_limit` or `network_limit` row;
+- the 10 most recent rows, each with its time, reason and member number.
+
+The card's data comes from `trial_signals` in `GET /api/vpn/admin/overview`, which also lists the 20 latest rows. All the settings are also accepted by
 `PUT /api/vpn/admin/settings`, with the following ranges:
 
 | Setting | Range |
@@ -125,7 +170,8 @@ changed, and it is hidden if the backend doesn't send these fields. All the sett
 
 | Setting | Default | Owner decides |
 |---|---|---|
-| `trial_one_per_identity` | on | Keep on (recommended). |
+| `trial_guard_mode` | **monitor** | Nobody is refused by the guards. Switch to `enforce` once the counts look right (see "Trial guard modes"). |
+| `trial_one_per_identity` | on | Takes effect only in `enforce`; keep on (recommended). |
 | `trial_min_account_age_hours` | 24 | A brand-new Passport waits a day for its trial and sees why. Lower it (or set 0) if that hurts sign-ups more than abuse. |
 | `trial_min_xp` | 0 (off) | Optional extra gate, e.g. 50 XP. |
 | `trial_per_ip_day` / `trial_per_network_day` | 3 / 10 | Works only once the website reports real visitors (PROXY_SHARED_SECRET valid in Railway **and** Vercel). Until then it limits only app and extension callers. |
@@ -134,30 +180,40 @@ changed, and it is hidden if the backend doesn't send these fields. All the sett
 | Website "also delete devices" (L8) | unticked | Keep opt-in. |
 
 ## Tests
-- Backend: new `tests/test_vpn_hardening.py`, **25 tests**: M1 ×5, M4 ×12 including the migration backfill, L6 ×2,
-  L7 ×2, L8 ×1, L9 ×2, I4 ×1.
+- Backend: new `tests/test_vpn_hardening.py`, **30 tests**:
+  - M1 ×6, including "monitor adds no per-address device limit";
+  - M4 ×12, including the migration backfill; these run in `enforce` mode;
+  - modes ×4: the default is monitor; monitor never refuses but records (a member enforce would refuse four ways gets
+    a trial, with four rows recorded and claims written); monitor rows expire after 30 days; `off` records nothing,
+    still writes claims, and `enforce` later honours them;
+  - L6 ×2, L7 ×2, L8 ×1, L9 ×2, I4 ×1.
 - Existing tests updated for the new behaviour:
   - refusals are no longer charged (`test_vpn.py::test_device_limit_and_offline_server`, `test_vpn_rate_limit.py::test_the_trial_does_not_drain_the_device_bucket`);
   - new settings and trial fields (`test_vpn.py::test_admin_routes`, `test_vpn_desktop.py`, `test_vpn_plans.py`);
   - `member_at` backdates `created_at` by 30 days.
-- VPN group (`test_vpn*.py`, `test_audit_vpn_payments.py`, `test_client_ip.py`, `test_migrations.py`): **247 passed**
-  (222 before the branch, plus 25 new). With `test_members.py`: **281 passed**.
-- Full backend suite: **2608 passed, 5 failed** (11 min), see below.
-- Frontend (`npm ci`, `npx vitest run`, `npx tsc -b`): **507 passed** (58 files), tsc clean. Three new tests: Admin
-  guards save only what changed, the card is hidden on an old backend, and the website checkbox sends `remove_devices`.
+- VPN group (`test_vpn*.py`, `test_audit_vpn_payments.py`, `test_client_ip.py`, `test_migrations.py`): **252 passed**
+  (222 before the branch, plus 30 new).
+- Full backend suite: **2613 passed, 5 failed** (10 min), see below.
+- Frontend (`npm ci`, `npx vitest run`, `npx tsc -b`): **508 passed** (58 files), tsc clean. Four new tests:
+  - the Admin guards card saves only what changed;
+  - it shows the monitor counts and switches to enforce;
+  - it is hidden on an old backend;
+  - the website checkbox sends `remove_devices`.
 
 ## Deploy steps
 1. **Back up the production database first** (the audit's O1: backups were failing; take and verify a manual copy).
-2. **Rechain the migration.** 0113's `down_revision` is `0111_vpn_server_traffic_allowance`. Another branch adds 0112: if
-   0112 is merged first, change 0113's `down_revision` to 0112's revision ID so there is one head (`alembic heads`).
+2. **Rechain the migration.** On this branch 0113's `down_revision` is `0111_vpn_server_traffic_allowance`. On
+   `release/kiwi-hardening` it is already `0112_vpn_server_checks`, so keep that when merging. There must be one head
+   (`alembic heads`).
 3. Deploy the backend (Railway). Migration 0113 runs at startup:
    - adds `vpn_trial_claims` and backfills it;
-   - adds the settings columns, with the defaults above;
+   - adds `vpn_trial_signals`;
+   - adds the settings columns, with the defaults above (`trial_guard_mode` = `monitor`);
    - adds `vpn_devices.created_via`;
    - binds the existing reviewer.
 4. Deploy the frontend (Vercel) for the Admin card and the website checkbox. The backend works without it.
-5. Check Admin › Kiwi VPN › "Free trial guards" shows the defaults. Optionally confirm that a 6-hour-old test Passport
-   gets "Free trials open once…".
+5. Check Admin › Kiwi VPN › "Free trial guards" shows **Monitor only** and the defaults. A 6-hour-old test Passport
+   still gets its trial, and an `account_too_new` count appears in the card.
 6. Leave `sync_enforce_limits` and `count_pc_once` off unless the owner decides otherwise.
 
 ## Rollback
@@ -166,13 +222,13 @@ back means **old code plus this migration file**. Two options:
 - **Keep the schema.** Deploy the previous code with `backend/migrations/versions/0113_vpn_trial_guards.py` added. The
   extra columns and table are ignored by the old models. No data is lost, and redeploying this branch later is instant.
 - **Remove the schema.** With this branch's code still deployed, run `alembic downgrade 0111_vpn_server_traffic_allowance`.
-  This drops the claims table, the settings columns and `created_via`, and the trial claims are lost. Then deploy the
+  This drops the claims and signals tables, the settings columns and `created_via`, and the trial claims are lost. Then deploy the
   old code.
 
 Restoring the backup also works, but loses everything written since.
 
 ## Full-suite result
-`pytest tests` on this branch, 2026-11-14: **2608 passed, 5 failed**. None of the failures involve Kiwi VPN:
+`pytest tests` on this branch, 2026-11-14 (with the guard modes): **2613 passed, 5 failed**. None of the failures involve Kiwi VPN:
 - `test_community`, `test_lunch_bot`, `test_trading_execution` and `test_trends` are on the known-unrelated list.
 - `test_tg_trading::test_positions_orders_balance_and_settings` also fails when run on its own, because `/pnl` makes a
   live network lookup (`getaddrinfo failed`) on this PC. This branch's only change to `tradingos/bot.py` is in `/vpn add`.

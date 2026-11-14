@@ -11,10 +11,11 @@ import "./VpnAdmin.css";
 export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number } & Partial<TrialGuards>;
 /** Free-trial abuse guards and the opt-in sync rules (backend app/vpn/trial_guard.py, docs/hardening/TRIAL-AND-LIMITS.md). Numbers: 0 = that check off. */
 export type TrialGuards = {
+  trial_guard_mode: "off" | "monitor" | "enforce";
   trial_one_per_identity: boolean; trial_min_account_age_hours: number; trial_min_xp: number; trial_per_ip_day: number; trial_per_network_day: number;
   sync_enforce_limits: boolean; count_pc_once: boolean;
 };
-const GUARD_KEYS = ["trial_one_per_identity", "trial_min_account_age_hours", "trial_min_xp", "trial_per_ip_day", "trial_per_network_day", "sync_enforce_limits", "count_pc_once"] as const;
+const GUARD_KEYS = ["trial_guard_mode", "trial_one_per_identity", "trial_min_account_age_hours", "trial_min_xp", "trial_per_ip_day", "trial_per_network_day", "sync_enforce_limits", "count_pc_once"] as const;
 export type VpnAdminServer = { id: number; name: string; region: string; country_code: string; endpoint_host: string | null; listen_port: number | null;
   agent_url: string; capacity: number; enabled: boolean; online: boolean; last_seen: string | null; last_error: string | null; devices: number; active_24h: number;
   adblock: boolean; /** its browser proxy's public name; empty = none */ proxy_host?: string;
@@ -28,7 +29,15 @@ export function trafficText(bytes = 0, includedGb = 0): string {
   return includedGb > 0 ? `${used} GB of ${includedGb.toLocaleString("en-US")} GB (${Math.round((gb / includedGb) * 100)}%)` : `${used} GB this month`;
 }
 export type VpnOverview = { settings: VpnSettings; servers: VpnAdminServer[]; totals: { devices: number; members: number; active_24h: number };
-  billing?: { paying: number; anonymous: number; revenue_30d_usd: number; usdt: boolean; card: boolean } };
+  billing?: { paying: number; anonymous: number; revenue_30d_usd: number; usdt: boolean; card: boolean };
+  trial_signals?: TrialSignals };
+/** Monitor mode: trial starts the guards would have refused (backend app/vpn/trial_guard.signals_out). */
+export type TrialSignals = { counts: Record<string, { "7d": number; "30d": number }>; repeat_networks: number; retention_days: number;
+  recent: { code: string; at: string; member_id: number | null }[] };
+const SIGNAL_LABELS: Record<string, string> = {
+  identity_used: "Email or linked account already had a trial", account_too_new: "Passport too new", needs_xp: "Not enough XP",
+  ip_limit: "Too many from one address", network_limit: "Too many from one network (/24)",
+};
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -128,7 +137,7 @@ function pickGuards(s: VpnSettings): TrialGuards {
   return Object.fromEntries(GUARD_KEYS.map((k) => [k, s[k]])) as TrialGuards;
 }
 
-function TrialGuardsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }) {
+function TrialGuardsCard({ s, signals, onSaved }: { s: VpnSettings; signals?: TrialSignals; onSaved: () => void }) {
   const [v, setV] = useState<TrialGuards>(pickGuards(s));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -156,6 +165,26 @@ function TrialGuardsCard({ s, onSaved }: { s: VpnSettings; onSaved: () => void }
   return (
     <Card title="Free trial guards and device rules">
       <div className="form">
+        <Field label="Trial guards" hint="Monitor: checked and counted below, nobody is refused. Enforce: refused with the reason. Off: not checked.">
+          <select className="input" aria-label="trial_guard_mode" value={v.trial_guard_mode ?? "monitor"}
+                  onChange={(e) => setV({ ...v, trial_guard_mode: e.target.value as TrialGuards["trial_guard_mode"] })}>
+            <option value="off">Off</option>
+            <option value="monitor">Monitor only</option>
+            <option value="enforce">Enforce</option>
+          </select>
+        </Field>
+        {signals && (
+          <div className="small" aria-label="Trial guard signals">
+            <p><b>Would have been refused</b> (last 7 / 30 days, kept {signals.retention_days} days):</p>
+            {Object.keys(signals.counts).length === 0 ? <p>None yet.</p> : (
+              <ul>{Object.entries(signals.counts).map(([code, n]) => <li key={code}>{SIGNAL_LABELS[code] ?? code}: {n["7d"]} / {n["30d"]}</li>)}</ul>
+            )}
+            {signals.repeat_networks > 0 && <p>Networks seen more than once: {signals.repeat_networks} (shared mobile or office networks show up here)</p>}
+            {signals.recent.length > 0 && (
+              <ul>{signals.recent.slice(0, 10).map((r, i) => <li key={i}>{relativeTime(r.at)}: {SIGNAL_LABELS[r.code] ?? r.code}{r.member_id ? ` (member #${r.member_id})` : ""}</li>)}</ul>
+            )}
+          </div>
+        )}
         {box("trial_one_per_identity", "One free trial per email, Google, X or Telegram account (even after the account is deleted)")}
         <div className="row-fields">
           <Field label="Passport age before a trial (hours)" hint="0 = off.">{num("trial_min_account_age_hours", 2160)}</Field>
@@ -630,7 +659,7 @@ export function VpnAdminPage() {
           )}
           <MakeDevice servers={d.servers} onMade={r.reload} />
           <LimitsCard s={d.settings} onSaved={() => void r.reload()} />
-          {d.settings.trial_min_account_age_hours !== undefined && <TrialGuardsCard s={d.settings} onSaved={() => void r.reload()} />}
+          {d.settings.trial_min_account_age_hours !== undefined && <TrialGuardsCard s={d.settings} signals={d.trial_signals} onSaved={() => void r.reload()} />}
         </>}
         {tab === "servers" && <>
         <Card title={`Servers (${d.servers.length})`}>
