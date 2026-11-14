@@ -148,7 +148,7 @@ describe("brand and community", () => {
     const { container } = await renderSite(<Website />);
     const perk = container.querySelector("#community .site-vpnperk")!;
     expect(perk.querySelector("h3")!.textContent).toContain("Kiwi VPN");
-    expect([...perk.querySelectorAll("li b")].map((b) => b.textContent)).toEqual(["Your address stays hidden", "We don't log the sites you visit", "30-day free trial"]);
+    expect([...perk.querySelectorAll("li b")].map((b) => b.textContent)).toEqual(["Your address stays hidden", "We don't keep a history of the sites you visit", "30-day free trial"]);
     expect(perk.querySelector("a")!.getAttribute("href")).toBe("/vpn");
   });
 

@@ -1082,6 +1082,19 @@ describe("The redesigned page", () => {
     expect(screen.getByRole("link", { name: "See pricing" }).getAttribute("href")).toBe("/vpn#vpn-plans");
   });
 
+  it("answers the logs question honestly: names the DNS resolvers and links the policies, acceptable use included", async () => {
+    serve(member({ billing: BILL }));
+    const { container } = render(<VpnPage />);
+    await settle();
+    const faq = container.querySelector("#vpn-faq")!;
+    expect(faq.textContent).toMatch(/We don't keep a history of the websites you visit or the content of your traffic/);
+    expect(faq.textContent).toMatch(/Cloudflare \(1\.1\.1\.1\) for WireGuard devices on some servers/);
+    expect(faq.textContent).toMatch(/hosting provider's resolvers for the browser extension/);
+    expect(container.textContent).not.toMatch(/We don't log|your DNS lookups or the content/i);
+    expect(container.querySelector(".vpn-hero")!.textContent).toMatch(/We don't keep a history of the sites you visit/);
+    expect([...faq.querySelectorAll(".vpn-help a")].map((a) => a.getAttribute("href"))).toContain("/vpn/acceptable-use");
+  });
+
   it("makes no over-claim about privacy or the private key on the page", async () => {
     serve(member({ billing: BILL }));
     const { container } = render(<VpnPage />);
