@@ -10,7 +10,8 @@ const [python, browser, shots] = process.argv.slice(2);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failed = 0;
-const check = (name, ok, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${extra}`}`); if (!ok) failed++; };
+const t0 = Date.now();
+const check = (name, ok, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : `  ${extra}`}  [${((Date.now() - t0) / 1000).toFixed(0)} s]`); if (!ok) failed++; };
 
 // ----- the servers -----
 const servers = spawn(python, [join(HERE, "servers.py")], { stdio: ["ignore", "pipe", "inherit"] });
@@ -42,7 +43,7 @@ async function launch() {
 }
 async function quit() {
   const gone = new Promise((r) => { if (proc.exitCode != null) r(); else proc.once("exit", r); });
-  await pipe("Browser.close", {}).catch(() => undefined);
+  await Promise.race([pipe("Browser.close", {}), sleep(5000)]);
   await Promise.race([gone, sleep(8000)]);
   if (proc.exitCode == null) { proc.kill(); await sleep(1000); }
 }
@@ -73,7 +74,12 @@ class Tab {
   }
   send(method, params = {}) {
     const id = ++this.n;
-    return new Promise((res) => { this.wait.set(id, res); this.ws.send(JSON.stringify({ id, method, params })); });
+    // a DevTools call that never answers fails that check instead of hanging the whole run
+    return new Promise((res) => {
+      const timer = setTimeout(() => { this.wait.delete(id); console.log(`      (no answer in 30 s: ${method} ${JSON.stringify(params).slice(0, 160)})`); res({ timeout: true }); }, 30000);
+      this.wait.set(id, (m) => { clearTimeout(timer); res(m); });
+      this.ws.send(JSON.stringify({ id, method, params }));
+    });
   }
   async eval(expression) {
     const r = await this.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -87,8 +93,10 @@ class Tab {
   async html() { return (await this.eval("document.body ? document.body.innerHTML : ''")) ?? ""; }
   async shot(name) {
     if (!shots) return;
+    await this.send("Page.bringToFront"); // a background tab may never paint a frame to capture
     const r = await this.send("Page.captureScreenshot", { format: "png" });
-    writeFileSync(join(shots, name), Buffer.from(r.result.data, "base64"));
+    if (r.result?.data) writeFileSync(join(shots, name), Buffer.from(r.result.data, "base64"));
+    else console.log(`      (no screenshot for ${name})`);
   }
   close() { this.ws.close(); return fetch(`http://127.0.0.1:${port}/json/close/${this.id}`); }
 }
