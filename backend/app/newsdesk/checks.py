@@ -115,9 +115,10 @@ def unsupported_tickers(text: str, source_text: str) -> list[str]:
     return [tag for tag in tags if tag not in ok and not re.search(rf"(?<![\w$])\$?{tag[1:]}\b", src)]
 
 
-def final_gate(text: str, source_text: str, chart_symbol: str = "") -> list[str]:
+def final_gate(text: str, source_text: str, chart_symbol: str = "", *, wire: bool = False) -> list[str]:
     """The last check on what actually goes out, after every formatting step (cashtags, credits, labels): the problems, or [] to send.
-    A hard gate, whatever wrote the words (the desk's writer, a person, the viral hooks) and whatever the story's score."""
+    A hard gate, whatever wrote the words (the desk's writer, a person, the viral hooks) and whatever the story's score.
+    wire: the wire style (app/newsdesk/wire) also holds hype and superlatives the sources don't support (wording_problems), on top."""
     from app.newsdesk import clean
 
     problems = []
@@ -128,7 +129,56 @@ def final_gate(text: str, source_text: str, chart_symbol: str = "") -> list[str]
     if tag and tag not in {t for _, t in clean.established(source_text or "")} and not re.search(rf"\b{tag[1:]}\b", source_text or ""):
         problems.append(f"a {tag} price chart the sources don't establish")
     problems += claim_problems(story_of(text), source_text)
+    if wire:
+        problems += wording_problems(story_of(text), source_text)
     return problems
+
+
+# The wire style's wording rules (owner, 2026-11-14: no "massive", "huge", "explodes" unless the figures support it; no unsupported
+# superlatives). Deterministic: a word passes only on the sources' own use of it (and, for intensity words, a figure in the same sentence).
+INTENSE = re.compile(r"\b(massive(?:ly)?|huge(?:ly)?|enormous(?:ly)?|gigantic|colossal|monster|mega|stunning(?:ly)?|shock(?:ing|ingly)?|explod(?:e|es|ed|ing)|"
+                     r"explosive|skyrocket(?:s|ed|ing)?|rocket(?:s|ed|ing)|moon(?:s|ed|ing)|bloodbath|carnage|meltdown|frenzy|mania|insane(?:ly)?|crazy|"
+                     r"wild(?:ly)?|epic|nuked?)\b", re.I)
+SUPERLATIVE = re.compile(r"\b(record(?:-breaking|-high|-low)?|all-time|biggest|largest|highest|lowest|worst|best|fastest|steepest|sharpest|deepest|"
+                         r"strongest|weakest|first[- ]ever|ever|unprecedented|historic|never before)\b", re.I)
+MOVE_WORDS = re.compile(r"\b(crash(?:es|ed|ing)?|plung(?:e|es|ed|ing)|plummet(?:s|ed|ing)?|soar(?:s|ed|ing)?|surg(?:e|es|ed|ing)|spik(?:e|es|ed)|"
+                        r"tank(?:s|ed|ing)?|collaps(?:e|es|ed|ing)|tumbl(?:e|es|ed|ing)|slump(?:s|ed|ing)?)\b", re.I)
+
+
+def _word_rx(word: str) -> str:
+    """The word's family as a pattern: 'plunges' matches plunge/plunged/plunging; a word with no suffix matches only itself ('ever' is not
+    'every')."""
+    w = re.escape(word.lower()).replace(r"\ ", "[- ]").replace("\\-", "[- ]")
+    for suffix in ("ingly", "ing", "ed", "es", "ly", "s", "e"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 4:
+            return rf"\b{w[: -len(suffix)]}\w*"
+    return rf"\b{w}\b"
+
+
+def _sources_use(word: str, source_text: str) -> bool:
+    return bool(re.search(_word_rx(word), source_text or "", re.I))
+
+
+def wording_problems(story: str, source_text: str) -> list[str]:
+    """Hype, superlatives and loaded move words the sources don't support. Per sentence: an intensity word needs the sources' own word AND
+    a figure in the sentence; a superlative needs the sources' own word; a crash/plunge/soar word needs a figure in the sentence or the
+    sources' own word."""
+    from app.newsdesk.telegram import sentences as _sents
+
+    out: list[str] = []
+    parts = [s for p in re.split(r"\n\s*\n", story or "") for s in (_sents(p) or [p])]
+    for s in parts:
+        figure = bool(re.search(r"\d", s))
+        for m in INTENSE.finditer(s):
+            if not (_sources_use(m.group(0), source_text) and figure):
+                out.append(f"hype the figures don't support: {m.group(0)}")
+        for m in SUPERLATIVE.finditer(s):
+            if not _sources_use(m.group(0), source_text):
+                out.append(f"a superlative no source uses: {m.group(0)}")
+        for m in MOVE_WORDS.finditer(s):
+            if not figure and not _sources_use(m.group(0), source_text):
+                out.append(f"a loaded move word without a figure: {m.group(0)}")
+    return list(dict.fromkeys(out))
 
 
 # what a caption carries besides the story: the sources line, the photo credit, the signature (their names and numbers aren't claims)

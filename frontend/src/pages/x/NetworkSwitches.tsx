@@ -7,7 +7,15 @@ import { ApiErrorBanner, Badge, Card } from "../../components/ui";
  * its own; these are the owner's controls: an emergency pause for Telegram and X together, and source links in X posts. */
 
 export type NetworkState = { x_links: boolean; x_cost_per_post_usd: number; emergency: boolean; x_paused: string; telegram_paused: string;
-  post_style?: "clean" | "classic" };
+  post_style?: PostStyle };
+
+export type PostStyle = "wire" | "clean" | "classic";
+
+const STYLES: { id: PostStyle; name: string; hint: string }[] = [
+  { id: "wire", name: "Wire", hint: "Short factual headline, BREAKING / JUST IN / UPDATE only when earned, real chart for big moves, text-only otherwise; sources and @thepricechat on one line" },
+  { id: "clean", name: "Clean", hint: "Picture first (real photo, photo + chart, chart, or a labelled AI illustration), 1-3 sentences, sources, @thepricechat" },
+  { id: "classic", name: "Classic", hint: "The older layout: headline on the picture, caption with byline and why it matters" },
+];
 
 export function NetworkSwitches() {
   const { data, failure, reload } = useApi(() => request<NetworkState>("/x/newsdesk/network"), 30000);
@@ -37,17 +45,18 @@ export function NetworkSwitches() {
         <span className="small muted">${data.x_cost_per_post_usd.toFixed(3)} per X post ({data.x_links ? "X charges $0.20 for a post with a link" : "named sources only"})</span>
         <button className="btn btn-sm" disabled={busy} onClick={() => void put({ x_links: !data.x_links })}>{data.x_links ? "Turn links off" : "Turn links on"}</button>
       </div>
-      {data.post_style ? (
-        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
-          <span>Post style: <strong>{data.post_style === "clean" ? "Clean" : "Classic"}</strong></span>
-          <span className="small muted">{data.post_style === "clean"
-            ? "Picture first (real photo, photo + chart, chart, or a labelled AI illustration), 1-3 sentences, sources, @thepricechat"
-            : "The older layout: headline on the picture, caption with byline and why it matters"}</span>
-          <button className="btn btn-sm" disabled={busy} onClick={() => void put({ post_style: data.post_style === "clean" ? "classic" : "clean" })}>
-            {data.post_style === "clean" ? "Use classic" : "Use clean"}
-          </button>
-        </div>
-      ) : null}
+      {data.post_style ? (() => {
+        const current = STYLES.find((x) => x.id === data.post_style) ?? STYLES[0];
+        return (
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+            <span>Post style: <strong>{current.name}</strong></span>
+            <span className="small muted">{current.hint}</span>
+            {STYLES.filter((x) => x.id !== current.id).map((x) => (
+              <button key={x.id} className="btn btn-sm" disabled={busy} onClick={() => void put({ post_style: x.id })}>Use {x.name.toLowerCase()}</button>
+            ))}
+          </div>
+        );
+      })() : null}
       {!data.emergency && (data.x_paused || data.telegram_paused) ? (
         <p className="small muted">Lane pauses: {[data.x_paused && `X: ${data.x_paused}`, data.telegram_paused && `Telegram: ${data.telegram_paused}`].filter(Boolean).join(" · ")}</p>
       ) : null}

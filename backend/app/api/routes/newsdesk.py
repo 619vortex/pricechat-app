@@ -133,7 +133,7 @@ class NetworkInput(StrictInput):
     emergency: bool | None = None  # stop Telegram and X at once until turned off
     data_posts: bool | None = None  # Viral Engine 2.0: data posts and the daily MARKETS GONE MAD
     experiments: bool | None = None  # Viral Engine 2.0: about one story in five tries its runner-up factual hook
-    post_style: Literal["clean", "classic"] | None = None  # clean: the picture speaks, a short caption, @thepricechat; classic: the older layout
+    post_style: Literal["wire", "clean", "classic"] | None = None  # wire: short factual headlines, earned tags, real charts or text only; clean: picture first; classic: the older layout
 
 
 @router.get("/network")

@@ -484,7 +484,7 @@ def local_copy(ev: Any) -> Copy | None:
     return c
 
 
-async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport: Any = None) -> Copy:
+async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport: Any = None, extra: Any = None) -> Copy:
     """The words, from the first writer whose draft passes every check: the GPU PC's local model (written with the picture, no API cost,
     fact-checked there by a second pass), then the Anthropic model when a key exists, then the desk's own from the outlets' sentences
     (checked too: a part that fails is dropped)."""
@@ -494,7 +494,7 @@ async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport
     rejected: list[str] = []
 
     def check(c: Copy) -> list[str]:
-        return verify_copy(c, src) + viral.draft_problems(ev, c, rows)
+        return verify_copy(c, src) + viral.draft_problems(ev, c, rows) + (list(extra(c, src)) if extra is not None else [])
 
     named = " ".join([getattr(ev, "summary", "") or "", *[getattr(r, "summary", "") or "" for r in rows or []]])  # sentence-case text: where names show
     drafted = local_copy(ev)
@@ -524,7 +524,7 @@ async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport
     c = desk_copy(ev)
     c.rejected = rejected
     for part in ("stakes", "context"):
-        if verify_copy(c, src):
+        if verify_copy(c, src) or (extra is not None and extra(c, src)):
             setattr(c, part, "")
     return c
 
@@ -651,14 +651,31 @@ def x_links_on(state: dict[str, Any] | None) -> bool:
     return (state or {}).get("x_links") is not False
 
 
-STYLES = ("clean", "classic")
-DEFAULT_STYLE = "clean"  # tests of the classic layout set "classic"
+STYLES = ("wire", "clean", "classic")
+# owner, 2026-11-14: the wire style (app/newsdesk/wire) by default; Admin switches back to clean or classic. Tests of the classic layout
+# set "classic" (tests/conftest.py), the clean and wire tests their own.
+DEFAULT_STYLE = "wire"
 
 
 def post_style(state: dict[str, Any] | None) -> str:
-    """clean (owner, 2026-11-12: the picture speaks, a short caption, @thepricechat) unless Admin set the older classic layout back."""
+    """wire (owner, 2026-11-14: short factual headlines, earned tags, real charts or text only) unless Admin chose clean (2026-11-12: the
+    picture speaks, a short caption, @thepricechat) or the older classic layout."""
     s = str((state or {}).get("post_style") or DEFAULT_STYLE)
     return s if s in STYLES else DEFAULT_STYLE
+
+
+def _wire_draft_problems(c: Copy, source_text: str) -> list[str]:
+    """The wire style refuses a draft whose words it would have to hold later: hype or superlatives the sources don't support, or a
+    cashtag the sentence would get that the sources don't establish (the final gate holds both again on the caption as sent)."""
+    from app.newsdesk import clean
+
+    words = " ".join(x for x in (c.headline, c.context, c.stakes) if x)
+    problems = checks.wording_problems(words, source_text)
+    tagged = " ".join(clean.cashtag(s)[0] for s in (c.headline, c.context, c.stakes) if s)
+    bad = checks.unsupported_tickers(tagged, source_text)
+    if bad:
+        problems.append(f"tickers the sources don't establish: {', '.join(bad)}")
+    return problems
 
 
 async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = None, transport: Any = None, x_links: bool = True,
@@ -666,13 +683,23 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     """Everything both platforms post for an event, checked. Stored on the event (facts.package) so X uses exactly what Telegram used."""
     from app.newsdesk import brief
 
-    c = await write(settings, ev, rows, transport)
+    wording = _wire_draft_problems if style == "wire" else None
+    c = await write(settings, ev, rows, transport, extra=wording)
     links = links_for(ev, rows)
     line = verification(ev)
     breaking = getattr(ev, "label", "") == brief.BREAKING
     outs = outlets_of(ev)
     kicker = str((ev.facts or {}).get("kicker") or "")
-    if style == "clean":  # app/newsdesk/clean: the label earned, the story in 1-3 sentences with cashtags, the sources, @thepricechat
+    if style == "wire":  # app/newsdesk/wire: an earned tag, one or two sentences, the sources and @thepricechat on one line
+        from app.newsdesk import wire
+
+        tag = wire.tag_for(ev)
+        flag = wire.flag_for(ev, tag)
+        said = " ".join([str(getattr(ev, "summary", "") or ""), *(str(getattr(r, "summary", "") or "") for r in rows or [])])
+        x = wire.x_caption(c, links, tag=tag, flag=flag, with_links=x_links, outlets=outs, case_source=said)
+        html, plain, checked = wire.telegram_caption(c, links, tag=tag, flag=flag, outlets=outs, case_source=said)
+        breaking = tag == wire.BREAKING
+    elif style == "clean":  # app/newsdesk/clean: the label earned, the story in 1-3 sentences with cashtags, the sources, @thepricechat
         from app.newsdesk import clean
 
         pre = clean.prefix_for(ev)
@@ -694,7 +721,13 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     empty = viral.substance(c) if getattr(ev, "kind", "") in ("news", "update") else ""
     if empty:
         all_checks.append({"check": "substance", "passed": False, "detail": empty, "platform": "both"})
-    return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty, empty)
+    worded = True
+    if style == "wire":  # the wire style's wording rules, on exactly what each platform says
+        for platform, text in (("x", x), ("telegram", checked)):
+            problems = checks.wording_problems(checks.story_of(text), src)
+            all_checks.append({"check": "wording", "passed": not problems, "detail": "; ".join(problems) or "wording", "platform": platform})
+            worded = worded and not problems
+    return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty and worded, empty)
 
 
 def stored(ev: Any) -> dict[str, Any] | None:
@@ -742,7 +775,7 @@ def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = 
         x.state = {**(x.state or {}), "data_posts": bool(data_posts)}
     if experiments is not None:  # Viral Engine 2.0: runner-up hook experiments
         x.state = {**(x.state or {}), "experiments": bool(experiments)}
-    if post_style is not None and post_style in STYLES:  # clean (default) or the classic layout
+    if post_style is not None and post_style in STYLES:  # wire (default), clean or the classic layout
         x.state = {**(x.state or {}), "post_style": post_style}
     if emergency is True:
         x.paused_until, x.pause_reason = now + timedelta(days=FAR), EMERGENCY

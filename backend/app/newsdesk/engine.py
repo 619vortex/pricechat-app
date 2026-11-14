@@ -577,10 +577,11 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
                 stage = "image"
                 image, meta = await visual.for_event(ev, db=db)
                 ev.facts = {**(ev.facts or {}), "visual": meta}
-                stage = "permit"
-                upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
-                stage = "upload"
-                media = [await client.upload_image(image, permit=upload_permit)]
+                if image:  # the wire style's text-only post (b"") goes without a picture, as on Telegram
+                    stage = "permit"
+                    upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
+                    stage = "upload"
+                    media = [await client.upload_image(image, permit=upload_permit)]
         stage = "permit"
         permit = guard.issue_news_permit(req)
         stage = "post"
@@ -819,7 +820,7 @@ async def test_post_preview(db: Session, event_id: int | None, now: datetime) ->
     image, meta = await visual.for_event(ev, db=db)
     mime = "image/jpeg" if image[:3] == b"\xff\xd8\xff" else "image/png"
     return {"event_id": ev.id, "headline": ev.headline, "text": text, "ok": result.ok, "reason": result.reason if not result.ok else "", "x_status": ev.x_status,
-            "image": f"data:{mime};base64,{base64.b64encode(image).decode()}", "visual": meta}
+            "image": f"data:{mime};base64,{base64.b64encode(image).decode()}" if image else "", "visual": meta}
 
 
 async def send_test_post(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, event_id: int, now: datetime) -> NdPost:

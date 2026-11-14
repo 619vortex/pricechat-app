@@ -213,9 +213,10 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
 
     f = ev.facts or {}
     pkg = None
+    desk_state: dict[str, Any] = {}
+    rows: list[NdStory] = []
     if ev.kind != "recap":
         rows = await stories_of(db, ev)
-        desk_state = {}
         if db is not None:
             from app.newsdesk import engine
 
@@ -237,6 +238,12 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     head = visual.post_headline(ev)
     src = visual.source_name(ev)
     plain = f"{head}\n\nSource: {src}"
+    style = network.post_style(desk_state) if ev.kind != "recap" else ""
+    wire_html = ""
+    if style == "wire" and pkg is None:  # the wire fallback: the outlet's headline in sentence case and its source, nothing else
+        from app.newsdesk import wire
+
+        wire_html, plain = wire.fallback_caption(ev, src)
     if pkg is None:
         told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours"
         result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)
@@ -246,7 +253,7 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     recent = list((s.state or {}).get("recent_visuals") or []) if s is not None else []
     try:
         image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now, db=db)
-    except Exception as e:  # noqa: BLE001 - no picture, no post: the format is the picture
+    except Exception as e:  # noqa: BLE001 - no picture, no post (the wire style's text-only post is b"", not an error)
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"
     ev.facts = {**f, "visual": meta}
@@ -260,20 +267,24 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         from app.newsdesk import clean
 
         pkg.telegram_html, pkg.telegram_plain = clean.with_credit(pkg.telegram_html, pkg.telegram_plain, meta)
+    if pkg is not None and meta.get("style") == "wire":
+        from app.newsdesk import wire
+
+        pkg.telegram_html, pkg.telegram_plain = wire.with_credit(pkg.telegram_html, pkg.telegram_plain, meta)
     # the final-output gate (owner, 2026-11-13): the caption exactly as it will go out and the chart beside it, against the sources
     final_plain = pkg.telegram_plain if pkg is not None else plain
     told_all = f"{network.source_text_of(ev, rows if ev.kind != 'recap' else [])} {f.get('told') or ''} {ev.title} {ev.summary}"
-    problems = checks.final_gate(final_plain, told_all, str(meta.get("symbol") or ""))
+    problems = checks.final_gate(final_plain, told_all, str(meta.get("symbol") or ""), wire=style == "wire")
     if problems:
         logger.warning("tgnews: event %s held by the final check: %s", ev.id, "; ".join(problems))
         return None, "final check: " + "; ".join(problems)
     if pkg is not None:
         srcs = [{"name": x.name, "url": x.url} for x in pkg.links if x.kind != "pricechat"]
         return {"headline": pkg.copy.headline, "summary": pkg.copy.context, "html": pkg.telegram_html, "plain": pkg.telegram_plain, "sources": srcs,
-                "writer": f"network-{pkg.copy.writer}", "card": image, "choice": {}, "link": f"event:{ev.id}", "title": ev.title, "source": src[:60],
+                "writer": f"network-{pkg.copy.writer}", "card": image or None, "choice": {}, "link": f"event:{ev.id}", "title": ev.title, "source": src[:60],
                 "fingerprint": checks.fingerprint(f"{pkg.copy.headline} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""
     srcs = [{"name": x["name"], "url": x["url"]} for x in ev.sources or [] if str(x.get("url", "")).startswith("https://")][:3]
-    return {"headline": head, "summary": "", "html": visual.caption_html(head, src), "plain": plain, "sources": srcs, "writer": "visual", "card": image, "choice": {},
+    return {"headline": head, "summary": "", "html": wire_html or visual.caption_html(head, src), "plain": plain, "sources": srcs, "writer": "visual", "card": image or None, "choice": {},
             "link": f"event:{ev.id}", "title": ev.title, "source": src[:60], "fingerprint": checks.fingerprint(f"{head} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""
 
 

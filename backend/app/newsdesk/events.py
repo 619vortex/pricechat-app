@@ -82,6 +82,17 @@ class Policy:
     experiments: bool = True  # about one story in five tries its runner-up factual hook (app/newsdesk/viral)
     priority_bonus: int = 6  # ranking only, never the bar: Bitcoin, Ethereum, Hyperliquid, macro, commodities, geopolitics come first
     priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC"}))
+    # the wire style (app/newsdesk/wire, network.post_style "wire"): exceptional market moves and material updates may break between slots
+    # too, under a rolling cap (breaking_per_6h) as well as the daily one; slot ranking favours surprising stories and downranks filler
+    wire: bool = False
+    breaking_per_6h: int = 0  # 0 = no rolling cap (the older styles)
+    breaking_market_age: timedelta = timedelta(minutes=30)  # a measured move breaks only while it is happening
+
+
+# the wire style's breaking lane (owner, 2026-11-14: "publish meaningful breaking updates quickly ... a sane rate limit so breaking can't
+# flood the channel"): at most 3 a day and 2 in any six hours, 90 minutes from any other post, never 45 minutes before a slot
+WIRE_BREAKING_PER_DAY = 3
+WIRE_BREAKING_PER_6H = 2
 
 
 DEFAULT_SCHEDULE = "slots"
@@ -171,6 +182,12 @@ def policy(desk_state: dict[str, Any] | None = None) -> Policy:
         p.slot_catch_up = timedelta(minutes=over["slot_catch_up_minutes"])
     p.recap = RECAP_FALLBACK and over.get("recap") is not False
     p.experiments = (desk_state or {}).get("experiments", True) is not False  # Viral Engine 2.0 hook experiments (Admin switch)
+    from app.newsdesk import network
+
+    if network.post_style(desk_state) == "wire":
+        p.wire = True
+        p.breaking_per_day = WIRE_BREAKING_PER_DAY
+        p.breaking_per_6h = WIRE_BREAKING_PER_6H
     return p
 
 
@@ -821,12 +838,20 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
 
     covered = editorial.coverage(db, now)
 
+    from app.newsdesk import wire
+
     def damp(e: NdEvent) -> float:
         return p.controversy_penalty if e.kind in ("news", "update") and editorial.routine_controversy(e.title or "", e.topic or "") else 0.0
 
+    def filler(e: NdEvent) -> float:  # the wire style: filler, previews and speculation count lower, against the bar too
+        return wire.FILLER_PENALTY if p.wire and wire.filler(e) else 0.0
+
+    def surprise(e: NdEvent) -> float:  # the wire style: surprising, consequential stories first (ranking only, never the bar)
+        return wire.surprise_bonus(e) if p.wire else 0.0
+
     def rank(e: NdEvent) -> tuple[float, int]:
         return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e) - editorial.diversity(e, covered, now)[0] - damp(e)
-                  + float((e.facts or {}).get("angle_bonus") or 0)), e.id)
+                  - filler(e) + surprise(e) + float((e.facts or {}).get("angle_bonus") or 0)), e.id)
 
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
@@ -853,6 +878,9 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             continue
         if damp(ev) and standing - damp(ev) < p.regular_bar:
             ev.why = f"{editorial.routine_controversy(ev.title or '', ev.topic or '')}: ranked {p.controversy_penalty} lower, {standing - damp(ev):g} is under the bar of {p.regular_bar}"
+            continue
+        if filler(ev) and standing - damp(ev) - filler(ev) < p.regular_bar:
+            ev.why = f"{wire.filler(ev)}: ranked {filler(ev):g} lower, {standing - damp(ev) - filler(ev):g} is under the bar of {p.regular_bar}"
             continue
         if _age(ev, now) > 24 * 60 / max(1, len(p.slot_hours)) and ev.kind == "news" and not (ev.facts or {}).get("importance") \
                 and (ev.topic or "") not in IMPORTANT_TOPICS and editorial.significance(ev.title or "", ev.summary or "") is None:
@@ -898,6 +926,8 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
     if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
         return None
+    if p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
+        return None
     last = max((_utc(e.released_at, now) for e in day), default=None)
     if last is not None and now - last < p.breaking_gap:
         return None
@@ -905,13 +935,17 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
         # the discovery points rank slot stories; they never make a story breaking (the 70 bar is judged without them)
         bare = ev.virality - float((ev.parts or {}).get("discovery") or 0) * float((ev.parts or {}).get("freshness") or 1)
-        if ev.kind not in ("news", "update") or bare < p.breaking_bar or not verified_important(ev):
-            continue
-        worthy, because = editorial.breaking_worthy(ev.title or "", ev.topic or "", (ev.facts or {}).get("importance"))
-        if not worthy:
-            continue
-        if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
-            continue
+        wire_way = _wire_breaking(db, ev, now, p, out, bare) if p.wire else ""
+        if wire_way:
+            because = wire_way
+        else:
+            if ev.kind not in ("news", "update") or bare < p.breaking_bar or not verified_important(ev):
+                continue
+            worthy, because = editorial.breaking_worthy(ev.title or "", ev.topic or "", (ev.facts or {}).get("importance"))
+            if not worthy:
+                continue
+            if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
+                continue
         if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1]:
             continue
         if ev.kind == "update":
@@ -934,6 +968,36 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         logger.info("newsdesk events: released #%s as BREAKING [%s %s, %d outlets]: %s", ev.id, int(ev.virality), ev.evidence, n, ev.headline[:100])
         return ev
     return None
+
+
+def _wire_breaking(db: Session, ev: NdEvent, now: datetime, p: Policy, out: list[NdEvent], bare: float) -> str:
+    """The wire style's two extra ways to break between slots (what makes it, or ""). Both still meet every rule below in _release_breaking
+    (repeats, diversity, the owner's block, the checks) and its caps.
+    - an exceptional measured move or liquidation flush (editorial.exceptional) on a priority asset, scoring market_bar, while it happens,
+      and not this asset's second move in asset_cooldown;
+    - an update with a material development (editorial.material_development) on a story already out, strong evidence, regular_bar,
+      update_gap after the original, fresh."""
+    f = ev.facts or {}
+    if ev.kind == "market":
+        if ev.virality < p.market_bar or not priority(ev, p) or _age(ev, now) > p.breaking_market_age.total_seconds() / 60:
+            return ""
+        big, detail = editorial.exceptional(ev)
+        if not big:
+            return ""
+        assets = set(f.get("assets") or [])
+        if assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
+            return ""
+        return f"exceptional market move: {detail}"
+    if ev.kind == "update":
+        parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
+        if parent is None or parent.status != RELEASED or now - (_utc(parent.released_at, now) or now) < p.update_gap:
+            return ""
+        if not editorial.material_development(str(f.get("development") or "")) or ev.evidence not in STRONG or bare < p.regular_bar:
+            return ""
+        if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
+            return ""
+        return f"material development: {f.get('development')}"
+    return ""
 
 
 TRACK = timedelta(days=5)  # how long a story we posted is followed for material developments (updates_per_story caps how many go out)
