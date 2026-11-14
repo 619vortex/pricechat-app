@@ -180,6 +180,7 @@ export function VpnPage() {
 function DesktopSessions() {
   const [count, setCount] = useState(0);
   const [done, setDone] = useState(false);
+  const [wipe, setWipe] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { void memberApi<{ count: number }>("/members/desktop/sessions").then((r) => setCount(r.count)).catch(() => undefined); }, []);
   if (done) return <p className="vpn-done" role="status"><Tick />The Windows app is signed out on every PC.</p>;
@@ -188,7 +189,8 @@ function DesktopSessions() {
     <section className="vpn-card" aria-labelledby="vpn-desktop-sessions">
       <h2 id="vpn-desktop-sessions">Kiwi VPN for Windows</h2>
       <p className="site-muted">Signed in on {count} {count === 1 ? "PC" : "PCs"}.</p>
-      <button className="site-button is-ghost is-small" onClick={() => void memberApi("/members/desktop/sessions/revoke", { method: "POST" }).then(() => setDone(true)).catch((e) => setErr(vpnError(e)))}>Sign out on every PC</button>
+      <label className="site-muted small"><input type="checkbox" checked={wipe} onChange={(e) => setWipe(e.target.checked)} /> Also delete the app's VPN devices, so a lost PC can't connect any more</label>
+      <button className="site-button is-ghost is-small" onClick={() => void memberApi("/members/desktop/sessions/revoke", wipe ? { method: "POST", body: JSON.stringify({ remove_devices: true }) } : { method: "POST" }).then(() => setDone(true)).catch((e) => setErr(vpnError(e)))}>Sign out on every PC</button>
       {err && <p className="site-error" role="alert">{err}</p>}
     </section>
   );

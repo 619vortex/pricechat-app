@@ -12,7 +12,9 @@ import binascii
 import hashlib
 import ipaddress
 import logging
+import re
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -27,7 +29,7 @@ from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
 from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
-from app.vpn import billing, keys, node, reviewer
+from app.vpn import billing, keys, node, reviewer, trial_guard
 
 OFFLINE_AFTER = 2  # checks in a row that couldn't reach a server's agent before it's marked offline (one could be a blip)
 
@@ -42,7 +44,12 @@ MAX_TESTERS = 10
 MAX_TESTER_DAYS = 90
 ROYAL_LEVEL = 7  # Royal Kiwi on the rank ladder; higher ranks count too
 LIVE_WINDOW = timedelta(minutes=10)  # the server reads handshakes and proxy use every 5 minutes
-SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0, "payments_enabled": False, "trial_enabled": True}  # min_rank: unused column, kept
+SETTINGS_DEFAULTS = {"enabled": False, "min_rank": "warrior", "max_devices": 3, "monthly_cap_gb": 0, "payments_enabled": False, "trial_enabled": True,  # min_rank: unused column, kept
+                     "trial_one_per_identity": True, "trial_min_account_age_hours": 24, "trial_min_xp": 0, "trial_per_ip_day": 3,
+                     "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False}
+# Admin-settable trial guards: (lowest, highest). 0 switches that check off. See app/vpn/trial_guard.py and docs/hardening/TRIAL-AND-LIMITS.md.
+TRIAL_GUARDS = {"trial_min_account_age_hours": (0, 24 * 90), "trial_min_xp": (0, 1_000_000), "trial_per_ip_day": (0, 1000), "trial_per_network_day": (0, 10_000)}
+SWITCHES = ("enabled", "trial_enabled", "payments_enabled", "trial_one_per_identity", "sync_enforce_limits", "count_pc_once")
 OWNER_MAX_DEVICES = 50  # devices made in Admin; the server's capacity still applies
 NOT_SUBSCRIBED = "Kiwi VPN is $9.99 for 30 days. Add time to start."
 START_TRIAL = "Start your free 30-day trial on the Kiwi VPN page."
@@ -57,9 +64,11 @@ Who = Member | VpnAccount
 class VpnError(ValueError):
     """A problem the member (or admin) can act on; the message is shown. `status` is the HTTP status."""
 
-    def __init__(self, message: str, status: int = 400) -> None:
+    def __init__(self, message: str, status: int = 400, code: str | None = None, retry_after: int | None = None) -> None:
         super().__init__(message)
         self.status = status
+        self.code = code  # a machine-readable reason, sent as the X-Kiwi-Reason header (the trial's refusals)
+        self.retry_after = retry_after
 
 
 # --- secrets ---------------------------------------------------------------------------------------------------------
@@ -86,7 +95,10 @@ def settings(db: Session) -> VpnSettings:
 
 
 def settings_out(s: VpnSettings) -> dict[str, Any]:
-    return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "trial_enabled": s.trial_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb}
+    return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "trial_enabled": s.trial_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb,
+            "trial_one_per_identity": s.trial_one_per_identity, "trial_min_account_age_hours": s.trial_min_account_age_hours, "trial_min_xp": s.trial_min_xp,
+            "trial_per_ip_day": s.trial_per_ip_day, "trial_per_network_day": s.trial_per_network_day, "sync_enforce_limits": s.sync_enforce_limits,
+            "count_pc_once": s.count_pc_once}
 
 
 def _entitlement(db: Session) -> Entitlement | None:
@@ -135,7 +147,7 @@ def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime 
             return "blocked"
     if acct.status != "active":
         return "blocked"
-    if reviewer.is_reviewer(member):
+    if reviewer.is_reviewer(db, member):
         return "active" if reviewer.in_time(now) else "blocked"
     if is_tester(acct, now):
         return "active"
@@ -167,7 +179,9 @@ def is_free(s: VpnSettings) -> bool:
 def no_access_reason(db: Session, acct: VpnAccount) -> str:
     s = settings(db)
     if s.trial_enabled and acct.member_id is not None and acct.trial_started_at is None:
-        return START_TRIAL
+        member = _member_of(db, acct)
+        why = _trial_guard(db, member, s) if member is not None else None
+        return why[1] if why is not None else START_TRIAL
     if not s.payments_enabled:
         return PAID_UNAVAILABLE
     return TIME_ENDED if acct.paid_until is not None else TRIAL_ENDED if acct.trial_started_at is not None else NOT_SUBSCRIBED
@@ -211,24 +225,73 @@ def plan_out(db: Session, acct: VpnAccount, s: VpnSettings, state: str, now: dat
     return {"kind": "expired" if paid is not None or trial is not None else "not_activated", "until": None, "days_left": None}
 
 
-def start_trial(db: Session, who: Member, preview: bool = False) -> None:
-    """One 30-day trial per account, only while the VPN is open and the trial is on. The one write that sets it can only win once."""
+TRIAL_OFF = "The free trial isn't available right now."
+TRIAL_USED = "You've already used your free trial."
+
+
+def _trial_guard(db: Session, member: Member, s: VpnSettings, now: datetime | None = None) -> tuple[str, str] | None:
+    """(code, message) when an abuse guard stops this Passport starting a trial, else None: one trial per identity, the
+    account's age, its XP. The per-address throttle is separate (it needs the request: trial_guard.ip_wait)."""
+    now = now or utcnow()
+    if s.trial_one_per_identity and (label := trial_guard.used_identity(db, member)) is not None:
+        return "identity_used", f"A free trial has already been used with this {label}. It's one free trial per person."
+    if s.trial_min_account_age_hours > 0 and (made := _aware(member.created_at)) is not None:
+        ready = made + timedelta(hours=s.trial_min_account_age_hours)
+        if ready > now:
+            hours = max(1, -((now - ready) // timedelta(hours=1)))
+            return "account_too_new", (f"Free trials open once a Kiwi Passport is {s.trial_min_account_age_hours} hours old. "
+                                       f"Yours can start one in about {hours} hour{'s' if hours != 1 else ''}.")
+    if s.trial_min_xp > 0:
+        xp = 0 if member.xp_suspended else int(member.xp_total or 0)
+        if xp < s.trial_min_xp:
+            return "needs_xp", f"Free trials need {s.trial_min_xp} XP on your Kiwi Passport. You have {xp}."
+    return None
+
+
+def trial_unavailable(db: Session, acct: VpnAccount, s: VpnSettings, preview: bool = False, now: datetime | None = None) -> tuple[str, str, int] | None:
+    """(code, message, HTTP status) when this account can't start the free trial right now, else None. Everything but the per-address throttle."""
+    if not s.trial_enabled or not (s.enabled or preview):
+        return "off", TRIAL_OFF, 403
+    member = _member_of(db, acct)
+    if member is None:
+        return "no_passport", "The free trial needs a Kiwi Passport.", 403
+    if acct.trial_started_at is not None:
+        return "used", TRIAL_USED, 409
+    state = access(db, acct, now=now)
+    if state == "active":
+        return "has_access", "You already have Kiwi VPN.", 409
+    if state != "lapsed":
+        return "blocked", "Your account can't use Kiwi VPN.", 403
+    why = _trial_guard(db, member, s, now)
+    return (why[0], why[1], 403) if why is not None else None
+
+
+def start_trial(db: Session, who: Member, preview: bool = False, ip: str | None = None, charge: Callable[[], None] | None = None) -> None:
+    """One 30-day trial per account and per verified identity, only while the VPN is open and the trial is on. The one write that sets it can only win once.
+
+    ip: the caller's real address (trial_guard.real_ip), or None when it isn't known to be theirs (never throttled).
+    charge: the route's rate limit, spent only once every check has passed (security audit M1)."""
     s = settings(db)
     db.commit()
-    if not s.trial_enabled or not (s.enabled or preview):
-        raise VpnError("The free trial isn't available right now.", 403)
     acct = account_of(db, who)
     db.commit()
-    if acct.trial_started_at is not None:
-        raise VpnError("You've already used your free trial.", 409)
-    if access(db, acct) != "lapsed":
-        raise VpnError("You already have Kiwi VPN." if access(db, acct) == "active" else "Your account can't use Kiwi VPN.", 409 if access(db, acct) == "active" else 403)
+    why = trial_unavailable(db, acct, s, preview)
+    if why is not None:
+        raise VpnError(why[1], why[2], code=why[0])
+    wait = trial_guard.ip_wait(ip, s.trial_per_ip_day, s.trial_per_network_day)
+    if wait is not None:
+        raise VpnError("Too many free trials have started from your network today. Please try again later.", 429, code="network_limit", retry_after=wait)
+    if charge is not None:
+        charge()
     now = utcnow()
     done = db.execute(update(VpnAccount).where(VpnAccount.id == acct.id, VpnAccount.trial_started_at.is_(None))
                       .values(trial_started_at=now, trial_ends_at=now + timedelta(days=TRIAL_DAYS)))
-    db.commit()
     if done.rowcount != 1:
-        raise VpnError("You've already used your free trial.", 409)
+        db.commit()
+        raise VpnError(TRIAL_USED, 409, code="used")
+    trial_guard.mark(db, who)
+    db.commit()
+    trial_guard.ip_record(ip)
     db.refresh(acct)
 
 
@@ -294,7 +357,7 @@ def _testing(db: Session, who: Who) -> bool:
 def _reviewing(db: Session, who: Who) -> bool:
     """The store-review account, within its time (app/vpn/reviewer.py)."""
     member = who if isinstance(who, Member) else db.get(Member, who.member_id) if who.member_id is not None else None
-    return reviewer.is_reviewer(member) and reviewer.in_time()
+    return reviewer.is_reviewer(db, member) and reviewer.in_time()
 
 
 CLOSED = "Kiwi VPN is unavailable right now. Please try again later."
@@ -320,12 +383,15 @@ def update_settings(db: Session, changes: dict[str, Any]) -> dict[str, Any]:
         if not 0 <= cap <= MAX_CAP_GB:
             raise VpnError(f"Monthly data per member: 0 (unlimited) to {MAX_CAP_GB} GB.", 400)
         s.monthly_cap_gb = cap  # the next sync pauses / resumes members to match
-    if changes.get("enabled") is not None:
-        s.enabled = bool(changes["enabled"])
-    if changes.get("trial_enabled") is not None:
-        s.trial_enabled = bool(changes["trial_enabled"])
-    if changes.get("payments_enabled") is not None:
-        s.payments_enabled = bool(changes["payments_enabled"])  # the next sync switches off whoever has no time left, and back on
+    for key, (low, high) in TRIAL_GUARDS.items():
+        if changes.get(key) is not None:
+            n = int(changes[key])
+            if not low <= n <= high:
+                raise VpnError(f"{key}: {low} (off) to {high}.", 400)
+            setattr(s, key, n)
+    for key in SWITCHES:  # payments_enabled: the next sync switches off whoever has no time left, and back on
+        if changes.get(key) is not None:
+            setattr(s, key, bool(changes[key]))
     db.commit()
     return settings_out(s)
 
@@ -461,7 +527,8 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     # While the VPN is closed to this person, a plan can't be used, so none is claimed. Their trial or paid time is kept and shows again when it opens.
     out["plan"] = plan_out(db, acct, s, state) if open_here else {"kind": "closed", "until": None, "days_left": None}
     out["royal"] = is_royal(member)
-    out["trial"] = {"available": (s.enabled or preview) and s.trial_enabled and member is not None and acct.trial_started_at is None and state == "lapsed", "days": TRIAL_DAYS}
+    why = trial_unavailable(db, acct, s, preview)
+    out["trial"] = {"available": why is None, "days": TRIAL_DAYS, "code": why[0] if why else None, "reason": why[1] if why else None}
     db.commit()  # first call seeds the settings row
     return out
 
@@ -496,9 +563,38 @@ def clean_name(name: str) -> str:
     return n
 
 
-def _checked_server(db: Session, acct_id: int, server_id: int, max_devices: int) -> VpnServer:
+APP_DEVICE = re.compile(r"^(.+) \((\d+)\)$")  # the Windows app names its device on each server "<PC> (<server id>)"
+
+
+def slot_key(name: str, server_id: int, device_id: int | None) -> tuple[str, Any]:
+    """Which device slot a device takes with count_pc_once on: the Windows app's devices of one PC share one ("pc", PC name),
+    when the number in the name is the device's own server; anything else is a slot of its own."""
+    m = APP_DEVICE.match(name or "")
+    if m and int(m.group(2)) == int(server_id):
+        return "pc", m.group(1)
+    return "dev", device_id if device_id is not None else ("new", name, server_id)
+
+
+def slots_used(devices: list[tuple[int | None, str, int]], count_pc_once: bool) -> int:
+    """How many device slots these (id, name, server id) devices use. Off: one each. On: one per PC (security audit L6),
+    plus one for each extra device of that PC on the same server (two devices on one server are two devices)."""
+    if not count_pc_once:
+        return len(devices)
+    per: dict[tuple[str, Any], dict[int, int]] = {}
+    for dev_id, name, server_id in devices:
+        on = per.setdefault(slot_key(name, server_id, dev_id), {})
+        on[server_id] = on.get(server_id, 0) + 1
+    return sum(max(on.values()) for on in per.values())
+
+
+def _slots_full(db: Session, acct_id: int, max_devices: int, name: str, server_id: int, count_pc_once: bool) -> bool:
+    mine = [(i, n, sid) for i, n, sid in db.execute(select(VpnDevice.id, VpnDevice.name, VpnDevice.server_id).where(VpnDevice.account_id == acct_id)).all()]
+    return slots_used(mine + [(None, name, server_id)], count_pc_once) > max_devices
+
+
+def _checked_server(db: Session, acct_id: int, server_id: int, max_devices: int, name: str = "", count_pc_once: bool = False) -> VpnServer:
     db.scalar(select(VpnAccount.id).where(VpnAccount.id == acct_id).with_for_update())  # one device creation per account at a time
-    if db.scalar(select(func.count()).select_from(VpnDevice).where(VpnDevice.account_id == acct_id)) >= max_devices:
+    if _slots_full(db, acct_id, max_devices, name, server_id, count_pc_once):
         raise VpnError(f"You can have up to {max_devices} devices. Delete one first.", 409)
     server = db.get(VpnServer, server_id)
     if server is None or not server.enabled or not sees(db.get(VpnAccount, acct_id), server):
@@ -553,7 +649,54 @@ def device_peer(db: Session, who: Who, device_id: int) -> dict[str, Any]:
     return peer_out(dev, server)
 
 
-def create_device(db: Session, who: Who, name: str, server_id: int, preview: bool = False, own_public_key: str | None = None) -> tuple[VpnDevice, str, str]:
+def device_precheck(db: Session, who: Who, name: str, server_id: int, preview: bool = False) -> None:
+    """Everything create_device refuses for before it touches a node, without writing anything: routes call this BEFORE
+    charging the rate limit, so an account that can't add a device never spends a token (security audit M1)."""
+    name = clean_name(name)
+    acct = account_of(db, who)
+    db.commit()
+    ok, reason = eligibility(db, acct, preview)
+    if not ok:
+        raise VpnError(reason or "Kiwi VPN isn't available.", 403)
+    if _reviewing(db, acct):
+        raise VpnError("This review account is for the browser extension only.", 403)
+    s = settings(db)
+    max_devices = OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
+    _over_cap(db, acct, s)
+    if _slots_full(db, acct.id, max_devices, name, server_id, s.count_pc_once and not acct.is_owner):
+        raise VpnError(f"You can have up to {max_devices} devices. Delete one first.", 409)
+    server = db.get(VpnServer, server_id)
+    if server is None or not server.enabled or not sees(acct, server):
+        raise VpnError("Server not found.", 404)
+    db.commit()
+
+
+def _over_cap(db: Session, acct: VpnAccount, s: VpnSettings) -> None:
+    if s.monthly_cap_gb > 0 and not acct.is_owner:
+        use = usage_out(db, acct, s)
+        if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:
+            raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
+
+
+def browser_precheck(db: Session, who: Who, server_id: int, preview: bool = False) -> None:
+    """create_browser's refusals that need no node, before the route charges the rate limit (security audit M1)."""
+    acct = account_of(db, who)
+    db.commit()
+    ok, reason = eligibility(db, acct, preview)
+    if not ok:
+        raise VpnError(reason or "Kiwi VPN isn't available.", 403)
+    _over_cap(db, acct, settings(db))
+    server = db.get(VpnServer, server_id)
+    if server is None or not server.enabled or not server.proxy_host or not sees(acct, server) or (_reviewing(db, acct) and server.name != reviewer.SERVER):
+        raise VpnError("That server isn't available for the browser extension.", 404)
+    db.commit()
+
+
+VIA = ("app", "web", "anon", "admin", "bot")
+
+
+def create_device(db: Session, who: Who, name: str, server_id: int, preview: bool = False, own_public_key: str | None = None,
+                  via: str | None = None) -> tuple[VpnDevice, str, str]:
     """(device, config text, filename). The config, holding the private key, exists only in this return value.
 
     With `own_public_key`, the app made its key itself: the server never sees the private half, so the config and filename come back empty. See `peer_out`.
@@ -582,11 +725,12 @@ def create_device(db: Session, who: Who, name: str, server_id: int, preview: boo
     else:
         private_key, public_key = keys.generate_keypair()
     tried: set[str] = set()
+    once = s.count_pc_once and not acct.is_owner
     for _ in range(8):
-        server = _checked_server(db, acct_id, server_id, max_devices)
+        server = _checked_server(db, acct_id, server_id, max_devices, name, once)
         ip = allocate_ip(db, server, tried)
         dev = VpnDevice(account_id=acct_id, server_id=server.id, name=name, public_key=public_key, ip=ip,
-                        usage_month=utcnow().strftime("%Y-%m"))
+                        usage_month=utcnow().strftime("%Y-%m"), created_via=via if via in VIA else None)
         db.add(dev)
         try:
             db.flush()
@@ -688,6 +832,22 @@ def delete_device(db: Session, who: Who, device_id: int) -> tuple[int, str]:
         raise VpnError("Device not found.", 404)
     gone = (dev.server_id, dev.name)
     _remove(db, dev)
+    db.commit()
+    return gone
+
+
+def remove_app_devices(db: Session, member: Member) -> int:
+    """Every WireGuard device this member's Kiwi VPN app made (security audit L8: "sign the app out everywhere" can take
+    the PCs' keys with it). Made through an app session (created_via "app"), or, for devices from before that was
+    recorded, named the way the Windows app names them ("<PC> (<server id>)" on that server). Browser logins stay."""
+    acct = db.scalar(select(VpnAccount).where(VpnAccount.member_id == member.id))
+    if acct is None:
+        return 0
+    gone = 0
+    for dev in list(db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id))):
+        if dev.created_via == "app" or (dev.created_via is None and slot_key(dev.name, dev.server_id, dev.id)[0] == "pc"):
+            _remove(db, dev)
+            gone += 1
     db.commit()
     return gone
 
@@ -1108,7 +1268,7 @@ def _sync_state(db: Session, acct: VpnAccount, r: Rules, now: datetime, enabled:
     if state != "active" or enabled or acct.is_owner or is_tester(acct, now):
         return state
     member = r.people.get(acct.member_id) if acct.member_id is not None and r.people is not None else None
-    return "active" if reviewer.is_reviewer(member) else "closed"
+    return "active" if reviewer.is_reviewer(db, member) else "closed"
 
 
 def _keep_off(state: str, acct: VpnAccount, now: datetime) -> bool:
@@ -1117,7 +1277,8 @@ def _keep_off(state: str, acct: VpnAccount, now: datetime) -> bool:
 
 
 def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowser], accounts: dict[int, VpnAccount], r: Rules,
-                   users: dict[str, dict[str, int]], states: dict[int, str], out: dict[str, Any], now: datetime) -> None:
+                   users: dict[str, dict[str, int]], states: dict[int, str], out: dict[str, Any], now: datetime,
+                   off: set[int] | frozenset[int] = frozenset()) -> None:
     """Make the proxy's logins match: active accounts under their data cap are on it; out of time or over the cap, off and kept; blocked, gone."""
     month, cap = _month(now), settings(db).monthly_cap_gb * GB
     wanted: set[str] = set()
@@ -1141,7 +1302,7 @@ def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowse
             continue
         db.flush()  # the bytes just counted must be in what the cap sees
         over = cap > 0 and not acct.is_owner and account_usage(db, acct.id, now) >= cap
-        if state != "active" or over:
+        if state != "active" or over or b.id in off:
             continue  # off for now: not wanted on the proxy, removed below
         wanted.add(b.username)
         if seen is None:
@@ -1157,6 +1318,39 @@ def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowse
             out["suspended"] += 1
         except node.NodeError:
             out["errors"] += 1
+
+
+def over_limit(db: Session, accounts: dict[int, VpnAccount], server: VpnServer, s: VpnSettings, now: datetime) -> tuple[set[int], set[int]]:
+    """With sync_enforce_limits on (security audit L7, off by default): (device ids, browser ids) on this server to switch
+    off for now, rows kept. Past the device limit (the oldest devices keep their slots; browsers counted on their own, the
+    oldest kept) and, on a testers-only server, every account that may not see it. Owner and reviewer are exempt from the
+    limit (they have their own). Never removes anything: lowering the limit or ending a test back out undoes it."""
+    if not s.sync_enforce_limits or not accounts:
+        return set(), set()
+    off_devices: set[int] = set()
+    off_browsers: set[int] = set()
+    ids = list(accounts)
+    devices: dict[int, list[VpnDevice]] = {}
+    for d in db.scalars(select(VpnDevice).where(VpnDevice.account_id.in_(ids)).order_by(VpnDevice.created_at, VpnDevice.id)):
+        devices.setdefault(d.account_id, []).append(d)
+    browsers: dict[int, list[VpnBrowser]] = {}
+    for b in db.scalars(select(VpnBrowser).where(VpnBrowser.account_id.in_(ids)).order_by(VpnBrowser.id)):
+        browsers.setdefault(b.account_id, []).append(b)
+    for acct_id, acct in accounts.items():
+        mine, logins = devices.get(acct_id, []), browsers.get(acct_id, [])
+        if not sees(acct, server):
+            off_devices |= {d.id for d in mine if d.server_id == server.id}
+            off_browsers |= {b.id for b in logins if b.server_id == server.id}
+        if acct.is_owner or _reviewing(db, acct):
+            continue
+        kept: list[tuple[int | None, str, int]] = []
+        for d in mine:  # oldest first: a device keeps its slot unless the ones before it already fill the limit
+            if slots_used(kept + [(d.id, d.name, d.server_id)], s.count_pc_once) <= s.max_devices:
+                kept.append((d.id, d.name, d.server_id))
+            elif d.server_id == server.id:
+                off_devices.add(d.id)
+        off_browsers |= {b.id for b in logins[s.max_devices:] if b.server_id == server.id}
+    return off_devices, off_browsers
 
 
 def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> dict[str, Any]:
@@ -1179,6 +1373,7 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
             # accounts, members, the entitlement and grants read once for the server, not a query per member
             accounts = {a.id: a for a in db.scalars(select(VpnAccount).where(VpnAccount.id.in_(ids)))} if ids else {}
             r = rules(db, sorted({a.member_id for a in accounts.values() if a.member_id is not None}))
+            off_devices, off_browsers = over_limit(db, accounts, server, s, now)
             for dev in devices:
                 acct = accounts[dev.account_id]
                 if dev.account_id not in states:
@@ -1188,6 +1383,17 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
                     else:
                         acct.lapsed_at = None
                 state = states[dev.account_id]
+                if state == "active" and dev.id in off_devices:  # sync_enforce_limits: off for now, kept (L7)
+                    ours.add(dev.public_key)
+                    peer = peers.get(dev.public_key)
+                    if peer is not None:
+                        _usage(dev, peer, month)
+                        try:
+                            agent.delete_peer(dev.public_key)
+                            out["suspended"] += 1
+                        except node.NodeError:
+                            out["errors"] += 1
+                    continue
                 if _keep_off(state, acct, now):  # out of time or closed: off, kept, back on when paid or opened
                     ours.add(dev.public_key)
                     peer = peers.get(dev.public_key)
@@ -1238,7 +1444,7 @@ def sync_server(db: Session, server: VpnServer, now: datetime | None = None) -> 
                 except node.NodeError:
                     out["errors"] += 1
             if server.proxy_host:
-                _sync_browsers(db, agent, browsers, accounts, r, st["proxy_users"], states, out, now)
+                _sync_browsers(db, agent, browsers, accounts, r, st["proxy_users"], states, out, now, off_browsers)
     except node.NodeError as e:
         _unreachable(server, e)
         out["error"] = str(e)

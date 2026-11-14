@@ -168,6 +168,9 @@ def verify(db: Session, settings: Settings, email: str, code: str, browser: str 
             raise MemberError("That email already belongs to another Price Chat account.")
         current.email, current.email_verified_at = addr, now
         ledger.audit(db, current.id, "member", "email_verified", {"purpose": "link"})
+        from app.vpn import trial_guard
+
+        trial_guard.mark_if_trial_used(db, current)  # had a Kiwi VPN trial: this address has had one too
         db.commit()
         return current, False
     if owner is not None:

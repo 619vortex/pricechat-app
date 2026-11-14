@@ -25,6 +25,17 @@ class VpnSettings(Base):
     monthly_cap_gb: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # per member per UTC month, 0 = unlimited
     trial_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)  # regular members get one 30-day trial; off (with payments off) = free for all
     payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # off: free for anyone it's open to
+    # Free-trial abuse guards (migration 0113; docs/hardening/TRIAL-AND-LIMITS.md). Each number 0 = that check is off.
+    trial_one_per_identity: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)  # an email / Google / X / Telegram account gets one trial, ever
+    trial_min_account_age_hours: Mapped[int] = mapped_column(Integer, default=24, server_default="24", nullable=False)
+    trial_min_xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    trial_per_ip_day: Mapped[int] = mapped_column(Integer, default=3, server_default="3", nullable=False)  # trial starts per address per 24 h (real addresses only)
+    trial_per_network_day: Mapped[int] = mapped_column(Integer, default=10, server_default="10", nullable=False)  # per IPv4 /24 or IPv6 /48
+    # The 5-minute sync switches off (never deletes) devices past max_devices and non-testers' devices on testers-only servers
+    sync_enforce_limits: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    # The Windows app's devices on several servers ("<PC> (<server id>)") count as one device slot
+    count_pc_once: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    reviewer_member_id: Mapped[int | None] = mapped_column(Integer)  # the store-review account's member (app/vpn/reviewer.py), bound on its first sign-in
 
 
 class VpnServer(IdMixin, TimestampMixin, Base):
@@ -135,6 +146,17 @@ class VpnDevice(IdMixin, TimestampMixin, Base):
     rx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)  # the agent's last raw counters
     tx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
     paused_until: Mapped[datetime | None] = mapped_column(UTCDateTime())  # over the monthly cap: peer off the node until then
+    created_via: Mapped[str | None] = mapped_column(String(8))  # app (a Kiwi VPN app session) | web | anon | admin; None = made before 0113
+
+
+class VpnTrialClaim(IdMixin, TimestampMixin, Base):
+    """An email address or linked Google / X / Telegram account that has had a Kiwi VPN free trial, as a salted hash
+    (app.vpn.trial_guard), so a new Passport with the same identity can't start another. Survives account deletion, like
+    xp_claims; no identity is stored."""
+
+    __tablename__ = "vpn_trial_claims"
+
+    claim_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
 
 
 class VpnSupportReport(IdMixin, TimestampMixin, Base):

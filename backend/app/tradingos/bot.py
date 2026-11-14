@@ -777,10 +777,15 @@ async def vpn_command(db: Session, client: Any, chat_id: int, user_id: int, word
             if not online:
                 return "No Kiwi VPN server is online right now. Try again later."
             server = next((s for s in online if s.get("recommended")), None) or min(online, key=lambda s: (s["load"], s["id"]))
+        name = " ".join(rest) or "phone"
+        try:
+            await asyncio.to_thread(vpn.device_precheck, db, m, name, server["id"])  # refused for free, before the rate limit (audit M1)
+        except vpn.VpnError as e:
+            return esc(str(e))
         if LIMITS["vpn_device"].hit(str(m.id)) is not None:
             return "Too many new devices. Please wait a few minutes."
         try:
-            dev, config, filename = await asyncio.to_thread(vpn.create_device, db, m, " ".join(rest) or "phone", server["id"])
+            dev, config, filename = await asyncio.to_thread(vpn.create_device, db, m, name, server["id"], False, None, "bot")
         except vpn.VpnError as e:
             return esc(str(e))
         await client.send_document(chat_id, config.encode(), filename, html=True,

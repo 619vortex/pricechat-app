@@ -18,9 +18,8 @@ from app.api.schemas import StrictInput
 from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX
 from app.models.vpn import VpnAccount
 from app.security import admin_auth, client_ip, rate_limit
-from app.security import rate_limit
 from app.security.rate_limit import LIMITS
-from app.vpn import billing, service, support
+from app.vpn import billing, service, support, trial_guard
 from app.vpn.billing import BillingError
 from app.vpn.service import VpnError
 
@@ -28,7 +27,21 @@ router = APIRouter(tags=["vpn"])
 
 
 def _fail(e: VpnError | BillingError) -> HTTPException:
-    return HTTPException(e.status, str(e))
+    headers = {}
+    if getattr(e, "code", None):
+        headers["X-Kiwi-Reason"] = str(e.code)  # type: ignore[union-attr]
+    if getattr(e, "retry_after", None):
+        headers["Retry-After"] = str(e.retry_after)  # type: ignore[union-attr]
+    return HTTPException(e.status, str(e), headers=headers or None)
+
+
+def _too_many(wait: int | None, message: str) -> None:
+    if wait is not None:
+        raise HTTPException(429, message, headers={"Retry-After": str(wait)})
+
+
+def _via(pc_session: str | None) -> str:
+    return "app" if (pc_session or "").startswith(DESKTOP_TOKEN_PREFIX) else "web"
 
 
 def _preview(db: DbSession, request: Request) -> bool:
@@ -66,14 +79,17 @@ def stats(db: DbSession) -> dict[str, Any]:
 
 @router.post("/members/vpn/trial")
 def start_trial(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
-    """Takes no input: eligibility comes from the account, Admin's switch and the server's clock."""
+    """Takes no input: eligibility comes from the account, Admin's switch, the trial guards (app/vpn/trial_guard.py) and the
+    server's clock. Every check runs before the rate limit is charged: a refused start spends nobody's tokens (audit M1).
+    A refusal says why in `detail`, with a machine-readable X-Kiwi-Reason header."""
     member = _require(db, pc_session)
-    wait = LIMITS["vpn_trial"].hit(str(member.id))
-    if wait is not None:
-        raise HTTPException(429, "Too many tries. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     preview = _preview(db, request)
+
+    def charge() -> None:
+        _too_many(LIMITS["vpn_trial"].hit(str(member.id)), "Too many tries. Please wait a few minutes.")
+
     try:
-        service.start_trial(db, member, preview)
+        service.start_trial(db, member, preview, ip=trial_guard.real_ip(request), charge=charge)
     except VpnError as e:
         raise _fail(e) from e
     return service.overview(db, member, preview)
@@ -101,11 +117,14 @@ def create_device(payload: DeviceInput, request: Request, db: DbSession, pc_sess
                 return {"device": service.device_out(mine), "peer": service.device_peer(db, member, mine.id)}
             except VpnError as e:
                 raise _fail(e) from e
-    wait = rate_limit.device_charge(str(member.id), payload.server_id, payload.name)
-    if wait is not None:
-        raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    preview = _preview(db, request)
     try:
-        dev, config, filename = service.create_device(db, member, payload.name, payload.server_id, _preview(db, request), payload.public_key)
+        service.device_precheck(db, member, payload.name, payload.server_id, preview)  # refused for free: nothing charged (audit M1)
+    except VpnError as e:
+        raise _fail(e) from e
+    _too_many(rate_limit.device_charge(str(member.id), payload.server_id, payload.name), "Too many new devices. Please wait a few minutes.")
+    try:
+        dev, config, filename = service.create_device(db, member, payload.name, payload.server_id, preview, payload.public_key, via=_via(pc_session))
         if payload.public_key is not None:
             return {"device": service.device_out(dev), "peer": service.device_peer(db, member, dev.id)}
     except VpnError as e:
@@ -151,11 +170,14 @@ class BrowserInput(StrictInput):
 def create_browser(payload: BrowserInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     """The browser extension's login for one server. Shown this once; only its hash is kept."""
     member = _require(db, pc_session)
-    wait = LIMITS["vpn_browser"].hit(str(member.id))
-    if wait is not None:
-        raise HTTPException(429, "Too many new connections. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    preview = _preview(db, request)
     try:
-        return service.create_browser(db, member, payload.server_id, payload.replace, _preview(db, request))
+        service.browser_precheck(db, member, payload.server_id, preview)  # refused for free: nothing charged (audit M1)
+    except VpnError as e:
+        raise _fail(e) from e
+    _too_many(LIMITS["vpn_browser"].hit(str(member.id)), "Too many new connections. Please wait a few minutes.")
+    try:
+        return service.create_browser(db, member, payload.server_id, payload.replace, preview)
     except VpnError as e:
         raise _fail(e) from e
 
@@ -311,12 +333,14 @@ def _anon(db: DbSession, x_kiwi_key: str | None = Header(None)) -> VpnAccount:
     return acct
 
 
-@router.post("/members/vpn/anon", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_new"))])
+@router.post("/members/vpn/anon", status_code=status.HTTP_201_CREATED)
 def anon_create(request: Request, db: DbSession) -> dict[str, str]:
-    """A new key. Shown this once: there is no way to recover it. Only while paying: free access goes with a Passport, so one person can't take every slot on a server."""
+    """A new key. Shown this once: there is no way to recover it. Only while paying: free access goes with a Passport, so one person can't take every slot on a server.
+    The rate limit is charged only once a key would really be made (audit M1: refusals don't drain the shared bucket)."""
     _open_or_preview(db, request)
     if not service.settings(db).payments_enabled:
         raise HTTPException(403, "New keys are off while payments are off. Sign in with a Passport instead.")
+    _too_many(rate_limit.retry_after("vpn_new", request), "Too many requests. Please slow down.")
     return {"key": billing.new_anonymous(db)[1]}
 
 
@@ -327,11 +351,19 @@ def anon_view(request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)
 
 @router.post("/members/vpn/anon/devices", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit.limit("vpn_key"))])
 def anon_device(payload: DeviceInput, request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
-    wait = LIMITS["vpn_anon_device"].hit(f"a{acct.id}")
-    if wait is not None:
-        raise HTTPException(429, "Too many new devices. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    """Checked first, then charged per key AND per client address (a real one only: website visitors behind Vercel's shared
+    egress aren't keyed together), so many keys from one place can't drain the shared bucket either (audit M1)."""
+    preview = _preview(db, request)
     try:
-        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id, _preview(db, request))
+        service.device_precheck(db, acct, payload.name, payload.server_id, preview)
+    except VpnError as e:
+        raise _fail(e) from e
+    ip = trial_guard.real_ip(request)
+    if ip is not None:
+        _too_many(LIMITS["vpn_anon_ip"].hit(client_ip.bucket(ip)), "Too many new devices. Please wait a few minutes.")
+    _too_many(LIMITS["vpn_anon_device"].hit(f"a{acct.id}"), "Too many new devices. Please wait a few minutes.")
+    try:
+        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id, preview, via="anon")
     except VpnError as e:
         raise _fail(e) from e
     return {"device": service.device_out(dev), "config": config, "filename": filename}
@@ -380,6 +412,14 @@ class SettingsUpdate(StrictInput):
     trial_enabled: bool | None = None
     max_devices: int | None = Field(None, ge=1, le=service.MAX_DEVICES_LIMIT)
     monthly_cap_gb: int | None = Field(None, ge=0, le=service.MAX_CAP_GB)  # per member per month, 0 = unlimited
+    # free-trial guards (app/vpn/trial_guard.py); each number 0 = that check off
+    trial_one_per_identity: bool | None = None
+    trial_min_account_age_hours: int | None = Field(None, ge=0, le=service.TRIAL_GUARDS["trial_min_account_age_hours"][1])
+    trial_min_xp: int | None = Field(None, ge=0, le=service.TRIAL_GUARDS["trial_min_xp"][1])
+    trial_per_ip_day: int | None = Field(None, ge=0, le=service.TRIAL_GUARDS["trial_per_ip_day"][1])
+    trial_per_network_day: int | None = Field(None, ge=0, le=service.TRIAL_GUARDS["trial_per_network_day"][1])
+    sync_enforce_limits: bool | None = None  # the sync switches off (never deletes) devices past the limit and non-testers on testers-only servers
+    count_pc_once: bool | None = None  # the Windows app's devices of one PC count as one slot
 
 
 @router.put("/vpn/admin/settings")
@@ -502,7 +542,7 @@ def admin_create_device(payload: DeviceInput, db: DbSession) -> dict[str, Any]:
     acct = service.owner_account(db)
     db.commit()
     try:
-        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id, preview=True)
+        dev, config, filename = service.create_device(db, acct, payload.name, payload.server_id, preview=True, via="admin")
     except VpnError as e:
         raise _fail(e) from e
     return {"device": service.device_out(dev), "config": config, "filename": filename}

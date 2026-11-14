@@ -93,6 +93,9 @@ def link_identity(db: Session, member: Member, platform: str, platform_user_id: 
     db.add(ident)
     db.flush()
     ledger.audit(db, member.id, "member", "identity_linked", {"platform": platform})
+    from app.vpn import trial_guard
+
+    trial_guard.mark_if_trial_used(db, member)  # had a Kiwi VPN trial: this identity has had one too
     ledger.award(db, member, f"identity.{platform}_linked", f"{platform}:{uid}", claim_key=f"{platform}:{uid}",
                  reason=f"Connected {PLATFORM_LABEL[platform]}", commit=False)
     if platform == "telegram":

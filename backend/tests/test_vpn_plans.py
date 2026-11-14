@@ -28,7 +28,7 @@ def test_the_trial_is_off_until_enabled_even_when_open_and_paid(client: TestClie
     open_vpn(db)
     db.commit()
     c = signed_in(client, db, member_at(db, "egg", "early", paid=False))
-    assert me(c)["trial"] == {"available": False, "days": 30}
+    assert me(c)["trial"] == {"available": False, "days": 30, "code": "off", "reason": "The free trial isn't available right now."}
     assert c.post(TRIAL).status_code == 403
     assert me(c)["plan"]["kind"] == "not_activated"
 

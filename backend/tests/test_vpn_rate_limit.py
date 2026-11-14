@@ -132,9 +132,9 @@ def test_the_trial_does_not_drain_the_device_bucket(client: TestClient, db: Sess
     server = add_server(db, fake)
     open_vpn(db, max_devices=10, trial_enabled=True)
     c = signed_in(client, db, member_at(db, "egg", "trialist", paid=False))
-    tries = int(LIMITS["vpn_trial"].burst)
+    tries = int(LIMITS["vpn_trial"].burst) * 2
+    # only the start that succeeds is charged: refusals ("already used") are checked first and cost nothing (audit M1)
     assert [c.post("/api/members/vpn/trial").status_code for _ in range(tries)] == [200] + [409] * (tries - 1)
-    assert_limited(c.post("/api/members/vpn/trial"))
     assert [add(c, server.id, f"PC {i}").status_code for i in range(BURST)] == [201] * BURST
 
 

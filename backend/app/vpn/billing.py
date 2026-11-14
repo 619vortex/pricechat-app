@@ -299,7 +299,7 @@ def nowpayments_webhook(db: Session, raw: bytes, signature: str | None, now: dat
     try:
         signed = _np_signature_ok(raw, signature, secret)
         data = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: deeply nested JSON (audit I4) is a bad request, not a 500
         raise BillingError("Bad request.", 400) from None
     if not signed:
         raise BillingError("Bad signature.", 401)
