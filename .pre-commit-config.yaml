@@ -1,0 +1,9 @@
+# Optional local hook: blocks commits that add secrets. Not installed globally.
+# Owner, per clone/worktree (needs Python): pip install pre-commit && pre-commit install
+# The hook runs gitleaks on the staged changes with the repo's .gitleaks.toml.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: ["--config", ".gitleaks.toml", "--redact"]

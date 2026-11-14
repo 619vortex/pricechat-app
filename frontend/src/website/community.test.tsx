@@ -365,6 +365,41 @@ describe("legal pages", () => {
     expect(refunds).toMatch(/rights the law gives you/);
     expect(screen.getByRole("note").textContent).toContain("Draft");
   });
+
+  it("Kiwi VPN privacy names who resolves DNS and what the servers and hosts hold, with no absolute no-logs claim", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const privacy = (await show(<LegalPage kind="vpnprivacy" />)).container.textContent!;
+    expect(screen.getByRole("heading", { name: "Your DNS lookups" })).toBeTruthy();
+    expect(privacy).toMatch(/Cloudflare \(1\.1\.1\.1\) for WireGuard devices/);
+    expect(privacy).toMatch(/hosting provider's \(Hetzner's\) resolvers for the browser extension/);
+    expect(privacy).toMatch(/aren't encrypted/);
+    expect(privacy).toMatch(/server's own resolver, which keeps no log/);  // stays true once the nodes run their own resolver
+    expect(privacy).toMatch(/IP address it last connected from/);  // WireGuard's in-memory endpoint (audit I1)
+    expect(privacy).toMatch(/last handshake/);
+    expect(privacy).toMatch(/Railway's and Vercel's\) request logs record them, including your IP address/);  // audit L5
+    expect(privacy).toMatch(/private \(incognito\) windows/);  // audit L17
+    expect(privacy).not.toMatch(/We don't log|don't record the sites|your DNS lookups or the content|zero[- ]logs?|no[- ]logs/i);
+  });
+
+  it("Kiwi VPN acceptable use is a clearly marked draft covering abuse, P2P, suspension, reporting and visibility", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const aup = (await show(<LegalPage kind="vpnaup" />)).container.textContent!;
+    expect(screen.getByRole("note").textContent).toMatch(/Draft for review: this policy isn't in force yet/);
+    expect(document.title).toBe("Kiwi VPN Acceptable Use · Price Chat");
+    for (const h of ["Not allowed", "File sharing (P2P)", "What we can and can't see", "Abuse reports and suspension", "Reporting abuse"])
+      expect(screen.getByRole("heading", { name: h })).toBeTruthy();
+    expect(aup).toMatch(/Anything illegal/);
+    expect(aup).toMatch(/Spam/);
+    expect(aup).toMatch(/port scans/);
+    expect(aup).toMatch(/isn't supported for now/);
+    expect(aup).toMatch(/abuse report that we can verify/);
+    expect(aup).toMatch(/\[abuse contact address to be confirmed\]/);
+    expect(aup).toMatch(/usually can't tell which account/);
+    cleanup();
+    const terms = (await show(<LegalPage kind="vpnterms" />)).container.textContent!;
+    expect(terms).toContain("/vpn/acceptable-use");
+    expect(screen.getByRole("note").textContent).toBe("Draft: this page has not had final legal review yet.");
+  });
 });
 
 describe("rank art", () => {

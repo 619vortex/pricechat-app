@@ -710,7 +710,7 @@ function Community({ links, growth }: { links: HomeData["links"]; growth?: HomeD
 
 const VPN_POINTS: [string, string][] = [
   ["Your address stays hidden", "Sites see our server's address instead of yours."],
-  ["We don't log the sites you visit", "Our privacy page lists exactly what we do keep."],
+  ["We don't keep a history of the sites you visit", "Our privacy page names who resolves your DNS and lists what we do keep."],
 ];
 
 /** What GET /members/vpn/public says: billing (the price) is only sent while payments are really open. */

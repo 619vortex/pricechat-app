@@ -1,0 +1,32 @@
+# gitleaks config for the Price Chat monorepo (gitleaks 8.30+).
+# Used by the pre-commit hook in .pre-commit-config.yaml and by manual scans:
+#   gitleaks git . --redact -c .gitleaks.toml          (full history)
+#   gitleaks git . --redact -c .gitleaks.toml --log-opts="-1"   (last commit)
+# Keep the allowlist narrow: each entry below was triaged on 2026-11-14 (docs/hardening/CREDENTIALS.md)
+# as a test fixture or public value, not a secret. Never allowlist a real secret: rotate it and remove it instead.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Triaged false positives: test fixtures, public keys and published contract addresses"
+paths = [
+  # WireGuard test keys in Windows client tests/examples
+  '''^windows-client/service/(examples|tests)/(guard_check|fake_service)\.rs$''',
+  '''^windows-client/client/src/tune\.rs$''',
+  # iOS / Android unit-test fixtures (generated throwaway keys)
+  '''^ios-client/Packages/KiwiCore/Tests/''',
+  '''^android-client/app/src/test/''',
+  # Chrome extension manifest "key" is the extension's PUBLIC key (pins the extension ID)
+  '''^vpn-extension/manifest\.json$''',
+  # Hyperliquid token IDs in a recorded public API response
+  '''^fundarb/tests/fixtures/hl_spot_meta_tokens\.json$''',
+  # Backend/frontend tests with dummy values (eth-account docs keys, fake Telegram hash, fake OAuth signature)
+  '''^backend/tests/(test_client_ip|fakes|test_market_wallets|test_x_social)\.py$''',
+  '''^frontend/src/pages/pokemon/marketplace/marketplace\.test\.tsx$''',
+  # Tether's published USDT contract addresses
+  '''^backend/app/market/payments\.py$''',
+  '''^docs/MARKETPLACE\.md$''',
+]
+
+# worker/worker.env is deliberately NOT allowlisted: it holds the live PRICECHAT_WORKER_TOKEN and must leave the index.

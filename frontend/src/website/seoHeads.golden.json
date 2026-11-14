@@ -48,7 +48,7 @@
   },
   "vpn": {
    "title": "Kiwi VPN · Price Chat",
-   "description": "A WireGuard VPN from Price Chat. We don't log the sites you visit. Start with a 30-day free trial."
+   "description": "A WireGuard VPN from Price Chat. We don't keep a history of the sites you visit, and we name who resolves your DNS. Start with a 30-day free trial."
   },
   "vpn/privacy": {
     "title": "Kiwi VPN Privacy · Price Chat",
@@ -61,6 +61,10 @@
   "vpn/refunds": {
     "title": "Kiwi VPN Refund Policy · Price Chat",
     "description": "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong."
+  },
+  "vpn/acceptable-use": {
+    "title": "Kiwi VPN Acceptable Use · Price Chat",
+    "description": "What you can't use Kiwi VPN for, what happens after an abuse report, and what we can and can't see."
   },
   "privacy": {
    "title": "Privacy · Price Chat",

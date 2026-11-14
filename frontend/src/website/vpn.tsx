@@ -291,7 +291,7 @@ function useTrial(onStarted: (s: VpnState) => void) {
 }
 
 const TRUST: { text: string; href?: string }[] = [
-  { text: "We don't log the sites you visit", href: "/vpn/privacy" },
+  { text: "We don't keep a history of the sites you visit", href: "/vpn/privacy" },
   { text: "We don't store your device's private key" },
 ];
 
@@ -750,7 +750,7 @@ function RoyalKiwi({ member }: { member: VpnState | null }) {
 function Faq({ member, free, paid, open }: { member: VpnState | null; free: boolean; paid: boolean; open: boolean }) {
   const items: [string, React.ReactNode][] = [
     ["What's the difference between the device and browser versions?", "A browser extension sends only that browser's traffic through Kiwi VPN. Other apps keep your normal connection. A device connection covers every app on the device."],
-    ["Do you keep logs?", <>We don't log the websites you visit, your DNS lookups or the content of your traffic. We do keep your account, your devices' names and keys, and how much data each one used this month and when it was last active. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server logs.</>],
+    ["Do you keep logs?", <>We don't keep a history of the websites you visit or the content of your traffic. Your DNS lookups are answered by the server's own resolver or passed to a public one, and that one sees the names you look up: Cloudflare (1.1.1.1) for WireGuard devices on some servers, and the hosting provider's resolvers for the browser extension. We do keep your account, your devices' names and public keys, how much data each one used this month and when it last connected. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server and hosting logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
     ["Is there a Kiwi VPN app?", WINDOWS_BETA.href
       ? `A Windows app is available as a public beta. It's code signed, so it installs on a PC with Smart App Control turned on, and it has an optional kill switch in Settings. ${ANDROID_BETA.href ? "An Android release candidate is available too, for testing: real-device VPN routing and sign-in testing are still pending. iPhone, Mac and browser versions aren't available yet." : "Android, iPhone, Mac and browser versions aren't available yet."}`
@@ -778,6 +778,7 @@ function Faq({ member, free, paid, open }: { member: VpnState | null; free: bool
           <a className="vpn-privacy" href="/vpn/privacy">How Kiwi VPN handles your data</a>
           <a href="/vpn/terms">Kiwi VPN terms</a>
           <a href="/vpn/refunds">Refund policy</a>
+          <a href="/vpn/acceptable-use">Acceptable use</a>
         </aside>
       </div>
     </section>

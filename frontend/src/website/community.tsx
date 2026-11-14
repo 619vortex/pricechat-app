@@ -296,9 +296,10 @@ export function LeaderboardPage() {
 
 // --- legal (draft) ----------------------------------------------------------------------------------------------
 
-type LegalKind = "privacy" | "vpnprivacy" | "vpnterms" | "vpnrefunds" | "terms" | "disclaimer" | "contact";
+type LegalKind = "privacy" | "vpnprivacy" | "vpnterms" | "vpnrefunds" | "vpnaup" | "terms" | "disclaimer" | "contact";
 
-const LEGAL: Record<LegalKind, { title: string; description: string; sections: [string, string[]][] }> = {
+/** `note` replaces the standard draft banner for a page that needs a stronger one (the acceptable-use draft isn't in force yet). */
+const LEGAL: Record<LegalKind, { title: string; description: string; note?: string; sections: [string, string[]][] }> = {
   privacy: {
     title: "Privacy",
     description: "How Price Chat handles member data, connected accounts and Kiwi XP.",
@@ -333,24 +334,30 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
     description: "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions.",
     sections: [
       ["The short version", [
-        "Kiwi VPN is run by Price Chat. It carries your traffic so websites see our server's address instead of yours. We don't record the sites you visit, and we don't sell your data or use it for advertising.",
+        "Kiwi VPN is run by Price Chat. It carries your traffic so websites see our server's address instead of yours. We don't keep a history of the sites you visit, and we don't sell your data or use it for advertising. Some things do pass through other companies, such as your DNS lookups: this page names them.",
       ]],
       ["What we keep", [
         "Your account: your Kiwi Passport member id, or a one-way fingerprint of your key if you use an anonymous key. Your Price Chat privacy page covers the Passport itself.",
         "For each browser using the extension: a random login for one server. We keep only a one-way fingerprint of its password, and the password itself stays in your browser's extension storage.",
         "For each WireGuard device: the name you gave it, its public key and the private address we assigned it. Its private key is created on our server, handed to you once in its config, and not stored.",
-        "Usage: how many bytes each login or device used this month, and when it was last active. We use this to show you your usage, apply any monthly limit and keep the service fair.",
+        "Usage: how many bytes each login or device used this month, and when it was last active (for a WireGuard device, the time of its last handshake with the server). We use this to show you your usage, apply any monthly limit and keep the service fair.",
         "If payments are switched on and you pay: the amount, date, network and status of each payment, and the address and provider reference it used. Payment providers handle the payment itself. For an anonymous key, the link between a payment and your key, and its address and reference, are removed 7 days after the payment is settled, and the amount and date stay for our accounts.",
         "If your paid time or free trial is ending and you use a Kiwi Passport: a reminder in your notifications, and by email if your Passport has an email address. An anonymous key has no way to be reached, so only the Kiwi VPN page shows it.",
       ]],
       ["What we don't keep", [
-        "We don't log the websites or addresses you visit, your DNS lookups or the content of your traffic, and we don't keep a per-connection history of your use.",
-        "Your traffic does pass through our server while the VPN is on, and it has to read the destination to carry it there. Pages on https stay encrypted between your browser and the website. Pages on plain http aren't encrypted beyond our server, as with any VPN.",
+        "We don't keep a history of the websites or addresses you visit or of the content of your traffic, and we don't keep a per-connection history of your use.",
+        "Your traffic does pass through our server while the VPN is on, and it has to read the destination to carry it there: while a connection is open, the server's memory holds where it's going. Pages on https stay encrypted between your browser and the website. Pages on plain http aren't encrypted beyond our server, as with any VPN.",
+        "While a WireGuard device is set up on a server, the server's memory holds the IP address it last connected from, because WireGuard needs it to send your traffic back. We don't copy it to our database, and it's gone when the device is removed or the server restarts.",
         "Our server's ordinary system and firewall logs can record connection attempts to the server, including IP addresses. We use them only for security, and the system rotates them away.",
-        "Account requests to pricechat.live, from this website or the apps, are ordinary website visits: our hosting providers' request logs can record them, including your IP address. The extension's don't go through the VPN.",
+        "Account requests to pricechat.live, from this website or the apps, are ordinary website visits: our hosting providers' (Railway's and Vercel's) request logs record them, including your IP address and the page or API address asked for, and keep them for as long as those providers keep their logs. The extension's don't go through the VPN.",
+      ]],
+      ["Your DNS lookups", [
+        "Every site you open starts with a DNS lookup that turns its name into an address, so whoever answers those lookups can see the names of the sites you visit.",
+        "Depending on the server, they're answered by the server's own resolver, which keeps no log of them, or passed to a public resolver: Cloudflare (1.1.1.1) for WireGuard devices, or the hosting provider's (Hetzner's) resolvers for the browser extension. The extension's lookups to Hetzner aren't encrypted. Cloudflare and Hetzner handle them under their own privacy policies.",
+        "A WireGuard device's config shows which one it uses on its DNS line: 1.1.1.1 means Cloudflare, and our server's own address means the server's resolver.",
       ]],
       ["The browser extension", [
-        "While switched on, it sends that browser's traffic through the server you chose, except pricechat.live and addresses on your own network. It doesn't cover other apps. If you switch it off, disable it or remove it, your browser goes back to its normal connection.",
+        "While switched on, it sends that browser's traffic through the server you chose, except pricechat.live and addresses on your own network. It doesn't cover other apps or private (incognito) windows. If you switch it off, disable it or remove it, your browser goes back to its normal connection.",
         "Proxy: to send traffic through the server. Web requests: to answer the server's password request and notice a refused login. Site access to all sites: the browser only lets an extension answer the server's password request, and notice a refused login, on sites it has access to, and the VPN carries every site. It also uses that access to reach your account on pricechat.live and the server's own check address, to confirm the connection is working. It doesn't read or change the pages you visit, and it runs no scripts on them. Privacy: to stop WebRTC revealing your real address while on. Storage: to remember your on/off state, server and login on your device.",
         "It uses your Kiwi Passport sign-in on pricechat.live to get its login. It has no ads or analytics and loads no code from outside its package.",
         "The use of information received through the extension is limited to providing this feature, in line with the Limited Use requirements of the Chrome Web Store User Data Policy and the Microsoft Edge Add-ons developer policies.",
@@ -361,7 +368,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "It's a beta: it's code signed and has an optional kill switch in Settings. If something doesn't work, tell us here.",
       ]],
       ["Who else is involved", [
-        "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). WireGuard devices look up addresses through Cloudflare's public DNS unless the server blocks ads, so Cloudflare receives those lookups under its own privacy policy. These companies provide infrastructure for us; we don't send them your data for their own use.",
+        "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). DNS lookups that a server doesn't answer itself go to Cloudflare or Hetzner, as described above. These companies provide infrastructure for us; we don't send them your data for their own use.",
         "We'd only share data beyond this if the law requires it, and we can only share what's listed above.",
       ]],
       ["How long, and your controls", [
@@ -389,7 +396,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ["Anonymous keys", ["If you pay with an anonymous key, the key is the only thing that identifies your account. We can't recover a lost key, and any time on it is lost with it. Keep it safe."]],
       ["Paying correctly", ["Send the exact amount shown, on the network shown, to the address shown. Coins sent on another network or in another currency may be lost, and we may not be able to recover them."]],
       ["Using the service", [
-        "Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk, and blocked accounts can't buy more time.",
+        "Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk, and blocked accounts can't buy more time. The acceptable use policy at /vpn/acceptable-use lists the rules in full.",
         "Kiwi VPN is provided as is. We don't promise it will always be available, and no VPN makes you fully anonymous or secure. Our privacy page lists what we keep. Our apps have their own limits, which their download pages explain.",
       ]],
       ["Refunds", ["See the refund policy at /vpn/refunds."]],
@@ -419,6 +426,39 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
       ["Asking for help", ["Message us on Telegram or X (see Contact) with your receipt number. Never send us your anonymous key in a public message."]],
     ],
   },
+  vpnaup: {
+    title: "Kiwi VPN acceptable use",
+    description: "What you can't use Kiwi VPN for, what happens after an abuse report, and what we can and can't see.",
+    note: "Draft for review: this policy isn't in force yet and may change before it is.",
+    sections: [
+      ["The short version", [
+        "Kiwi VPN is for private, everyday browsing. Many people share each server and its address, so one person's abuse can get that address blocked for everyone. Don't use Kiwi VPN for anything below.",
+      ]],
+      ["Not allowed", [
+        "Anything illegal where you are or where the server is.",
+        "Spam: bulk or unwanted email, messages, comments or sign-ups. Servers may block outgoing mail ports.",
+        "Scanning, probing or attacking other systems: port scans, vulnerability scans, password guessing, denial-of-service traffic, or getting into accounts or systems you're not allowed into.",
+        "Fraud, phishing, spreading malware, running bots or botnets, and harassing or threatening people.",
+        "Getting around our own limits: sharing one account among many people, reselling access, or opening extra accounts for more trials.",
+      ]],
+      ["File sharing (P2P)", [
+        "Peer-to-peer file sharing, such as BitTorrent, isn't supported for now. Please don't use it through Kiwi VPN. We may slow down or block it on a server without notice.",
+      ]],
+      ["What we can and can't see", [
+        "We don't keep a history of the sites you visit or of your connections, so we usually can't tell which account was behind an address and a time in a report after the fact.",
+        "While traffic is flowing, a server can see which of its devices or browser logins is sending it, where it's going and how much data it uses. That's what lets us find and stop abuse that's still happening.",
+        "We can't see the content of encrypted (https) traffic. Our privacy page lists everything we keep.",
+      ]],
+      ["Abuse reports and suspension", [
+        "When we receive an abuse report that we can verify, for example from a network operator or our hosting provider, we may suspend the device, browser login or account involved, or block that kind of traffic on the server for everyone.",
+        "If your account is suspended, we'll tell you in your Kiwi Passport notifications where we can. Time lost to a suspension for breaking these rules isn't refunded (see /vpn/refunds). If you think we got it wrong, contact us and we'll look again.",
+      ]],
+      ["Reporting abuse", [
+        "To report abuse coming from a Kiwi VPN server, email [abuse contact address to be confirmed] with the server's address, the time with its time zone, and what happened. You can also message us on Telegram or X (see Contact).",
+      ]],
+      ["Changes", ["We'll update this page if these rules change. The Kiwi VPN terms (/vpn/terms) and privacy page (/vpn/privacy) still apply."]],
+    ],
+  },
   terms: {
     title: "Terms",
     description: "The rules of the Price Chat community and Kiwi XP.",
@@ -430,7 +470,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
         "Ranks can't be bought. Any future paid perks will be kept separate from community rank.",
       ]],
       ["Community conduct", ["Be respectful. No spam, scams, impersonation, harassment or automated activity. Accounts that break the rules may be suspended or closed."]],
-      ["Kiwi VPN", ["Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk. It's provided as is, without a promise that it will always be available. Payments, renewal and refunds are covered by the Kiwi VPN terms (/vpn/terms) and refund policy (/vpn/refunds)."]],
+      ["Kiwi VPN", ["Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk. It's provided as is, without a promise that it will always be available. Payments, renewal and refunds are covered by the Kiwi VPN terms (/vpn/terms) and refund policy (/vpn/refunds), and the full rules by the acceptable use policy (/vpn/acceptable-use)."]],
       ["Changes", ["We may update these terms as the community grows. Material changes will be announced."]],
     ],
   },
@@ -458,14 +498,19 @@ const LEGAL: Record<LegalKind, { title: string; description: string; sections: [
   },
 };
 
+const LEGAL_PATH = {
+  privacy: "privacy", vpnprivacy: "vpn/privacy", vpnterms: "vpn/terms", vpnrefunds: "vpn/refunds", vpnaup: "vpn/acceptable-use",
+  terms: "terms", disclaimer: "disclaimer", contact: "contact",
+} as const satisfies Record<LegalKind, string>;
+
 export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
   return (
-    <SitePage {...pageHead(kind === "vpnprivacy" ? "vpn/privacy" : kind === "vpnterms" ? "vpn/terms" : kind === "vpnrefunds" ? "vpn/refunds" : kind)}>
+    <SitePage {...pageHead(LEGAL_PATH[kind])}>
       <article className="site-legal site-reveal">
         <p className="site-draft" role="note">
-          Draft: this page has not had final legal review yet.
+          {page.note ?? "Draft: this page has not had final legal review yet."}
         </p>
         <h1 className="site-display site-h1">{page.title}</h1>
         {page.sections.map(([heading, paras]) => (
