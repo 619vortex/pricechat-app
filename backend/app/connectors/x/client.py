@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 PRICE_POST_READ = 0.005
 PRICE_USER_READ = 0.010
 PRICE_OWNED_READ = 0.001
+PRICE_TRENDS_REQUEST = 0.010  # per request, whatever it returns
 # Writes: Price Chat's own configurable estimate (settings.x_write_cost_estimate_usd); X does not report it per request.
 DEFAULT_WRITE_COST_ESTIMATE = 0.01
 
@@ -157,6 +158,13 @@ class XClient:
         return await self._get("/2/tweets", params, est_cost=PRICE_OWNED_READ * len(ids[:100]), endpoint="tweets/lookup",
                                count_posts=True, user=True, owned=True)
 
+    async def trends(self, woeid: int = 1, max_trends: int = 30) -> dict[str, Any]:
+        """X's trends for a place (GET /2/trends/by/woeid/:woeid; 1 = worldwide). Billed per request ($0.010 on pay-per-use, 2026-11).
+        A plan without access answers 403 (XForbiddenError): callers show "not available on your X plan" and stop asking."""
+        params = {"max_trends": str(max(1, min(50, max_trends))), "trend.fields": "trend_name,tweet_count"}
+        return await self._get(f"/2/trends/by/woeid/{int(woeid)}", params, est_cost=PRICE_TRENDS_REQUEST, endpoint="trends/by/woeid",
+                               flat_cost=PRICE_TRENDS_REQUEST)
+
     # --- writes (only with a SocialActionGuard permit) ---------------------------------------------
 
     async def upload_image(self, data: bytes, *, permit: "ExecutionPermit") -> str:
@@ -263,7 +271,7 @@ class XClient:
 
     async def _get(
         self, path: str, params: dict[str, str], *, est_cost: float, endpoint: str,
-        count_posts: bool = False, user: bool = False, owned: bool = False, count_users: bool = False,
+        count_posts: bool = False, user: bool = False, owned: bool = False, count_users: bool = False, flat_cost: float | None = None,
     ) -> dict[str, Any]:
         if self.budget_check is not None:
             self.budget_check(est_cost)  # may raise XBudgetExceededError before anything is spent
@@ -294,7 +302,7 @@ class XClient:
         users = len((body.get("includes") or {}).get("users") or []) + (1 if endpoint.startswith("users/") and not count_posts else 0)
         if count_users and isinstance(body.get("data"), list):
             users = len(body["data"])
-        cost = posts * (PRICE_OWNED_READ if owned else PRICE_POST_READ) + users * PRICE_USER_READ
+        cost = posts * (PRICE_OWNED_READ if owned else PRICE_POST_READ) + users * PRICE_USER_READ if flat_cost is None else flat_cost
         if self.on_usage is not None:
             self.on_usage(endpoint, posts, users, round(cost, 4))
         return body

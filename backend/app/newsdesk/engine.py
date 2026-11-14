@@ -7,7 +7,7 @@ marked uncertain and never retried on its own. Rate limits and server errors ret
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -142,9 +142,24 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     return {"new_stories": fresh, "feed_problems": problems, "feed_health": health}
 
 
+CORROBORATION_WINDOW = timedelta(hours=48)  # two tellings further apart than this are not one event
+
+
 def corroboration(story: NdStory, recent_rows: list[NdStory]) -> list[NdStory]:
-    """Other outlets carrying the same story."""
-    return [o for o in recent_rows if o.id != story.id and o.source != story.source and checks.similarity(o.fingerprint, story.fingerprint) >= 0.34]
+    """Other outlets carrying the same story: most of the words in common, and nothing that says it is another event (a different subject,
+    place or figure: checks.same_event), reported within two days of each other."""
+    def near_in_time(o: NdStory) -> bool:
+        a, b = story.published_at, o.published_at
+        if a is None or b is None:
+            return True
+        a, b = (a if a.tzinfo else a.replace(tzinfo=timezone.utc)), (b if b.tzinfo else b.replace(tzinfo=timezone.utc))
+        return abs(a - b) <= CORROBORATION_WINDOW
+
+    def worded_alike(o: NdStory) -> bool:  # most words in common, or one asset through one price level the same way (checks.same_event)
+        return checks.similarity(o.fingerprint, story.fingerprint) >= 0.34 or bool(checks.price_levels(o.title) & checks.price_levels(story.title))
+
+    return [o for o in recent_rows if o.id != story.id and o.source != story.source and worded_alike(o)
+            and checks.same_event(o.title or "", story.title or "") and near_in_time(o)]
 
 
 # --- dedupe ------------------------------------------------------------------------------------------------------
@@ -415,6 +430,11 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         if sent >= cap:
             events.mark(ev, "x", "skipped", f"X's own daily limit ({cap})")
             continue
+        covered = _trend_covered(db, ev, now)
+        if covered:  # Trending Topics already tweeted this story: one story, one post on X (app/trending/coordinate)
+            events.mark(ev, "x", "skipped", covered)
+            db.commit()
+            continue
         b = events.brief_of(ev, now)
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
@@ -444,6 +464,18 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
     return None
 
 
+def _trend_covered(db: Session, ev: NdEvent, now: datetime) -> str:
+    """Why X skips this event: a Trending Topics post on the same story in the last 24 h. Never stops the desk if Trending misbehaves."""
+    try:
+        from app.trending import coordinate
+
+        post = coordinate.trend_covered(db, [ev.title or "", ev.headline or ""], now)
+    except Exception:  # noqa: BLE001
+        logger.exception("newsdesk: the Trending Topics check failed; X goes on without it")
+        return ""
+    return f"Trending Topics already posted this story (trend post {post.id})" if post is not None else ""
+
+
 def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str]) -> tuple[str, list[str], str, list[str]]:
     """(text, allowed links, what the sources said, source names) for X. Price Chat News (2026-11-11): the caption Telegram's package
     wrote (headline, context, a question now and then, the article link), so both platforms say the same thing; without one, the older
@@ -455,14 +487,14 @@ def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str]) 
     if pkg and pkg.get("x_text"):
         links = [str(x.get("url")) for x in pkg.get("links") or [] if x.get("url")]
         names = [str(x.get("name")) for x in pkg.get("links") or [] if x.get("kind") != "pricechat" and x.get("name")] or named
-        return str(pkg["x_text"]), links, network.source_text_of(ev), names
+        return checks.one_cashtag(str(pkg["x_text"])), links, network.source_text_of(ev), names  # X: one cashtag (403 otherwise)
     if X_FORMAT == "visual":  # the owner's format: the same picture as Telegram, the headline, a small source credit
         from app.newsdesk import visual
 
         text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
     else:
         text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
-    return text, [], f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}", named
+    return checks.one_cashtag(text), [], f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}", named
 
 
 # --- publish ------------------------------------------------------------------------------------------------------
@@ -548,6 +580,9 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     if not _claim(db, post):
         return "already claimed"
     db.refresh(post)
+    if checks.cashtag_count(post.text) > checks.X_MAX_CASHTAGS:  # X answers 403 to an API post with more than one cashtag
+        post.text = checks.one_cashtag(post.text)
+        db.commit()
     if s.mode != "live" and not force_live:
         post.status, post.published_at = "dry_run", now
         db.commit()
@@ -577,10 +612,11 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
                 stage = "image"
                 image, meta = await visual.for_event(ev, db=db)
                 ev.facts = {**(ev.facts or {}), "visual": meta}
-                stage = "permit"
-                upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
-                stage = "upload"
-                media = [await client.upload_image(image, permit=upload_permit)]
+                if image:  # the wire style's text-only post (b"") goes without a picture, as on Telegram
+                    stage = "permit"
+                    upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
+                    stage = "upload"
+                    media = [await client.upload_image(image, permit=upload_permit)]
         stage = "permit"
         permit = guard.issue_news_permit(req)
         stage = "post"
@@ -819,7 +855,7 @@ async def test_post_preview(db: Session, event_id: int | None, now: datetime) ->
     image, meta = await visual.for_event(ev, db=db)
     mime = "image/jpeg" if image[:3] == b"\xff\xd8\xff" else "image/png"
     return {"event_id": ev.id, "headline": ev.headline, "text": text, "ok": result.ok, "reason": result.reason if not result.ok else "", "x_status": ev.x_status,
-            "image": f"data:{mime};base64,{base64.b64encode(image).decode()}", "visual": meta}
+            "image": f"data:{mime};base64,{base64.b64encode(image).decode()}" if image else "", "visual": meta}
 
 
 async def send_test_post(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, event_id: int, now: datetime) -> NdPost:

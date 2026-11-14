@@ -582,6 +582,12 @@ def deep_checks(db: Session, runtime: Any, watchdog: Any = None, window: ErrorWi
         db.rollback()
         out["owner_alerts"] = _c("warn", f"couldn't read ({type(exc).__name__})")
 
+    try:
+        out["trending"] = trending_check(db, sched, now)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out["trending"] = _c("warn", f"couldn't read ({type(exc).__name__})")
+
     if watchdog is not None:
         if watchdog._task is None:
             out["watchdog"] = _c("off", "not running on this server")
@@ -596,6 +602,29 @@ def deep_checks(db: Session, runtime: Any, watchdog: Any = None, window: ErrorWi
                                 f"{snap['errors']} server errors in {snap['requests']} requests (5 min)",
                                 errors=snap["errors"], requests=snap["requests"], top_routes=snap["routes"])
     return out
+
+
+def trending_check(db: Session, sched: Any, now: datetime) -> dict[str, Any]:
+    """Trending Topics: off (not running here / switched off), warn (a source failing 3+ reads in a row, no run for over an hour, or its
+    stop on), ok. Owner alerts for failing sources are sent by the job itself (app/trending/engine.check_health, deduplicated)."""
+    from app.models.trending import TtSettings
+
+    s = db.get(TtSettings, 1)
+    if not _runs_here(db, sched, "newsdesk.trending"):
+        return _c("off", "the Trending Topics job doesn't run on this server")
+    if s is None or not s.enabled:
+        return _c("off", "Trending Topics is switched off" if s is not None else "not run yet")
+    state = s.state or {}
+    failing = [h.get("name") for h in (state.get("health") or {}).values() if h.get("status") == "error" and int(h.get("fails") or 0) >= 3]
+    last = (state.get("last_run") or {}).get("at")
+    age = _age(now, datetime.fromisoformat(last)) if last else None
+    if s.kill_switch:
+        return _c("warn", "its stop is on: no trend post goes out", sources_failing=failing)
+    if failing:
+        return _c("warn", f"sources failing: {', '.join(str(f) for f in failing)}", sources_failing=failing, last_run_age_s=age)
+    if age is not None and age > 3600:
+        return _c("warn", f"no run for {_secs(age)}", last_run_age_s=age)
+    return _c("ok", "scanning", last_run_age_s=age, mode=s.mode)
 
 
 def worst(checks: dict[str, dict[str, Any]]) -> str:

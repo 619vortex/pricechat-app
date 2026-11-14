@@ -6,13 +6,15 @@ import type { Approval, MetricSnapshot, MonitorRuleType, SocialOpportunity, Soci
 import { TrendBadge } from "../components/community";
 import { GrowthPilot } from "./x/GrowthPilot";
 import { NewsDesk } from "./x/NewsDesk";
+import { TrendingTopics } from "./x/TrendingTopics";
 import { CapabilityBadge, compact, FeedbackButtons, GuardChecks, Reasons, SignalBars } from "../components/social";
 import { Advanced, ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, Tabs, formatTime, label, relativeTime, type Tone } from "../components/ui";
 
-type Tab = "newsdesk" | "growth" | "overview" | "mentions" | "accounts" | "topics" | "opportunities" | "own" | "analytics" | "connection";
+type Tab = "newsdesk" | "trending" | "growth" | "overview" | "mentions" | "accounts" | "topics" | "opportunities" | "own" | "analytics" | "connection";
 const TABS: { key: Tab; label: string; more?: boolean }[] = [
   { key: "overview", label: "Overview" },
   { key: "newsdesk", label: "News Desk" },
+  { key: "trending", label: "Trending Topics" },
   { key: "opportunities", label: "Post ideas" },
   { key: "growth", label: "Growth Pilot" },
   { key: "connection", label: "Connect X" },
@@ -41,6 +43,7 @@ export function XPage() {
       <Tabs tabs={TABS} value={tab} onChange={go} />
       {tab === "growth" && <GrowthPilot />}
       {tab === "newsdesk" && <NewsDesk />}
+      {tab === "trending" && <TrendingTopics />}
       {tab === "overview" && <OverviewTab go={go} />}
       {tab === "mentions" && <PostsTab source="mention" empty="No mentions yet." intro="Posts that mention your account, newest first." />}
       {tab === "accounts" && <AccountsTab />}

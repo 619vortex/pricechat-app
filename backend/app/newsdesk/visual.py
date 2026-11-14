@@ -1102,7 +1102,7 @@ def _style_of(stored: dict[str, Any], db: Any) -> str:
     """The picture's style: what it was first drawn in (X redraws Telegram's), else the desk's setting (network.post_style). Without a
     database (older callers, tests) the classic layout."""
     if stored.get("style"):
-        return "clean" if stored["style"] == "clean" else "classic"
+        return stored["style"] if stored["style"] in ("clean", "wire") else "classic"
     if stored.get("design") or stored.get("kind"):
         return "classic"
     if db is None:
@@ -1223,7 +1223,12 @@ async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = N
     f = ev.facts or {}
     used = used or set()
     stored_visual = dict(f.get("visual") or {})
-    if (style or _style_of(stored_visual, db)) == "clean":  # app/newsdesk/clean: the picture without a poster around it
+    chosen_style = style or _style_of(stored_visual, db)
+    if chosen_style == "wire":  # app/newsdesk/wire: a real chart, a data card, the public figure's photo, or no picture (b"")
+        from app.newsdesk import wire
+
+        return await wire.for_event(ev, stored_visual, used=used, transport=transport, market=market, now=now, db=db)
+    if chosen_style == "clean":  # app/newsdesk/clean: the picture without a poster around it
         from app.newsdesk import clean
 
         if stored_visual.get("style") == "clean":

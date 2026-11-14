@@ -5,7 +5,7 @@ import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type T
 import { TelegramLane } from "./TelegramLane";
 import { EditorialDesk } from "./EditorialDesk";
 import { GpuRender } from "./GpuRender";
-import { NetworkSwitches } from "./NetworkSwitches";
+import { NetworkSwitches, PostStyleSwitch } from "./NetworkSwitches";
 import { ViralEngine } from "./ViralEngine";
 import { WorldMonitor } from "./WorldMonitor";
 
@@ -113,6 +113,7 @@ export function NewsDesk() {
   return (
     <div className="stack">
       {error ? <ApiErrorBanner error={error} /> : null}
+      <PostStyleSwitch />
       <Card title="News Desk">
         <p className="muted">Reads news and prices around the clock, verifies them, and posts to X without you. Runs on the server, so this page can be closed.</p>
         <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
