@@ -288,6 +288,11 @@ class Settings(BaseSettings):
     newsdesk_model: str = "claude-haiku-5-5"
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
+    # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the
+    # owner opts in to the public JSON endpoints in Admin). The writer uses newsdesk_model.
+    job_trending_seconds: int = Field(600, ge=120)
+    reddit_client_id: str = ""
+    reddit_client_secret: SecretStr | None = None
     job_pokemon_pulse_seconds: int = Field(900, ge=300)  # Market Pulse X search (only when enabled in the dashboard)
     x_daily_budget_usd: float = Field(1.0, ge=0)
     x_monthly_budget_usd: float = Field(20.0, ge=0)

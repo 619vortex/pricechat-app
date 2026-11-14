@@ -430,6 +430,11 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         if sent >= cap:
             events.mark(ev, "x", "skipped", f"X's own daily limit ({cap})")
             continue
+        covered = _trend_covered(db, ev, now)
+        if covered:  # Trending Topics already tweeted this story: one story, one post on X (app/trending/coordinate)
+            events.mark(ev, "x", "skipped", covered)
+            db.commit()
+            continue
         b = events.brief_of(ev, now)
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
@@ -457,6 +462,18 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         db.commit()
         return result
     return None
+
+
+def _trend_covered(db: Session, ev: NdEvent, now: datetime) -> str:
+    """Why X skips this event: a Trending Topics post on the same story in the last 24 h. Never stops the desk if Trending misbehaves."""
+    try:
+        from app.trending import coordinate
+
+        post = coordinate.trend_covered(db, [ev.title or "", ev.headline or ""], now)
+    except Exception:  # noqa: BLE001
+        logger.exception("newsdesk: the Trending Topics check failed; X goes on without it")
+        return ""
+    return f"Trending Topics already posted this story (trend post {post.id})" if post is not None else ""
 
 
 def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str]) -> tuple[str, list[str], str, list[str]]:
