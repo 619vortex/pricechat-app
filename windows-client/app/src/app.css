@@ -150,3 +150,11 @@ body { background: var(--ground); color: var(--text); font: 400 15px/1.45 var(--
 .support .row { width: 100%; min-height: 48px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--forest); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); font: 650 14px var(--sans); text-align: left; cursor: pointer; }
 .support .row:disabled { opacity: .5; cursor: default; }
 .support .result { margin: 0; font: 700 15px/1.3 var(--sans); color: var(--lime-bright); }
+
+/* 2.2: update banner and the kill switch's release cases */
+.update { margin: 6px 0 0; padding: 8px 12px; border-radius: 10px; background: rgba(120, 200, 120, .12); color: var(--lime); font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.update.is-urgent, .update.is-failed { background: rgba(255, 159, 90, .12); color: var(--warn); }
+.update .notes { flex-basis: 100%; color: var(--soft); }
+.update .hint { flex-basis: 100%; margin: 0; color: var(--soft); }
+.releases { padding: 4px 0 8px; }
+.releases ul { margin: 4px 0; padding-left: 18px; color: var(--soft); font-size: 12px; }

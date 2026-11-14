@@ -3,7 +3,8 @@ import { useExit } from "./exit";
 import { DEFAULT_FAILOVER, DEFAULT_LIVENESS, type FailoverState, type LivenessState, failoverOrder, freshFailover, freshLiveness, nextFailoverStep, observeRx, probeResult, rankServers } from "./smart";
 import { Support } from "./support";
 import { ConnectionSettings, Tools } from "./tools";
-import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, probeServers, probeTunnel, shouldAutoConnect, signIn, signOut, startTrial, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
+import { type AccountView, type Answer, type Phase, type Sample, type Diagnostics, type Server, type Settings, accountState, cancelSignIn, diagnostics, formatBytes, formatDuration, formatRate, getSettings, hasTestConfig, notify, openSite, phaseOf, ratesBetween, secondsUp, serverPlace, setSettings as saveSettings, probeServers, probeTunnel, shouldAutoConnect, signIn, signOut, startTrial, updateCheck, updateInstall, vpnConnect, vpnConnectTestFile, vpnDisconnect, vpnStatus } from "./vpn";
+import { UpdateBanner } from "./update";
 
 const POLL_MS = 1000;
 const ACCOUNT_MS = 60_000;
@@ -11,6 +12,9 @@ const ACCOUNT_MS = 60_000;
 const SLOW_CONNECT_MS = 30_000;
 /** The picker's "fastest server" choice: Smart Connect times every online server and connects to the best. */
 const SMART = -1;
+/** 2.2: the app asks the service to check for updates shortly after it opens, then once a day (the service also checks by itself). */
+export const UPDATE_FIRST_MS = 15_000;
+export const UPDATE_EVERY_MS = 24 * 3600_000;
 
 const SEEDS = Array.from({ length: 26 }, (_, i) => (i * 360) / 26);
 const RAYS = Array.from({ length: 52 }, (_, i) => (i * 360) / 52);
@@ -153,7 +157,10 @@ export function App() {
     void hasTestConfig().then(setTestConfig).catch(() => setTestConfig(false));
     void getSettings().then(setPrefs).catch(() => setPrefs(null));
     const refresh = window.setInterval(() => void loadAccount(), ACCOUNT_MS);
-    return () => { alive = false; window.clearTimeout(timer); window.clearInterval(refresh); };
+    const ask = () => void updateCheck().then((a) => { if (alive && a?.service && a.status) take(a); }).catch(() => undefined);
+    const firstCheck = window.setTimeout(ask, UPDATE_FIRST_MS);
+    const daily = window.setInterval(ask, UPDATE_EVERY_MS);
+    return () => { alive = false; window.clearTimeout(timer); window.clearInterval(refresh); window.clearTimeout(firstCheck); window.clearInterval(daily); };
   }, [take, loadAccount]);
 
   const run = async (kind: NonNullable<typeof action>, work: () => Promise<void>) => {
@@ -274,6 +281,7 @@ export function App() {
   const live = phase === "on";
   const status = answer?.status ?? null;
   const guarding = status?.kill_switch === true;
+  const strictBlock = guarding && status?.strict === true;
   const up = live ? secondsUp(status?.connected_since, now) : null;
   const showsAddress = live || phase === "off";
   const pending = checking ? "Checking" : "Couldn't check";
@@ -330,7 +338,8 @@ export function App() {
               <Toggle label="Notifications" hint="When you connect, or the connection drops." on={prefs.notifications} onChange={(v) => change({ notifications: v })} />
             </div>
           )}
-          {prefs && <ConnectionSettings prefs={prefs} change={change} connected={tunnelUp} killSwitchReady={!!diag?.features?.includes("kill_switch")} />}
+          {prefs && <ConnectionSettings prefs={prefs} change={change} connected={tunnelUp} killSwitchReady={!!diag?.features?.includes("kill_switch")}
+                                        strictReady={!!diag?.features?.includes("strict_kill_switch")} dotReady={!!diag?.features?.includes("dot_guard")} />}
           {view?.signed_in && <button type="button" className="row" onClick={() => void logout()}>Sign out of Kiwi VPN</button>}
           <button type="button" className="row" onClick={() => void openSite("devices")}>My Devices on pricechat.live</button>
           <details className="advanced" onToggle={(e) => { if (e.currentTarget.open) void diagnostics().then(setDiag).catch(() => setDiag(null)); }}>
@@ -366,13 +375,16 @@ export function App() {
         <button type="button" className="link" onClick={() => { setSettings(true); void diagnostics().then(setDiag).catch(() => setDiag(null)); }}>Settings</button>
       </header>
 
+      <UpdateBanner info={status?.update ?? null} connected={tunnelUp} killSwitch={prefs?.kill_switch === true} strict={strictBlock}
+                    install={() => void updateInstall().then(take).catch((e) => setProblem(String(e)))} />
+
       <section className={`stage${unchanged ? " is-warned" : ""}`}>
         <Slice phase={phase} />
         <h1 aria-live="polite">{HEADLINE[phase]}</h1>
         <p className="detail" role={phase === "failed" || phase === "no-service" ? "alert" : "status"}>{note && !tunnelUp && !offline ? note : detail(phase, answer, slow)}</p>
         {problem && <p className="problem" role="alert">{problem}</p>}
-        {guarding && live && <p className="guard is-on">Kill switch on: nothing leaves outside the VPN.</p>}
-        {guarding && !live && <p className="guard" role="status">The kill switch is blocking internet traffic until the VPN reconnects.</p>}
+        {guarding && live && <p className="guard is-on">{strictBlock ? "Strict kill switch on: nothing leaves outside the VPN, even if Kiwi VPN stops." : "Kill switch on: nothing leaves outside the VPN."}</p>}
+        {guarding && !live && <p className="guard" role="status">{strictBlock ? "The strict kill switch is blocking all internet traffic until you connect or press Disconnect." : "The kill switch is blocking internet traffic until the VPN reconnects."}</p>}
         {guarding && !live && !tunnelUp && action === null && <button type="button" className="link" onClick={() => void disconnect()}>Disconnect and unblock</button>}
         {switchedTo && tunnelUp && <p className="detail" role="status">The server stopped answering, so Kiwi VPN moved you to {switchedTo}.</p>}
         {unchanged && <p className="problem" role="alert">Your public IP is the same as before connecting, so traffic may not be leaving through the server.</p>}

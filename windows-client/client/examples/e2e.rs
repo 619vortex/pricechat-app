@@ -399,7 +399,7 @@ fn kill_tunnel_process() -> bool {
 /// The kill switch on a real tunnel: on while connected, holding when the tunnel crashes and while it's brought back, released by
 /// Disconnect, and letting go by itself when a pause isn't followed by a connect.
 fn kill_switch(r: &mut Report, cfg: &str, home4: &Option<String>) {
-    let on = Protect { kill_switch: true, allow_lan: true, allow: Vec::new() };
+    let on = Protect { kill_switch: true, allow_lan: true, allow: Vec::new(), ..Default::default() };
     let server = endpoint_ip(cfg);
     match connect_with(cfg, on.clone()) {
         Err(e) => {

@@ -2,6 +2,8 @@
 //!   service | tunnel <file>   started by Windows, never by hand
 //!   install | uninstall       needs an administrator
 //!   connect <file> | disconnect | status
+//!   unblock                   an administrator lifts the kill switch, strict included, even with the service stopped
+//!   recover                   the update recovery task (2.2)
 
 #[cfg(windows)]
 mod app {
@@ -96,12 +98,41 @@ mod app {
                 }
             },
             ["disconnect"] => show(Request::Disconnect),
-            // for support: an administrator lifts the kill switch (and closes the tunnel) without the app
-            ["unblock"] => show(Request::Disconnect),
+            // for support: an administrator lifts the kill switch (and closes the tunnel) without the app. Also removes the strict
+            // kill switch's persistent filters directly, so it works even when the service isn't running.
+            ["unblock"] => unblock(),
+            // run by the update recovery task while an update is in flight (docs/AUTO-UPDATE.md)
+            ["recover"] => {
+                let running = win::ask_service(&Request::Status).ok().and_then(|s| s.version).and_then(|v| kiwivpn::update::Version::parse(&v));
+                println!("{}", kiwivpn::update_win::recover(running));
+                0
+            }
             ["status"] => show(Request::Status),
             _ => {
-                eprintln!("usage: kiwivpn-service install | uninstall | connect <config> | disconnect | unblock | status");
+                eprintln!("usage: kiwivpn-service install | uninstall | connect <config> | disconnect | unblock | status | recover");
                 2
+            }
+        }
+    }
+
+    fn unblock() -> i32 {
+        let asked = win::ask_service(&Request::Disconnect);
+        match &asked {
+            Ok(_) => println!("The service closed the tunnel and lifted the kill switch."),
+            Err(e) => println!("{} Removing the strict kill switch directly.", e.message()),
+        }
+        match kiwivpn::firewall::strict_remove() {
+            Ok(0) => {
+                println!("No strict kill switch filters were in place.");
+                i32::from(asked.is_err() && !matches!(asked, Err(win::AskError::NoService)))
+            }
+            Ok(n) => {
+                println!("Removed {n} strict kill switch filters.");
+                0
+            }
+            Err(e) => {
+                eprintln!("Couldn't remove the strict kill switch (run this as an administrator): {e}");
+                1
             }
         }
     }

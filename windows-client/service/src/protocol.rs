@@ -1,4 +1,4 @@
-//! What the app may ask the service: exactly these four things, one JSON line each way. No paths, no commands.
+//! What the app may ask the service: exactly these six things, one JSON line each way. No paths, no URLs, no commands.
 
 pub use crate::guard::Protect;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,15 @@ pub enum Request {
     /// app can't fetch the next server's settings until it's closed. A connect within PAUSE_LIMIT_SECONDS carries on; otherwise the block goes.
     Pause,
     Status,
+    /// 2.2: look for an update now (the service fetches its one manifest; at most once per UPDATE_CHECK_EVERY_SECONDS). The answer's
+    /// `update` says what it found.
+    UpdateCheck,
+    /// 2.2: install the update the service already found and verified. Carries nothing: no URL, path or file.
+    UpdateInstall,
 }
+
+/// The app's own asking is limited to this; the service checks by itself every few hours anyway.
+pub const UPDATE_CHECK_EVERY_SECONDS: u64 = 600;
 
 /// How long a pause may hold the kill switch without a connect following it.
 pub const PAUSE_LIMIT_SECONDS: u64 = 120;
@@ -34,7 +42,7 @@ impl Request {
 }
 
 /// What this service enforces, so the app offers only what's real.
-pub const FEATURES: &[&str] = &["kill_switch", "dns_guard"];
+pub const FEATURES: &[&str] = &["kill_switch", "dns_guard", "strict_kill_switch", "dot_guard", "update"];
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -63,11 +71,20 @@ pub struct Status {
     /// What this service can do (see FEATURES). Empty from an older service.
     #[serde(default)]
     pub features: Vec<String>,
+    /// 2.2: the strict kill switch's persistent filters are in place. They stay until Disconnect or `kiwivpn-service unblock`.
+    #[serde(default)]
+    pub strict: bool,
+    /// 2.2: what the service knows about updates. Absent from an older service.
+    #[serde(default)]
+    pub update: Option<crate::update::UpdateInfo>,
+    /// 2.2: the service's own version, so the recovery task can tell whether an update finished.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 impl Status {
     pub fn off() -> Self {
-        Status { state: State::Disconnected, handshake_age_seconds: None, rx_bytes: 0, tx_bytes: 0, error: None, connected_since: None, kill_switch: false, features: Vec::new() }
+        Status { state: State::Disconnected, handshake_age_seconds: None, rx_bytes: 0, tx_bytes: 0, error: None, connected_since: None, kill_switch: false, features: Vec::new(), strict: false, update: None, version: None }
     }
     pub fn failed(error: impl Into<String>) -> Self {
         Status { state: State::Failed, error: Some(error.into()), ..Status::off() }
@@ -95,7 +112,7 @@ pub fn decide(service: ServiceState, handshake_age: Option<u64>, rx: u64, tx: u6
             _ => State::Connecting,
         },
     };
-    Status { state, handshake_age_seconds: handshake_age, rx_bytes: rx, tx_bytes: tx, error: None, connected_since: None, kill_switch: false, features: Vec::new() }
+    Status { state, handshake_age_seconds: handshake_age, rx_bytes: rx, tx_bytes: tx, error: None, connected_since: None, kill_switch: false, features: Vec::new(), strict: false, update: None, version: None }
 }
 
 /// Someone wants the tunnel, nothing is changing it, and it isn't running: it stopped by itself, such as failing just after starting. Without this it would read as an ordinary "not connected",
@@ -140,6 +157,20 @@ pub const RESTART_EVERY_SECONDS: u64 = 15;
 /// After Windows restarts, a tunnel brought back has this long to reach its server before the kill switch lets go.
 pub const RESUME_LIMIT_SECONDS: u64 = 600;
 pub const RELEASED: &str = "The VPN couldn't reconnect, so the kill switch was turned off to keep you online. Connect again when you're ready.";
+/// The strict kill switch never lets go by itself (audit M3): the same give-up closes the tunnel, and says so.
+pub const STRICT_HELD: &str = "The VPN couldn't reconnect. The strict kill switch is still blocking all internet traffic: connect again, or press Disconnect to get your normal connection back.";
+
+/// The cases where the normal kill switch lets traffic out unprotected, so the app and the docs can list them (audit M3). The strict
+/// kill switch holds through all of them except a reinstall or uninstall; only Disconnect, `kiwivpn-service unblock` or uninstalling
+/// removes it. Keep in step with the app's settings text (app/src/tools.tsx RELEASE_CASES).
+pub const RELEASE_CASES: &[&str] = &[
+    "for about 3 seconds while Windows restarts the Kiwi VPN service after a crash",
+    "while Windows starts, before the Kiwi VPN service is running",
+    "after the tunnel fails to restart 6 times in a row",
+    "10 minutes after a restart if the server never answers",
+    "2 minutes after a server switch that never completes",
+    "while Kiwi VPN is being updated",
+];
 
 /// Whether the service should give up bringing the tunnel back and release the block.
 pub fn recovery_given_up(restarts: u32, resumed_at: Option<u64>, ever_connected: bool, now: u64) -> bool {
@@ -178,7 +209,7 @@ pub fn parse_request(line: &str) -> Result<Request, String> {
     // serde lets extra fields through on a tagged enum, so they're refused here: nothing unexpected reaches a service running as SYSTEM
     let allowed: &[&str] = match fields.get("cmd").and_then(|c| c.as_str()) {
         Some("connect") => &["cmd", "config", "protect"],
-        Some("disconnect" | "pause" | "status") => &["cmd"],
+        Some("disconnect" | "pause" | "status" | "update_check" | "update_install") => &["cmd"],
         _ => return Err(bad()),
     };
     if fields.keys().any(|k| !allowed.contains(&k.as_str())) {
@@ -292,5 +323,26 @@ mod tests {
             assert!(parse_request(bad).is_err(), "{bad}");
         }
         assert!(parse_request(&"x".repeat(MAX_REQUEST + 1)).is_err());
+    }
+
+    #[test]
+    fn update_requests_carry_nothing_and_only_the_app_may_send_them() {
+        assert_eq!(parse_request(r#"{"cmd":"update_check"}"#).unwrap(), Request::UpdateCheck);
+        assert_eq!(parse_request(r#"{"cmd":"update_install"}"#).unwrap(), Request::UpdateInstall);
+        for bad in [r#"{"cmd":"update_install","url":"https://evil.example/x.exe"}"#, r#"{"cmd":"update_install","path":"C:\\x.exe"}"#, r#"{"cmd":"update_check","host":"x"}"#] {
+            assert!(parse_request(bad).is_err(), "{bad}");
+        }
+        for r in [Request::UpdateCheck, Request::UpdateInstall] {
+            assert!(!allowed(&r, Caller::Other), "{r:?}");
+            assert!(allowed(&r, Caller::App) && allowed(&r, Caller::Elevated));
+        }
+        assert!(FEATURES.contains(&"update") && FEATURES.contains(&"strict_kill_switch") && FEATURES.contains(&"dot_guard"));
+    }
+
+    #[test]
+    fn a_2_1_answer_reads_with_no_update_and_no_strict_block() {
+        let s: Status = serde_json::from_str(r#"{"state":"disconnected","handshake_age_seconds":null,"rx_bytes":0,"tx_bytes":0,"error":null,"kill_switch":true,"features":["kill_switch"]}"#).unwrap();
+        assert!(!s.strict && s.update.is_none() && s.kill_switch);
+        assert_eq!(RELEASE_CASES.len(), 6);
     }
 }
