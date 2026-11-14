@@ -750,8 +750,11 @@ pub fn after_start(updater: &Updater) {
             delete_recovery_tasks();
             keep_repair_copy(running);
             log_event(&format!("update: {running} installed and running, committed"));
-            let mut i = updater.info.lock().unwrap();
-            *i = UpdateInfo { state: UpdateState::None, checked_at: i.checked_at, ..UpdateInfo::default() };
+            // up to date now; a build without manifest keys keeps saying so instead
+            if update::keys_configured(update::trusted_keys()) {
+                let mut i = updater.info.lock().unwrap();
+                *i = UpdateInfo { state: UpdateState::None, checked_at: i.checked_at, ..UpdateInfo::default() };
+            }
         }
         Health::Recover => {
             // the old version is running again: the installer didn't finish. Nothing to roll back; try again later.
