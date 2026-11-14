@@ -25,7 +25,24 @@ published or signed; KIWIVPN main, its secrets and environments are untouched.
 
 ## CI runs
 
-RESULTS
+All runs are `workflow_dispatch` on KIWIVPN branch `kiwi-22`, with `sign` off and no `remove_devices`. Rust was compiled and
+tested only on GitHub Actions. On this PC only `npm ci`, `npx vitest run` (99 passed) and `npx tsc -b` (clean) were run.
+
+| Run | KIWIVPN commit (source) | build | upgrade | kill-switch | update-test | e2e |
+|---|---|---|---|---|---|---|
+| 43571026082 | 63b0bb5 (8fb92d3) | success | success | 40/41 (strict `unblock` race; GitHub shows "cancelled") | 0/1, broken setup check in run.ps1 | skipped |
+| 43573165764 | 53e5cd9 (3c62a9b) | success | success | **success, 19 + 22 = 41/41** | 34/35 (after commit, the "no keys" message was overwritten) | skipped |
+| **43574419119** (final) | **f871b4b (4afbec5)** | **success** | **success** | **41/41 checks pass, every step succeeds**; GitHub still marks the job "cancelled" during runner cleanup | **success, 35/35** | **success, 37 VPN + 12 window checks** (the one real-account run) |
+
+Exact test counts (final run):
+
+- Window (vitest): 99 tests in 7 files: 86 from earlier versions plus 13 new in App22.test.tsx.
+- Service `cargo test`: 52 unit tests (update 21, guard 11, protocol 11, config 6, windows 3) plus 3 integration tests (fake_service 1, pipe 2).
+- Client `cargo test`: 58, including the new settings test.
+- App `cargo test --no-default-features`: 0 tests, compile only.
+- Release check: the public service contains neither the test host nor the test key.
+- kill-switch job: 19 service checks (6 new strict ones) and 22 raw filter checks (new: L12 port 80, L14 DoT, strict persistence/removal). The boot-time set was added (62 or 66 filters).
+- update-test job: 35 checks: 4 setup; 14 manifest refusals or "nothing offered" (bad signature, unknown key, expired, future, channel, product, other host, plain http, lower version, same version, paused, 0% rollout, replayed seq, redirect); 5 installer refusals (hash mismatch, truncated, longer, unsigned, unpinned signer); 3 folder and offer checks; 7 checks after the update (service 2.2.0, committed, no pending, recovery tasks gone, repair copy kept, tunnels\ kept, one Apps entry); 2 kill switch checks after the update; 1 check that the public build has no keys.
 
 ## Owner actions
 
