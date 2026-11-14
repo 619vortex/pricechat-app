@@ -121,7 +121,7 @@ permission prompt and the update won't be disabled pending re-approval.
 
 | Suite | Result |
 |---|---|
-| `node --test vpn-extension/lib.test.js vpn-extension/store/cws.test.mjs` | 27/27 (lib 23 incl. 4 new; cws 4) |
+| `node --test vpn-extension/lib.test.js vpn-extension/store/cws.test.mjs` | 27/27 (lib 16, 4 of them new; cws 11) |
 | e2e (`vpn-extension/e2e/run.mjs`, run directly, no retry) | 48 checks. 12 runs with the 1.0.5 changes: 10 all-pass; 2 harness failures fixed on the way (the second test extension was blocked by `--disable-extensions-except`; one screenshot of a background tab hung until the outer timeout, now bounded). The last 4 runs on the final code (95491d6): 48/48 each |
 | `node vpn-extension/store/release.mjs prepare` | passed first try, no retry: unit, proxy/agent pytest, browser suite on the source 48/48, browser suite on the store ZIP under the store ID 48/48 |
 
