@@ -7,7 +7,7 @@ marked uncertain and never retried on its own. Rate limits and server errors ret
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -142,9 +142,24 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     return {"new_stories": fresh, "feed_problems": problems, "feed_health": health}
 
 
+CORROBORATION_WINDOW = timedelta(hours=48)  # two tellings further apart than this are not one event
+
+
 def corroboration(story: NdStory, recent_rows: list[NdStory]) -> list[NdStory]:
-    """Other outlets carrying the same story."""
-    return [o for o in recent_rows if o.id != story.id and o.source != story.source and checks.similarity(o.fingerprint, story.fingerprint) >= 0.34]
+    """Other outlets carrying the same story: most of the words in common, and nothing that says it is another event (a different subject,
+    place or figure: checks.same_event), reported within two days of each other."""
+    def near_in_time(o: NdStory) -> bool:
+        a, b = story.published_at, o.published_at
+        if a is None or b is None:
+            return True
+        a, b = (a if a.tzinfo else a.replace(tzinfo=timezone.utc)), (b if b.tzinfo else b.replace(tzinfo=timezone.utc))
+        return abs(a - b) <= CORROBORATION_WINDOW
+
+    def worded_alike(o: NdStory) -> bool:  # most words in common, or one asset through one price level the same way (checks.same_event)
+        return checks.similarity(o.fingerprint, story.fingerprint) >= 0.34 or bool(checks.price_levels(o.title) & checks.price_levels(story.title))
+
+    return [o for o in recent_rows if o.id != story.id and o.source != story.source and worded_alike(o)
+            and checks.same_event(o.title or "", story.title or "") and near_in_time(o)]
 
 
 # --- dedupe ------------------------------------------------------------------------------------------------------

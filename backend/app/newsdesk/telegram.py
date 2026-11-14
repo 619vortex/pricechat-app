@@ -243,7 +243,7 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     if style == "wire" and pkg is None:  # the wire fallback: the outlet's headline in sentence case and its source, nothing else
         from app.newsdesk import wire
 
-        wire_html, plain = wire.fallback_caption(ev, src)
+        wire_html, plain = wire.fallback_caption(ev, src, network.source_text_of(ev, rows))
     if pkg is None:
         told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours"
         result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)

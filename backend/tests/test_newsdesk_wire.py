@@ -204,7 +204,8 @@ async def test_a_clean_model_draft_goes_out_in_the_wire_shape(with_key: SimpleNa
     draft = {"headline": "Bitcoin breaks below $70,000 as $1 billion of longs are liquidated", "short": "", "context": "", "stakes": "", "question": ""}
     pkg = await network.package(_news_event(), settings=with_key, rows=[STORY, STORY2], transport=_model(draft), style="wire")
     assert pkg.ok and pkg.copy.writer == "model"
-    assert pkg.telegram_html.startswith("<b>JUST IN:</b> Bitcoin $BTC breaks below $70,000 as $1B of longs are liquidated.")
+    # the sources say "more than $1 billion": the model's bare "$1 billion" gets the sources' own qualifier back (checks.restore_qualifiers)
+    assert pkg.telegram_html.startswith("<b>JUST IN:</b> Bitcoin $BTC breaks below $70,000 as more than $1B of longs are liquidated.")
     assert pkg.telegram_html.endswith('· <a href="https://t.me/thepricechat">@thepricechat</a>')
     assert any(c["check"] == "wording" and c["passed"] for c in pkg.checks)
 

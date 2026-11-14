@@ -474,9 +474,9 @@ def admissible(why: str) -> bool:
 
 
 def corroborating(story: Any, rows: list[Any], hours: float = 12) -> list[Any]:
-    """Other outlets carrying the same story: two shared names, or one shared name and close wording, within `hours`. Looser than the
-    fingerprint match the chaos filter uses, because outlets word the same story differently ("NYSE picks Avalanche ..." / "NYSE to
-    settle tokenized stocks on Avalanche")."""
+    """Other outlets carrying the same story: two shared names, or one shared name and close wording, within `hours`, and same-event
+    evidence (checks.same_event: never only a shared country or adjective). Looser than the fingerprint match the chaos filter uses,
+    because outlets word the same story differently ("NYSE picks Avalanche ..." / "NYSE to settle tokenized stocks on Avalanche")."""
     mine = _who(story.title)
     at = _naive_utc(story.published_at)
     out = []
@@ -487,7 +487,8 @@ def corroborating(story: Any, rows: list[Any], hours: float = 12) -> list[Any]:
             continue
         shared = mine & _who(o.title)
         near = checks.similarity(checks.fingerprint(story.title), checks.fingerprint(o.title))
-        if len(shared) >= 2 or (shared and near >= 0.15):
+        # and the same event, not the same country (owner, 2026-11-14, post 166: a hospital strike and a footballer's death shared ISRAEL)
+        if (len(shared) >= 2 or (shared and near >= 0.15)) and checks.same_event(story.title or "", o.title or ""):
             out.append(o)
     return out
 

@@ -362,15 +362,13 @@ def _same(ev: NdEvent, story: NdStory, links: set[str]) -> bool:
     mine, theirs = checks.names(story.title), checks.names(ev.title)
     if mine and theirs and not mine & theirs:
         return False  # Bybaz hacked and Qorvex hacked are two stories, however alike the wording
-    shared_names = mine & theirs
+    shared_names = checks.distinctive_names(story.title) & checks.distinctive_names(ev.title)
     family = next((f for f in FAMILIES if ev.topic in f), {ev.topic})
     if shared_names and ev.topic and ev.topic in ("hack", "scam", "failure", "controversy") and family & set(virality.topics_in(story.title or "")):
         return True
-    if checks.similarity(checks.fingerprint(ev.title), story.fingerprint) >= 0.34:
-        return True
-    shared = checks.names(story.title) & checks.names(ev.title)
-    near = checks.similarity(checks.fingerprint(ev.title), story.fingerprint)
-    return len(shared) >= 2 or (bool(shared) and near >= 0.15)
+    # owner, 2026-11-14 (post 166: a footballer's death merged into a hospital strike on "Israeli" and "Gaza"): same-event evidence, not
+    # shared countries, adjectives or ordinary words (checks.same_event)
+    return checks.same_event(ev.title or "", story.title or "")
 
 
 # A development must be a reported fact, not a maybe (owner, 2026-11-10: "allowed story developments contain genuinely new sourced facts").

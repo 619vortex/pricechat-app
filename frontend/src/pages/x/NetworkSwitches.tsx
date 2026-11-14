@@ -12,8 +12,8 @@ export type NetworkState = { x_links: boolean; x_cost_per_post_usd: number; emer
 export type PostStyle = "wire" | "clean" | "classic";
 
 const STYLES: { id: PostStyle; name: string; hint: string }[] = [
-  { id: "wire", name: "Wire", hint: "Short factual headline, BREAKING / JUST IN / UPDATE only when earned, real chart for big moves, text-only otherwise; sources and @thepricechat on one line" },
-  { id: "clean", name: "Clean", hint: "Picture first (real photo, photo + chart, chart, or a labelled AI illustration), 1-3 sentences, sources, @thepricechat" },
+  { id: "wire", name: "Wire", hint: "Opt-in: short factual headline, BREAKING / JUST IN / UPDATE only when earned, a verified chart or a real credited photo when it adds something, text-only otherwise; sources and @thepricechat on one line" },
+  { id: "clean", name: "Clean", hint: "Default: picture first (real photo, photo + chart, chart, or a labelled AI illustration), 1-3 sentences, sources, @thepricechat" },
   { id: "classic", name: "Classic", hint: "The older layout: headline on the picture, caption with byline and why it matters" },
 ];
 
@@ -46,7 +46,7 @@ export function NetworkSwitches() {
         <button className="btn btn-sm" disabled={busy} onClick={() => void put({ x_links: !data.x_links })}>{data.x_links ? "Turn links off" : "Turn links on"}</button>
       </div>
       {data.post_style ? (() => {
-        const current = STYLES.find((x) => x.id === data.post_style) ?? STYLES[0];
+        const current = STYLES.find((x) => x.id === data.post_style) ?? STYLES[1]; // clean is the default
         return (
           <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
             <span>Post style: <strong>{current.name}</strong></span>

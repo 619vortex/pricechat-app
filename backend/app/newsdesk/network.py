@@ -101,10 +101,9 @@ class Link:
 
 
 def related(lead_title: str, other_title: str) -> bool:
-    """Two headlines are the same story: they share a distinctive name (Nvidia, Wachtell) or most of their words."""
-    if checks.names(lead_title) & checks.names(other_title):
-        return True
-    return checks.similarity(checks.fingerprint(lead_title), checks.fingerprint(other_title)) >= 0.34
+    """Two headlines are the same event (checks.same_event): the same distinctive subject (Nvidia, Wachtell) with words in common, or most
+    of their words, and no different subject, place or figure. A shared country or adjective ("Israeli") is never enough (post 166)."""
+    return checks.same_event(lead_title, other_title)
 
 
 def links_for(ev: Any, rows: list[Any] | None = None, *, limit: int = MAX_LINKS) -> list[Link]:
@@ -652,14 +651,15 @@ def x_links_on(state: dict[str, Any] | None) -> bool:
 
 
 STYLES = ("wire", "clean", "classic")
-# owner, 2026-11-14: the wire style (app/newsdesk/wire) by default; Admin switches back to clean or classic. Tests of the classic layout
-# set "classic" (tests/conftest.py), the clean and wire tests their own.
-DEFAULT_STYLE = "wire"
+# clean by default (owner, 2026-11-12); the wire style (app/newsdesk/wire, 2026-11-14) is opt-in: Admin switches between wire, clean and
+# classic, and deploying it changes nothing live until the owner picks Wire. Tests of the classic layout set "classic" (tests/conftest.py),
+# the clean and wire tests their own.
+DEFAULT_STYLE = "clean"
 
 
 def post_style(state: dict[str, Any] | None) -> str:
-    """wire (owner, 2026-11-14: short factual headlines, earned tags, real charts or text only) unless Admin chose clean (2026-11-12: the
-    picture speaks, a short caption, @thepricechat) or the older classic layout."""
+    """clean (owner, 2026-11-12: the picture speaks, a short caption, @thepricechat) unless Admin chose wire (2026-11-14: short factual
+    headlines, earned tags, real charts or text only) or the older classic layout."""
     s = str((state or {}).get("post_style") or DEFAULT_STYLE)
     return s if s in STYLES else DEFAULT_STYLE
 
@@ -695,9 +695,10 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
 
         tag = wire.tag_for(ev)
         flag = wire.flag_for(ev, tag)
-        said = " ".join([str(getattr(ev, "summary", "") or ""), *(str(getattr(r, "summary", "") or "") for r in rows or [])])
-        x = wire.x_caption(c, links, tag=tag, flag=flag, with_links=x_links, outlets=outs, case_source=said)
-        html, plain, checked = wire.telegram_caption(c, links, tag=tag, flag=flag, outlets=outs, case_source=said)
+        said = wire.case_source(ev, rows)
+        told = source_text_of(ev, rows)  # the sources' own qualifiers ("at least six") go back on a figure the copy states bare
+        x = wire.x_caption(c, links, tag=tag, flag=flag, with_links=x_links, outlets=outs, case_source=said, source_text=told)
+        html, plain, checked = wire.telegram_caption(c, links, tag=tag, flag=flag, outlets=outs, case_source=said, source_text=told)
         breaking = tag == wire.BREAKING
     elif style == "clean":  # app/newsdesk/clean: the label earned, the story in 1-3 sentences with cashtags, the sources, @thepricechat
         from app.newsdesk import clean
@@ -724,7 +725,7 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
     worded = True
     if style == "wire":  # the wire style's wording rules, on exactly what each platform says
         for platform, text in (("x", x), ("telegram", checked)):
-            problems = checks.wording_problems(checks.story_of(text), src)
+            problems = checks.wording_problems(checks.story_of(text), src) + checks.qualifier_problems(checks.story_of(text), src)
             all_checks.append({"check": "wording", "passed": not problems, "detail": "; ".join(problems) or "wording", "platform": platform})
             worded = worded and not problems
     return Package(c, links, line, is_original(ev), x, html, plain, all_checks, rx.ok and rt.ok and not empty and worded, empty)
@@ -775,7 +776,7 @@ def configure(db: Any, *, x_links: bool | None = None, emergency: bool | None = 
         x.state = {**(x.state or {}), "data_posts": bool(data_posts)}
     if experiments is not None:  # Viral Engine 2.0: runner-up hook experiments
         x.state = {**(x.state or {}), "experiments": bool(experiments)}
-    if post_style is not None and post_style in STYLES:  # wire (default), clean or the classic layout
+    if post_style is not None and post_style in STYLES:  # wire, clean (default) or the classic layout
         x.state = {**(x.state or {}), "post_style": post_style}
     if emergency is True:
         x.paused_until, x.pause_reason = now + timedelta(days=FAR), EMERGENCY
