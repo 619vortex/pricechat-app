@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "apply-proxy-ipv6-fix.sh")
 BASH = shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
 NET = "2a01:4f9:c015:4b9c::/64"
-OLD_PROXY = subprocess.run(["git", "show", "main:vpn-node/proxy.py"], cwd=HERE, capture_output=True, check=True).stdout
+OLD_PROXY = subprocess.run(["git", "show", "b840198:vpn-node/proxy.py"], cwd=HERE, capture_output=True, check=True).stdout
 
 # rules.sh as the 2026-11-04 installer wrote it on Helsinki (no OWN_NETS loop)
 OLD_RULES = """#!/bin/sh
@@ -225,6 +225,6 @@ def test_rollback_puts_the_old_files_back(server):
     never_touches_wireguard_or_the_agent(root)
 
 
-def test_the_known_old_hash_is_mains_proxy():
+def test_the_known_old_hash_is_the_2026_11_04_proxy():  # pinned: main moves on, the installed file does not
     text = open(SCRIPT, encoding="utf-8").read()
     assert f"KNOWN_OLD={hashlib.sha256(OLD_PROXY).hexdigest()}" in text

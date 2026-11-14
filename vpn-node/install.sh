@@ -62,6 +62,9 @@ WITH_PROXY="${WITH_PROXY:-0}"
 QUIET_SECRETS="${QUIET_SECRETS:-0}"
 NFT_D=/etc/kiwi-vpn/nft.d  # extra tables (the browser proxy's) that survive every reload of this ruleset
 [ -z "$AGENT_ALLOW" ] || printf '%s' "$AGENT_ALLOW" | grep -Eq '^[0-9./,]+$' || die "AGENT_ALLOW must be IPv4 addresses or CIDRs, comma-separated"
+if [ -z "$AGENT_ALLOW" ] && [ "$MODE" = install ]; then
+  echo "warning: AGENT_ALLOW is empty: the agent port $AGENT_PORT accepts connections from anyone (set it to the backend's addresses)" >&2
+fi
 BLOCKLIST_URL="${BLOCKLIST_URL:-https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts}"
 WG_IF=wg0
 WG_ADDR="${POOL%/*}"
@@ -154,7 +157,7 @@ $(proxy_rule)
     ct state established,related accept
     meta nfproto ipv6 $V6_VERDICT comment "kiwi: v6 reject"
     iifname "$WG_IF" oifname "$WG_IF" reject with icmpx type admin-prohibited comment "kiwi: client isolation"
-    iifname "$WG_IF" tcp dport 25 reject with tcp reset comment "kiwi: smtp 25 blocked"
+    iifname "$WG_IF" tcp dport { 25, 465, 587 } reject with tcp reset comment "kiwi: smtp 25 blocked, 465 587 too"
     iifname "$WG_IF" ip daddr { 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 } reject with icmpx type admin-prohibited comment "kiwi: no private or metadata"
     iifname "$WG_IF" oifname "$WAN_IF" ip saddr $POOL_NET accept
   }

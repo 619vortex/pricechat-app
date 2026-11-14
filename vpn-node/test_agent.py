@@ -390,7 +390,7 @@ def test_nftables_hardening_rules(flags):
     assert 'iifname "wg0" oifname "wg0" reject' in nft
     assert 'iifname "wg0" reject with icmpx type admin-prohibited' in nft
     # No outbound SMTP abuse; MSS clamped; metadata/private ranges unreachable.
-    assert 'iifname "wg0" tcp dport 25 reject' in nft
+    assert 'iifname "wg0" tcp dport { 25, 465, 587 } reject' in nft  # L19: every mail port, not just 25
     assert "tcp option maxseg size set rt mtu" in nft
     assert "169.254.0.0/16" in nft
     assert 'oifname "eth0" ip saddr 10.66.0.0/16 masquerade' in nft
@@ -539,14 +539,7 @@ def test_unattended_installs_never_print_the_agent_token():
     assert '(umask 077; printf' in src and "/root/kiwi-node.txt" in src
 
 
-def test_proxy_on_an_nftables_node_has_the_same_limits_as_on_a_shared_node():
-    src = open(os.path.join(HERE, "install-proxy.sh"), encoding="utf-8").read()
-    nft = src[src.index('cat > "$NFT_FILE" <<EOF'):src.index('nft -c -f "$NFT_FILE"')]
-    assert 'meta skuid "$USER_NAME" jump guard' in nft
-    for must in ("169.254.0.0/16", "10.0.0.0/8", "127.0.0.0/8", "ip daddr $PUBLIC_IP reject", "{ 25, 465, 587 }", "oif lo reject", "ip6 daddr { $V6_DENY } reject"):
-        assert must in nft, must
-    assert 'V6_DENY="$(echo "$OWN_NETS"' in src  # the server's own IPv6 networks are refused here too
-    assert "delete table inet kiwi_proxy" in nft  # loading it twice never doubles the rules
+# test_proxy_on_an_nftables_node_has_the_same_limits_as_on_a_shared_node: now in test_installers.py (from --print-config)
 
 
 def test_no_pipeline_that_fails_a_fresh_install():
