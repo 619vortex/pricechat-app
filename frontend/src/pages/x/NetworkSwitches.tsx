@@ -45,21 +45,41 @@ export function NetworkSwitches() {
         <span className="small muted">${data.x_cost_per_post_usd.toFixed(3)} per X post ({data.x_links ? "X charges $0.20 for a post with a link" : "named sources only"})</span>
         <button className="btn btn-sm" disabled={busy} onClick={() => void put({ x_links: !data.x_links })}>{data.x_links ? "Turn links off" : "Turn links on"}</button>
       </div>
-      {data.post_style ? (() => {
-        const current = STYLES.find((x) => x.id === data.post_style) ?? STYLES[1]; // clean is the default
-        return (
-          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
-            <span>Post style: <strong>{current.name}</strong></span>
-            <span className="small muted">{current.hint}</span>
-            {STYLES.filter((x) => x.id !== current.id).map((x) => (
-              <button key={x.id} className="btn btn-sm" disabled={busy} onClick={() => void put({ post_style: x.id })}>Use {x.name.toLowerCase()}</button>
-            ))}
-          </div>
-        );
-      })() : null}
       {!data.emergency && (data.x_paused || data.telegram_paused) ? (
         <p className="small muted">Lane pauses: {[data.x_paused && `X: ${data.x_paused}`, data.telegram_paused && `Telegram: ${data.telegram_paused}`].filter(Boolean).join(" · ")}</p>
       ) : null}
+    </Card>
+  );
+}
+
+/** Admin › Social Media › X/Twitter › News Desk, at the top: how posts look on Telegram and X. Clean is the default; Wire and Classic
+ * are opt-in. Only the look changes: publishing (live/dry run, automation, limits) is set elsewhere and never touched here. */
+export function PostStyleSwitch() {
+  const { data, failure, reload } = useApi(() => request<NetworkState>("/x/newsdesk/network"), 30000);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  if (failure) return <Card title="Post style"><ApiErrorBanner error={failure} /></Card>;
+  if (!data) return null;
+  const current = STYLES.find((x) => x.id === data.post_style) ?? STYLES[1]; // clean is the default
+  const pick = async (id: PostStyle) => {
+    if (id === current.id) return;
+    setBusy(true); setError(null);
+    try { await request("/x/newsdesk/network", { method: "PUT", body: JSON.stringify({ post_style: id }), headers: { "Content-Type": "application/json" } }); await reload(); }
+    catch (e) { setError(e); } finally { setBusy(false); }
+  };
+  return (
+    <Card title="Post style">
+      {error ? <ApiErrorBanner error={error} /> : null}
+      <div className="row" role="group" aria-label="Post style" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {STYLES.map((x) => (
+          <button key={x.id} type="button" aria-pressed={x.id === current.id} disabled={busy}
+                  className={x.id === current.id ? "btn btn-primary" : "btn"} onClick={() => void pick(x.id)}>
+            {x.name}{x.id === "clean" ? " (default)" : ""}
+          </button>
+        ))}
+      </div>
+      <p className="small" style={{ marginTop: 8 }}>Now: <strong>{current.name}</strong> · <span>{current.hint}</span></p>
+      <p className="small muted">Changes only how posts look. Publishing settings stay as they are.</p>
     </Card>
   );
 }
