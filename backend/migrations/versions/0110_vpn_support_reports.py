@@ -1,7 +1,7 @@
 """Kiwi VPN support: bug reports and feedback members send from the apps, listed in Admin.
 
 Numbered 0110 because feat/kiwi-production (not merged) already uses 0108 and 0109. It revises main's head 0109_signal_cards (rechained 2026-11-12).
-The server-checks table from feat/kiwi-production was ported later as 0112_vpn_server_checks (after 0111), so nothing here changes.
+The server-checks table from feat/kiwi-production was ported later as 0115_vpn_server_checks (after 0114_trending_topics), so nothing here changes.
 
 Revision ID: 0110_vpn_support_reports
 Revises: 0109_signal_cards

@@ -25,7 +25,7 @@ class VpnSettings(Base):
     monthly_cap_gb: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # per member per UTC month, 0 = unlimited
     trial_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)  # regular members get one 30-day trial; off (with payments off) = free for all
     payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # off: free for anyone it's open to
-    # Free-trial abuse guards (migration 0113; docs/hardening/TRIAL-AND-LIMITS.md). Each number 0 = that check is off.
+    # Free-trial abuse guards (migration 0116; docs/hardening/TRIAL-AND-LIMITS.md). Each number 0 = that check is off.
     trial_one_per_identity: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true(), nullable=False)  # an email / Google / X / Telegram account gets one trial, ever
     trial_min_account_age_hours: Mapped[int] = mapped_column(Integer, default=24, server_default="24", nullable=False)
     trial_min_xp: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
@@ -164,7 +164,7 @@ class VpnDevice(IdMixin, TimestampMixin, Base):
     rx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)  # the agent's last raw counters
     tx_counter: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0", nullable=False)
     paused_until: Mapped[datetime | None] = mapped_column(UTCDateTime())  # over the monthly cap: peer off the node until then
-    created_via: Mapped[str | None] = mapped_column(String(8))  # app (a Kiwi VPN app session) | web | anon | admin; None = made before 0113
+    created_via: Mapped[str | None] = mapped_column(String(8))  # app (a Kiwi VPN app session) | web | anon | admin; None = made before 0116
 
 
 class VpnTrialClaim(IdMixin, TimestampMixin, Base):

@@ -7,10 +7,11 @@ Security audit M4 / L6 / L7 / L9 / L8 (docs/hardening/TRIAL-AND-LIMITS.md):
 - vpn_settings: trial_guard_mode (default monitor), the trial guards, sync_enforce_limits and count_pc_once (both off), reviewer_member_id.
 - vpn_devices.created_via: app | web | anon | admin | bot (NULL for devices made before this).
 
-Rechained on release/kiwi-hardening: revises 0112_vpn_server_checks (feat/kiwi-hardening-monitoring), one head, no data change.
+Rechained on release/kiwi-hardening: revises the server-checks migration (feat/kiwi-hardening-monitoring), one head, no data change.
+Numbered 0116 (first written as 0113) so both Kiwi VPN migrations follow production's 0114_trending_topics.
 
-Revision ID: 0113_vpn_trial_guards
-Revises: 0112_vpn_server_checks
+Revision ID: 0116_vpn_trial_guards
+Revises: 0115_vpn_server_checks
 """
 
 import hashlib
@@ -21,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = '0113_vpn_trial_guards'
-down_revision: str | None = '0112_vpn_server_checks'
+revision: str = '0116_vpn_trial_guards'
+down_revision: str | None = '0115_vpn_server_checks'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -106,7 +106,7 @@ def sign_in(db: Session, s: Settings, email: str, password: str) -> Member:
             ledger.audit(db, member.id, "member", "vpn_reviewer_created", {})
     if member.status != "active":
         raise MemberError(FAIL)
-    _bind(db, member)  # idempotent: also uses up the trial of a review account bound by migration 0113
+    _bind(db, member)  # idempotent: also uses up the trial of a review account bound by migration 0116
     db.commit()
     return member
 

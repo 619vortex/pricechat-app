@@ -1,7 +1,10 @@
 """Kiwi VPN server health history: one row per server per 5-minute sync, kept 14 days (app/vpn/health.py).
 
-Revision ID: 0112_vpn_server_checks
-Revises: 0111_vpn_server_traffic_allowance
+Numbered 0115 (first written as 0112): production already ran 0114_trending_topics (feat/trending-topics, based on 0111), so the
+Kiwi VPN migrations follow it. No schema change from the 0112 version.
+
+Revision ID: 0115_vpn_server_checks
+Revises: 0114_trending_topics
 """
 
 from collections.abc import Sequence
@@ -10,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = '0112_vpn_server_checks'
-down_revision: str | None = '0111_vpn_server_traffic_allowance'
+revision: str = '0115_vpn_server_checks'
+down_revision: str | None = '0114_trending_topics'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

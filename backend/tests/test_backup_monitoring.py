@@ -40,7 +40,7 @@ def _key(at: datetime) -> str:
     return f"backups/db/price_chat-{at.strftime('%Y%m%d-%H%M%S')}.db.gz"
 
 
-def _db_bytes(tmp_path: Path, members: int = 3, version: str | None = "0112_vpn_server_checks", tables: tuple[str, ...] = db_backup.KEY_TABLES) -> bytes:
+def _db_bytes(tmp_path: Path, members: int = 3, version: str | None = "0116_vpn_trial_guards", tables: tuple[str, ...] = db_backup.KEY_TABLES) -> bytes:
     path = tmp_path / f"src-{members}-{len(tables)}-{version}.db"
     con = sqlite3.connect(path)
     for t in tables:
@@ -99,8 +99,8 @@ def test_restore_test_passes_on_a_sound_copy_and_never_touches_the_live_database
     opened: list[str] = []
     real = sqlite3.connect
     monkeypatch.setattr(db_backup.sqlite3, "connect", lambda p, *a, **k: (opened.append(str(p)), real(p, *a, **k))[1])
-    out = db_backup.restore_test(BUCKET, NOW, s3, expected_head="0112_vpn_server_checks")
-    assert s3.downloads == [key] and out["integrity"] == "ok" and out["alembic_version"] == "0112_vpn_server_checks"
+    out = db_backup.restore_test(BUCKET, NOW, s3, expected_head="0116_vpn_trial_guards")
+    assert s3.downloads == [key] and out["integrity"] == "ok" and out["alembic_version"] == "0116_vpn_trial_guards"
     assert out["matches_code_head"] is True and out["counts"]["members"] == 7 and "Restore test passed" in out["summary"]
     assert len(opened) == 1 and opened[0].startswith("file:") and opened[0].endswith("?mode=ro") and "restore-test" in opened[0]
     assert not Path(opened[0][len("file:///"):-len("?mode=ro")]).exists()  # the temporary copy is gone
@@ -118,7 +118,7 @@ def _corrupt_db_bytes(tmp_path: Path) -> bytes:
     con.execute("CREATE INDEX ix_members_name ON members (name)")
     con.executemany("INSERT INTO members (name) VALUES (?)", [(f"kiwi {i:05d}",) for i in range(3000)])
     con.execute("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)")
-    con.execute("INSERT INTO alembic_version VALUES ('0112_vpn_server_checks')")
+    con.execute("INSERT INTO alembic_version VALUES ('0116_vpn_trial_guards')")
     con.commit()
     # the index's stored definition no longer describes what is in it (what a torn write to the schema page looks like)
     con.execute("PRAGMA writable_schema = ON")

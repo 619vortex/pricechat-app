@@ -5,7 +5,7 @@ account. Here every identity a trial was used with is remembered as a salted has
 (normalised, so "a.b+1@gmail.com" and "ab@gmail.com" are one address) and each linked Google / X / Telegram account. A new
 Passport holding any of them can't start another trial. Hashes are written when a trial starts, when a member who has had
 a trial links another identity or adds an email (so identities can't be rotated through an old account), and by
-migration 0113 for trials started before it. Like xp_claims they survive account deletion and store no identity.
+migration 0116 for trials started before it. Like xp_claims they survive account deletion and store no identity.
 
 The per-address throttle counts successful trial starts per client address and per network (IPv4 /24, IPv6 /48) over
 24 hours, in memory (one Railway replica; a restart forgets, which is why it's "soft"). It applies only when the address
@@ -31,7 +31,7 @@ from app.db.base import utcnow
 from app.models.vpn import VpnAccount, VpnTrialClaim, VpnTrialSignal
 from app.security import client_ip
 
-SALT = "kiwi-vpn-trial-v1"  # migration 0113 repeats this and normalise_email(): keep them identical
+SALT = "kiwi-vpn-trial-v1"  # migration 0116 repeats this and normalise_email(): keep them identical
 GMAIL = {"gmail.com", "googlemail.com"}
 DAY = 86400.0
 MAX_KEYS = 20_000

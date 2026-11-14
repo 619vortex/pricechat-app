@@ -345,7 +345,7 @@ def test_migration_remembers_trials_started_before_it(tmp_path: Path) -> None:
     with engine.begin() as conn:
         config = alembic_config()
         config.attributes["connection"] = conn
-        command.upgrade(config, "0111_vpn_server_traffic_allowance")
+        command.upgrade(config, "0114_trending_topics")  # production's revision before this release
         now = utcnow().isoformat()
 
         def insert(table: str, **values: Any) -> None:
@@ -373,6 +373,49 @@ def test_migration_remembers_trials_started_before_it(tmp_path: Path) -> None:
     assert claims == {trial_guard.claim_hash("email:oldtimer@gmail.com"), trial_guard.claim_hash("telegram:4242")}
     assert reviewer_id == 2
 
+
+
+def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) -> None:
+    """Production ran 0114_trending_topics (based on 0111) before this release: the Kiwi VPN migrations must come after it, so a
+    database at 0114 gets only them, and downgrading back to 0114 keeps Trending Topics' tables and rows. Never rechain 0114."""
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(alembic_config())
+    assert script.get_heads() == ["0116_vpn_trial_guards"]
+    assert script.get_revision("0114_trending_topics").down_revision == "0111_vpn_server_traffic_allowance"
+    assert script.get_revision("0115_vpn_server_checks").down_revision == "0114_trending_topics"
+    assert script.get_revision("0116_vpn_trial_guards").down_revision == "0115_vpn_server_checks"
+    url = f"sqlite:///{(tmp_path / 'prod.db').as_posix()}"
+    engine = build_engine(url, enforce_foreign_keys=False)
+
+    def tables() -> set[str]:
+        with engine.connect() as conn:
+            return set(inspect(conn).get_table_names())
+
+    def to(target: str, down: bool = False) -> None:
+        with engine.begin() as conn:
+            config = alembic_config()
+            config.attributes["connection"] = conn
+            (command.downgrade if down else command.upgrade)(config, target)
+
+    kiwi = {"vpn_server_checks", "vpn_trial_claims", "vpn_trial_signals"}
+    to("0114_trending_topics")
+    before = tables()
+    assert "tt_settings" in before and not kiwi & before
+    now = utcnow().isoformat()
+    with engine.begin() as conn:
+        cols = [c for c in inspect(conn).get_columns("tt_settings") if not c["nullable"] and c.get("default") is None and c["name"] != "id"]
+        values = {c["name"]: (now if "DATE" in str(c["type"]).upper() else 0) for c in cols}
+        conn.execute(text(f"INSERT INTO tt_settings (id{''.join(', ' + k for k in values)}) VALUES (1{''.join(', :' + k for k in values)})"), values)
+    to("head")
+    assert tables() - before == kiwi
+    to("0114_trending_topics", down=True)
+    assert tables() == before
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM tt_settings")).scalar() == 1
+    to("head")
+    assert kiwi <= tables()
+    engine.dispose()
 
 # --- L6: one PC, one slot (opt-in) -----------------------------------------------------------------------------------
 
