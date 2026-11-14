@@ -127,4 +127,50 @@ def final_gate(text: str, source_text: str, chart_symbol: str = "") -> list[str]
     tag = next((t for t, sym in clean.CHARTED.items() if sym == chart_symbol), "") if chart_symbol else ""
     if tag and tag not in {t for _, t in clean.established(source_text or "")} and not re.search(rf"\b{tag[1:]}\b", source_text or ""):
         problems.append(f"a {tag} price chart the sources don't establish")
+    problems += claim_problems(story_of(text), source_text)
     return problems
+
+
+# what a caption carries besides the story: the sources line, the photo credit, the signature (their names and numbers aren't claims)
+NOT_STORY = re.compile(r"^(?:🔗|🥝|Price Chat News|Source:|Sources:|Via |Photo|Image|Illustration|AI illustration|Credit|Chart:|Data:|@thepricechat)", re.I)
+# accusations and legal actions: the caption may use one only when the sources do (same stem)
+ACCUSE = {
+    "steal": r"\b(?:stole|stolen|steal\w*|theft|thie(?:f|ves))\b", "hack": r"\bhack(?:s|ed|er|ers|ing)?\b", "launder": r"\blaunder\w*\b",
+    "fraud": r"\bfraud\w*\b", "scam": r"\bscam\w*\b", "charge": r"\b(?:charged|charges|indict\w*)\b", "sue": r"\b(?:sue[sd]?|suing|lawsuit)\b",
+    "arrest": r"\barrest\w*\b", "seize": r"\b(?:seiz\w+|confiscat\w+|forfeit\w*)\b", "convict": r"\b(?:convict\w*|guilty|sentenced)\b",
+    "embezzle": r"\bembezzl\w*\b", "bribe": r"\bbrib\w+\b", "sanction": r"\bsanction\w*\b", "manipulate": r"\bmanipulat\w+\b",
+    "ponzi": r"\bponzi\b", "insider": r"\binsider trading\b", "exploit": r"\bexploit\w*\b", "bankrupt": r"\bbankrupt\w*\b",
+}
+QUOTED = re.compile(r"[\"“]([^\"”]{12,})[\"”]")
+
+
+def story_of(caption: str) -> str:
+    """The claims part of a final caption: every paragraph except the sources line, credits and signature."""
+    return "\n\n".join(p for p in re.split(r"\n\s*\n", caption or "") if p.strip() and not NOT_STORY.match(p.strip()))
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[’‘]", "'", s or "")).strip().lower()
+
+
+def claim_problems(story: str, source_text: str) -> list[str]:
+    """Claims in the story the sources don't support (owner, 2026-11-13): figures, named people, accusations / legal actions, quotations.
+    Deterministic and conservative: a word the sources use passes; anything new is a problem, never silently rewritten."""
+    from app.newsdesk import photos
+
+    src = source_text or ""
+    low = _norm(src)
+    out = []
+    extra = numbers(story) - numbers(src)
+    if extra:
+        out.append(f"figures no source gave: {', '.join(sorted(extra))}")
+    people = [p for p in dict.fromkeys(photos.people_named(story)) if p.split()[-1].lower().strip("'s") not in low]
+    if people:
+        out.append(f"people no source names: {', '.join(people)}")
+    accused = [k for k, rx in ACCUSE.items() if re.search(rx, story, re.I) and not re.search(rx, src, re.I)]
+    if accused:
+        out.append(f"accusations or legal actions no source makes: {', '.join(accused)}")
+    quotes = [q for q in QUOTED.findall(story) if _norm(q) not in low]
+    if quotes:
+        out.append(f"quotations not in the sources: {'; '.join(q[:60] for q in quotes)}")
+    return out
