@@ -107,17 +107,64 @@ def tag_for(ev: Any) -> str:
 
 
 def flag_for(ev: Any, tag: str) -> str:
-    return brief.flag(getattr(ev, "headline", "") or getattr(ev, "title", "") or "") if tag in (BREAKING, JUST_IN) else ""
+    """A flag after a BREAKING / JUST IN tag only when the headline leads with exactly one country (brief.FLAGS): "China, US discuss tariffs"
+    gets none."""
+    if tag not in (BREAKING, JUST_IN):
+        return ""
+    lead = " ".join((getattr(ev, "headline", "") or getattr(ev, "title", "") or "").split()[:4])
+    flags = {f for pattern, f in brief.FLAGS if pattern.search(lead)}
+    return flags.pop() if len(flags) == 1 else ""
 
 
 # --------------------------------------------------------------------------------------------------------------- words
+def _protected(core: str) -> bool:
+    """A name the reporting may never write mid-sentence but that is always a name: a country, capital or leader the desk knows."""
+    from app.newsdesk import editorial
+
+    return any(rx.fullmatch(core) for rx in editorial.COUNTRIES.values()) or core.lower() in clean.KNOWN_PEOPLE
+
+
+def headline_case(head: str, reporting: str) -> str:
+    """An outlet's Title Case Headline in sentence case: the same rule as the clean style (network.sentence_case: a word keeps its capital
+    where the reporting capitalises it mid-sentence), with two repairs. A word it would lower-case takes the reporting's own spelling when the
+    reporting uses it ("U-turn", "pre-war", never "u-Turn"), and a country, capital or known leader keeps its capital even when the reporting
+    never names it again ("Riyadh"). Already sentence case: unchanged."""
+    from app.newsdesk import network
+
+    cased = network.sentence_case(head, reporting)
+    if cased == head:
+        return head
+    forms: dict[str, list[str]] = {}
+    for m in re.finditer(r"(?<![.!?]\s)(?<!^)\b[\w’'-]+", reporting or ""):
+        forms.setdefault(m.group(0).lower(), []).append(m.group(0))
+    out = []
+    for o, c in zip(head.split(), cased.split()):
+        if o == c:
+            out.append(o)
+            continue
+        m = re.match(r"^([^\w]*)([\w’'-]+?)([’']s)?([^\w]*)$", o)
+        if not m:
+            out.append(c)
+            continue
+        core = m.group(2)
+        if _protected(core):
+            out.append(o)
+            continue
+        seen = forms.get(core.lower())
+        form = max(set(seen), key=seen.count) if seen else core.lower()
+        out.append(f"{m.group(1)}{form}{m.group(3) or ''}{m.group(4)}")
+    return clean._proper(" ".join(out))
+
+
 def story_sentences(c: Any, case_source: str = "") -> list[str]:
     """The headline as a sentence (shortened past HEAD_MAX by dropping a trailing clause), then at most one more: the first of the copy's
     sentences that adds a figure the headline lacks, or any short one when the headline is very short. Usually one or two sentences."""
     from app.newsdesk import network
 
-    short = network.Copy(**{**c.out(), "headline": network.shorten(c.headline, HEAD_MAX)})
-    sents = clean.sentences_of(short, case_source)
+    cased = headline_case(network.shorten(c.headline, HEAD_MAX), case_source)
+    short = network.Copy(**{**c.out(), "headline": cased})
+    sents = clean.sentences_of(short, "")
+    sents[0] = clean._sentence(cased)
     head, rest = sents[0], sents[1:]
     have = checks.numbers(head)
     for s in rest:
@@ -151,11 +198,10 @@ def footer(links: list[Any], outlets: list[str] | None) -> tuple[str, str, str]:
 
 def lead(c: Any, *, tag: str = "", flag: str = "", case_source: str = "") -> tuple[str, str]:
     """(HTML, plain): the tag, the flag, the story in one or two sentences with the cashtags the sentences establish."""
-    sents = story_sentences(c, case_source)
-    words = [clean.cashtag(s)[0] for s in sents]
+    story = clean.cashtag(" ".join(story_sentences(c, case_source)))[0]  # one tag per asset per post, at its first mention
     pre = " ".join(x for x in (tag, flag) if x)
-    plain = " ".join(x for x in (pre, *words) if x)
-    html = " ".join(x for x in ((f"<b>{_esc(tag)}</b>" if tag else ""), flag, _esc(" ".join(words))) if x)
+    plain = " ".join(x for x in (pre, story) if x)
+    html = " ".join(x for x in ((f"<b>{_esc(tag)}</b>" if tag else ""), flag, _esc(story)) if x)
     return html, plain
 
 
@@ -171,7 +217,7 @@ def x_caption(c: Any, links: list[Any], *, tag: str = "", flag: str = "", with_l
     """The same words on X: tag + story, then one source link (or the sources named). The second sentence goes first if it doesn't fit."""
     from app.newsdesk import network
 
-    sents = [clean.cashtag(s)[0] for s in story_sentences(c, case_source)]
+    raw = story_sentences(c, case_source)
     pre = " ".join(x for x in (tag, flag) if x)
     srcs = [x for x in links if getattr(x, "kind", "article") != "pricechat"]
     if with_links and srcs:
@@ -179,11 +225,12 @@ def x_caption(c: Any, links: list[Any], *, tag: str = "", flag: str = "", with_l
     else:
         named = [x.name for x in srcs][:2] or list(outlets or [])[:2]
         tail = f"Via {' · '.join(named)}" if named else ""
-    for n in (len(sents), 1):
-        text = "\n\n".join(p for p in (" ".join(x for x in (pre, *sents[:n]) if x), tail) if p)
+    for n in (len(raw), 1):
+        story = clean.cashtag(" ".join(raw[:n]))[0]  # one tag per asset, at its first mention
+        text = "\n\n".join(p for p in (" ".join(x for x in (pre, story) if x), tail) if p)
         if network.x_length(text) <= network.X_LIMIT:
             return text
-    return " ".join(x for x in (pre, sents[0]) if x)[:network.X_LIMIT]
+    return " ".join(x for x in (pre, clean.cashtag(raw[0])[0]) if x)[:network.X_LIMIT]
 
 
 def fallback_caption(ev: Any, source: str) -> tuple[str, str]:
@@ -243,10 +290,16 @@ MOVE = re.compile(r"\d+(?:\.\d+)?\s?%|\bliquidat\w*|\b(?:breaks?|broke|falls?|fe
                   r"\b(?:record|all-time)\s+(?:high|low)s?\b", re.I)
 
 
+# a commodity's own price moving: "Oil prices jump 5%", "Gold hits a record high", never "Saudi crude output jumps 26%"
+COMMODITY_MOVE = re.compile(r"\b(?:oil|crude|brent|wti|gold|silver)(?:\s+(?:prices?|futures))?\s+(?:hits?|tops?|breaks?|"
+                            r"(?:falls?|fell|drops?|dropped|slides?|slid|sinks?|sank|climbs?|climbed|rises?|rose|jumps?|jumped|surges?|surged|"
+                            r"plunges?|plunged|tumbles?|tumbled|gains?|gained|rall(?:y|ies|ied)|soars?|soared))\b", re.I)
+
+
 def price_story(ev: Any) -> tuple[str, str, str] | None:
     """(Yahoo symbol, name, label) when the story is about this asset's price: the headline leads with the asset (its first four words
-    establish it) and reports a move, or the Viral Engine measured that asset reacting. Else None: a chart beside a story implies the
-    story is about that price."""
+    establish it) and reports a move (a commodity: its own price moving, COMMODITY_MOVE), or the Viral Engine measured that asset reacting.
+    Macro stories (the S&P 500 stand-in) only on a measured reaction. Else None: a chart beside a story implies the story is about that price."""
     head = f"{getattr(ev, 'headline', '') or ''}"
     title = f"{getattr(ev, 'title', '') or ''}"
     for text in (head, title):
@@ -254,7 +307,9 @@ def price_story(ev: Any) -> tuple[str, str, str] | None:
         if subject is None:
             continue
         leading = clean.chart_subject(" ".join(text.split()[:4]))
-        if leading is not None and leading[0] == subject[0] and MOVE.search(text):
+        commodity = subject[0] in ("BZ=F", "GC=F", "SI=F")
+        moved = COMMODITY_MOVE.search(text) if commodity else MOVE.search(text)
+        if subject[0] != "^GSPC" and leading is not None and leading[0] == subject[0] and moved:
             return subject
         measured = ((getattr(ev, "facts", None) or {}).get("viral") or {}).get("reactions") or []
         if any(isinstance(r, dict) and str(r.get("symbol")) == subject[0] for r in measured):
@@ -275,6 +330,11 @@ async def _person_photo(ev: Any, used: set[str], transport: Any) -> tuple[Any, d
 
     person = clean.person_subject(ev)
     if not person:
+        return None
+    # the story is about them: they lead the headline ("Powell says...", "Musk's xAI..."), not a meeting they are mentioned in
+    lead = {re.sub(r"[’']s$", "", w).strip(",.:;").lower() for w in (getattr(ev, "headline", "") or getattr(ev, "title", "") or "").split()[:4]}
+    names = {person.split()[-1].lower(), *(k for k, v in clean.KNOWN_PEOPLE.items() if v == person)}
+    if not lead & names:
         return None
     sensitive = visual.is_sensitive(ev)
     async with httpx.AsyncClient(transport=transport) as client:

@@ -312,3 +312,49 @@ def test_the_policy_follows_the_style(db: Session) -> None:
     assert network.configure(db, post_style="clean")["post_style"] == "clean"
     assert network.configure(db, post_style="classic")["post_style"] == "classic"
     assert network.configure(db, post_style="wire")["post_style"] == "wire"
+
+
+# ---------------------------------------------------------------- the channel's own cases (2026-11-11..14)
+@pytest.mark.parametrize("head,reporting,want", [
+    ("Saudi Crude Output Jumps 26% as Riyadh Reports Near Pre-War Production",
+     "Saudi Arabia told OPEC it raised crude production in October, back near pre-war levels.",
+     "Saudi crude output jumps 26% as Riyadh reports near pre-war production"),  # a capital the reporting never repeats keeps its capital
+    ("Russian Diesel Tanker Makes U-Turn After Heading to U.S.", "A tanker carrying Russian diesel made a U-turn off New York.",
+     "Russian diesel tanker makes U-turn after heading to U.S."),  # the reporting's own spelling, never "u-Turn"
+    ("Bitcoin breaks below $70,000 as liquidations sweep", "", "Bitcoin breaks below $70,000 as liquidations sweep"),  # already sentence case
+])
+def test_title_case_becomes_sentence_case_without_losing_a_name(head: str, reporting: str, want: str) -> None:
+    assert wire.headline_case(head, reporting) == want
+
+
+def test_one_cashtag_per_asset_per_post() -> None:
+    c = Copy(headline="SpaceX-Tesla merger talks put 30,000 bitcoin back in focus", short="",
+             context="A deal could be announced as soon as December, putting $2.1 billion of bitcoin under one roof.")
+    _, plain = wire.lead(c)
+    assert plain.count("$BTC") == 1 and plain.startswith("SpaceX-Tesla merger talks put 30,000 bitcoin $BTC back in focus.")
+
+
+def test_a_flag_only_when_the_headline_leads_with_one_country() -> None:
+    assert wire.flag_for(ev("China, US discuss tariffs, farm trade ahead of Xi-Trump meeting"), "JUST IN:") == ""
+    assert wire.flag_for(ev("Japan raises rates for the first time since 2007"), "JUST IN:") == "🇯🇵"
+    assert wire.flag_for(ev("Japan raises rates for the first time since 2007"), "") == ""  # no tag, no flag
+
+
+@pytest.mark.parametrize("headline,symbol", [
+    ("Oil prices jump 5% after missile strike on Ras Tanura", "BZ=F"),
+    ("Gold hits record high above $4,000", "GC=F"),
+    ("Saudi crude output jumps 26% as Riyadh reports near pre-war production", None),  # output, not the oil price
+    ("Fed cuts rates by 0.25%, the first cut this year", None),  # macro: the S&P 500 stand-in only on a measured reaction
+])
+def test_commodity_and_macro_charts_need_their_own_price_moving(headline: str, symbol: str | None) -> None:
+    got = wire.price_story(ev(headline))
+    assert (got[0] if got else None) == symbol
+
+
+async def test_a_photo_only_when_the_person_leads_the_story(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def discover(*a: Any, **k: Any) -> list[Any]:
+        raise AssertionError("Xi is mentioned, not the subject: no photo search")
+
+    monkeypatch.setattr(photos, "discover", discover)
+    img, meta = await wire.picture(ev("China, US discuss tariffs, farm trade ahead of Xi-Trump meeting"), now=AT)
+    assert img == b"" and meta["kind"] == "text"
