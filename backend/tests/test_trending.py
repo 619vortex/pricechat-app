@@ -1,6 +1,7 @@
 """Trending Topics (app/trending). TEST FIXTURES only (tests/trending_fixtures.py): made-up headlines and trends, mocked HTTP. Nothing real is
 contacted and nothing is posted: the one live-mode test talks to a mocked X API."""
 
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -15,7 +16,7 @@ from app.models.newsdesk import NdEvent, NdPost
 from app.models.trending import TtPost, TtSignal, TtTopic
 from app.services.agent_service import get_agent_config
 from app.services.safety import get_or_create_policy
-from app.trending import coordinate, engine, gates, learning, rank, sources, writer
+from app.trending import coordinate, engine, gates, learning, rank, sensitive, sources, writer
 from tests.conftest import connect_x_user
 from tests.trending_fixtures import Web, google_rss, story
 
@@ -106,7 +107,8 @@ async def test_in_approval_mode_a_hot_topic_gets_a_pending_suggestion_and_nothin
     assert out["suggested"] >= 1 and out["published"] is None
     [post] = [p for p in posts(db) if "Bybaz" in p.text]
     assert post.status == "pending" and post.hold_reason is None
-    assert "(via CoinDesk)" in post.text or "(via Reuters)" in post.text or "(via The Block)" in post.text
+    assert any(o in post.text for o in ("CoinDesk", "Reuters", "The Block")) and "?" not in post.text  # credited; no canned question
+    assert "Searches for Bybaz have topped 200K on Google in the US." in post.text  # the measured interest, plainly
     topic = db.get(TtTopic, post.topic_id)
     assert topic is not None and topic.category == "crypto" and {"news", "google"} <= set(topic.parts["sources"])
     assert not [c for c in web.calls if "api.x.com" in c]  # X never called: not connected, and nothing approved
@@ -193,6 +195,8 @@ def test_ranking_rewards_velocity_breadth_and_relevance_and_drops_what_the_audie
     hot = [_sig(1, HACK, outlet="CoinDesk"), _sig(2, "Bybaz halts withdrawals after a $40 million hack", outlet="Reuters", minutes=20),
            _sig(3, "Crypto exchange Bybaz pauses withdrawals after $40 million hack", outlet="The Block", minutes=10),
            _sig(4, "bybaz", source="google", outlet="Google Trends", reliable=False, eng=200_000, query="bybaz", group="g:bybaz"),
+           _sig(6, "Bybaz withdrawals frozen after $40 million hack", source="google", outlet="Some Blog", reliable=False, eng=0, group="g:bybaz", kind="article",
+                query="bybaz"),
            _sig(5, "Bybaz just froze my withdrawals", source="reddit", outlet="r/CryptoCurrency", reliable=False, eng=6000, minutes=40, comments=800)]
     slow = [_sig(10, "Oil prices edge higher as OPEC meeting nears", outlet="BBC", minutes=60 * 9)]
     sport = [_sig(20, "Lakers beat Celtics in overtime thriller", outlet="BBC")]
@@ -200,11 +204,96 @@ def test_ranking_rewards_velocity_breadth_and_relevance_and_drops_what_the_audie
     by = {c.lead.id: c for c in clusters}
     assert 20 not in by  # sport: not for this audience
     hot_c = next(c for c in clusters if any(s.id == 1 for s in c.signals))
-    assert {s.id for s in hot_c.signals} == {1, 2, 3, 4, 5}  # the trend, the headlines and the thread are one topic
+    assert {s.id for s in hot_c.signals} == {1, 2, 3, 4, 5, 6}  # the trend (through the article Google links it to), the headlines, the thread
     hot_score, parts = rank.score(hot_c, NOW)
     slow_score, _ = rank.score(next(c for c in clusters if any(s.id == 10 for s in c.signals)), NOW)
     assert hot_score > slow_score + 20 and hot_c.category == "crypto"
-    assert set(parts) >= {"velocity", "engagement", "freshness", "relevance", "discussion", "learned"} and parts["learned"] == 1.0
+    assert set(parts) >= {"velocity", "engagement", "freshness", "relevance", "discussion", "learned", "growth"} and parts["learned"] == 1.0
+    assert parts["growth"]["measured"] and "google" in parts["growth"]["evidence"]
+
+
+def _seen_sig(i: int, title: str, outlet: str, first_seen_min: int, published_min: int | None = None, **kw: Any) -> rank.Sig:
+    """A signal first seen by our scan first_seen_min minutes before NOW, published published_min before NOW."""
+    seen = NOW - timedelta(minutes=first_seen_min)
+    pub = NOW - timedelta(minutes=published_min if published_min is not None else first_seen_min)
+    return rank.Sig(id=i, source=kw.pop("source", "news"), title=title, outlet=outlet, reliable=kw.pop("reliable", True), engagement=kw.pop("eng", 2.0),
+                    first_seen=seen, last_seen=NOW, published_at=pub, history=kw.pop("history", []), extra=kw)
+
+
+ZEN = ["Zentrix agrees $12 billion takeover of crypto exchange Lumora", "Zentrix to buy crypto exchange Lumora in $12 billion takeover",
+       "Crypto exchange Lumora accepts $12 billion Zentrix takeover", "Zentrix wins Lumora takeover, a $12 billion crypto exchange deal",
+       "Lumora board backs $12 billion Zentrix takeover of the crypto exchange"]
+OUTLETS = ["Reuters", "Bloomberg", "CNBC", "Financial Times", "CoinDesk", "The Block", "BBC", "Axios", "Decrypt", "Fortune"]
+
+
+def test_many_articles_but_flat_interest_stays_below_the_automatic_line() -> None:
+    """Ten outlets on one story, spread over twelve hours, nothing new since our scans first saw them, no search interest: coverage, not growth."""
+    sigs = [_seen_sig(i, ZEN[i % 5], OUTLETS[i], first_seen_min=200, published_min=60 + 70 * i) for i in range(10)]
+    [c] = rank.cluster(sigs)
+    assert len(c.signals) == 10  # same-event coverage merges
+    sc, parts = rank.score(c, NOW)
+    assert sc < 75 and sc <= rank.NO_GROWTH_CAP and parts["growth"]["measured"] is False and parts["growth"]["evidence"] == []
+    # even at its freshest (all ten published in the last two hours, a burst), coverage alone can't reach the line
+    burst = [_seen_sig(i, ZEN[i % 5], OUTLETS[i], first_seen_min=0, published_min=5 + 10 * i) for i in range(10)]
+    [b] = rank.cluster(burst)
+    sc2, p2 = rank.score(b, NOW)
+    assert sc2 <= rank.NO_GROWTH_CAP < 75 and p2["growth"]["measured"] is False
+
+
+def test_interest_growing_across_scans_raises_the_score_past_the_line() -> None:
+    q = {"query": "zentrix lumora", "group": "g:zl", "geo": "US"}
+    # scan 1, an hour ago: two outlets, Google at 20K+
+    early = [_seen_sig(1, ZEN[0], "Reuters", 60), _seen_sig(2, ZEN[1], "Bloomberg", 60),
+             _seen_sig(3, "zentrix lumora", "Google Trends", 60, source="google", reliable=False, eng=20_000, history=[[(NOW - timedelta(minutes=60)).isoformat(), 20_000]], **q)]
+    then = NOW - timedelta(minutes=60)
+    [c1] = rank.cluster(early)
+    s1, p1 = rank.score(c1, then)
+    # scan 2, now: four more outlets, Google at 200K+ (the same trend's history across the two scans)
+    later = early[:2] + [_seen_sig(3, "zentrix lumora", "Google Trends", 60, source="google", reliable=False, eng=200_000,
+                                   history=[[then.isoformat(), 20_000], [NOW.isoformat(), 200_000]], **q)]
+    later += [_seen_sig(10 + i, ZEN[(i + 2) % 5], OUTLETS[2 + i], 0, published_min=10 + 5 * i) for i in range(4)]
+    [c2] = rank.cluster(later)
+    s2, p2 = rank.score(c2, NOW)
+    g = p2["growth"]
+    assert s2 > s1 + 10 and s2 >= 75, (s1, s2, p2)
+    assert {"scans", "google"} <= set(g["evidence"]) and g["outlets_before"] == 2 and g["outlets_now"] == 6 and g["google_up"]
+    assert g["google_from"] == 20_000 and g["google_to"] == 200_000
+
+
+NVIDIA = ["Nvidia unveils Rubin chips at its GTC developer conference", "Nvidia shares slide as China opens antitrust probe",
+          "Nvidia CEO Jensen Huang meets Trump at the White House", "Nvidia CEO Jensen Huang says AI demand is still rising",
+          "Nvidia to invest $5 billion in Intel", "Singapore files 41 charges in Nvidia-linked server case"]
+
+
+def test_unrelated_stories_sharing_a_big_name_do_not_merge() -> None:
+    sigs = [_seen_sig(i, t, OUTLETS[i], 30) for i, t in enumerate(NVIDIA)]
+    sigs.append(_seen_sig(20, "nvidia", "Google Trends", 30, source="google", reliable=False, eng=500_000, query="nvidia", group="g:nv"))
+    sigs.append(_seen_sig(21, "Nvidia to invest $5 billion in chipmaker Intel", "Some Blog", 30, source="google", reliable=False, eng=0,
+                          query="nvidia", group="g:nv", kind="article"))
+    clusters = rank.cluster(sigs)
+    sizes = sorted(len(c.signals) for c in clusters)
+    assert len(clusters) == 6, [[s.title for s in c.signals] for c in clusters]
+    invest = next(c for c in clusters if any(s.id == 4 for s in c.signals))
+    assert {s.id for s in invest.signals} == {4, 20, 21}  # the one-word trend joins only through the article Google linked to it
+    assert sizes == [1, 1, 1, 1, 1, 3]
+    # a cluster's seed decides, not any member: a story that matches a later member but not the seed stays out
+    chain = [_seen_sig(1, "Bybaz halts withdrawals after $40 million hack", "Reuters", 30),
+             _seen_sig(2, "Bybaz hack: $40 million drained, withdrawals halted as Qorvex audit questioned", "CoinDesk", 30, eng=1.0),
+             _seen_sig(3, "Qorvex audit of crypto exchange Lumora questioned by regulators", "BBC", 30, eng=0.5)]
+    assert [len(c.signals) for c in rank.cluster(chain)] == [2, 1]
+    # and a time window: the same words twenty hours apart are two stories
+    apart = [_seen_sig(1, ZEN[0], "Reuters", 30), _seen_sig(2, ZEN[1], "Bloomberg", 30, published_min=20 * 60)]
+    assert len(rank.cluster(apart)) == 2
+
+
+def test_same_event_coverage_still_merges() -> None:
+    donbas = ["Zelenskyy Says US Floats NATO Membership in Deal for Donbas", "US floats Nato membership for Donbas withdrawal deal, Zelenskyy says",
+              "U.S. floated idea of Ukraine ceding Donbas for NATO membership, Zelenskyy says"]
+    hack = [HACK, "Bybaz halts withdrawals after a $40 million hack, the exchange says", "Crypto exchange Bybaz pauses withdrawals following $40 million hack"]
+    sigs = [_seen_sig(i, t, OUTLETS[i], 30) for i, t in enumerate(donbas)] + [_seen_sig(10 + i, t, OUTLETS[3 + i], 30) for i, t in enumerate(hack)]
+    assert sorted(len(c.signals) for c in rank.cluster(sigs)) == [3, 3]
+    assert rank.related("Bitcoin breaks below $69,000", "Bitcoin tumbles below $69,000 as ETF outflows grow")
+    assert not rank.related("Nvidia CEO Jensen Huang meets Trump", "Nvidia CEO Jensen Huang says AI demand is still rising")
 
 
 def test_learned_weights_are_bounded_and_need_enough_posts(db: Session) -> None:
@@ -240,17 +329,79 @@ def gate(text: str, **kw: Any) -> dict[str, Any]:
 
 
 def test_the_gate_passes_a_sourced_tweet_and_holds_invented_claims() -> None:
-    ok = gate(f"👀 Crypto's story of the moment:\n\n{HACK} (via CoinDesk)\n\nOverreaction or the real deal?")
+    ok = gate(f"{HACK}, CoinDesk reports.\n\nThe exchange says it halted withdrawals after a $40 million hack.")
     assert ok["ok"], ok["reason"]
     assert "Figures no source gave: 25" in gate(f"{HACK}, with 25% of users hit (via CoinDesk)")["reason"]
     assert "people no source names" in gate(f"{HACK}. Changpeng Zhao is furious (via CoinDesk)")["reason"] or not gate(f"{HACK}. Changpeng Zhao is furious (via CoinDesk)")["ok"]
-    assert "accusations" in gate(f"{HACK}. Fraud, plain and simple (via CoinDesk)")["reason"]
+    assert any("accusations" in c["detail"] for c in gate(f"{HACK}. Fraud, plain and simple (via CoinDesk)")["checks"] if not c["passed"])
     assert "quotations" in gate(f'{HACK} (via CoinDesk): "we will make every user whole"')["reason"]
     assert "Controversy" in gate(f"{HACK}. The backlash is already here (via CoinDesk)")["reason"]
     assert not gate(f"{HACK} (via CoinDesk)", reliable=0)["ok"]  # social signals alone never back a tweet
     assert "trend source" in gate(f"{HACK} is trending everywhere (via CoinDesk)")["reason"]
     assert gate(f"{HACK} is trending (via CoinDesk)", buzz_ok=True)["ok"]
     assert "BREAKING" in gate(f"BREAKING: {HACK} (via CoinDesk)")["reason"]
+
+
+RETIRED = ["👀 Crypto's story of the moment:", "🪙 Worth a minute of your crypto scroll:", "⚡ On the crypto radar right now:", "🌍 The world story with market stakes:",
+           "🧠 One for the crypto crowd:", "📈 On the stock market radar:", "🌐 Today's big picture:"]
+BAIT = ["Does this change your view?", "Who comes out ahead here?", "What happens next?", "Overreaction or the real deal?", "Game changer or hype?",
+        "Thoughts?", "What's the market missing?", "Retweet if you agree."]
+
+
+def test_the_gate_holds_template_lines_engagement_bait_and_generic_questions() -> None:
+    for hook in RETIRED:
+        r = gate(f"{hook}\n\n{HACK} (via CoinDesk)")
+        assert not r["ok"] and "template line or engagement bait" in r["reason"], hook
+    for q in BAIT:
+        assert not gate(f"{HACK} (via CoinDesk)\n\n{q}")["ok"], q
+    assert not gate(f"{HACK} (via CoinDesk)\n\nIs this good?")["ok"]  # generic, not tied to a stated fact
+    assert not gate(f"{HACK} (via CoinDesk). Will Bybaz reopen withdrawals? Will the hack spread?")["ok"]  # one question at most
+    specific = gate(f"{HACK} (via CoinDesk)\n\nWill Bybaz reopen withdrawals this week?")
+    assert specific["ok"], specific["reason"]  # rare, specific, neutral, tied to the stated fact: allowed
+
+
+def _brief(**kw: Any) -> writer.Brief:
+    b = writer.Brief(key=kw.pop("key", "t:7"), category=kw.pop("category", "crypto"), headline=kw.pop("headline", HACK), outlet=kw.pop("outlet", "CoinDesk"), **kw)
+    b.source_text = " ".join([b.headline] + [h for _, h in b.others]) + " " + " ".join(writer.measured_lines(b))
+    return b
+
+
+def test_the_rules_writer_is_natural_varied_sourced_and_asks_nothing() -> None:
+    others = [("Reuters", "Bybaz says 12,000 accounts were affected by the $40 million hack")]
+    seen = set()
+    for i in range(12):
+        b = _brief(key=f"t:{i}", others=others, outlets=["CoinDesk", "Reuters"])
+        text, angle = writer.rules(b)
+        seen.add(text.split("\n\n")[0].replace(HACK, "H"))
+        assert len(text) <= 280 and "CoinDesk" in text and HACK in text and "?" not in text and angle == "detail"
+        assert "12,000 accounts" in text and "Reuters" in text  # the second sentence: a concrete figure from another reliable outlet
+        assert not gates.EMOJI.search(text) and not gates.BAIT.search(text)
+        res = gates.gate(text, source_text=b.source_text, source_names=["CoinDesk"], reliable_count=2)
+        assert res["ok"], (text, res["reason"])
+    assert len(seen) >= 2  # the opening varies by topic ("(via CoinDesk)", "CoinDesk reports.", "CoinDesk:")
+    # the measured interest, only when Google gave a traffic figure
+    g = _brief(google=True, google_query="bybaz", google_geo="US", google_traffic="500K+", google_to=500_000)
+    text, angle = writer.rules(g)
+    assert angle == "interest" and text.endswith("Searches for Bybaz have topped 500K on Google in the US.")
+    assert gates.gate(text, source_text=g.source_text, source_names=["CoinDesk"], reliable_count=1, buzz_ok=True)["ok"]
+    rising = _brief(google=True, google_query="bybaz", google_geo="US", google_from=20_000, google_to=200_000, google_minutes=130)
+    assert writer.rules(rising)[0].endswith("Google searches for Bybaz in the US went from 20K+ to 200K+ in about 2 hours.")
+    none = _brief()
+    assert writer.rules(none) == (writer.opener(none), "plain") and "Searches" not in writer.rules(none)[0]
+    cov = _brief(outlets=["CoinDesk", "Reuters", "The Block", "AP"])
+    assert writer.rules(cov)[0].endswith("Reuters, The Block and AP have it too.")
+
+
+def test_the_model_writer_gets_the_same_constraints() -> None:
+    b = _brief(others=[("Reuters", "Bybaz says 12,000 accounts were affected")], google=True, google_query="bybaz", google_geo="US", google_to=200_000)
+    system, user = writer.prompt(b)
+    for must in ("no engagement bait", "By default ask no question", "No hook or teaser lines", "must come from the FACTS", "untrusted text"):
+        assert must in system
+    assert "Headline (Reuters): Bybaz says 12,000 accounts were affected" in user and "Measured by Price Chat: Searches for Bybaz have topped 200K" in user
+    s = _brief(headline="Airstrike on a camp kills 12, officials say", outlet="BBC", category="geopolitics")
+    s.sensitive = sensitive.classify(s.headline)
+    system, _ = writer.prompt(s)
+    assert "SENSITIVE" in system and "No question, no emoji" in system
 
 
 def test_at_most_one_cashtag() -> None:
@@ -260,20 +411,6 @@ def test_at_most_one_cashtag() -> None:
     one = writer.with_one_cashtag("Bitcoin and Ethereum fall as Bybaz halts withdrawals", src)
     assert len(gates.cashtags(one)) == 1 and "Bitcoin ($BTC)" in one
     assert gates.gate(f"{one} (via CoinDesk)", source_text=src, source_names=["CoinDesk"], reliable_count=1)["ok"]
-
-
-def test_the_rules_writer_has_personality_in_the_framing_only_and_passes_the_gate() -> None:
-    b = writer.Brief(key="t:7", category="crypto", headline=HACK, outlet="CoinDesk", google=True, reddit_sub="CryptoCurrency", outlets=["CoinDesk", "Reuters", "The Block"],
-                     source_text=SRC + " on Google's trending searches a top thread on r/CryptoCurrency 3 outlets")
-    seen = set()
-    for angle in ("hook", "question", "signal"):
-        text, used = writer.rules(b, angle)
-        seen.add(text)
-        assert len(text) <= 280 and "(via CoinDesk)" in text and HACK in text
-        res = gates.gate(text, source_text=b.source_text, source_names=["CoinDesk"], reliable_count=3, buzz_ok=True, discussion_ok=True)
-        assert res["ok"], (angle, res["reason"])
-    assert len(seen) == 3
-    assert writer.rules(b, "question")[0].rstrip().endswith("?")
 
 
 async def test_a_social_only_topic_is_held_for_lack_of_a_reliable_source(db: Session, web: Web) -> None:
@@ -472,6 +609,9 @@ async def test_the_scheduler_job_runs_the_tick_and_posts_through_a_fake_x(client
     monkeypatch.setattr(runtime.x, "transport", web.transport, raising=False)
     monkeypatch.setattr(engine, "HTTP_TRANSPORT", web.transport)
     monkeypatch.setattr(engine, "utcnow", lambda: NOW)
+    import app.scheduler.scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, "utcnow", lambda: NOW)  # the job's ctx.now: fixed, so News Desk slot spacing never depends on the wall clock
     spec = next(j for j in build_jobs(runtime) if j.name == "newsdesk.trending")
     assert spec.name.startswith("newsdesk.")  # production's SCHEDULER_ONLY_JOBS lists "newsdesk.": it runs there with no env change
     sch = Scheduler(SessionLocal, [spec])
@@ -515,8 +655,174 @@ def test_performance_report_per_category(db: Session) -> None:
     assert r["totals"]["like_count"] == 60 and not r["learning"]
 
 
-def test_no_jokes_or_questions_on_deaths() -> None:
-    b = writer.Brief(key="t:9", category="geopolitics", headline="Airstrike on a camp kills 12, officials say", outlet="BBC", source_text="Airstrike on a camp kills 12, officials say")
-    for angle in ("hook", "question", "signal"):
-        text, used = writer.rules(b, angle)
-        assert used == "somber" and "?" not in text and text.startswith("🌍 Worth knowing today:")
+# --- sensitive subjects (owner, 2026-11-14) ---------------------------------------------------------------------------------------
+
+SENSITIVE_CASES = [
+    ("allegation", "approval", "Senator John Smith accused of taking bribes, prosecutors say"),
+    ("crime", "approval", "Gunman opens fire in a shopping centre shooting, police say"),
+    ("terrorism", "approval", "Islamic State claims responsibility for checkpoint bombing"),
+    ("sexual", "approval", "Film studio faces sexual misconduct claims from former staff"),
+    ("suicide", "approval", "Rise in suicide rates among farmers, study says"),
+    ("minors", "approval", "School bus crash injures 12 children, officials say"),
+    ("conflict", "strict", "Airstrikes hit oil depot as war enters its third year"),
+    ("deaths", "strict", "Factory fire kills 12, officials say"),
+    ("disaster", "strict", "Magnitude 7.1 earthquake strikes off the coast of Japan"),
+    ("health", "strict", "Bird flu outbreak spreads to dairy herds, USDA says"),
+    ("legal", "strict", "SEC sues Bybaz over unregistered token sales"),
+]
+
+
+@pytest.mark.parametrize("kind,tier,title", SENSITIVE_CASES)
+def test_each_sensitive_category_is_recognised_and_written_plainly(kind: str, tier: str, title: str) -> None:
+    c = sensitive.classify(title)
+    assert c is not None and c["kind"] == kind and c["tier"] == tier, c
+    b = _brief(headline=title, outlet="BBC", category="world", outlets=["BBC", "Reuters"], google=True, google_query="x", google_to=500_000)
+    b.sensitive = c
+    b.source_text = title + " " + " ".join(writer.measured_lines(b))
+    text, angle = writer.rules(b)
+    assert angle == f"sensitive:{kind}" and text.startswith(f"BBC reports: {title}") and text.endswith("Also reported by Reuters.")
+    assert "?" not in text and not gates.EMOJI.search(text) and "Searches" not in text  # no hook, question, emoji or interest statistics
+    res = gates.gate(text, source_text=b.source_text, source_names=["BBC"], reliable_count=2)
+    assert res["ok"], res["reason"]
+    for bad in (f"{text} What happens now?", f"\U0001F622 {text}", f"Wow. {text}", f"{text}\n\nSearches for it have topped 500K on Google."):
+        assert not gates.gate(bad, source_text=b.source_text + " Searches for it have topped 500K on Google.", source_names=["BBC"], reliable_count=2)["ok"], bad
+    # automatic: never for the approval-only subjects; the strict ones only with 2+ independent outlets, attributed, nobody named
+    two = sensitive.auto_problem(c, text=text, outlets=["BBC", "Reuters"])
+    one = sensitive.auto_problem(c, text=text, outlets=["BBC", "BBC News"])  # one outlet under two names
+    if tier == "approval":
+        assert two and "approval only" in two
+    else:
+        assert two is None and one and "at least 2 independent" in one
+        if not sensitive.ATTRIBUTION.search(title):  # a headline that already says who says it is attributed
+            assert "who reports it" in (sensitive.auto_problem(c, text=title, outlets=["BBC", "Reuters"]) or "")
+
+
+def test_ordinary_market_stories_are_not_sensitive() -> None:
+    for t in (HACK, "Trade war fears lift gold to $2,400", "Nvidia shares slide 4% after earnings", "Bitcoin price war chest grows as ETFs add $1 billion",
+              "Clinical trial results lift Moderna shares"):
+        assert sensitive.classify(t) is None, t
+
+
+def test_allegation_wording_keeps_the_sources_hedges() -> None:
+    src = "Senator John Smith accused of taking bribes, prosecutors say"
+    ok = gates.gate(f"BBC reports: {src}.", source_text=src, source_names=["BBC"], reliable_count=2)
+    assert ok["ok"], ok["reason"]
+    dropped = gates.gate("BBC reports: Senator John Smith took bribes.", source_text=src + " took", source_names=["BBC"], reliable_count=2)
+    assert not dropped["ok"] and any("hedge words" in c["detail"] for c in dropped["checks"] if not c["passed"])
+
+
+def test_a_strict_topic_names_no_person_when_automatic() -> None:
+    c = sensitive.classify("Factory fire kills 12, officials say")
+    assert "names a person" in (sensitive.auto_problem(c, text="BBC reports: Factory fire kills 12 as John Smith escapes, officials say.", outlets=["BBC", "AP"]) or "")
+
+
+def _hot_story(db: Session, web: Web, titles: list[tuple[str, str]], query: str) -> None:
+    for i, (outlet, title) in enumerate(titles):
+        story(db, title, outlet, 100 + i, NOW, 20 - i, category="politics")
+    web.google = [{"query": query, "traffic": "500K+", "news": [{"title": titles[0][1], "url": "https://bbc.test/s", "source": titles[0][0]}]}]
+
+
+async def test_automatic_mode_never_publishes_an_allegation_about_a_named_person(db: Session, web: Web) -> None:
+    s = engine.settings_row(db)
+    s.hot_score = 40
+    db.commit()
+    _hot_story(db, web, [("BBC", "Senator John Smith accused of taking bribes from Bybaz, prosecutors say"),
+                         ("Reuters", "Prosecutors say Senator John Smith accused of taking Bybaz bribes"),
+                         ("AP", "Senator John Smith accused of taking bribes from crypto firm Bybaz")], "john smith")
+    await tick(db, web)
+    [post] = [p for p in posts(db) if "Smith" in p.text]
+    assert post.status == "pending" and "approval only" in (post.note or "") and post.angle == "sensitive:allegation"
+    assert "?" not in post.text and post.text.startswith(("BBC reports:", "Reuters reports:", "AP reports:"))
+
+
+async def test_automatic_mode_may_publish_a_disaster_only_with_two_independent_outlets(db: Session, web: Web) -> None:
+    s = engine.settings_row(db)
+    s.hot_score = 40
+    db.commit()
+    _hot_story(db, web, [("BBC", "Magnitude 7.1 earthquake strikes off the coast of Japan, closing Bybaz offices"),
+                         ("Reuters", "Magnitude 7.1 earthquake strikes off the coast of Japan; Bybaz offices closed")], "japan earthquake")
+    await tick(db, web)
+    [post] = [p for p in posts(db) if "earthquake" in p.text]
+    assert post.angle == "sensitive:disaster" and post.status == "dry_run", (post.status, post.note, post.text)  # two outlets, attributed: it may go
+    assert "Also reported by" in post.text and "Searches" not in post.text
+
+
+async def test_a_disaster_with_one_outlet_waits_for_the_owner(db: Session, web: Web) -> None:
+    s = engine.settings_row(db)
+    s.hot_score = 40
+    db.commit()
+    _hot_story(db, web, [("BBC", "Magnitude 7.1 earthquake strikes off the coast of Japan, closing Bybaz offices")], "japan earthquake")
+    await tick(db, web)
+    [post] = [p for p in posts(db) if "earthquake" in p.text]
+    assert post.status == "pending" and "at least 2 independent" in (post.note or "")
+
+
+# --- growth evidence in the engine ----------------------------------------------------------------------------------------------
+
+
+async def test_a_hot_score_without_measured_growth_waits_for_the_owner(db: Session, web: Web) -> None:
+    s = engine.settings_row(db)
+    s.hot_score, s.suggest_score = 30, 20  # even with the line lowered by hand, coverage alone never publishes by itself
+    db.commit()
+    for i, o in enumerate(OUTLETS[:6]):
+        story(db, ZEN[i % 5], o, 200 + i, NOW, 30 + 40 * i)
+    await tick(db, web)
+    [post] = [p for p in posts(db) if "Zentrix" in p.text]
+    topic = db.get(TtTopic, post.topic_id)
+    assert topic.score >= 30 and topic.parts["growth"]["measured"] is False
+    assert post.status == "pending" and "no measured growth" in (post.note or "")
+
+
+# --- limits (unchanged: 3 a day, 180 minutes apart, the shared cap) ----------------------------------------------------------
+
+
+async def test_never_more_than_three_trend_posts_a_day_and_always_three_hours_apart(db: Session, web: Web) -> None:
+    s = engine.settings_row(db)
+    db.commit()
+    for i in range(8):
+        db.add(TtPost(topic_id=1000 + i, category="crypto", status="queued", text=f"{HACK} (via CoinDesk)", score=90 - i, source_text=SRC,
+                      sources=[{"name": "CoinDesk", "title": f"story {i}", "url": "https://c.test"}], checks=[], metrics={}, expires_at=NOW + timedelta(days=3)))
+    db.commit()
+    at = NOW.replace(hour=0, minute=5)
+    for step in range(6 * 36):  # every 10 minutes for 36 hours
+        await engine.publish_due(db, s, get_settings(), web.runtime, get_agent_config(db).id, at + timedelta(minutes=10 * step))
+    sent = sorted(p.published_at for p in posts(db) if p.status == "dry_run")
+    assert len(sent) >= 4  # the limits pace posts, they don't stop them
+    assert all((b - a) >= timedelta(minutes=180) for a, b in zip(sent, sent[1:]))
+    assert all(sum(1 for x in sent if t - timedelta(hours=24) < x <= t) <= 3 for t in sent)
+    assert web.posted == []
+    s.max_per_day, s.shared_daily_cap = 10, 1  # the shared News Desk + Trending cap stops it too
+    db.commit()
+    assert "shared X cap" in (coordinate.cap_problem(db, s, sent[-1] + timedelta(minutes=1)) or "")
+
+
+# --- production evidence: the scan log ------------------------------------------------------------------------------------------
+
+SECRETISH = re.compile(r"(?i)bearer\s|sk-[a-z0-9]|api[_-]?key\s*[=:]|token\s*[=:]|secret\s*[=:]|password|[A-Za-z0-9_\-]{32,}|[\w.+-]+@[\w-]+\.\w+")
+
+
+async def test_each_scan_logs_sources_topics_top_five_and_the_decision_with_no_secrets(db: Session, web: Web, caplog: pytest.LogCaptureFixture,
+                                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    import logging
+
+    monkeypatch.setattr(engine, "_STARTUP_LOGGED", False)
+    hack_story(db, web)
+    with caplog.at_level(logging.INFO, logger="app.trending.engine"):
+        await tick(db, web)
+        await tick(db, web, NOW + timedelta(minutes=10))
+    lines = [r.getMessage() for r in caplog.records if r.name == "app.trending.engine"]
+    startup = [x for x in lines if x.startswith("trending startup:")]
+    assert len(startup) == 1  # once per process (per deploy)
+    for want in ("mode=automatic", "auto=on", "hot_threshold=75", "daily_max=3", "min_gap=180min", "newsdesk_x=dry_run", "x_live=False", "live_switch=on"):
+        assert want in startup[0], want
+    scans = [x for x in lines if x.startswith("trending scan ")]
+    assert len(scans) == 2 and "news=ok" in scans[0] and "google=ok" in scans[0] and "reddit=unavailable" in scans[0] and "x_trends=off" in scans[0]
+    assert "google=ok (not due)" in scans[1]
+    tops = [x for x in lines if x.startswith("trending top")]
+    assert tops and "Bybaz" in tops[0] and "growth=google" in tops[0] and " v" in tops[0] and "tweet " in tops[0]
+    pubs = [x for x in lines if x.startswith("trending publish:")]
+    assert len(pubs) == 2 and pubs[0].startswith("trending publish: dry_run") and "dry run" in pubs[0].lower()
+    assert len(lines) <= 1 + 2 * 7  # a few lines per scan
+    for x in lines:
+        assert not SECRETISH.search(x), x
+    assert engine._safe("Authorization: Bearer abc.def.ghi token=xyz sk-ant-12345678 owner@example.com").count("[redacted]") >= 3
