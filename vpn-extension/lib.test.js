@@ -116,3 +116,50 @@ test("Smart Connect never does worse than before when nothing can be measured", 
   assert.equal(smartPick(servers, { 1: null, 3: null }, 1), 1); // the last one used
   assert.equal(smartPick([], {}, null), null);
 });
+
+test("never claims protection while another extension or policy holds the proxy or WebRTC setting", async () => {
+  const { controlConflict, HELD, FREE } = await import("./lib.js");
+  const OTHER = "controlled_by_other_extensions", POLICY = "not_controllable";
+  // the normal cases: off and free to take both, on and holding both
+  assert.equal(controlConflict({ on: false, proxy: FREE, webrtc: FREE }), null);
+  assert.equal(controlConflict({ on: true, proxy: HELD, webrtc: HELD }), null);
+  assert.equal(controlConflict({ on: false, proxy: HELD, webrtc: HELD }), null);
+  // the proxy: nothing is protected, and it's named first
+  for (const on of [false, true]) {
+    assert.equal(controlConflict({ on, proxy: OTHER, webrtc: HELD }).kind, "proxy");
+    assert.match(controlConflict({ on, proxy: OTHER, webrtc: OTHER }).text, /Another extension controls this browser's proxy settings/);
+    assert.match(controlConflict({ on, proxy: POLICY, webrtc: FREE }).text, /managed by your organization/);
+  }
+  assert.equal(controlConflict({ on: true, proxy: FREE, webrtc: HELD }).kind, "proxy"); // on, but our setting isn't the one in force
+  assert.equal(controlConflict({ on: true, proxy: null, webrtc: HELD }).kind, "proxy"); // couldn't be read: don't assume
+  // WebRTC: traffic is proxied, but the real address may leak
+  const w = controlConflict({ on: true, proxy: HELD, webrtc: OTHER });
+  assert.equal(w.kind, "webrtc");
+  assert.match(w.text, /WebRTC/);
+  assert.equal(controlConflict({ on: false, proxy: FREE, webrtc: OTHER }).kind, "webrtc");
+  assert.match(controlConflict({ on: true, proxy: HELD, webrtc: POLICY }).text, /managed by your organization/);
+  assert.equal(controlConflict({ on: true, proxy: HELD, webrtc: FREE }).kind, "webrtc");
+});
+
+test("the badge never says ON while another extension holds a setting", () => {
+  const b = badge({ on: true, conflict: { kind: "webrtc", text: "Another extension controls WebRTC." } });
+  assert.equal(b.text, "!");
+  assert.match(b.title, /not protected/);
+  assert.equal(badge({ on: false, conflict: { kind: "proxy", text: "x" } }).text, ""); // off: nothing to warn about in the toolbar
+});
+
+test("the popup never says Connected during a conflict, and says what isn't covered", async () => {
+  const { readFileSync } = await import("node:fs");
+  const popup = readFileSync(new URL("./popup.js", import.meta.url), "utf8");
+  assert.match(popup, /taken \? \(taken\.kind === "proxy" \? "Not protected" : "Not fully protected"\)/);
+  assert.match(popup, /pricechat\.live always uses your normal connection/);
+  assert.match(popup, /Incognito windows aren't covered/);
+});
+
+test("the proxy password is only ever kept in session storage", async () => {
+  const { readFileSync } = await import("node:fs");
+  const bg = readFileSync(new URL("./background.js", import.meta.url), "utf8");
+  assert.match(bg, /chrome\.storage\.session\.set\(\{ secret: \{ username: login\.username, password \} \}\)/);
+  assert.match(bg, /return write\(\{ login: rest, \.\.\.extra \}\)/); // local gets the login without its password
+  assert.doesNotMatch(bg, /write\(\{ login(,| \})/); // never the whole login object into local storage
+});

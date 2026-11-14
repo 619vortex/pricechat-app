@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Kiwi e2e: another proxy extension",
+  "description": "Test only: stands in for another extension that takes the proxy or WebRTC setting. Driven from run.mjs through page.html.",
+  "version": "1.0",
+  "permissions": ["proxy", "privacy"]
+}
