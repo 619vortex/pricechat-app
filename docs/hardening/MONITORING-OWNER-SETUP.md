@@ -31,7 +31,7 @@ This is for branch `feat/kiwi-hardening-monitoring`, after it is deployed. Do th
 No other Admin setting changes. Leave payments as they are.
 
 ## B. Railway environment variables
-**None.** The new jobs `system.backup_check` and `system.restore_test` are covered by the `system.` entry already in production's `SCHEDULER_ONLY_JOBS`. They use the existing bucket variables, which `system.backup` already uses. Migration 0112 runs by itself at start-up.
+**None.** The new jobs `system.backup_check` and `system.restore_test` are covered by the `system.` entry already in production's `SCHEDULER_ONLY_JOBS`. They use the existing bucket variables, which `system.backup` already uses. Migrations 0115 and 0116 run by themselves at start-up.
 
 ## C. External uptime monitor on GitHub (optional, free, outside Railway)
 
@@ -64,11 +64,11 @@ Local proof without GitHub:
 ## D. Verify after the deploy (expected outputs)
 
 1. **Health.** `GET https://api.pricechat.live/api/health/public` returns 200 with `{"ok":true,"db":"ok","scheduler":"ok","jobs":"ok","backup":"ok",…}`.
-2. **Owner health.** Admin, or `/api/health` with the owner login: `checks.migrations.status` is `"ok"`, and its code and database revisions are both `0112_vpn_server_checks` (or 0113 if that branch merged after this one). `checks.owner_alerts.status` is `"ok"` with detail `"delivered by Telegram"`. Before step A it is `"fail"` with "Owner alerts go nowhere: …".
+2. **Owner health.** Admin, or `/api/health` with the owner login: `checks.migrations.status` is `"ok"`, and its code and database revisions are both `0116_vpn_trial_guards` (the release head). `checks.owner_alerts.status` is `"ok"` with detail `"delivered by Telegram"`. Before step A it is `"fail"` with "Owner alerts go nowhere: …".
 3. **Start-up log.** Railway logs show `Startup self-check: configuration OK`, or a problems line. It must not contain `OWNER ALERTS GO NOWHERE` once A is done.
 4. **The new jobs.** Admin › Settings › Background jobs: the jobs table lists **Backup freshness check** (`system.backup_check`, every 1 h) and **Weekly backup restore test** (`system.restore_test`, every 7 d). Neither may show "off here".
 5. **Backup freshness check.** Press **Run now**. Expected result: `success`, and the result shows the newest key with `age_hours` under 26 and `"stale": false`. No Telegram message is sent.
-6. **Restore test.** Press **Run now**. It takes seconds to a few minutes and needs temporary disk of about 2x the database size. Expected result: `success`, with the activity line `Restore test passed: price_chat-YYYYmmdd-HHMMSS.db.gz (N h old, M MB) integrity ok, alembic 0112_vpn_server_checks, <members> members, <devices> VPN devices`. On a failure you get one Telegram message, `Price Chat alert: Weekly backup restore test FAILED …`, and then a reminder at most once a day.
+6. **Restore test.** Press **Run now**. It takes seconds to a few minutes and needs temporary disk of about 2x the database size. Expected result: `success`, with the activity line `Restore test passed: price_chat-YYYYmmdd-HHMMSS.db.gz (N h old, M MB) integrity ok, alembic 0116_vpn_trial_guards, <members> members, <devices> VPN devices`. On a failure you get one Telegram message, `Price Chat alert: Weekly backup restore test FAILED …`, and then a reminder at most once a day.
 7. **Server health.** `GET /api/vpn/admin/health` (owner) answers with `servers[]`, each with `status` healthy, degraded, offline or disabled, and a `fleet` block. `checks_24h` grows by 12 an hour per server.
 8. **Uptime workflow**, if set up: the next scheduled run is green.
 

@@ -4,13 +4,15 @@ Branch `feat/kiwi-hardening-monitoring`, based on main `a7d2081`. **Not deployed
 
 ## What changed
 
-### 1. Server health and capacity, ported from `feat/kiwi-production` ffb2de6 (migration 0112)
+### 1. Server health and capacity, ported from `feat/kiwi-production` ffb2de6 (migration 0115, first numbered 0112)
 - Only that commit's backend work was brought over: `app/vpn/health.py`, the `VpnServerCheck` model, `GET /api/vpn/admin/health`
   (owner login), the members' `health` ok|degraded field, the fleet alerts in `app/alerts.py` (fewer than 2 healthy public
   servers while open, public capacity at 80% or more, a server's traffic on pace to pass its allowance), and `tests/test_vpn_health.py`.
   `vpn-node/infra/regions-lib.mjs` and the rest of that branch were left out. The capacity alert's reference to `regions.mjs` (not on main) was removed.
 - Migration renumbered **0109 → `0112_vpn_server_checks`**, `down_revision = '0111_vpn_server_traffic_allowance'`. It only
   creates the `vpn_server_checks` table and one index. No existing data changes. The stale note in 0110 about rechaining onto 0109 was updated.
+- 2026-11-14, on `release/kiwi-hardening`: renumbered again to **`0115_vpn_server_checks`** with `down_revision = '0114_trending_topics'`,
+  because production already ran 0114 (feat/trending-topics, based on 0111). See STAGE-3.md.
 - **Fixed during the port:** the fleet "redundancy" alert counted a server with one failed sync as unhealthy, so one blip
   on one of two public servers paged the owner. That went around main's flap guard. A server whose only problem is
   `0 < fail_streak < OFFLINE_AFTER` now still counts as healthy for that alert. New test:
@@ -118,6 +120,8 @@ Frontend (`npm ci`, then): `npx vitest run` gave **58 files, 506 tests passed** 
 - No new accounts and no paid services.
 
 ## Migration ordering note
+Historical (before the release branch). The current chain is 0111 → 0114_trending_topics → 0115_vpn_server_checks → 0116_vpn_trial_guards (STAGE-3.md).
+
 Another branch (trial abuse) adds **0113**, also based on 0111. **Whichever merges second must rechain:**
 - if this branch merges first, set 0113's `down_revision = '0112_vpn_server_checks'`;
 - if 0113 merges first, set this branch's 0112 `down_revision` to 0113's revision id. Renaming the file is optional; alembic follows the ids.
@@ -127,7 +131,7 @@ Then check that `alembic heads` shows exactly one head. `tests/test_migrations.p
 ## Deploy steps (when the owner says go)
 1. **Back up first:** `GET /api/system/db-backup` (owner login) and keep the file, or confirm tonight's `system.backup` landed in the bucket.
 2. Merge `feat/kiwi-hardening-monitoring` into main, after rechaining with 0113 if that has merged.
-3. Deploy the backend to Railway from a clean worktree as usual. The start runs `alembic upgrade head`, which applies **0112**
+3. Deploy the backend to Railway from a clean worktree as usual. The start runs `alembic upgrade head`, which applies **0115** (was 0112)
    (`vpn_server_checks` table only). Confirm `/api/health` shows `migrations: ok`.
 4. Deploy the frontend to Vercel (Admin banner and Settings card).
 5. Check:
@@ -137,9 +141,10 @@ Then check that `alembic heads` shows exactly one head. `tests/test_migrations.p
    - run `system.restore_test` by hand.
 
 ## Rollback
-- Code: redeploy the previous main build (`a7d2081`) on Railway, and the previous Vercel deployment.
+- Code: superseded by STAGE-3.md: old code is whatever production runs at deploy time (now feat/trending-topics `cf713cb`) **plus** the
+  0115/0116 migration files, deployed with `railway up`; never Railway "Redeploy" (old code crashes on the unknown revision).
 - Database: not required. The `vpn_server_checks` table is harmless to old code. To remove it:
-  `alembic downgrade 0111_vpn_server_traffic_allowance` (drops the table and its index; no other data is touched), run
+  `alembic downgrade 0114_trending_topics` (drops the VPN tables/columns of 0115 and 0116; Trending Topics stays), run
   **before** redeploying the old code.
 - The two new jobs' rows in `scheduled_jobs` are ignored by old code.
 

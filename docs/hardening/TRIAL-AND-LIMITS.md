@@ -27,7 +27,7 @@ wouldn't refuse or charge. The check-then-charge ordering itself is a fix and st
 
 ### Trial guard modes (`trial_guard_mode`)
 The owner wants the restrictions off at first. Every M4 guard below runs under one switch. The default is **`monitor`**,
-both for new settings rows and for the existing row (set by migration 0113's server default).
+both for new settings rows and for the existing row (set by migration 0116's server default; first numbered 0113).
 
 | Mode | Guards evaluated | Refuses | Records would-be refusals | Writes `vpn_trial_claims` | Counts starts for the address throttle |
 |---|---|---|---|---|---|
@@ -70,7 +70,7 @@ both for new settings rows and for the existing row (set by migration 0113's ser
   - when a trial starts;
   - when a member who has had a trial links another identity or adds an email, so identities can't be passed through an old account;
   - when the store-review account is bound;
-  - by migration 0113, for every trial started before it.
+  - by migration 0116, for every trial started before it.
 
   Like `xp_claims`, the hashes survive account deletion and store no identity. Salt: `kiwi-vpn-trial-v1`, a constant
   like the XP one. A per-server secret would make every claim worthless whenever the key is rotated.
@@ -128,7 +128,7 @@ assumption "testers_only never removes existing devices" still holds (tested).
 `POST /members/desktop/sessions/revoke` accepts an optional body `{"remove_devices": true}`. With it, the WireGuard
 devices the app made are deleted from the node and the database:
 - devices with the new `vpn_devices.created_via = "app"`, made through a `kd.` app session;
-- devices made before 0113 that are named the Windows-app way (`"<PC> (<server id>)"`).
+- devices made before 0116 that are named the Windows-app way (`"<PC> (<server id>)"`).
 
 Website, bot, anonymous and Admin devices and browser logins stay. With no body, nothing changes, as before. The
 response adds `devices_removed`. The website's "Sign out on every PC" now has an unticked checkbox, "Also delete the
@@ -140,7 +140,7 @@ That matches the button, which signs out every PC.
 the member's email no longer grants anything. Binding happens on the first password sign-in:
 - If a Passport that the review sign-in did not create already holds the review address, the sign-in is refused (the
   same error as any failure) and no rights are granted.
-- Migration 0113 binds the existing review member (found by its `vpn_reviewer_created` audit row), so a review in
+- Migration 0116 binds the existing review member (found by its `vpn_reviewer_created` audit row), so a review in
   progress keeps working.
 
 The review account's trial is marked used (and over), and its email is added to `vpn_trial_claims`.
@@ -202,10 +202,10 @@ The card's data comes from `trial_signals` in `GET /api/vpn/admin/overview`, whi
 
 ## Deploy steps
 1. **Back up the production database first** (the audit's O1: backups were failing; take and verify a manual copy).
-2. **Rechain the migration.** On this branch 0113's `down_revision` is `0111_vpn_server_traffic_allowance`. On
-   `release/kiwi-hardening` it is already `0112_vpn_server_checks`, so keep that when merging. There must be one head
+2. **Rechain the migration.** Done on `release/kiwi-hardening`: renumbered `0116_vpn_trial_guards`, `down_revision`
+   `0115_vpn_server_checks`, which follows production's `0114_trending_topics` (STAGE-3.md). There must be one head
    (`alembic heads`).
-3. Deploy the backend (Railway). Migration 0113 runs at startup:
+3. Deploy the backend (Railway). Migration 0116 runs at startup:
    - adds `vpn_trial_claims` and backfills it;
    - adds `vpn_trial_signals`;
    - adds the settings columns, with the defaults above (`trial_guard_mode` = `monitor`);
@@ -217,12 +217,12 @@ The card's data comes from `trial_signals` in `GET /api/vpn/admin/overview`, whi
 6. Leave `sync_enforce_limits` and `count_pc_once` off unless the owner decides otherwise.
 
 ## Rollback
-Old code crashes at startup on an unknown alembic revision (`0113_vpn_trial_guards` in `alembic_version`), so rolling
-back means **old code plus this migration file**. Two options:
-- **Keep the schema.** Deploy the previous code with `backend/migrations/versions/0113_vpn_trial_guards.py` added. The
+Old code crashes at startup on an unknown alembic revision (`0116_vpn_trial_guards` in `alembic_version`), so rolling
+back means **old code plus the two Kiwi VPN migration files**. Two options:
+- **Keep the schema.** Deploy the previous code with `backend/migrations/versions/0115_vpn_server_checks.py` and `0116_vpn_trial_guards.py` added. The
   extra columns and table are ignored by the old models. No data is lost, and redeploying this branch later is instant.
-- **Remove the schema.** With this branch's code still deployed, run `alembic downgrade 0111_vpn_server_traffic_allowance`.
-  This drops the claims and signals tables, the settings columns and `created_via`, and the trial claims are lost. Then deploy the
+- **Remove the schema.** With this branch's code still deployed, run `alembic downgrade 0114_trending_topics`.
+  This drops the server-checks, claims and signals tables, the settings columns and `created_via` (Trending Topics stays), and the trial claims are lost. Then deploy the
   old code.
 
 Restoring the backup also works, but loses everything written since.
