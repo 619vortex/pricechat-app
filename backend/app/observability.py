@@ -425,6 +425,10 @@ class Watchdog:
                 if not m["notify"]:
                     continue
                 if m["status"] == "alert":
+                    from app import alerts
+
+                    if m["key"] == "backup" and alerts._is_open(db, alerts.BACKUP_KEY):
+                        continue  # system.backup_check already told the owner about this incident (one message, not two)
                     out["alerts"] += await self._problem(db, KEY_SILENCE + m["key"], m["alert"])
                 elif m["status"] == "ok":
                     out["recovered"] += await self._fixed(db, KEY_SILENCE + m["key"], f"Price Chat: recovered\n{m['label']}: "

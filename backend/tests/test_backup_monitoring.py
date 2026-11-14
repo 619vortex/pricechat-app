@@ -29,7 +29,7 @@ class Bucket:
     def list_objects_v2(self, Bucket: str, Prefix: str) -> dict[str, Any]:  # noqa: N803 - boto3's names
         if self.broken:
             raise RuntimeError("SignatureDoesNotMatch")
-        return {"Contents": [{"Key": k} for k in self.objects if k.startswith(Prefix)]}
+        return {"Contents": [{"Key": k, "Size": len(v)} for k, v in self.objects.items() if k.startswith(Prefix)]}
 
     def download_fileobj(self, Bucket: str, Key: str, f: Any) -> None:  # noqa: N803
         self.downloads.append(Key)
@@ -107,16 +107,42 @@ def test_restore_test_passes_on_a_sound_copy_and_never_touches_the_live_database
     assert db_backup.restore_test(BUCKET, NOW, s3, expected_head="0113_other")["matches_code_head"] is False  # reported, not a failure
 
 
+def _corrupt_db_bytes(tmp_path: Path) -> bytes:
+    """A real SQLite file whose index no longer matches its table: opens and reads fine, PRAGMA integrity_check
+    reports the mismatch (rows missing from the index)."""
+    path = tmp_path / "corrupt.db"
+    con = sqlite3.connect(path)
+    con.execute("PRAGMA page_size = 1024")
+    for t in db_backup.KEY_TABLES:
+        con.execute(f'CREATE TABLE "{t}" (id INTEGER PRIMARY KEY, name TEXT)')
+    con.execute("CREATE INDEX ix_members_name ON members (name)")
+    con.executemany("INSERT INTO members (name) VALUES (?)", [(f"kiwi {i:05d}",) for i in range(3000)])
+    con.execute("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)")
+    con.execute("INSERT INTO alembic_version VALUES ('0112_vpn_server_checks')")
+    con.commit()
+    # the index's stored definition no longer describes what is in it (what a torn write to the schema page looks like)
+    con.execute("PRAGMA writable_schema = ON")
+    con.execute("UPDATE sqlite_master SET sql = 'CREATE INDEX ix_members_name ON members (id)' WHERE name = 'ix_members_name'")
+    con.commit()
+    con.close()
+    raw = path.read_bytes()
+    return gzip.compress(bytes(raw))
+
+
 @pytest.mark.parametrize("make,reason", [
     (lambda tmp: b"not gzip at all", "doesn't gunzip"),
+    (lambda tmp: _db_bytes(tmp)[:200], "doesn't gunzip"),  # truncated gzip (an upload cut short)
+    (lambda tmp: gzip.compress(b"hello, this is not a database " * 50), "not a sound SQLite"),  # gzip of non-SQLite bytes
     (lambda tmp: gzip.compress(b"SQLite format 3\x00" + b"\x00" * 200), "not a sound SQLite"),
+    (lambda tmp: _corrupt_db_bytes(tmp), "failed PRAGMA integrity_check"),
+    (lambda tmp: gzip.compress(b""), "unpacks to 0 bytes"),
     (lambda tmp: _db_bytes(tmp, version=None), "no alembic_version"),
     (lambda tmp: _db_bytes(tmp, tables=("members", "vpn_servers")), "missing table(s): vpn_accounts"),
     (lambda tmp: _db_bytes(tmp, members=0), "0 members"),
 ])
 def test_restore_test_fails_loudly(tmp_path: Path, make: Any, reason: str) -> None:
     s3 = Bucket({_key(NOW - timedelta(hours=4)): make(tmp_path)})
-    with pytest.raises(db_backup.RestoreTestFailed, match=reason.replace("(", r"\(").replace(")", r"\)")):
+    with pytest.raises(db_backup.RestoreTestFailed, match=reason if "|" in reason else reason.replace("(", r"\(").replace(")", r"\)")):
         db_backup.restore_test(BUCKET, NOW, s3)
     with pytest.raises(db_backup.RestoreTestFailed, match="No backup"):
         db_backup.restore_test(BUCKET, NOW, Bucket())
@@ -190,3 +216,27 @@ def test_the_test_alert_endpoint_says_why_it_cannot_send(client: TestClient) -> 
     r = client.post("/api/system/alerts/test")
     assert r.status_code == 400 and "Telegram user id" in r.text
 
+
+
+def test_a_zero_byte_object_is_not_a_backup(tmp_path: Path) -> None:
+    """An upload that wrote nothing: freshness says so (not "fresh"), and the restore test fails on it."""
+    good, empty = _key(NOW - timedelta(hours=30)), _key(NOW - timedelta(hours=2))
+    s3 = Bucket({good: _db_bytes(tmp_path), empty: b""})
+    info = db_backup.newest(BUCKET, NOW, s3)
+    assert info["key"] == good and info["empty_newer"] == [empty] and info["stale"]
+    with pytest.raises(db_backup.RestoreTestFailed, match=r"empty \(0 bytes\)"):
+        db_backup.restore_test(BUCKET, NOW, s3)
+    only_empty = db_backup.newest(BUCKET, NOW, Bucket({empty: b""}))
+    assert only_empty["key"] is None and only_empty["empty_newer"] == [empty]
+
+
+async def test_a_zero_byte_object_alerts(db: Session) -> None:
+    from app import alerts
+    from tests.test_owner_alerts import SETTINGS, Bot
+
+    tg = Bot()
+    alerts.settings_row(db).telegram_chat = "424242"
+    db.commit()
+    info = db_backup.newest(BUCKET, NOW, Bucket({_key(NOW - timedelta(hours=1)): b""}))
+    assert (await alerts.check_backup_freshness(db, info, settings=SETTINGS, transport=tg.transport, now=NOW))["backup_stale"] == 1
+    assert "is empty (0 bytes)" in tg.sent[-1]["text"]

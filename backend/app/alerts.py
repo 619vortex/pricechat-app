@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 COOLDOWN = timedelta(hours=6)
 FAIL_AFTER = 3  # failed runs in a row before the owner hears about a job
+DAILY = timedelta(hours=24)
+REMIND_JOB = {"system.restore_test": DAILY, "system.backup_check": DAILY}  # weekly / hourly checks: a reminder a day, not every 6 h
 FAIL_AFTER_JOB = {"system.backup": 1, "system.restore_test": 1, "system.backup_check": 1}  # daily / weekly / backup safety: the first failure matters
 TIKTOK_BAD = ("expired", "revoked", "disconnected")
 from app.vpn.service import OFFLINE_AFTER as VPN_OFFLINE_AFTER  # noqa: E402  (same count as the server going offline)
@@ -72,13 +74,14 @@ async def send_text(settings: Settings, chat: str, text: str, transport: Any = N
 
 
 async def notify_owner(db: Session, key: str, text: str, *, settings: Settings | None = None, transport: Any = None,
-                       now: datetime | None = None, cooldown: bool = True, open_: bool | None = None) -> bool:
-    """DM the owner `text` unless `key` was sent within 6 h. True when it went out. Never raises.
+                       now: datetime | None = None, cooldown: bool | timedelta = True, open_: bool | None = None) -> bool:
+    """DM the owner `text` unless `key` was sent within 6 h (or the `cooldown` given). True when it went out. Never raises.
     `open_`: mark the problem behind `key` open (True) / fixed (False) once sent."""
     now = now or utcnow()
+    window = cooldown if isinstance(cooldown, timedelta) else COOLDOWN
     try:
         row = db.get(OwnerAlert, key)
-        if cooldown and row is not None and row.last_sent_at is not None and now - _aware(row.last_sent_at) < COOLDOWN:
+        if cooldown and row is not None and row.last_sent_at is not None and now - _aware(row.last_sent_at) < window:
             return False
         chat = owner_chat(db)
         if chat is None:
@@ -132,7 +135,8 @@ async def job_outcome(db: Session, name: str, label: str, status: str, error: st
         title = {"system.backup": "Nightly database backup FAILED", "system.restore_test": "Weekly backup restore test FAILED"}.get(name, "Background job failing")
         runs = "1 run" if failures == 1 else f"{failures} runs in a row"
         text = f"Price Chat alert: {title}\nJob: {label} ({name})\nFailed: {runs}\nError: {_first_line(error)}\nTime: {_when(now)}"
-        return await notify_owner(db, key, text, settings=settings, transport=transport, now=now, open_=True)
+        return await notify_owner(db, key, text, settings=settings, transport=transport, now=now, open_=True,
+                                  cooldown=REMIND_JOB.get(name, True))
     if status == "success" and _is_open(db, key):  # not only previous > 0: a skipped run in between resets the streak
         now = now or utcnow()
         after = f" after {previous} failed run{'s' if previous != 1 else ''}" if previous else ""
@@ -248,20 +252,27 @@ BACKUP_KEY = "backup:stale"
 async def check_backup_freshness(db: Session, info: dict[str, Any] | None, error: str | None = None, *, settings: Settings | None = None,
                                  transport: Any = None, now: datetime | None = None) -> dict[str, int]:
     """`info` from db_backup.newest() (None with `error` when the bucket couldn't be read). One message when the newest
-    backup is older than 26 h, missing, or unreadable (again every 6 h while it lasts), one "recovered" when a fresh copy
-    is there. Complements the system.backup job's own failure alert: this one also catches a job that never ran."""
+    backup is older than 26 h, missing, empty (0 bytes) or the bucket is unreadable, a reminder once a day while it lasts,
+    one "recovered" when a fresh copy is there.
+    Deduplicated against the two alerts main already had for the same incident: while the system.backup job's own failure
+    alert (`job:system.backup`) or the watchdog's "no successful backup for 26 h" (`ops:silence:backup`) is open, the owner
+    already knows, so this stays quiet. It speaks when the bucket disagrees with a job that looks fine."""
     now = now or utcnow()
     out = {"backup_stale": 0, "backup_recovered": 0}
-    if error is not None or info is None or info.get("stale"):
+    if error is not None or info is None or info.get("stale") or info.get("empty_newer"):
+        if _is_open(db, "job:system.backup") or _is_open(db, "ops:silence:backup"):
+            return out
         if error is not None or info is None:
             why = f"The backup bucket can't be read: {_first_line(error)}"
+        elif info.get("empty_newer"):
+            why = f"The newest backup object is empty (0 bytes): {info['empty_newer'][0].rsplit('/', 1)[-1]}."
         elif not info.get("key"):
             why = "There is no backup in the bucket (backups/db/ is empty)."
         else:
             why = f"The newest backup is {info['age_hours']:.0f} h old ({info['key'].rsplit('/', 1)[-1]}); one should land every 24 h."
         text = (f"Price Chat alert: database backups are STALE\n{why}\nCheck the system.backup job (Admin › Settings › Background jobs) "
                 f"and the bucket secret.\nTime: {_when(now)}")
-        out["backup_stale"] += await notify_owner(db, BACKUP_KEY, text, settings=settings, transport=transport, now=now, open_=True)
+        out["backup_stale"] += await notify_owner(db, BACKUP_KEY, text, settings=settings, transport=transport, now=now, open_=True, cooldown=DAILY)
     elif _is_open(db, BACKUP_KEY):
         text = f"Price Chat: recovered\nDatabase backups are fresh again: the newest is {info['age_hours']:.0f} h old.\nTime: {_when(now)}"
         if await notify_owner(db, f"{BACKUP_KEY}:recovered", text, settings=settings, transport=transport, now=now, cooldown=False):
@@ -324,8 +335,21 @@ async def check_vpn_servers(db: Session, *, settings: Settings | None = None, tr
                                 f"Consider moving users to another server or raising its plan.\nTime: {_when(now)}")
                         out["vpn_traffic"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
                     break
-    out.update(await _check_vpn_fleet(db, settings=settings, transport=transport, now=now))
+    for k, n in (await _check_vpn_fleet(db, settings=settings, transport=transport, now=now)).items():
+        out[k] = out.get(k, 0) + n
     return out
+
+
+async def _recovered(db: Session, key: str, text: str, settings: Settings | None, transport: Any, now: datetime) -> int:
+    """One "recovered" message for an open problem, then closed (kept open if Telegram didn't take it: retried next time)."""
+    if not _is_open(db, key):
+        return 0
+    if await notify_owner(db, f"{key}:recovered", text, settings=settings, transport=transport, now=now, cooldown=False):
+        _close(db, key)
+        return 1
+    if owner_chat(db) is None:
+        _close(db, key)  # nowhere to send it: don't hold the problem open forever
+    return 0
 
 
 async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport: Any, now: datetime) -> dict[str, int]:
@@ -336,7 +360,7 @@ async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport:
 
     rows = health.server_rows(db, now)
     f = health.fleet(rows)
-    out = {"vpn_fleet": 0}
+    out = {"vpn_fleet": 0, "vpn_recovered": 0}
     key = "vpn:fleet:redundancy"
     # the same flap guard as the per-server offline alert: a server whose only problem is fewer than OFFLINE_AFTER
     # failed syncs in a row (a blip) still counts as healthy here, so one blip never pages the owner
@@ -349,8 +373,11 @@ async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport:
                     f"{f['public_up']} of {f['public_servers']} public servers are up. If one more fails, members have nowhere to fail over to.\n"
                     f"Check Admin › Kiwi VPN › Health.\nTime: {_when(now)}")
             out["vpn_fleet"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
+    elif vpn_settings(db).enabled and f["public_servers"]:
+        out["vpn_recovered"] += await _recovered(
+            db, key, f"Price Chat: recovered\nKiwi VPN has {healthy} healthy public servers again.\nTime: {_when(now)}", settings, transport, now)
     else:
-        _close(db, key)
+        _close(db, key)  # closed, or no public server: nothing to fail over between
     key = "vpn:fleet:capacity"
     util = f["utilization"]
     if util is not None and util >= VPN_FLEET_BUSY:
@@ -359,7 +386,8 @@ async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport:
                     f"({f['devices']} of {f['capacity']}).\nAdd a server or raise capacities.\nTime: {_when(now)}")
             out["vpn_fleet"] += await notify_owner(db, key, text, settings=settings, transport=transport, now=now, cooldown=False, open_=True)
     elif util is None or util < VPN_FLEET_CLEAR:
-        _close(db, key)
+        out["vpn_recovered"] += await _recovered(
+            db, key, f"Price Chat: recovered\nKiwi VPN capacity is back below {VPN_FLEET_CLEAR * 100:.0f}% used.\nTime: {_when(now)}", settings, transport, now)
     month = now.strftime("%Y-%m")
     for r in rows:
         share = r["traffic_projected_share"]

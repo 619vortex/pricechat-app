@@ -115,18 +115,23 @@ def _taken_at(obj: dict[str, Any]) -> datetime | None:
 
 
 def newest(settings: Settings, now: datetime | None = None, s3: Any = None) -> dict[str, Any]:
-    """The newest backup in the bucket: {"key", "taken_at", "age_hours", "copies", "stale"}; key None when there is none.
-    Raises whatever the bucket client raises (wrong secret, no bucket): the caller turns that into an alert."""
+    """The newest non-empty backup in the bucket: {"key", "taken_at", "age_hours", "copies", "stale", "empty_newer"}; key None
+    when there is none. `empty_newer`: zero-byte objects newer than it (an upload that wrote nothing), newest first: they
+    don't count as a backup. Raises whatever the bucket client raises (wrong secret, timeout): the caller alerts."""
     now = now or datetime.now(timezone.utc)
     s3 = s3 or _client(settings)
     listed = s3.list_objects_v2(Bucket=settings.portfolio_bucket, Prefix=PREFIX).get("Contents") or []
-    copies = [(t, o) for o in listed if o.get("Key", "").endswith(".db.gz") and (t := _taken_at(o)) is not None]
+    every = sorted(((t, o) for o in listed if o.get("Key", "").endswith(".db.gz") and (t := _taken_at(o)) is not None),
+                   key=lambda c: c[0], reverse=True)
+    copies = [(t, o) for t, o in every if o.get("Size", 1) != 0]  # Size is in every real listing; absent = unknown, kept
+    newest_at = copies[0][0] if copies else None
+    empty = [o["Key"] for t, o in every if o.get("Size", 1) == 0 and (newest_at is None or t > newest_at)]
     if not copies:
-        return {"key": None, "taken_at": None, "age_hours": None, "copies": 0, "stale": True}
-    taken, obj = max(copies, key=lambda c: c[0])
+        return {"key": None, "taken_at": None, "age_hours": None, "copies": 0, "stale": True, "empty_newer": empty}
+    taken, obj = copies[0]
     age = now - taken
     return {"key": obj["Key"], "taken_at": taken.isoformat(), "age_hours": round(age.total_seconds() / 3600, 1),
-            "copies": len(copies), "stale": age > STALE_AFTER}
+            "copies": len(copies), "stale": age > STALE_AFTER, "empty_newer": empty}
 
 
 class RestoreTestFailed(RuntimeError):
@@ -140,6 +145,8 @@ def restore_test(settings: Settings, now: datetime | None = None, s3: Any = None
     now = now or datetime.now(timezone.utc)
     s3 = s3 or _client(settings)
     info = newest(settings, now, s3)
+    if info["empty_newer"]:
+        raise RestoreTestFailed(f"The newest backup object is empty (0 bytes): {info['empty_newer'][0]}")
     if not info["key"]:
         raise RestoreTestFailed("No backup in the bucket to restore (backups/db/ is empty)")
     with tempfile.TemporaryDirectory(prefix="price_chat-restore-test-") as tmp:
@@ -153,6 +160,8 @@ def restore_test(settings: Settings, now: datetime | None = None, s3: Any = None
             raise RestoreTestFailed(f"{info['key']} doesn't gunzip: {type(e).__name__}: {str(e)[:120]}") from e
         gz.unlink()
         size = db_file.stat().st_size
+        if size == 0:
+            raise RestoreTestFailed(f"{info['key']} unpacks to 0 bytes")
         try:
             con = sqlite3.connect(db_file.as_uri() + "?mode=ro", uri=True)
         except sqlite3.Error as e:
