@@ -182,21 +182,26 @@ async function forget() {
 
 /** While on: is traffic still getting through? If not, try for a new login once; if that fails, stay closed and show why. */
 let rechecking = null;
-function recheck() {
+let mintFailedAt = 0; // a refused new login isn't asked for again on every blocked request: at most every 30 s, or on "Try again"
+function recheck(manual = false) {
   rechecking ??= (async () => {
     const state = await read();
     if (!state.on) return;
     await refreshConflict();
     let ok = state.login?.password ? await check() : null; // no password = the browser was restarted: straight to a new login
     let problem = "Connection lost. Traffic is stopped until it's back, or you switch off.";
-    if (!ok && state.login) {
+    if (!ok && state.login && !manual && Date.now() - mintFailedAt < 30000) {
+      problem = state.problem ?? problem; // keep the reason the last attempt gave
+    } else if (!ok && state.login) {
       try {
         const login = await newLogin(state.login.server_id, state.login.username);
         await applyProxy(login);
         ok = await check();
       } catch (e) {
+        mintFailedAt = Date.now();
         if (e.status === 401) problem = "You're signed out. Traffic is stopped until you sign in, or switch off.";
         else if (e.status === 403) problem = `${e.message} Traffic is stopped until you switch off.`;
+        else if (e.status === 429) problem = `${e.message} Traffic is stopped until then, or until you switch off.`;
       }
     }
     await write(ok ? { problem: null, exitIp: ok.ip } : { problem });
@@ -273,7 +278,7 @@ const ACTIONS = {
   connect: ({ serverId }) => connect(serverId),
   disconnect,
   forget,
-  retry: () => recheck(),
+  retry: () => recheck(true),
 };
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
