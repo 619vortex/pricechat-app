@@ -470,14 +470,14 @@ def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str]) 
     if pkg and pkg.get("x_text"):
         links = [str(x.get("url")) for x in pkg.get("links") or [] if x.get("url")]
         names = [str(x.get("name")) for x in pkg.get("links") or [] if x.get("kind") != "pricechat" and x.get("name")] or named
-        return str(pkg["x_text"]), links, network.source_text_of(ev), names
+        return checks.one_cashtag(str(pkg["x_text"])), links, network.source_text_of(ev), names  # X: one cashtag (403 otherwise)
     if X_FORMAT == "visual":  # the owner's format: the same picture as Telegram, the headline, a small source credit
         from app.newsdesk import visual
 
         text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
     else:
         text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
-    return text, [], f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}", named
+    return checks.one_cashtag(text), [], f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}", named
 
 
 # --- publish ------------------------------------------------------------------------------------------------------
@@ -563,6 +563,9 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     if not _claim(db, post):
         return "already claimed"
     db.refresh(post)
+    if checks.cashtag_count(post.text) > checks.X_MAX_CASHTAGS:  # X answers 403 to an API post with more than one cashtag
+        post.text = checks.one_cashtag(post.text)
+        db.commit()
     if s.mode != "live" and not force_live:
         post.status, post.published_at = "dry_run", now
         db.commit()

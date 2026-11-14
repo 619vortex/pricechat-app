@@ -115,6 +115,48 @@ def unsupported_tickers(text: str, source_text: str) -> list[str]:
     return [tag for tag in tags if tag not in ok and not re.search(rf"(?<![\w$])\$?{tag[1:]}\b", src)]
 
 
+# X refuses (403 Forbidden) a post made through the API with more than one cashtag (owner, 2026-11-14). X keeps the first cashtag; the
+# others go back to plain words. This only takes "$" signs away, so it can't add a claim, and the final gate still holds what is sent.
+X_MAX_CASHTAGS = 1
+_TAG_WITH_SPACE = re.compile(r"( ?)(?<![\w$])\$([A-Z]{2,6})\b")
+
+
+def cashtag_count(text: str) -> int:
+    """How many "$" cashtags the text has (each mention counts: X's limit is on cashtags in a post)."""
+    return len(CASHTAG.findall(text or ""))
+
+
+def _names_tag(before: str, tag: str) -> bool:
+    """Whether the words just before a cashtag are the asset's name or symbol, so the tag was added after them and can simply go."""
+    from app.newsdesk import clean
+
+    tail = before[-60:]
+    if re.search(rf"\b{re.escape(tag)}$", tail):
+        return True
+    for rx, t in clean.established(tail):
+        if t == f"${tag}" and any(m.end() == len(tail) for m in rx.finditer(tail)):
+            return True
+    return False
+
+
+def one_cashtag(text: str) -> str:
+    """The text with only its first cashtag. A later tag right after its name ("Ether $ETH", as clean.cashtag writes it) is dropped, so
+    the sentence reads as the reporting wrote it; a tag standing for the name ("$ETH rose", "$SOL -4%") becomes the bare symbol."""
+    kept = False
+
+    def repl(m: re.Match[str]) -> str:
+        nonlocal kept
+        space, tag = m.group(1), m.group(2)
+        if not kept:
+            kept = True
+            return m.group(0)
+        if space and _names_tag(m.string[:m.start()], tag):
+            return ""
+        return space + tag
+
+    return _TAG_WITH_SPACE.sub(repl, text or "")
+
+
 def final_gate(text: str, source_text: str, chart_symbol: str = "", *, wire: bool = False) -> list[str]:
     """The last check on what actually goes out, after every formatting step (cashtags, credits, labels): the problems, or [] to send.
     A hard gate, whatever wrote the words (the desk's writer, a person, the viral hooks) and whatever the story's score.
