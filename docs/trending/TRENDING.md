@@ -24,33 +24,65 @@ tests `backend/tests/test_trending.py`, `frontend/src/pages/x/TrendingTopics.tes
    not an error. Each source's last scan, items, requests and cost today, error and failure streak are kept in `tt_settings.state.health/usage`.
    Round-ups, archives, listicles and explainers are dropped; sport and celebrity trends are dropped (not this audience).
 
-2. **Group and score** (`rank.py`): single-link clustering (`checks.same_event`, or a search trend's words contained in a headline),
-   then a 0-100 score: velocity 30 (items in the last 2 h vs the 6 h before, engagement growth from each signal's history),
-   engagement 25 (Google traffic, Reddit score + 2×comments, X post counts, number of outlets), freshness 15 (by publication time),
-   audience relevance 20 (crypto 1.0, stocks/markets 0.9, geopolitics 0.75, tech 0.7, world 0.5, keyword strength), discussion 10
-   (source breadth, comments, outlets), times the learned weight (0.8-1.2).
+2. **Group and score** (`rank.py`, owner 2026-11-14: one Nvidia cluster had pulled 26 loosely related items). Seed-based grouping:
+   a signal joins a topic only when it tells the same event as the topic's *seed* (its first, most reliable item, never "any member",
+   so a cluster can't drift), within 12 h of it: `checks.same_event` plus evidence beyond a shared big name (the same subject AND a
+   shared action word or amount; in a Title Case headline one shared "name" needs two shared action words; without a distinctive
+   subject, most of the words). A Google trend and the articles Google links to it are one unit (one unit per search term across
+   countries); a one-word trend ("nvidia") never pulls in headlines by itself.
+   Score 0-100: velocity 30, engagement 25 (Google traffic, Reddit score + 2×comments, X counts; outlet count alone at most 0.3 of it),
+   freshness 15, audience relevance 20, discussion 10, times the learned weight (0.8-1.2). **Velocity comes only from measured growth**
+   (`rank.growth`, stored in `parts.growth`): items and independent outlets added across our own scans (`tt_signals.first_seen`, last
+   3 h), the Google Trends traffic tier and its rise between scans (each signal's `history`), Reddit/X engagement growth, and a burst
+   of fresh publications (velocity only, not evidence). A topic with no measured growth (`evidence` empty: no `scans`, `google` or
+   `engagement`) is capped at 60 (`NO_GROWTH_CAP`) and never queued automatically, whatever `hot_score` says. No migration: the
+   history lives in the existing signal rows and topic JSON.
 
 3. **Write** (`writer.py`) for topics scoring `suggest_score` (45)+, at most 5 per scan, one tweet per topic per `topic_cooldown_hours`.
-   Facts: the lead reliable headline credited "(via Outlet)", plus what our sources measured ("It's on Google's trending searches",
-   "a top thread on r/...", "5 outlets are on it"). Personality only in a claim-free hook line and an optional question. Deaths and
-   attacks: a plain "Worth knowing today" line, no question. At most one cashtag, inserted only for an asset the sources establish.
-   The model writer (Anthropic, `NEWSDESK_MODEL`) is used when a key is set; its words go through the same gate and fall back to the
+   No hook lines, no canned questions, no emoji. Sentence one: the lead reliable headline credited to its outlet (varied: "(via X)",
+   "X reports.", "X: ..."). Sentence two, when there is one: a concrete detail from another reliable outlet ("Reuters adds: ..."),
+   the measured interest stated plainly ("Searches for Bybaz have topped 200K on Google in the US.", only with a Google traffic
+   figure; "went from 20K+ to 200K+ in about 2 hours" when the tier rose between scans), or who else has it. The rules writer asks
+   no question; the model writer (Anthropic, `NEWSDESK_MODEL`, when a key is set) gets the same constraints and may ask one only
+   rarely (specific, neutral, tied to a stated fact). At most one cashtag. Its words go through the same gate and fall back to the
    rules writer if they fail.
 
 4. **Gate** (`gates.py`, last, whatever wrote it): every News Desk check (`checks.check_post`: length, no link, no @, advice,
    rumour, attribution, figures, tickers) and `checks.final_gate(..., wire=True)` (claim gate: figures, named people,
    accusations, quotations; hype/superlatives; dropped qualifiers), plus: `supported` (at least one reliable item; Reddit/X never
    back a fact), `one_cashtag` (X answers 403 to more than one), `not_breaking`, `buzz` ("trending/viral" only with a trend source),
-   `discussion` (Reddit mentions only with a Reddit thread), `controversy` ("backlash", "slams"... only if the sources say it).
-   A failing tweet is **held** with the reason and never sent.
+   `discussion` (Reddit mentions only with a Reddit thread), `controversy` ("backlash", "slams"... only if the sources say it),
+   `bait` (the retired template lines and engagement bait), `question` (one at most, sharing two of the source's distinctive words),
+   `sensitive` (below). A failing tweet is **held** with the reason and never sent.
 
-5. **Publish** (one per tick): automatic mode queues tweets for topics at `hot_score` (75)+; others wait for approval.
+5. **Publish** (one per tick): automatic mode queues tweets for topics at `hot_score` (75)+ *with measured growth* and no sensitive
+   block; others wait for approval (the reason is the post's note).
    A queued tweet goes out only if nothing in *Coordination* stops it, through `SocialActionGuard.news_problem` /
    `issue_news_permit` (kill switch, outbound switch, X connection and capabilities) and the X client's local budget.
 
 6. **Monitor**: owner alert (`alerts.notify_owner`, 6 h dedupe, one "recovered" message) when a source fails 3 reads in a row or X
    refuses a post; `/api/health` deep check `trending` (warn on failing sources, a stop, or no run for an hour); the scheduler's own
    job-failure alerts apply to `newsdesk.trending` like any job.
+
+## Sensitive subjects (`sensitive.py`, owner 2026-11-14)
+
+| Tier | Subjects | Automatic |
+| --- | --- | --- |
+| approval only | allegations / accusations / lawsuits / charges about a named person, crimes against people, terrorism, sexual misconduct, suicide and self-harm, children and minors | never (even in Automatic) |
+| strict | war and armed conflict, deaths and casualties, disasters, health scares, legal action against an organisation (no person named) | only with 2+ independent reliable outlets in the topic (AP / AP News count once), an attributed sentence, no person named |
+
+Writing for every sensitive topic: "Outlet reports: <headline>." plus "Also reported by ...", nothing else: no hook, attitude,
+emoji, question, exclamation or interest statistics; the source's hedges ("alleged", "accused", "says") must stay (gate `sensitive`).
+Detection is deliberately broad (regexes): a false alarm costs one approval click.
+
+## Production evidence (logs)
+
+No authenticated admin access is needed to see what it does: `app.trending.engine` logs at INFO, once per process
+`trending startup: ... mode auto hot_threshold daily_max min_gap live_switch newsdesk_x x_live ...`, and per scan a few lines:
+`trending scan <time>: sources news=ok/175 new 3; google=ok (not due); ... | topics N | suggested N`, `trending top1..5: <score>
+[cat] "<headline>" v e f r d x items= growth=<evidence>(<notes>) sensitive=<kind/tier> | tweet <status> (<short reason>)`, and
+`trending publish: <dry_run|published|waiting|held|blocked> post=<id> (<why>)`. Public headlines and our own decisions only;
+anything secret-looking is redacted (`engine._safe`).
 
 ## Modes and switches (defaults, owner decision 2026-11-14)
 
@@ -89,8 +121,8 @@ Jobs `newsdesk.trending` (600 s) and `newsdesk.trending_metrics` (daily). Produc
 
 ## Deploy
 
-1. Merge after release/kiwi-hardening: change `down_revision` in `0114_trending_topics.py` to that branch's 0113 revision so there is one
-   alembic head (`ScriptDirectory.get_heads()` must return one).
+1. `0114_trending_topics` is already applied in production (Railway deploy 569ccbf5, 2026-11-14): never change its revision or
+   `down_revision`. The Kiwi release chains 0115/0116 after 0114; after any merge `ScriptDirectory.get_heads()` must return one head.
 2. Back up the DB, deploy the backend (migration creates `tt_settings`, `tt_signals`, `tt_topics`, `tt_posts`), deploy the frontend.
 3. Optional: `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` (free Reddit "script"/web app, app-only OAuth). Without them Reddit stays
    "needs setup" (public JSON answered 403 from this PC on 2026-11-14).

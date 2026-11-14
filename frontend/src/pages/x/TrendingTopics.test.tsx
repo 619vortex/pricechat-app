@@ -3,13 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrendingTopics, type Trending, type TrendPost, type Topic } from "./TrendingTopics";
 
 /** TEST FIXTURES: made-up topics and tweets. */
-const POST: TrendPost = { id: 7, topic_id: 3, category: "crypto", status: "pending", text: "👀 Crypto's story of the moment:\n\nExchange Bybaz halts withdrawals after $40 million hack (via CoinDesk)",
-  edited: false, angle: "hook", writer: "rules", score: 81, sources: [{ name: "CoinDesk", url: "https://coindesk.test/1", title: "Exchange Bybaz halts withdrawals" }], checks: [],
+const POST: TrendPost = { id: 7, topic_id: 3, category: "crypto", status: "pending", text: "Exchange Bybaz halts withdrawals after $40 million hack (via CoinDesk)\n\nSearches for Bybaz have topped 200K on Google in the US.",
+  edited: false, angle: "interest", writer: "rules", score: 81, sources: [{ name: "CoinDesk", url: "https://coindesk.test/1", title: "Exchange Bybaz halts withdrawals" }], checks: [],
   hold_reason: null, note: null, error: null, x_id: null, url: null, metrics: {}, created_at: "2026-11-14T10:00:00Z", published_at: null, expires_at: null, cashtags: [] };
 const HELD: TrendPost = { ...POST, id: 8, status: "held", text: "(no tweet: bandy)", sources: [], hold_reason: "No reliable source backs this topic yet (only social signals): held until an outlet reports it" };
 const DONE: TrendPost = { ...POST, id: 9, status: "published", x_id: "123", url: "https://x.com/i/status/123", metrics: { impression_count: 1200, like_count: 40, retweet_count: 6, reply_count: 3 } };
 const TOPIC: Topic = { id: 3, title: "Exchange Bybaz halts withdrawals after $40 million hack", category: "crypto", status: "active", score: 81, peak_score: 81, first_seen: "2026-11-14T09:40:00Z",
-  last_seen: "2026-11-14T10:00:00Z", parts: { velocity: 22, engagement: 21, freshness: 14, relevance: 20, discussion: 4, learned: 1, sources: ["news", "google"], outlets: ["CoinDesk", "Reuters"] },
+  last_seen: "2026-11-14T10:00:00Z", parts: { velocity: 22, engagement: 21, freshness: 14, relevance: 20, discussion: 4, learned: 1, sources: ["news", "google"], outlets: ["CoinDesk", "Reuters"],
+    growth: { evidence: ["scans", "google"], notes: ["+2 outlets, +3 items in 60 min", "Google 20K+ -> 200K+"], measured: true } },
   sources: [{ source: "news", outlet: "CoinDesk", title: "Exchange Bybaz halts withdrawals", url: "https://coindesk.test/1", reliable: true, engagement: 2, at: null },
     { source: "google", outlet: "Google Trends", title: "bybaz", url: "", reliable: false, engagement: 200000, at: null, extra: { approx_traffic: "200K+" } }],
   metrics: { signals: 4, google: 200000 }, posted_at: null, post: POST };
@@ -55,6 +56,17 @@ describe("Trending Topics", () => {
     expect(document.body.textContent).toMatch(/1200 views · 40 likes · 6 reposts · 3 replies/);
     expect(document.body.textContent).toMatch(/6 \/ 20/);
     expect(screen.getByText("×1")).toBeTruthy();
+  });
+
+  it("shows the measured growth and the sensitivity of each topic", async () => {
+    const flat: Topic = { ...TOPIC, id: 4, title: "Senator accused of taking bribes, prosecutors say", score: 58, post: null,
+      parts: { ...TOPIC.parts, growth: { evidence: [], notes: [], measured: false, capped: true }, sensitive: { kind: "allegation", label: "allegations about a named person", tier: "approval" } } };
+    serve(state({}, { topics: [TOPIC, flat] }));
+    render(<TrendingTopics />);
+    await settle();
+    expect(document.body.textContent).toMatch(/Growth: more outlets across scans, Google Trends · \+2 outlets, \+3 items in 60 min; Google 20K\+ -> 200K\+/);
+    expect(document.body.textContent).toMatch(/No measured growth \(capped below the automatic line\): approval only/);
+    expect(screen.getByText(/sensitive: approval only · allegations about a named person/)).toBeTruthy();
   });
 
   it("asks before enabling automatic publishing again, and sends the confirmation only after a yes", async () => {

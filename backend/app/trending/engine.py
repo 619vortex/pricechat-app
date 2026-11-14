@@ -6,6 +6,7 @@ owner's explicit confirmation in Admin; Live is a separate switch. Every post pa
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -17,7 +18,7 @@ from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.trending import TtPost, TtSettings, TtSignal, TtTopic
 from app.newsdesk import checks
-from app.trending import coordinate, gates, learning, rank, sources, writer
+from app.trending import coordinate, gates, learning, rank, sensitive, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -183,11 +184,12 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
         if not enabled.get(c.category, True):
             continue
         sc, parts = rank.score(c, now, weights)
+        parts["sensitive"] = sensitive.classify(" ".join(x.title for x in (c.reliable or c.signals)[:8]))
         ids = sorted(x.id for x in c.signals)
         topic = next((owner[i] for i in ids if i in owner and owner[i] not in touched), None)
         lead = c.lead
         srcs = [{"source": x.source, "outlet": x.outlet, "title": x.title, "url": x.url, "reliable": x.reliable, "engagement": x.engagement,
-                 "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo")}}
+                 "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind")}}
                 for x in sorted(c.signals, key=lambda x: (not x.reliable, -x.engagement))[:12]]
         metrics: dict[str, Any] = {"signals": len(c.signals)}
         for x in c.signals:
@@ -213,29 +215,37 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
 
 
 def brief_of(topic: TtTopic) -> tuple[writer.Brief | None, list[dict[str, Any]]]:
-    """The writer's facts, from the topic's reliable items only. None when no reliable item backs it."""
+    """The writer's facts, from the topic's reliable items only, plus what our sources measured (topic.parts.growth). None when no
+    reliable item backs it."""
     srcs = topic.sources or []
     reliable = [x for x in srcs if x.get("reliable")]
-    google = next((x for x in srcs if x.get("source") == "google" and (x.get("extra") or {}).get("query")), None)
+    google = max((x for x in srcs if x.get("source") == "google" and (x.get("extra") or {}).get("query") and not (x.get("extra") or {}).get("kind")),
+                 key=lambda x: (x.get("engagement") or 0, (x.get("extra") or {}).get("geo") == "US"), default=None)
     reddit = max((x for x in srcs if x.get("source") == "reddit"), key=lambda x: x.get("engagement") or 0, default=None)
     x_trend = any(x.get("source") == "x_trends" for x in srcs)
     outlets = list(dict.fromkeys(x["outlet"] for x in reliable))
     if not reliable:
         return None, []
     lead = reliable[0]
+    parts = topic.parts or {}
+    g = parts.get("growth") or {}
+    sens = parts["sensitive"] if "sensitive" in parts else sensitive.classify(" ".join(x["title"] for x in reliable[:8]))
+    gx = (google or {}).get("extra") or {}
+    b = writer.Brief(key=topic.key, category=topic.category, headline=lead["title"], outlet=lead["outlet"], google=bool(google),
+                     google_traffic=str(gx.get("approx_traffic") or ""), google_query=str(gx.get("query") or ""), google_geo=str(gx.get("geo") or ""),
+                     google_from=float(g.get("google_from") or 0) if g.get("google_up") else 0.0,
+                     google_to=float(g.get("google_to") or (google or {}).get("engagement") or 0), google_minutes=int(g.get("google_minutes") or 0),
+                     reddit_sub=(reddit or {}).get("outlet", "")[2:] if reddit else "", x_trend=x_trend, outlets=outlets,
+                     others=[(x["outlet"], x["title"]) for x in reliable[1:8]], sensitive=sens)
     measured = []
     if google:
         measured.append("on Google's trending searches")
     if reddit:
         measured.append(f"a top thread on {reddit['outlet']}")
-    if len(outlets) >= 3:
-        measured.append(f"{len(outlets)} outlets")
     if x_trend:
         measured.append("trending on X")
-    source_text = " ".join(f"{x['title']}" for x in reliable) + " " + " ".join(measured)
-    return writer.Brief(key=topic.key, category=topic.category, headline=lead["title"], outlet=lead["outlet"], google=bool(google),
-                        google_traffic=str(((google or {}).get("extra") or {}).get("approx_traffic") or ""), reddit_sub=(reddit or {}).get("outlet", "")[2:] if reddit else "",
-                        x_trend=x_trend, outlets=outlets, source_text=source_text), reliable
+    b.source_text = " ".join(f"{x['title']}" for x in reliable) + " " + " ".join(measured + writer.measured_lines(b))
+    return b, reliable
 
 
 def _gate(text: str, b: writer.Brief | None, reliable: list[dict[str, Any]]) -> dict[str, Any]:
@@ -270,15 +280,33 @@ async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic
     conflict = coordinate.newsdesk_conflict(db, [topic.title] + [x["title"] for x in reliable[:3]], now) if held is None else None
     if conflict:
         held = conflict
-    hot = topic.score >= s.hot_score
+    hot, why_not = auto_ok(s, topic, text, b)
     status = "held" if held else ("queued" if automatic(s) and hot else "pending")
-    post = TtPost(topic_id=topic.id, category=topic.category, status=status, text=text, angle=angle, writer=used, fingerprint=checks.fingerprint(text),
+    if b is not None and b.sensitive and used == "model":
+        angle = f"sensitive:{b.sensitive['kind']}"
+    post = TtPost(topic_id=topic.id, category=topic.category, status=status, text=text, angle=angle[:24], writer=used, fingerprint=checks.fingerprint(text),
                   score=topic.score, sources=[{"name": x["outlet"], "url": x["url"], "title": x["title"], "at": x.get("at")} for x in reliable[:4]],
                   source_text=b.source_text if b else "", checks=result["checks"], hold_reason=held, metrics={},
+                  note=why_not if status == "pending" and (topic.score >= s.hot_score or (b is not None and b.sensitive)) else None,
                   approved_at=now if status == "queued" else None, expires_at=now + (QUEUED_TTL if status == "queued" else PENDING_TTL))
     db.add(post)
     db.flush()
     return post
+
+
+def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) -> tuple[bool, str | None]:
+    """(may go out without the owner, why not). Hot enough, with measured growth (rank.growth), and nothing sensitive stops it
+    (app/trending/sensitive: approval-only subjects never; strict ones only with 2+ independent outlets, attributed, no person named)."""
+    if b is not None and b.sensitive and b.sensitive.get("tier") == "approval":
+        return False, sensitive.auto_problem(b.sensitive, text=text, outlets=b.outlets)
+    if topic.score < s.hot_score:
+        return False, f"below the automatic line ({topic.score:.0f} < {s.hot_score:.0f})"
+    g = (topic.parts or {}).get("growth") or {}
+    if not g.get("measured"):
+        return False, "no measured growth (scans, Google Trends, engagement): approval only"
+    if b is not None and (why := sensitive.auto_problem(b.sensitive, text=text, outlets=b.outlets)):
+        return False, why
+    return True, None
 
 
 def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:
@@ -321,18 +349,22 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     return None
 
 
-async def publish_due(db: Session, s: TtSettings, settings: Settings, runtime: Any, agent_id: int, now: datetime, only: int | None = None) -> str | None:
-    """The best queued post, if nothing stops it. One per tick."""
+async def publish_due(db: Session, s: TtSettings, settings: Settings, runtime: Any, agent_id: int, now: datetime, only: int | None = None,
+                      decision: dict[str, Any] | None = None) -> str | None:
+    """The best queued post, if nothing stops it. One per tick. decision (optional): filled with the post id and why, for the scan log."""
+    decision = decision if decision is not None else {}
     stmt = select(TtPost).where(TtPost.status == "queued").order_by(TtPost.score.desc(), TtPost.id)
     if only is not None:
         stmt = stmt.where(TtPost.id == only)
     post = db.scalars(stmt.limit(1)).first()
     if post is None:
         return None
+    decision["post_id"] = post.id
     why = waiting_reason(db, s, post, now)
     if why is not None:
         held = why.startswith("covered by the News Desk")
         post.note = why
+        decision["why"] = why
         if held:
             post.status, post.hold_reason = "held", why
         db.commit()
@@ -341,9 +373,12 @@ async def publish_due(db: Session, s: TtSettings, settings: Settings, runtime: A
                           buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"))
     if not re_check["ok"]:
         post.status, post.hold_reason, post.checks = "held", re_check["reason"], re_check["checks"]
+        decision["why"] = re_check["reason"]
         db.commit()
         return "held"
-    return await publish(db, s, post, settings, runtime, agent_id, now)
+    out = await publish(db, s, post, settings, runtime, agent_id, now)
+    decision["why"] = post.note or post.error or (f"X post {post.x_id}" if post.x_id else "")
+    return out
 
 
 def _flag(post: TtPost, which: str) -> bool:
@@ -461,14 +496,97 @@ async def check_health(db: Session, s: TtSettings, settings: Settings, now: date
     return sent
 
 
+# --- production evidence: the log lines ------------------------------------------------------------------------------------
+# Owner, 2026-11-14: no authenticated admin access for automation, so each scan says what it did in a few INFO lines (Railway logs).
+# Public headlines, scores and our own decisions only: no secrets, no tokens, no personal data (_safe redacts anything secret-looking).
+
+_STARTUP_LOGGED = False
+SECRETISH = re.compile(r"(?i)(bearer\s+\S+|\b(?:api[_-]?key|access[_-]?token|token|secret|password|passwd|authorization)\b\s*[=:]\s*\S+|"
+                       r"\bsk-[A-Za-z0-9_-]{6,}|\b[A-Za-z0-9_\-]{32,}\b|[\w.+-]+@[\w-]+\.[\w.]+)")
+
+
+def _safe(text: Any, n: int = 80) -> str:
+    t = re.sub(r"\s+", " ", str(text or "")).strip()
+    t = SECRETISH.sub("[redacted]", t)
+    return t if len(t) <= n else t[: n - 1].rstrip() + "…"
+
+
+def _model_writer(settings: Settings) -> bool:
+    from app.security import credentials
+
+    return bool(credentials.resolve("anthropic_api_key", settings) and getattr(settings, "newsdesk_model", ""))
+
+
+def startup_line(db: Session, s: TtSettings, settings: Settings) -> str:
+    """Once per process (per deploy): the effective settings."""
+    srcs = sources.merged(s.sources)
+    on = ",".join(k for k, v in srcs.items() if v.get("on")) or "none"
+    return (f"trending startup: enabled={'on' if s.enabled else 'off'} mode={s.mode} auto={'on' if automatic(s) else 'off'} "
+            f"hot_threshold={s.hot_score:g} suggest_threshold={s.suggest_score:g} no_growth_cap={rank.NO_GROWTH_CAP:g} daily_max={s.max_per_day} "
+            f"min_gap={s.gap_minutes}min newsdesk_gap={s.newsdesk_gap_minutes}min shared_cap={s.shared_daily_cap}/24h "
+            f"live_switch={'on' if s.live else 'off'} newsdesk_x={'live' if coordinate.newsdesk_live(db) else 'dry_run'} "
+            f"x_live={coordinate.x_live(db, s)} stop={'on' if s.kill_switch else 'off'} sources={on} writer={'model' if _model_writer(settings) else 'rules'}")
+
+
+def scan_log_lines(db: Session, s: TtSettings, read: dict[str, Any], topics: list[TtTopic], made: int, published: str | None,
+                   decision: dict[str, Any], now: datetime) -> list[str]:
+    """One summary line, one line per top-5 topic, and the publish decision."""
+    health = read.get("health") or {}
+    bits = []
+    for name in sources.DEFAULT_SOURCES:
+        h = health.get(name) or {}
+        st = h.get("status") or "-"
+        if st == "off":
+            bits.append(f"{name}=off")
+            continue
+        scanned = h.get("last_scan") == now.isoformat()
+        b = f"{name}={st}" + (f"/{int(h.get('items') or 0)} new {int(h.get('stored') or 0)}" if scanned else " (not due)")
+        if h.get("problem") and scanned:
+            b += f" [{_safe(h.get('problem'), 60)}]"
+        bits.append(b)
+    lines = [f"trending scan {now:%Y-%m-%dT%H:%MZ}: sources {'; '.join(bits)} | topics {len(topics)} | suggested {made}"]
+    top = sorted(topics, key=lambda t: -(t.score or 0))[:5]
+    posts: dict[int, TtPost] = {}
+    if top:
+        for p in db.scalars(select(TtPost).where(TtPost.topic_id.in_([t.id for t in top])).order_by(TtPost.id)):
+            posts[p.topic_id] = p
+    for i, t in enumerate(top, 1):
+        pa = t.parts or {}
+        g = pa.get("growth") or {}
+        sens = pa.get("sensitive") or {}
+        p = posts.get(t.id)
+        if p is None:
+            tw = "no tweet" + (f" (below {s.suggest_score:g})" if t.score < s.suggest_score else "")
+        else:
+            why = p.hold_reason if p.status == "held" else p.note
+            tw = f"tweet {p.status}" + (f" ({_safe(why, 70)})" if why else "")
+        growth = ",".join(g.get("evidence") or []) or ("none, capped" if g.get("capped") else "none")
+        notes = f" ({_safe('; '.join(g.get('notes') or []), 60)})" if g.get("notes") else ""
+        lines.append(f"trending top{i}: {t.score:.1f} [{t.category}] \"{_safe(t.title, 70)}\" v{pa.get('velocity', 0):g} e{pa.get('engagement', 0):g} "
+                     f"f{pa.get('freshness', 0):g} r{pa.get('relevance', 0):g} d{pa.get('discussion', 0):g} x{pa.get('learned', 1):g} "
+                     f"items={len(t.signal_ids or [])} growth={growth}{notes}" + (f" sensitive={sens.get('kind')}/{sens.get('tier')}" if sens else "") + f" | {tw}")
+    if published is None:
+        lines.append(f"trending publish: none ({'automatic' if automatic(s) else 'approval mode'}, nothing queued)")
+    else:
+        lines.append(f"trending publish: {published} post={decision.get('post_id')} ({_safe(decision.get('why') or '-', 90)})")
+    return lines
+
+
 # --- tick ------------------------------------------------------------------------------------------------------------------
 
 
 async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now: datetime | None = None, *, transport: httpx.AsyncBaseTransport | None = None,
                writer_transport: Any = None, only: set[str] | None = None) -> dict[str, Any]:
+    global _STARTUP_LOGGED
     now = now or utcnow()
     s = settings_row(db)
     db.commit()
+    if not _STARTUP_LOGGED:
+        _STARTUP_LOGGED = True
+        try:
+            logger.info(startup_line(db, s, settings))
+        except Exception:  # noqa: BLE001
+            logger.exception("trending: startup log failed")
     out: dict[str, Any] = {"mode": s.mode, "automatic": automatic(s), "live": coordinate.x_live(db, s), "stopped": s.kill_switch, "expired": expire(db, now)}
     if not s.enabled:
         out["skipped"] = "Trending Topics is switched off"
@@ -490,12 +608,18 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
         await suggest(db, s, settings, t, now, writer_transport=writer_transport)
         made += 1
     db.commit()
-    published = await publish_due(db, s, settings, runtime, agent_id, now) if automatic(s) or _any_approved(db) else None
+    decision: dict[str, Any] = {}
+    published = await publish_due(db, s, settings, runtime, agent_id, now, decision=decision) if automatic(s) or _any_approved(db) else None
     alerts_sent = await check_health(db, s, settings, now)
     db.refresh(s)
     out.update({"stored": read["stored"], "topics": len(topics), "suggested": made, "published": published, "alerts": alerts_sent})
     _note(s, "last_run", {"at": now.isoformat(), **out})
     db.commit()
+    try:
+        for line in scan_log_lines(db, s, read, topics, made, published, decision, now):
+            logger.info(line)
+    except Exception:  # noqa: BLE001 - the log line never breaks a scan
+        logger.exception("trending: scan log failed")
     return out
 
 
@@ -591,7 +715,8 @@ def post_out(p: TtPost) -> dict[str, Any]:
     return {"id": p.id, "topic_id": p.topic_id, "category": p.category, "status": p.status, "text": p.text, "edited": bool(p.original_text), "angle": p.angle,
             "writer": p.writer, "score": p.score, "sources": p.sources, "checks": p.checks, "hold_reason": p.hold_reason, "note": p.note, "error": p.error,
             "x_id": p.x_id, "url": f"https://x.com/i/status/{p.x_id}" if p.x_id else None, "metrics": p.metrics, "created_at": _iso(p.created_at),
-            "published_at": _iso(p.published_at), "expires_at": _iso(p.expires_at), "cashtags": gates.cashtags(p.text)}
+            "published_at": _iso(p.published_at), "expires_at": _iso(p.expires_at), "cashtags": gates.cashtags(p.text),
+            "sensitive": sensitive.classify(p.source_text) if p.source_text else None}
 
 
 def topic_out(t: TtTopic, post: TtPost | None) -> dict[str, Any]:

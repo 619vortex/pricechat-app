@@ -1,7 +1,7 @@
 """Trending Topics (app/trending): settings, source signals, scored topics and suggested tweets.
 
-Numbered 0114 because release/kiwi-hardening adds 0112 and 0113 on another branch. Merged after it, change down_revision to that
-branch's 0113 revision so there is one head again.
+Production ran this revision on 2026-11-14 (Railway deploy 569ccbf5): never change its revision or down_revision. The Kiwi release
+(release/kiwi-hardening) chains its own migrations (0115, 0116) after 0114, so merging keeps one head without touching this file.
 
 Revision ID: 0114_trending_topics
 Revises: 0111_vpn_server_traffic_allowance

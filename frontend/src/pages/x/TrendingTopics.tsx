@@ -9,10 +9,15 @@ import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type T
 type Check = { check: string; passed: boolean; detail: string };
 export type TrendPost = { id: number; topic_id: number; category: string; status: string; text: string; edited: boolean; angle: string; writer: string; score: number;
   sources: { name: string; url: string; title?: string; at?: string | null }[]; checks: Check[]; hold_reason: string | null; note: string | null; error: string | null;
-  x_id: string | null; url: string | null; metrics: Record<string, number | string>; created_at: string | null; published_at: string | null; expires_at: string | null; cashtags: string[] };
+  x_id: string | null; url: string | null; metrics: Record<string, number | string>; created_at: string | null; published_at: string | null; expires_at: string | null; cashtags: string[];
+  sensitive?: Sensitive | null };
+export type Sensitive = { kind: string; label: string; tier: "approval" | "strict"; matched?: string };
+export type Growth = { evidence: string[]; notes: string[]; measured: boolean; capped?: boolean; observed_min?: number; items_before?: number; items_now?: number;
+  outlets_before?: number; outlets_now?: number; google_from?: number; google_to?: number; google_up?: boolean; recent_2h?: number; prior_6h?: number };
 export type TopicSource = { source: string; outlet: string; title: string; url: string; reliable: boolean; engagement: number; at: string | null; extra?: Record<string, unknown> };
 export type Topic = { id: number; title: string; category: string; status: string; score: number; peak_score: number; first_seen: string | null; last_seen: string | null;
-  parts: { velocity?: number; engagement?: number; freshness?: number; relevance?: number; discussion?: number; learned?: number; recent_2h?: number; sources?: string[]; outlets?: string[]; age_hours?: number };
+  parts: { velocity?: number; engagement?: number; freshness?: number; relevance?: number; discussion?: number; learned?: number; recent_2h?: number; sources?: string[]; outlets?: string[]; age_hours?: number;
+    growth?: Growth; sensitive?: Sensitive | null };
   sources: TopicSource[]; metrics: Record<string, number>; posted_at: string | null; post: TrendPost | null };
 export type SourceHealth = { name: string; last_scan?: string; items?: number; stored?: number; status: "ok" | "error" | "unavailable" | "off" | "idle"; problem: string | null;
   partial?: string; fails?: number; last_ok?: string | null; plan?: boolean; auth?: string | null };
@@ -57,6 +62,20 @@ function engagementText(t: Topic): string {
   return bits.join(" · ") || `${m.signals ?? 0} signals`;
 }
 
+const EVIDENCE: Record<string, string> = { scans: "more outlets across scans", google: "Google Trends", engagement: "engagement rising" };
+
+/** What we measured about a topic's growth: the only thing that can take it to the automatic line. */
+export function GrowthNote({ g }: { g?: Growth }) {
+  if (!g) return null;
+  if (!g.measured) return <div className="small muted">No measured growth{g.capped ? " (capped below the automatic line)" : ""}: approval only</div>;
+  return <div className="small">Growth: {g.evidence.map((e) => EVIDENCE[e] ?? e).join(", ")}{g.notes.length ? <span className="muted"> · {g.notes.join("; ")}</span> : null}</div>;
+}
+
+export function SensitiveBadge({ x }: { x?: Sensitive | null }) {
+  if (!x) return null;
+  return <Badge tone={x.tier === "approval" ? "bad" : "warn"}>{x.tier === "approval" ? "sensitive: approval only" : "sensitive: 2+ outlets"} · {x.label}</Badge>;
+}
+
 function PostCard({ p, busy, act, s }: { p: TrendPost; busy: boolean; act: (fn: () => Promise<unknown>) => Promise<void>; s: TrendSettings }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(p.text);
@@ -66,6 +85,7 @@ function PostCard({ p, busy, act, s }: { p: TrendPost; busy: boolean; act: (fn: 
       <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <Badge tone={STATUS_TONE[p.status] ?? "neutral"}>{p.status === "dry_run" ? "dry run" : p.status}</Badge>
         <Badge tone={scoreTone(p.score, s)}>score {p.score.toFixed(0)}</Badge>
+        <SensitiveBadge x={p.sensitive} />
         <span className="small muted">{CATEGORY[p.category] ?? p.category} · {p.writer === "model" ? "model writer" : p.writer === "owner" ? "edited by you" : "rules writer"}{p.cashtags.length ? ` · ${p.cashtags.join(" ")}` : ""}</span>
       </div>
       {editing ? <textarea className="input" rows={5} value={text} maxLength={280} onChange={(e) => setText(e.target.value)} aria-label="Edit tweet" style={{ width: "100%" }} />
@@ -131,7 +151,8 @@ export function TrendingTopics() {
         </div>
         {!s.automatic && <p className="small muted">Automatic publishing is disabled. It needs your confirmation to turn on.</p>}
         <p className="small muted">Posts reach X only while the News Desk's X lane is live ({c.newsdesk_x_mode === "live" ? "it is live now" : "it is in dry run now"}) and nothing is stopped: the News Desk's emergency stop and pauses stop trend posts too.
-          Automatic posts at most {s.max_per_day} a day, {Math.round(s.gap_minutes / 60 * 10) / 10} h apart, for topics scoring {s.hot_score}+.</p>
+          Automatic posts at most {s.max_per_day} a day, {Math.round(s.gap_minutes / 60 * 10) / 10} h apart, for topics scoring {s.hot_score}+
+          with measured growth (more outlets across scans, Google Trends, rising engagement). Sensitive subjects (allegations, crimes, minors...) always wait for you.</p>
         {c.desk_blocked && <p className="banner banner-warn" role="status">Posting waits: {c.desk_blocked}</p>}
         {data.writer === "rules" && <p className="muted small">Writing: Price Chat's rules writer (no Anthropic key). Add one in API keys for the model writer; its words pass the same checks.</p>}
         <div className="stat-grid">
@@ -163,9 +184,11 @@ export function TrendingTopics() {
             <tbody>{data.topics.map((t) => (
               <tr key={t.id}>
                 <td><Badge tone={scoreTone(t.score, s)}>{t.score.toFixed(0)}</Badge>{t.status !== "active" && <div className="small muted">{t.status}</div>}</td>
-                <td><b>{t.title}</b><div className="small muted">{CATEGORY[t.category] ?? t.category} · first seen {relativeTime(t.first_seen)}</div></td>
+                <td><b>{t.title}</b><div className="small muted">{CATEGORY[t.category] ?? t.category} · first seen {relativeTime(t.first_seen)}</div>
+                  <SensitiveBadge x={t.parts.sensitive} /></td>
                 <td>{PARTS.map(([k, name, max]) => <div key={k} className="small">{name} <ScoreBar value={Number(t.parts[k] ?? 0)} max={max} /> {Number(t.parts[k] ?? 0).toFixed(0)}</div>)}
-                  {t.parts.learned !== undefined && t.parts.learned !== 1 && <div className="small muted">learned ×{t.parts.learned}</div>}</td>
+                  {t.parts.learned !== undefined && t.parts.learned !== 1 && <div className="small muted">learned ×{t.parts.learned}</div>}
+                  <GrowthNote g={t.parts.growth} /></td>
                 <td>{(t.parts.sources ?? []).map((x) => <Badge key={x} tone="info">{SOURCE[x] ?? x}</Badge>)}
                   <div className="small">{t.sources.filter((x) => x.reliable).slice(0, 3).map((x, i) => <span key={x.url || i}>{i ? ", " : ""}<a href={x.url} target="_blank" rel="noreferrer">{x.outlet}</a></span>)}</div></td>
                 <td className="small">{engagementText(t)}</td>
