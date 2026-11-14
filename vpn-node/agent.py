@@ -26,6 +26,7 @@ from typing import Callable, Optional
 
 CONFIG_FILE = "/etc/kiwi-vpn/agent.env"
 MAX_BODY = 4096
+MAX_CONNECTIONS = 32  # request threads at once; more are closed at once (the backend makes a few at a time)
 DEFAULTS = {
     "TOKEN": "",
     "POOL": "10.66.0.1/16",
@@ -344,9 +345,14 @@ class Agent:
             return False
         return hmac.compare_digest(header[7:].strip().encode(), self.token)
 
+    def health_allowed(self, peer: str, auth: Optional[str]) -> bool:
+        """/v1/health answers without the token only on loopback (kiwi-vpn-doctor, the installers); from anywhere else it
+        needs the token like everything else. The backend never calls it: it reads /v1/status."""
+        return _loopback(peer) or self.authorized(auth)
+
     def handle(self, method: str, path: str, auth: Optional[str], body: bytes) -> tuple[int, dict]:
         path = path.split("?", 1)[0]
-        if path == "/v1/health":
+        if path == "/v1/health":  # the HTTP handler has checked health_allowed() for callers from the network
             return (200, {"ok": True}) if method == "GET" else (405, {"error": "method"})
         if not self.authorized(auth):
             return 401, {"error": "unauthorized"}
@@ -389,6 +395,14 @@ class Agent:
             return 500, {"error": "internal"}
 
 
+def _loopback(peer: str) -> bool:
+    try:
+        a = ipaddress.ip_address(peer.split("%", 1)[0])
+    except ValueError:
+        return False
+    return a.is_loopback or bool(getattr(a, "ipv4_mapped", None) and a.ipv4_mapped.is_loopback)
+
+
 def make_handler(agent: Agent):
     class Handler(BaseHTTPRequestHandler):
         timeout = 15
@@ -408,8 +422,10 @@ def make_handler(agent: Agent):
             if n < 0 or n > MAX_BODY:
                 return self._send(413, {"error": "body too large"})
             body = self.rfile.read(n) if n else b""
-            code, payload = agent.handle(self.command, self.path,
-                                         self.headers.get("Authorization"), body)
+            auth = self.headers.get("Authorization")
+            if self.path.split("?", 1)[0] == "/v1/health" and not agent.health_allowed(str(self.client_address[0]), auth):
+                return self._send(401, {"error": "unauthorized"})
+            code, payload = agent.handle(self.command, self.path, auth, body)
             self._send(code, payload)
 
         def _send(self, code: int, payload: dict):
@@ -429,9 +445,27 @@ def make_handler(agent: Agent):
 class AgentServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, addr, handler, ssl_ctx=None):
+    def __init__(self, addr, handler, ssl_ctx=None, max_connections: int = MAX_CONNECTIONS):
         super().__init__(addr, handler)
         self.ssl_ctx = ssl_ctx
+        self._slots = threading.BoundedSemaphore(max_connections)
+
+    def process_request(self, request, client_address):
+        # A bounded number of threads: a flood of connections can't exhaust memory; the extra ones are closed at once.
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
     def finish_request(self, request, client_address):
         # TLS handshake runs in the per-connection thread, not the accept loop.

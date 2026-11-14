@@ -390,7 +390,7 @@ def test_nftables_hardening_rules(flags):
     assert 'iifname "wg0" oifname "wg0" reject' in nft
     assert 'iifname "wg0" reject with icmpx type admin-prohibited' in nft
     # No outbound SMTP abuse; MSS clamped; metadata/private ranges unreachable.
-    assert 'iifname "wg0" tcp dport 25 reject' in nft
+    assert 'iifname "wg0" tcp dport { 25, 465, 587 } reject' in nft  # L19: every mail port, not just 25
     assert "tcp option maxseg size set rt mtu" in nft
     assert "169.254.0.0/16" in nft
     assert 'oifname "eth0" ip saddr 10.66.0.0/16 masquerade' in nft
@@ -496,3 +496,110 @@ def test_ipv6_for_rule(ip4, ip6):
 def test_ipv6_for_rejects_outside_pool():
     with pytest.raises(ValueError):
         A.ipv6_for("10.67.0.5/32", "10.66.0.1/16", "fd66:66::1/64")
+
+
+def _render_env(env_add, *flags) -> dict:
+    env = {k: v for k, v in os.environ.items() if k not in ("POOL", "POOL6", "DNS", "PUBLIC_IP", "WAN_IF", "AGENT_ALLOW", "WITH_PROXY")}
+    env.update(env_add)
+    res = subprocess.run([BASH, "install.sh", "--print-config", *flags], cwd=HERE, capture_output=True, text=True, timeout=60, env=env)
+    assert res.returncode == 0, res.stderr
+    return res.stdout
+
+
+@needs_bash
+def test_new_nodes_keep_the_agent_port_for_the_backend_and_open_the_proxy():
+    out = _render_env({"AGENT_ALLOW": "152.55.180.240,162.220.234.242/32", "WITH_PROXY": "1"})
+    nft = out[out.index("##### /etc/nftables.conf"):out.index("##### /etc/kiwi-vpn/agent.env")]
+    assert 'ip saddr { 152.55.180.240, 162.220.234.242/32 } tcp dport 8443 accept' in nft
+    assert "\n    tcp dport 8443 accept" not in nft  # never open to everyone as well
+    assert 'tcp dport { 80, 443 } accept' in nft
+    # the browser proxy's own table is loaded with the ruleset, so a reload (which flushes everything) keeps it
+    assert nft.rstrip().endswith('include "/etc/kiwi-vpn/nft.d/*.nft"')
+    assert nft.index("flush ruleset") < nft.index("include")
+
+
+@needs_bash
+def test_existing_behaviour_without_the_new_options():
+    nft = _render_env({})
+    assert "\n    tcp dport 8443 accept" in nft
+    assert "dport { 80, 443 }" not in nft
+
+
+@needs_bash
+def test_a_bad_agent_allowlist_is_refused():
+    env = {k: v for k, v in os.environ.items()}
+    env["AGENT_ALLOW"] = "1.2.3.4; rm -rf /"
+    res = subprocess.run([BASH, "install.sh", "--print-config"], cwd=HERE, capture_output=True, text=True, timeout=60, env=env)
+    assert res.returncode != 0 and "AGENT_ALLOW" in res.stderr
+
+
+def test_unattended_installs_never_print_the_agent_token():
+    src = open(os.path.join(HERE, "install.sh"), encoding="utf-8").read()
+    assert "agent_token:  $SHOW_TOKEN" in src and "agent_token:  $TOKEN" not in src
+    assert '(umask 077; printf' in src and "/root/kiwi-node.txt" in src
+
+
+# test_proxy_on_an_nftables_node_has_the_same_limits_as_on_a_shared_node: now in test_installers.py (from --print-config)
+
+
+def test_no_pipeline_that_fails_a_fresh_install():
+    # install.sh runs with pipefail: a `$(cmd file 2>/dev/null | ...)` whose file doesn't exist yet stops a fresh install silently
+    import re
+    for name in ("install.sh", "install-proxy.sh"):
+        for n, line in enumerate(open(os.path.join(HERE, name), encoding="utf-8"), 1):
+            if re.search(r"\$\([^()]*2>/dev/null\s*\|(?!\|)", line):
+                assert "|| true" in line, f"{name}:{n}: {line.strip()}"
+
+
+# ---- L1: health needs the token from anywhere but loopback; request threads are bounded ----
+@pytest.mark.parametrize("peer", ["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+def test_health_without_the_token_only_on_loopback(agent, peer):
+    assert agent.health_allowed(peer, None) is True
+
+
+@pytest.mark.parametrize("peer", ["203.0.113.5", "2001:db8::5", "10.66.0.2", "nonsense"])
+def test_health_from_elsewhere_needs_the_token(agent, peer):
+    assert agent.health_allowed(peer, None) is False
+    assert agent.health_allowed(peer, "Bearer wrong") is False
+    assert agent.health_allowed(peer, f"Bearer {TOKEN}") is True
+
+
+def test_health_over_http_from_a_non_loopback_caller_is_401(http_server, monkeypatch):
+    monkeypatch.setattr(A, "_loopback", lambda peer: False)  # as if the request came from the internet
+    assert request(http_server, "GET", "/v1/health", token=None)[0] == 401
+    assert request(http_server, "GET", "/v1/health")[0] == 200  # with the token
+    assert request(http_server, "GET", "/v1/status")[0] == 200  # what the backend calls keeps working
+
+
+def test_handle_keeps_its_signature_for_callers_that_wrap_it(agent):
+    # backend/tests/test_vpn_e2e.py wraps agent.handle(method, path, auth, body): it must stay a 4-argument call
+    import inspect
+    assert list(inspect.signature(agent.handle).parameters) == ["method", "path", "auth", "body"]
+
+
+def test_agent_threads_are_bounded(agent):
+    import socket
+    import time
+    srv = A.AgentServer(("127.0.0.1", 0), A.make_handler(agent), max_connections=2)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        port = srv.server_address[1]
+        hold = [socket.create_connection(("127.0.0.1", port)) for _ in range(2)]  # two slow clients hold both threads
+        time.sleep(0.3)
+        extra = socket.create_connection(("127.0.0.1", port))
+        extra.settimeout(5)
+        extra.sendall(b"GET /v1/health HTTP/1.1\r\nHost: x\r\n\r\n")
+        try:
+            got = extra.recv(100)
+        except ConnectionResetError:
+            got = b""
+        assert got == b""  # closed at once, no thread for it
+        extra.close()
+        for s in hold:
+            s.close()
+        time.sleep(0.5)
+        assert request(port, "GET", "/v1/health", token=None)[0] == 200  # slots come back
+    finally:
+        srv.shutdown()
+        srv.server_close()

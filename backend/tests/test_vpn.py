@@ -45,6 +45,8 @@ class FakeNode:
         self.fail = False
         self.adblock: bool | None = None  # None: an agent that doesn't report it
         self.address6: str | None = None
+        self.dns: list[str] | None = None  # set: exactly what the agent's DNS= says (overrides the adblock default)
+        self.endpoint = "203.0.113.10"
         self.calls: list[tuple[str, str]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -55,8 +57,8 @@ class FakeNode:
         path = request.url.path
         self.calls.append((request.method, path))
         if path == "/v1/status":
-            body = {"public_key": self.server_key, "listen_port": 51820, "endpoint_host": "203.0.113.10", "address": self.address,
-                    "dns": ["10.66.0.1", "1.1.1.1"] if self.adblock else ["1.1.1.1", "1.0.0.1"],
+            body = {"public_key": self.server_key, "listen_port": 51820, "endpoint_host": self.endpoint, "address": self.address,
+                    "dns": self.dns if self.dns is not None else ["10.66.0.1", "1.1.1.1"] if self.adblock else ["1.1.1.1", "1.0.0.1"],
                     "peers": [{"public_key": k, **v} for k, v in self.peers.items()]}
             if self.adblock is not None:
                 body["adblock"] = self.adblock
@@ -585,6 +587,24 @@ def test_adblock_server_uses_its_own_dns(client: TestClient, db: Session, fake: 
     assert shield.adblock is False
     cfg = c.post("/api/members/vpn/devices", json={"name": "q", "server_id": plain.id}).json()["config"]
     assert "DNS = 1.1.1.1\n" in cfg  # always just the first one the agent reports
+
+
+def test_a_shared_node_switching_to_its_own_resolver_is_picked_up_at_the_next_sync(client: TestClient, db: Session, fake: FakeNode) -> None:
+    # Helsinki (install-shared.sh): DNS=1.1.1.1, ADBLOCK=0. apply-dns-privacy.sh sets DNS=<wg1 address>; apply-floating-ip.sh
+    # sets ENDPOINT_HOST to the floating IP. No backend change: both come from the agent's status at each sync.
+    fake.adblock, fake.dns = False, ["1.1.1.1"]
+    hel = add_server(db, fake, "Helsinki")
+    open_vpn(db)
+    c = signed_in(client, db, member_at(db, "warrior"))
+    assert "DNS = 1.1.1.1\n" in c.post("/api/members/vpn/devices", json={"name": "before", "server_id": hel.id}).json()["config"]
+    fake.dns, fake.endpoint = ["10.66.0.1"], "192.0.2.50"
+    vpn.sync_all(db)
+    db.refresh(hel)
+    assert hel.dns == ["10.66.0.1"] and hel.endpoint_host == "192.0.2.50" and hel.adblock is False
+    cfg = c.post("/api/members/vpn/devices", json={"name": "after", "server_id": hel.id}).json()["config"]
+    assert "DNS = 10.66.0.1\n" in cfg and "Endpoint = 192.0.2.50:51820" in cfg
+    servers = {s["name"]: s for s in c.get("/api/members/vpn").json()["servers"]}
+    assert servers["Helsinki"]["adblock"] is False  # its own resolver, no blocking: the app shows no ad blocker
 
 
 def test_monthly_cap_pauses_then_resumes_next_month(client: TestClient, db: Session, fake: FakeNode) -> None:
