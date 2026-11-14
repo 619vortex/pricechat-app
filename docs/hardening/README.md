@@ -24,6 +24,9 @@ Integration fixes:
 
 ## Tests on the integration branch
 
+Latest full run (head 40e9cdf, after merging trial monitor mode b91cc9d): backend **2666 passed, 5 failed** (the same 5 as main), frontend 513 passed + `tsc -b` clean, website re-run 356, extension 27, infra 22, single alembic head 0113. Earlier run below.
+
+
 | Suite | Result |
 |---|---|
 | Backend full (`pytest tests`) | **2659 passed, 5 failed**. The same 5 fail on clean main a7d2081: test_community, test_lunch_bot, test_trading_execution, test_trends, test_tg_trading (/pnl needs a network lookup) |
@@ -39,7 +42,7 @@ Integration fixes:
 | Workstream | Blockers (owner) | Production risks | Depends on | Extra cost / month |
 |---|---|---|---|---|
 | Monitoring | Set the alert chat and press Send test; GitHub secrets for the uptime workflow | Weekly restore test downloads the full DB into Railway temp disk (time/disk unproven on production size); admin `/api/health` reports `owner_alerts: fail` until the chat is set | Verified backup before migration 0112 | $0 (private-repo Actions: ~1,440 of 2,000 free min at 30-min cadence; hourly halves it) |
-| Trial and limits | Decide defaults: account age 24 h (blocks a new sign-up's trial for a day), 3 trials/IP and 10 per /24 per day, XP off, L7 and L6 off | The IP throttle is live at deploy (PROXY_SHARED_SECRET is set). Mobile carrier CGNAT can share one IP among many users, so watch refusals in Admin | Migration 0113 after 0112; backup first | $0 |
+| Trial and limits | Decide when to switch `trial_guard_mode` from **monitor** (default: guards evaluated and counted in Admin, nobody refused) to enforce; defaults then: account age 24 h, 3 trials/IP and 10 per /24 per day, XP off, L7 and L6 off | In monitor mode none; enforce later can refuse CGNAT users (watch "networks seen more than once" in the Admin trial card first) | Migration 0113 after 0112; backup first | $0 |
 | Privacy text + AUP | Approve the wording; a real abuse mailbox (placeholder in the page); P2P "not supported" vs blocked | None technical; legal review optional | Ships with the backend (heads.py) | $0 (optional legal review $500–2,000 one-off) |
 | Credentials | Every rotation is the owner's (CREDENTIALS.md order) | The worker token is still tracked on main and valid; the Railway-breach list was never confirmed rotated | R1 before untracking worker.env | $0 |
 | Nodes | Approve each apply at a terminal; ops email for certbot; whether to apply host-wide journald/ufw changes on Helsinki | If the local resolver fails, connected customers lose DNS; rule order and unbound are untested on a real node; rollback of DNS needs fresh configs for devices made after the switch | Monitoring and uptime live first; dry-run diff read before apply | $0 |
