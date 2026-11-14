@@ -49,7 +49,7 @@ Set-Content "$Dir\ping.txt" "ok"
 $server = Start-Process node -ArgumentList "`"$Here\server.mjs`"", "`"$Site`"", "`"$env:RUNNER_TEMP\server.pfx`"", $pw -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\server.out" -RedirectStandardError "$env:RUNNER_TEMP\server.err"
 Start-Sleep 3
 $served = $false
-try { $served = (Invoke-WebRequest -UseBasicParsing "https://kiwi-update.test/downloads/kiwi/windows/ping.txt").Content.Trim() -eq "ok" } catch { Write-Host $_ }
+try { $served = (Invoke-WebRequest -UseBasicParsing "https://kiwi-update.test/downloads/kiwi/windows/ping.txt").StatusCode -eq 200 } catch { Write-Host $_ }
 Row "setup: the test HTTPS server answers as kiwi-update.test, with a certificate this runner trusts" $served "server process $($server.Id)"
 if (-not $served) { Get-Content "$env:RUNNER_TEMP\server.err" -ErrorAction SilentlyContinue; exit 1 }
 

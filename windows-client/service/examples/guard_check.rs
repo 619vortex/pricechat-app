@@ -414,7 +414,7 @@ mod check {
             let exe = r"C:\Program Files\KiwiVPN\kiwivpn-service.exe";
             let out = Command::new(exe).arg("unblock").output().map(|o| format!("{} {}", String::from_utf8_lossy(&o.stdout).trim(), String::from_utf8_lossy(&o.stderr).trim())).unwrap_or_else(|e| e.to_string());
             let back = until(Duration::from_secs(15), online);
-            let lifted = ask(&Request::Status).is_ok_and(|s| !s.strict && !s.kill_switch);
+            let lifted = until(Duration::from_secs(15), || ask(&Request::Status).is_ok_and(|s| !s.strict && !s.kill_switch)).is_some();
             r.check("strict: kiwivpn-service unblock lifts it", back.is_some() && lifted, format!("internet back after {}, lifted: {lifted}; unblock said: {}", secs(back), out.replace('\n', " / ")));
         }
         let _ = ask(&Request::Disconnect);

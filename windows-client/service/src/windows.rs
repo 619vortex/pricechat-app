@@ -59,8 +59,10 @@ fn resume_after_restart(tunnel: Arc<Tunnel>) {
     tunnel.resuming.store(true, Ordering::SeqCst);
     if conf_path().map(|p| p.exists()).unwrap_or(false) {
         *tunnel.resumed_at.lock().unwrap() = Some(now_seconds());
-        // the kill switch comes back before the tunnel does, so nothing leaks while the network comes up
-        if let Some((plan, protect)) = saved_plan() {
+        // the kill switch comes back before the tunnel does, so nothing leaks while the network comes up. Under the same lock as
+        // Connect and Disconnect, and only if the tunnel is still wanted: a Disconnect (or `unblock`) that came first wins.
+        let _one_at_a_time = tunnel.changing.lock().unwrap();
+        if let Some((plan, protect)) = saved_plan().filter(|_| conf_path().map(|p| p.exists()).unwrap_or(false)) {
             if let Err(e) = tunnel.engage(&plan, protect.strict) {
                 log_event(&format!("guard: couldn't restore after the restart: {e}"));
             }
@@ -562,6 +564,11 @@ impl Tunnel {
     /// back. Without a kill switch, the DNS block never outlives the tunnel.
     fn watch(&self) {
         let Ok(_one_at_a_time) = self.changing.try_lock() else { return };
+        // `kiwivpn-service unblock` can remove the strict filters behind this process's back
+        if self.strict.load(Ordering::SeqCst) && !crate::firewall::strict_present() {
+            self.strict.store(false, Ordering::SeqCst);
+            log_event("guard: the strict kill switch was removed from outside (unblock)");
+        }
         if self.resuming.load(Ordering::SeqCst) {
             return;
         }

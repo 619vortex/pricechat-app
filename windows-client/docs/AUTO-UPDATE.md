@@ -1,6 +1,8 @@
 # Kiwi VPN for Windows: signed auto-update (design)
 
-Status: **design only, nothing built.** Applies to 2.x onward. The public 0.1.1 download
+Status: **built in 2.2** (phases 1-5 and the owner tools; see [KIWI-2.2.md](KIWI-2.2.md) for what differs from this design and
+what isn't built yet: the "Publish update" workflow, weekly re-sign, update lock, telemetry). The production manifest keys are
+still placeholders until the owner makes them (`tools/new-update-key.ps1`). Applies to 2.x onward. The public 0.1.1 download
 (`https://pricechat.live/downloads/KiwiVPN-Setup.exe`) has no updater and stays untouched; 0.1.1 users move to 2.x by
 installing it by hand, as the CI's "Upgrade from the public 0.1.1" job already tests.
 
