@@ -16,8 +16,60 @@ export function validateCatalog(cat) {
     if (!HOST.test(n.host || "") || !n.host.endsWith(`.${cat.dnsZone}`)) problems.push(`${key}: host must be a name under ${cat.dnsZone}`);
     if (!/^[A-Z]{2}$/.test(n.country || "")) problems.push(`${key}: country is a 2-letter code`);
     if (n.managed && !(n.location && n.serverType)) problems.push(`${key}: a managed node needs location and serverType`);
+    if (n.external && n.managed) problems.push(`${key}: an external server (install --host) isn't a Hetzner-managed one too`);
   }
+  if (cat.certEmail !== undefined && !EMAIL.test(cat.certEmail)) problems.push("certEmail: an email address for Let's Encrypt expiry warnings");
   return problems;
+}
+
+const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+/** A public IPv4 to install on: not private, shared, loopback, link-local, multicast or reserved. */
+export function isPublicIPv4(ip) {
+  const m = IPV4.exec(ip || "");
+  if (!m || m[5]) return false;
+  const o = m.slice(1, 5).map(Number);
+  if (o.some((x) => x > 255)) return false;
+  const [a, b] = o;
+  return !(a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b < 128) || (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168));
+}
+
+/** The read-only facts command run over SSH before an install on a server this tool didn't build, and its parser. */
+export const PREFLIGHT = [
+  ". /etc/os-release 2>/dev/null; echo \"os=$ID $VERSION_ID\"",
+  "echo \"uid=$(id -u)\"",
+  "echo \"wg=$(ls /etc/wireguard/*.conf 2>/dev/null | xargs -r -n1 basename | tr '\\n' ' ')\"",
+  "echo \"status=$(cat /opt/kiwi-src/status 2>/dev/null || echo none)\"",
+  "echo \"kiwi_nft=$(grep -q 'Managed by kiwi-vpn install.sh' /etc/nftables.conf 2>/dev/null && echo yes || echo no)\"",
+  "echo \"fw_rules=$( (nft list ruleset 2>/dev/null || true) | grep -c 'chain ' || true)\"",
+  "echo \"docker=$(command -v docker >/dev/null 2>&1 && echo yes || echo no)\"",
+  "echo \"port53=$( (ss -Hlnup 'sport = :53' 2>/dev/null || true) | grep -v systemd-resolve | grep -c . || true)\"",
+].join("; ");
+
+export function parseFacts(text) {
+  return Object.fromEntries(String(text).trim().split("\n").map((l) => l.split(/=(.*)/s).slice(0, 2).map((x) => (x ?? "").trim())));
+}
+
+/** Why install.sh must not run on this server (it flushes the firewall and owns wg0). Empty = it may. */
+export function preflightProblems(f) {
+  const out = [];
+  const ours = (f.status || "").startsWith("installed") || f.kiwi_nft === "yes";
+  if (f.os !== "ubuntu 24.04") out.push(`it runs ${f.os || "an unknown system"}, not Ubuntu 24.04`);
+  if (f.uid !== "0") out.push("the SSH login isn't root");
+  if (!ours && (f.wg || "").trim()) out.push(`it already has WireGuard (${f.wg.trim()}): install.sh would replace it; use install-shared.sh by hand`);
+  if (!ours && f.docker === "yes") out.push("Docker is installed: install.sh replaces the whole firewall, which breaks Docker's networking");
+  if (!ours && Number(f.fw_rules || 0) > 0) out.push(`it has its own nftables rules (${f.fw_rules} chains): install.sh would replace them`);
+  if (!ours && Number(f.port53 || 0) > 0) out.push("something already answers DNS on port 53 (the node's resolver needs it)");
+  return out;
+}
+
+/** Certificate days left -> ok / warn (renewal is overdue: Let's Encrypt renews at 30 days) / fail (expired or unreadable). */
+export function certVerdict(days, warnDays = 21) {
+  if (days == null || Number.isNaN(days)) return { level: "fail", text: "certificate unreadable" };
+  if (days < 0) return { level: "fail", text: `certificate EXPIRED ${-days} days ago` };
+  if (days < warnDays) return { level: "warn", text: `certificate expires in ${days} days (renewal should have happened at 30)` };
+  return { level: "ok", text: `certificate ${days} days` };
 }
 
 /** Hetzner's /pricing for one server type in one location, plus the primary IPv4 there. Amounts are net, monthly. */

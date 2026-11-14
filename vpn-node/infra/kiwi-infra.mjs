@@ -7,13 +7,18 @@
 //   node vpn-node/infra/kiwi-infra.mjs create <node>         owner: firewall + server (paid from this moment)
 //   node vpn-node/infra/kiwi-infra.mjs dns <node>            owner: A record on Vercel DNS
 //   node vpn-node/infra/kiwi-infra.mjs install <node>        owner: copies verified files over SSH, installs WireGuard + proxy
+//   node vpn-node/infra/kiwi-infra.mjs install <node> --host <ip> [--host-key SHA256:...]
+//                                                            owner: the same on an Ubuntu 24.04 server elsewhere (an
+//                                                            "external" node in catalog.json); read-only checks first
 //   node vpn-node/infra/kiwi-infra.mjs health [node]         outside checks of every node: DNS, TLS, proxy 407, cert expiry
-//   node vpn-node/infra/kiwi-infra.mjs register <node>       prints Admin > VPN fields; the token goes to the clipboard only
+//   node vpn-node/infra/kiwi-infra.mjs register <node> [--host <ip>] [--delete-file]
+//                                                            prints Admin > VPN fields; the token goes to the clipboard only;
+//                                                            --delete-file then removes /root/kiwi-node.txt (owner approves)
 //   node vpn-node/infra/kiwi-infra.mjs reboot <node>         owner: Hetzner reboot of a managed node that's stuck
 //   node vpn-node/infra/kiwi-infra.mjs agent-firewall <node> [--apply | --rollback <file>]
 //                                                            narrow the agent port to the backend's IPs in the Hetzner firewall
 //
-// It never deletes anything. Secrets: the Hetzner token stays in memory; the agent token is copied to the clipboard, not shown.
+// It never deletes anything (register --delete-file removes only the node's copy of its own token file). Secrets: the Hetzner token stays in memory; the agent token is copied to the clipboard, not shown.
 import { execFileSync, spawnSync } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -39,6 +44,7 @@ const api = () => new HCloud(loadToken());
 
 // --approved "<phrase>": a written approval given in advance; it counts only if it is exactly the phrase for this change now
 const PRE = process.argv.indexOf("--approved") > 0 ? process.argv[process.argv.indexOf("--approved") + 1] ?? "" : undefined;
+const opt = (name) => (process.argv.indexOf(name) > 0 ? process.argv[process.argv.indexOf(name) + 1] ?? "" : undefined);
 async function approve(phrase) {
   if (PRE !== undefined) {
     if (PRE.trim() !== phrase) throw new Error(`the approval given (${PRE}) doesn't match this change now (${phrase}): nothing was changed`);
@@ -68,6 +74,54 @@ function ssh(ip, command, { input, inherit = false } = {}) {
     "-o", "ConnectTimeout=15", `root@${ip}`, command], { input, encoding: input && typeof input !== "string" ? undefined : "utf8", stdio: inherit ? ["pipe", "inherit", "inherit"] : "pipe" });
   if (r.status !== 0) throw new Error(`ssh ${ip}: exit ${r.status} ${inherit ? "" : String(r.stderr || "").trim().split("\n").pop()}`);
   return r.stdout;
+}
+
+/** SHA256 fingerprints of the host keys pinned for this address (after the first connection). */
+function hostKeys(ip) {
+  const r = spawnSync("ssh-keygen", ["-F", ip, "-f", KNOWN_HOSTS, "-l"], { encoding: "utf8" });
+  return [...String(r.stdout || "").matchAll(/SHA256:[A-Za-z0-9+/]+/g)].map((m) => m[0]);
+}
+
+function upload(ip, bundle) {
+  const tmp = mkdtempSync(join(tmpdir(), "kiwi-node-"));
+  try {
+    for (const f of bundle.files) writeFileSync(join(tmp, f.name), f.body);
+    const tar = spawnSync("tar", ["-C", tmp, "-cf", "-", ...L.BUNDLE], { maxBuffer: 1 << 26 });
+    if (tar.status !== 0) throw new Error("couldn't pack the files");
+    ssh(ip, "rm -rf /opt/kiwi-src/new && mkdir -p -m 0700 /opt/kiwi-src/new && tar -C /opt/kiwi-src/new -xf -", { input: tar.stdout });
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+}
+
+/**
+ * One install over SSH. Every outside effect is passed in, so the order and the refusals are tested with fakes.
+ * external: a server this tool didn't build (install --host): read-only checks first, and the approval phrase covers its
+ * address and host key too, so an approval can't be reused for another server.
+ */
+export async function runInstall({ key, node, ip, external = false, bundle, ssh, upload, approve, resolve4, probe, hostKeys, expectHostKey, cat, say }) {
+  const facts = L.parseFacts(ssh(ip, L.PREFLIGHT)); // read-only; the first connection pins the host key
+  const keys = hostKeys(ip);
+  if (external) {
+    say(`${ip} host key ${keys.join(", ") || "(not pinned?)"}: compare it with the provider's console before approving`);
+    if (expectHostKey && !keys.includes(expectHostKey)) throw new Error(`the server's host key isn't ${expectHostKey}: nothing was changed`);
+    const problems = L.preflightProblems(facts);
+    if (problems.length) throw new Error(`not installing on ${ip}:\n  - ${problems.join("\n  - ")}`);
+  }
+  const status = facts.status || "none";
+  say(`${node.server ?? key} ${ip}: status ${status}; files from commit ${bundle.rev}:\n${bundle.files.map((f) => `  ${f.sha.slice(0, 16)}  ${f.name}`).join("\n")}`);
+  if (!(await resolve4(node.host)).includes(ip)) throw new Error(`${node.host} doesn't point at ${ip} yet: run dns first (the proxy's certificate needs it)`);
+  const binds = bundle.files.map((f) => f.sha).join() + (external ? ` ${ip} ${keys.join(",")}` : "");
+  await approve(L.approvalPhrase(status.startsWith("installed") ? "reinstall" : "install", key, 0, L.sha256(binds)));
+  upload(ip, bundle);
+  ssh(ip, "cd /opt/kiwi-src/new && sha256sum -c --quiet -", { input: bundle.files.map((f) => `${f.sha}  ${f.name}`).join("\n") + "\n" });
+  say("files verified on the server");
+  const env = `QUIET_SECRETS=1 WITH_PROXY=1 AGENT_ALLOW=${cat.agentAllow.join(",")}`;
+  const proxyEnv = `PROXY_HOST=${node.host}${cat.certEmail ? ` CERT_EMAIL=${cat.certEmail}` : ""}`;
+  ssh(ip, `set -eo pipefail; cd /opt/kiwi-src/new; echo installing > ../status; ${env} bash install.sh 2>&1 | tee -a /var/log/kiwi-install.log; ` +
+          `${proxyEnv} bash install-proxy.sh 2>&1 | tee -a /var/log/kiwi-install.log; kiwi-vpn-doctor; echo "installed ${bundle.rev}" > ../status`, { inherit: true });
+  const pr = await probe(node.host);
+  say(pr.ok ? `proxy answers 407 (TLS ${pr.tlsMs} ms, ${L.certVerdict(pr.certDays).text})` : `proxy check failed: ${pr.error ?? pr.status}`);
+  say(`Next: node vpn-node/infra/kiwi-infra.mjs register ${key}${external ? ` --host ${ip}` : ""}`);
+  return { status, facts };
 }
 
 /** The node files exactly as committed (LF endings), with their hashes. Refuses uncommitted changes. */
@@ -166,31 +220,18 @@ const COMMANDS = {
 
   async install(key) {
     const n = managedNode(key);
-    if (!n.managed) throw new Error(`${key} isn't built by this tool: ${n.note}`);
-    const s = await findServer(api(), key);
-    const ip = s.public_net.ipv4.ip;
-    const b = committedBundle();
-    const status = ssh(ip, "cat /opt/kiwi-src/status 2>/dev/null || echo none").trim();
-    say(`${s.name} ${ip}: status ${status}; files from commit ${b.rev}:\n${b.files.map((f) => `  ${f.sha.slice(0, 16)}  ${f.name}`).join("\n")}`);
-    const dnsOk = (await resolve4(n.host)).includes(ip);
-    if (!dnsOk) throw new Error(`${n.host} doesn't point at ${ip} yet: run dns first (the proxy's certificate needs it)`);
-    await approve(L.approvalPhrase(status.startsWith("installed") ? "reinstall" : "install", key, 0, L.sha256(b.files.map((f) => f.sha).join())));
-    const tmp = mkdtempSync(join(tmpdir(), "kiwi-node-"));
-    try {
-      for (const f of b.files) writeFileSync(join(tmp, f.name), f.body);
-      const tar = spawnSync("tar", ["-C", tmp, "-cf", "-", ...L.BUNDLE], { maxBuffer: 1 << 26 });
-      if (tar.status !== 0) throw new Error("couldn't pack the files");
-      ssh(ip, "rm -rf /opt/kiwi-src/new && mkdir -p -m 0700 /opt/kiwi-src/new && tar -C /opt/kiwi-src/new -xf -", { input: tar.stdout });
-    } finally { rmSync(tmp, { recursive: true, force: true }); }
-    const sums = b.files.map((f) => `${f.sha}  ${f.name}`).join("\n") + "\n";
-    ssh(ip, "cd /opt/kiwi-src/new && sha256sum -c --quiet -", { input: sums });
-    say("files verified on the server");
-    const env = `QUIET_SECRETS=1 WITH_PROXY=1 AGENT_ALLOW=${CAT.agentAllow.join(",")}`;
-    ssh(ip, `set -eo pipefail; cd /opt/kiwi-src/new; echo installing > ../status; ${env} bash install.sh 2>&1 | tee -a /var/log/kiwi-install.log; ` +
-            `PROXY_HOST=${n.host} bash install-proxy.sh 2>&1 | tee -a /var/log/kiwi-install.log; kiwi-vpn-doctor; echo "installed ${b.rev}" > ../status`, { inherit: true });
-    const pr = await probeProxy(n.host);
-    say(pr.ok ? `proxy answers 407 (TLS ${pr.tlsMs} ms, certificate ${pr.certDays} days)` : `proxy check failed: ${pr.error ?? pr.status}`);
-    say(`Next: node vpn-node/infra/kiwi-infra.mjs register ${key}`);
+    const host = opt("--host");
+    let ip, external = false;
+    if (host !== undefined) {
+      if (!n.external) throw new Error(`${key} isn't an external node in catalog.json ("external": true): --host is only for servers this tool didn't build`);
+      if (!L.isPublicIPv4(host)) throw new Error(`--host ${host} isn't a public IPv4 address`);
+      ip = host; external = true;
+    } else {
+      if (!n.managed) throw new Error(`${key} isn't built by this tool: ${n.note ?? (n.external ? "use --host <ip>" : "")}`);
+      ip = (await findServer(api(), key)).public_net.ipv4.ip;
+    }
+    await runInstall({ key, node: n, ip, external, bundle: committedBundle(), ssh, upload, approve, resolve4, probe: probeProxy, hostKeys,
+      expectHostKey: opt("--host-key"), cat: CAT, say });
   },
 
   async health(only) {
@@ -204,17 +245,19 @@ const COMMANDS = {
       if (!ips.length) { say(`${key.padEnd(5)} ${n.host}: no DNS record${s ? "" : " (not built)"}`); continue; }
       const pr = await probeProxy(n.host);
       const traffic = s ? ` · ${s.status}, ${(s.outgoing_traffic / 2 ** 40).toFixed(2)} TB out` : "";
-      const warn = pr.ok && pr.certDays != null && pr.certDays < 20 ? ` · certificate expires in ${pr.certDays} days` : "";
-      if (!pr.ok || warn) bad++;
-      say(`${key.padEnd(5)} ${n.host} ${ips.join(",")}: ${pr.ok ? `proxy OK ${pr.ms} ms (TLS ${pr.tlsMs})` : `proxy FAIL ${pr.error ?? pr.status}`}${warn}${traffic}`);
+      const cert = pr.ok ? L.certVerdict(pr.certDays) : null;
+      if (!pr.ok || cert.level !== "ok") bad++;
+      const certText = cert ? ` · ${cert.level === "ok" ? "" : `${cert.level.toUpperCase()}: `}${cert.text}` : "";
+      say(`${key.padEnd(5)} ${n.host} ${ips.join(",")}: ${pr.ok ? `proxy OK ${pr.ms} ms (TLS ${pr.tlsMs})` : `proxy FAIL ${pr.error ?? pr.status}`}${certText}${traffic}`);
     }
     process.exitCode = bad ? 1 : 0;
   },
 
   async register(key) {
     const n = managedNode(key);
-    const s = await findServer(api(), key);
-    const ip = s.public_net.ipv4.ip;
+    const host = opt("--host");
+    if (host !== undefined && !(n.external && L.isPublicIPv4(host))) throw new Error("--host is for external nodes, with their public IPv4");
+    const ip = host ?? (await findServer(api(), key)).public_net.ipv4.ip;
     const kv = Object.fromEntries(ssh(ip, "cat /root/kiwi-node.txt").trim().split("\n").map((l) => l.split(/=(.*)/s).slice(0, 2)));
     if (!kv.agent_token || !kv.cert_sha256) throw new Error("the node has no registration file: run install first");
     const clip = spawnSync(process.platform === "win32" ? "clip.exe" : "pbcopy", [], { input: kv.agent_token });
@@ -222,6 +265,13 @@ const COMMANDS = {
     say(`Admin > VPN > Add server:\n  name:         ${n.name}\n  region:       ${n.region ?? ""}\n  country_code: ${n.country}\n  agent_url:    ${kv.agent_url}`);
     say(`  cert_sha256:  ${kv.cert_sha256}\n  capacity:     ${n.capacity ?? 250}\n  agent_token:  (in your clipboard: paste it, then copy something else)`);
     say("The backend checks the agent before saving. The server shows in every app and the extension once it's online and has a proxy.");
+    if (process.argv.includes("--delete-file")) {
+      // L20: the token shouldn't stay on the server in a second file once it's saved in Admin (the agent keeps its own copy)
+      say("\nOnce Admin > VPN has saved the server (it tested the agent), approve to delete /root/kiwi-node.txt on the node.");
+      await approve(L.approvalPhrase("forget", key, 0, L.sha256(kv.cert_sha256)));
+      ssh(ip, "shred -u /root/kiwi-node.txt 2>/dev/null || rm -f /root/kiwi-node.txt; test ! -e /root/kiwi-node.txt");
+      say("deleted /root/kiwi-node.txt (the agent token is still in /etc/kiwi-vpn/agent.env, root and the agent only)");
+    }
   },
 
   async ["agent-firewall"](key, mode, file) {
@@ -275,7 +325,7 @@ const COMMANDS = {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === (await import("node:path")).resolve(process.argv[1]);
 if (isMain) {
   const [cmd, arg, ...rest] = process.argv.slice(2);
-  if (!COMMANDS[cmd]) { say(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 14).map((l) => l.replace(/^\/\/ ?/, "")).join("\n")); process.exit(2); }
+  if (!COMMANDS[cmd]) { say(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 20).map((l) => l.replace(/^\/\/ ?/, "")).join("\n")); process.exit(2); }
   if (["plan", "create", "dns", "install", "register", "reboot", "agent-firewall"].includes(cmd) && !L.NODE_KEY.test(arg || "")) { console.error("say which node, e.g. ash1"); process.exit(2); }
   COMMANDS[cmd](arg, ...rest).catch((e) => { console.error(`error: ${e.message}`); process.exit(1); });
 }

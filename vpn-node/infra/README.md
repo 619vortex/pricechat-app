@@ -11,7 +11,8 @@ checks and Admin registration. It needs Node 20+, `ssh`, `tar`, and the Vercel C
 | `create <node>` | **paid**: a firewall (free) and the server, with delete/rebuild protection |
 | `dns <node>` | Vercel DNS: adds the node's A record (refuses to change an existing one) |
 | `install <node>` | the new server: copies the committed node files over SSH, checks their sha256 there, runs `install.sh` then `install-proxy.sh`, then `kiwi-vpn-doctor` |
-| `register <node>` | no: prints the Admin > VPN fields; the agent token goes to the clipboard only |
+| `install <node> --host <ip> [--host-key SHA256:...]` | the same on an Ubuntu 24.04 server from another provider (`"external": true` in `catalog.json`). First a read-only check over SSH: Ubuntu 24.04, root, no WireGuard, Docker, own nftables rules or DNS server of its own; the approval phrase also covers the address and the pinned host key |
+| `register <node> [--host <ip>] [--delete-file]` | no: prints the Admin > VPN fields; the agent token goes to the clipboard only. `--delete-file` then deletes `/root/kiwi-node.txt` on the node after its own approval |
 | `reboot <node>` | Hetzner reboot of a managed node |
 
 Every command that changes something needs a person at a real terminal typing the phrase it shows, e.g.
@@ -38,7 +39,8 @@ deletes anything, and it won't touch `hel1` (shared with the owner's own tunnel)
 - **Hetzner firewall** `kiwi-<node>`: 22/tcp, 51820/udp, 80+443/tcp, ICMP; 8443 only from Railway's static IPs.
 
 Recovery: systemd restarts the agent and proxy on failure; the backend marks a node offline after two failed syncs and
-alerts the owner (once a Telegram chat is set); `health` exits non-zero on any failure, so it can run on a schedule;
+alerts the owner (once a Telegram chat is set); `health` exits non-zero on any failure, including a certificate with under 21 days left or expired, so it can run on a schedule
+(e.g. a daily Windows Task Scheduler job: `node vpn-node\infra\kiwi-infra.mjs health`, alert on exit code 1);
 `reboot` is the manual last resort. Nodes hold nothing the backend can't re-send, so they're rebuilt instead of backed up.
 
 ## Not tested on a real server yet

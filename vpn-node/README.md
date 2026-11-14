@@ -94,14 +94,25 @@ write without changing anything (no root needed).
 
 `install.sh` owns the whole firewall and `wg0`, so never use it next to another tunnel: it stops if it finds a `wg0` it didn't create.
 `install-shared.sh` adds a separate `wg1` (10.66.0.1/16, UDP 51821) and the agent on 8443, and leaves `wg0`, its peers and SSH alone.
-It only adds rules that match `wg1`, and `--uninstall` removes all of it. No resolver is installed: customers use `DNS` (1.1.1.1) and IPv6 is
-dropped. Never point the agent at another tunnel's interface, because the backend removes any peer it doesn't own. Allow 51821/udp and 8443/tcp in the provider's firewall.
+It only adds rules that match `wg1`, and `--uninstall` removes all of it. Customers' DNS is unbound on the `wg1` address (no query logs;
+`LOCAL_DNS=0` keeps the old `DNS`, 1.1.1.1), mail ports 25/465/587 are blocked and IPv6 is dropped. `AGENT_ALLOW` limits 8443 to the backend's
+addresses in ufw; `EXIT_IP` makes customers leave from (and connect to) a second IPv4 such as a floating IP, with the SNAT first in
+nat POSTROUTING so another tunnel's MASQUERADE can't shadow it. The options are kept in `/etc/kiwi-vpn/install.env` for re-runs,
+which apply the rules in place. `--print-config` prints everything it would write. Never point the agent at another tunnel's
+interface, because the backend removes any peer it doesn't own. Allow 51821/udp and 8443/tcp in the provider's firewall.
+
+For a node that already runs (Helsinki), `apply-dns-privacy.sh` (resolver, proxy limits, mail ports) and `apply-floating-ip.sh`
+(the hand-made floating-IP NAT, in code) make the same changes without the installers: read-only by default, `--apply` backs up
+first and rolls back on any failed check, `--rollback <dir>` undoes it. Neither touches `wg0`. See `docs/hardening/NODES.md`.
 
 ## The browser extension's proxy
 
 `proxy.py` is an HTTPS forward proxy for `vpn-extension/`, because browsers can't run WireGuard. `install-proxy.sh` adds it to a node that already has the agent: its own user, service,
 Let's Encrypt certificate and firewall rules, on 443/tcp (80/tcp for certificate renewals). The name in `PROXY_HOST` must already point at the server. `--uninstall` removes all of it, and neither
 direction touches `wg0`, `wg1` or SSH. The proxy reaches only the public internet: every resolved address is checked, and the firewall repeats that for its user. It keeps no per-connection logs, only bytes per login.
+It resolves names with its own unbound on 127.0.0.1 (`RESOLVER`; no query logs), and its firewall lets it reach DNS there only, so the hosting
+provider's resolvers never see the domains browser users visit. Only logged-in connections count toward the 3000 limit; before login one
+address may hold 50 connections and has 5 s to send its request. `CERT_EMAIL` gives Let's Encrypt an address for expiry warnings.
 The agent writes logins (hashes only) to `/var/lib/kiwi-vpn-proxy/users.json`; a removed login loses its open connections within seconds. The backend sees the proxy in the agent's status at the next sync. An agent without one simply reports none.
 
 ## Customers and payments (Price Chat backend, `app/vpn/billing.py`)
@@ -134,10 +145,11 @@ Client private keys never touch the server (or our database).
 
 ## Agent API (backend only)
 
-`GET /v1/health` (no auth), and with `Authorization: Bearer <token>`: `GET /v1/status`
+`GET /v1/health` (no auth from loopback only, for `kiwi-vpn-doctor`; from anywhere else it needs the token), and with `Authorization: Bearer <token>`: `GET /v1/status`
 (includes `"dns"`, `"adblock": true|false` and `"address6"`), `PUT /v1/peers/{key}`
 `{"allowed_ip": "10.66.0.5/32"}`, `DELETE /v1/peers/{key}` (key is URL-safe base64).
 Config: `/etc/kiwi-vpn/agent.env`.
 
-Tests (no `wg` needed; the installer tests need `bash` and use `--print-config`):
-`python -m pytest vpn-node/test_agent.py -q`.
+Tests (no `wg` needed; the installer tests need `bash` and use `--print-config`, the apply-script tests a fake server and a
+fake firewall, `fake_iptables.py` / `node_fakes.py`): `python -m pytest vpn-node -q -p no:cacheprovider` and
+`node --test vpn-node/infra/lib.test.mjs vpn-node/infra/install.test.mjs`.
