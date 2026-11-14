@@ -36,6 +36,18 @@ fn cidr(value: &str) -> Result<String, String> {
     Ok(format!("{ip}/{bits}"))
 }
 
+/// The tunnel's own address: exactly one host, /32 or /128 (audit L13). The kill switch lets everything from these addresses through as
+/// "inside the tunnel", so a wider prefix (0.0.0.0/0 at worst) would turn that rule into a hole.
+fn host_address(value: &str) -> Result<String, String> {
+    let checked = cidr(value)?;
+    let (ip, bits) = checked.split_once('/').unwrap_or(("", ""));
+    let host = if ip.contains(':') { "128" } else { "32" };
+    if bits != host {
+        return Err("the tunnel's address must be a single address (/32 or /128)".into());
+    }
+    Ok(checked)
+}
+
 fn endpoint(value: &str) -> Result<String, String> {
     if value.parse::<SocketAddr>().is_ok() {
         return Ok(value.to_string());
@@ -82,7 +94,7 @@ pub fn parse(text: &str) -> Result<Config, String> {
             ("interface", "privatekey") => private_key = Some(key(value)?),
             ("interface", "address") => {
                 for a in list(value) {
-                    addresses.push(cidr(a)?);
+                    addresses.push(host_address(a)?);
                 }
             }
             ("interface", "dns") => {
@@ -177,6 +189,19 @@ mod tests {
         assert!(parse(&good().replace("10.66.0.5/32", "10.66.0.5/99")).is_err());
         assert!(parse(&good().replace("10.66.0.5/32", "10.66.0.5")).is_err());
         assert!(parse(&"#".repeat(MAX_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn l13_the_tunnel_s_address_is_a_single_host() {
+        for wide in ["10.66.0.5/24", "10.66.0.5/31", "0.0.0.0/0", "10.66.0.5/0"] {
+            assert!(parse(&good().replace("10.66.0.5/32", wide)).unwrap_err().contains("single address"), "{wide}");
+        }
+        for wide in ["fd66:66::5/64", "fd66:66::5/127", "::/0"] {
+            assert!(parse(&good().replace("fd66:66::5/128", wide)).unwrap_err().contains("single address"), "{wide}");
+        }
+        assert_eq!(parse(&good()).unwrap().addresses, ["10.66.0.5/32", "fd66:66::5/128"]);
+        // AllowedIPs are routes, not the tunnel's address: wide prefixes are normal there
+        assert_eq!(parse(&good()).unwrap().allowed_ips, ["0.0.0.0/0", "::/0"]);
     }
 
     #[test]

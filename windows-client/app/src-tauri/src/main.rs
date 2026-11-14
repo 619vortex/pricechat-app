@@ -160,6 +160,21 @@ fn vpn_status() -> Answer {
     answer(ipc::ask(&Request::Status))
 }
 
+/// 2.2: asks the service to look for an update (it fetches and verifies the signed manifest itself; the page names nothing).
+#[tauri::command(async)]
+fn update_check() -> Answer {
+    answer(ipc::ask(&Request::UpdateCheck))
+}
+
+/// 2.2: the person pressed Install. The service downloads, verifies and runs the installer it found; nothing is passed to it.
+#[tauri::command(async)]
+fn update_install() -> Answer {
+    note("update: install pressed");
+    let done = answer(ipc::ask(&Request::UpdateInstall));
+    note_answer("update install", &done);
+    done
+}
+
 #[tauri::command(async)]
 fn vpn_disconnect() -> Answer {
     note("disconnect: pressed");
@@ -209,6 +224,9 @@ fn vpn_connect(server_id: i64, pause_first: Option<bool>) -> Result<Answer, Stri
         kill_switch: prefs.kill_switch,
         allow_lan: prefs.allow_lan,
         allow: exclude.iter().map(|c| format!("{}/{}", std::net::Ipv4Addr::from(c.ip), c.bits)).collect(),
+        // 2.2: both only mean anything with the kill switch on, and the service refuses strict without it
+        strict: prefs.kill_switch && prefs.strict_kill_switch,
+        block_dot: prefs.kill_switch && prefs.block_dot,
     };
     let done = answer(ipc::ask(&Request::Connect { config: config.to_string(), protect }));
     note_answer("connect", &done);
@@ -375,7 +393,7 @@ fn send_support(kind: String, message: String, include_diagnostics: bool) -> Res
     let http = backend()?;
     let diagnostics = include_diagnostics.then(|| {
         let prefs = current_settings();
-        let options = [("Smart Connect", prefs.smart_connect), ("Failover", prefs.failover), ("Kill switch", prefs.kill_switch), ("Allow local network", prefs.allow_lan),
+        let options = [("Smart Connect", prefs.smart_connect), ("Failover", prefs.failover), ("Kill switch", prefs.kill_switch), ("Strict kill switch", prefs.strict_kill_switch), ("Block DNS over TLS", prefs.block_dot), ("Allow local network", prefs.allow_lan),
                        ("Block malware", prefs.block_malware), ("Launch at startup", prefs.launch_at_startup), ("Auto-connect", prefs.auto_connect), ("Notifications", prefs.notifications)];
         let mut facts = support::Facts {
             app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -435,9 +453,9 @@ fn main() {
     // Opening the app again brings up the one that's running, so there's never a second window asking the service for different things.
     let builder = tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app))).plugin(tauri_plugin_notification::init());
     #[cfg(feature = "test-config")]
-    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
+    let builder = builder.plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, update_check, update_install, vpn_connect_test_file, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
     #[cfg(not(feature = "test-config"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
+    let builder = builder.invoke_handler(tauri::generate_handler![vpn_status, vpn_disconnect, vpn_connect, update_check, update_install, has_test_config, account_state, sign_in, cancel_sign_in, sign_out, start_trial, my_ip, open_site, get_settings, set_settings, should_auto_connect, diagnostics, notify, probe_servers, probe_tunnel, speed_test, leak_check, send_support]);
     builder
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Kiwi VPN", true, None::<&str>)?;

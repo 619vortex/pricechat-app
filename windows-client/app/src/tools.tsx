@@ -2,6 +2,16 @@ import { useState } from "react";
 import { type LeakReport, type Settings, type SpeedReport, leakCheck, speedTest } from "./vpn";
 import { allowedIpsExcluding, leakVerdict, mbps, speedSummary, validateExclusions } from "./smart";
 
+/** When the normal kill switch lets traffic out unprotected (audit M3). Kept in step with RELEASE_CASES in service/src/protocol.rs. */
+export const RELEASE_CASES = [
+  "for about 3 seconds while Windows restarts the Kiwi VPN service after a crash",
+  "while Windows starts, before the Kiwi VPN service is running",
+  "after the tunnel fails to restart 6 times in a row",
+  "10 minutes after a restart if the server never answers",
+  "2 minutes after a server switch that never completes",
+  "while Kiwi VPN is being updated",
+];
+
 /** The service accepts at most this many routes in a config (service/src/config.rs MAX_ALLOWED). */
 const MAX_ROUTES = 64;
 
@@ -15,7 +25,7 @@ export function Switch({ label, hint, on, off, onChange }: { label: string; hint
 }
 
 /** Kiwi VPN 2.0's connection settings. Each one says plainly what it does and what it can't do. */
-export function ConnectionSettings({ prefs, change, connected, killSwitchReady }: { prefs: Settings; change: (p: Partial<Settings>) => void; connected: boolean; killSwitchReady: boolean }) {
+export function ConnectionSettings({ prefs, change, connected, killSwitchReady, strictReady = false, dotReady = false }: { prefs: Settings; change: (p: Partial<Settings>) => void; connected: boolean; killSwitchReady: boolean; strictReady?: boolean; dotReady?: boolean }) {
   const [split, setSplit] = useState((prefs.split_exclude ?? []).join("\n"));
   const checked = validateExclusions(split.split(/\r?\n/), ["10.66.0.1/32", "9.9.9.9/32", "149.112.112.112/32"]);
   const pieces = allowedIpsExcluding(checked.ok).length;
@@ -31,6 +41,21 @@ export function ConnectionSettings({ prefs, change, connected, killSwitchReady }
           <Switch label="Kill switch" hint="Blocks all internet traffic outside the VPN while you want to be connected, even if the app closes. Disconnect, or turn this off, to get your normal connection back."
                   on={!!prefs.kill_switch} onChange={(v) => change({ kill_switch: v })} />
           <Switch label="Allow my local network" hint="Printers and other devices on your Wi-Fi stay reachable while the kill switch is on." on={prefs.allow_lan !== false} off={!prefs.kill_switch} onChange={(v) => change({ allow_lan: v })} />
+          {strictReady && (
+            <Switch label="Strict kill switch" hint="Also blocks while the service restarts, while Windows starts and when Kiwi VPN gives up reconnecting. Only Disconnect gets your normal connection back. If Kiwi VPN can't reconnect, you stay offline until you press Disconnect."
+                    on={!!prefs.strict_kill_switch} off={!prefs.kill_switch} onChange={(v) => change({ strict_kill_switch: v })} />
+          )}
+          {dotReady && (
+            <Switch label="Block DNS over TLS outside the VPN" hint="Stops apps sending encrypted DNS (port 853) around the tunnel, also to your local network and the addresses that skip the VPN."
+                    on={!!prefs.block_dot} off={!prefs.kill_switch} onChange={(v) => change({ block_dot: v })} />
+          )}
+          <div className="releases" aria-label="When the kill switch lets traffic through">
+            <small>{prefs.kill_switch && prefs.strict_kill_switch && strictReady
+              ? "The strict kill switch keeps blocking in all of these cases, which the normal kill switch lets through:"
+              : "The normal kill switch lets your traffic out unprotected:"}</small>
+            <ul>{RELEASE_CASES.map((c) => <li key={c}>{c}</li>)}</ul>
+            <small>It never blocks after you press Disconnect or turn it off.</small>
+          </div>
         </>
       ) : (
         // Never offered until the service proves it can do it: a kill switch that doesn't block is worse than none.

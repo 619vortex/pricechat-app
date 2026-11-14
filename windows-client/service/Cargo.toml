@@ -1,6 +1,6 @@
 [package]
 name = "kiwivpn-service"
-version = "0.1.0"
+version = "2.2.0"
 edition = "2021"
 description = "Kiwi VPN's Windows service: runs the tunnel for the app through WireGuard's embeddable tunnel service."
 
@@ -16,10 +16,18 @@ path = "src/lib.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+# 2.2 signed auto-update: the manifest's Ed25519 signature (RFC 8032, verify_strict) and the installer's SHA-256
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Services", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_NetworkManagement_WindowsFilteringPlatform", "Win32_System_Rpc", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Services", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_NetworkManagement_WindowsFilteringPlatform", "Win32_System_Rpc", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_System_Registry"] }
+
+[features]
+# TEST ONLY: trusts the throwaway TEST manifest keys, the "test" channel, host kiwi-update.test and the certificate thumbprint in
+# KIWI_UPDATE_TEST_PIN at compile time. CI's update test builds an installer with it; the release check refuses it in a public build.
+update-test = []
 
 [profile.release]
 strip = true

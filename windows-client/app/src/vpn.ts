@@ -7,8 +7,12 @@ import { invoke } from "@tauri-apps/api/core";
  */
 
 export type TunnelState = "disconnected" | "connecting" | "connected" | "stopping" | "failed";
+/** 2.2: what the service found when it checked the signed update manifest. The page can only ask it to check or to install. */
+export type UpdateState = "unknown" | "none" | "available" | "required" | "downloading" | "installing" | "failed";
+export interface UpdateInfo { state: UpdateState; version?: string | null; notes?: string | null; security?: boolean; error?: string | null; checked_at?: number | null }
 export interface Status { state: TunnelState; handshake_age_seconds: number | null; rx_bytes: number; tx_bytes: number; error: string | null; connected_since: number | null;
-  /** the service's kill switch is blocking everything outside the VPN */ kill_switch?: boolean; /** what the service enforces */ features?: string[] }
+  /** the service's kill switch is blocking everything outside the VPN */ kill_switch?: boolean; /** what the service enforces */ features?: string[];
+  /** 2.2: the strict kill switch's persistent block is in place (until Disconnect) */ strict?: boolean; /** 2.2 */ update?: UpdateInfo | null; version?: string | null }
 export interface Answer { service: boolean; status: Status | null; message: string | null }
 export type Phase = "loading" | "no-service" | "off" | "connecting" | "on" | "stopping" | "failed";
 
@@ -36,6 +40,10 @@ export function phaseOf(answer: Answer | null): Phase {
 }
 
 export const vpnStatus = () => invoke<Answer>("vpn_status");
+/** 2.2: the service checks the signed manifest (at most every 10 minutes when the app asks). */
+export const updateCheck = () => invoke<Answer>("update_check");
+/** 2.2: the service downloads, verifies (signature, pinned certificate, hash, version) and runs the installer it found. */
+export const updateInstall = () => invoke<Answer>("update_install");
 export const vpnDisconnect = () => invoke<Answer>("vpn_disconnect");
 /** `pauseFirst`: failover's switch. The current tunnel is closed first (the kill switch keeps blocking), because a server that stopped
  * answering still has this PC's routes, so the next server's settings couldn't be fetched through it. */
@@ -53,7 +61,8 @@ export const vpnConnectTestFile = () => invoke<Answer | null>("vpn_connect_test_
 export const hasTestConfig = () => invoke<boolean>("has_test_config");
 export interface Settings { launch_at_startup: boolean; auto_connect: boolean; minimize_to_tray: boolean; notifications: boolean;
   /** 2.0, all optional so a 0.1 settings file still loads */
-  smart_connect?: boolean; failover?: boolean; kill_switch?: boolean; allow_lan?: boolean; block_malware?: boolean; split_exclude?: string[] }
+  smart_connect?: boolean; failover?: boolean; kill_switch?: boolean; allow_lan?: boolean; block_malware?: boolean; split_exclude?: string[];
+  /** 2.2, both off by default */ strict_kill_switch?: boolean; block_dot?: boolean }
 export interface Diagnostics { version: string; service: string; tunnel: string; handshake_age_seconds: number | null; settings_file: string;
   /** what this build's service can really do, e.g. "kill_switch" once its rules are in place and verified */ features?: string[] }
 export const getSettings = () => invoke<Settings>("get_settings");

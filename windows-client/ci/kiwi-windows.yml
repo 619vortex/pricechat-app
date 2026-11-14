@@ -13,6 +13,10 @@
 # keeps WireGuard LLC's signature. A signed build is still only a private artifact: nothing here publishes it.
 #
 # "check_certificate" (also by hand) only looks at the certificate through SSL.com (no build, nothing signed, no signing used).
+#
+# 2.2: "update-test" (no account, no secrets) installs a previous version built from this source with the TEST-only update-test
+# feature, serves it TEST manifests over a local HTTPS server and checks every refusal and a real update. The real-account "e2e"
+# job runs on pushes to main, and on a manual run only with "run_e2e" ticked: it drains a shared production device rate limit.
 name: Kiwi VPN Windows
 
 on:
@@ -34,6 +38,11 @@ on:
         default: false
       check_certificate:
         description: "Only check the eSigner certificate (Authenticode, key type, chain, expiry): no build, nothing signed"
+        type: boolean
+        required: false
+        default: false
+      run_e2e:
+        description: "Also run the real-account VPN tests (e2e). Off by default on manual runs: they use the shared production device rate limit"
         type: boolean
         required: false
         default: false
@@ -156,17 +165,27 @@ jobs:
           cargo build --release --example e2e
           if ($LASTEXITCODE -ne 0) { throw "The test tool didn't build" }
           Push-Location ..\service
-          cargo build --release --example guard_check
-          if ($LASTEXITCODE -ne 0) { throw "The kill switch test tool didn't build" }
+          cargo build --release --example guard_check --example update_client
+          if ($LASTEXITCODE -ne 0) { throw "The kill switch / update test tools didn't build" }
           Pop-Location
           New-Item -ItemType Directory -Force "$env:GITHUB_WORKSPACE\tools" | Out-Null
-          Copy-Item "$env:CARGO_TARGET_DIR\release\examples\e2e.exe", "$env:CARGO_TARGET_DIR\release\examples\guard_check.exe" "$env:GITHUB_WORKSPACE\tools\"
+          Copy-Item "$env:CARGO_TARGET_DIR\release\examples\e2e.exe", "$env:CARGO_TARGET_DIR\release\examples\guard_check.exe", "$env:CARGO_TARGET_DIR\release\examples\update_client.exe" "$env:GITHUB_WORKSPACE\tools\"
 
       - name: Service, release build
         working-directory: windows-client/service
         run: |
           cargo build --release --bins
           if ($LASTEXITCODE -ne 0) { throw "The service didn't build" }
+
+      - name: Release check (the public service has no update-test build in it)
+        run: |
+          $ErrorActionPreference = "Stop"
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe"))
+          foreach ($marker in "kiwi-update.test", "ca934a560e296684883f80e107452d396a3bcfb0c2b16842b49ce1f7bd9911f8") {
+            if ($text.Contains($marker)) { throw "The public service contains the TEST update build's '$marker': it was built with --features update-test" }
+          }
+          if (-not $text.Contains("pricechat.live")) { throw "The public service doesn't name its update host" }
+          "Release check: no update-test feature in the public service" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Signing tool (SSL.com CodeSignTool, SHA-256 checked)
         if: env.SIGN == 'yes'
@@ -301,6 +320,73 @@ jobs:
           @("ci-commit $env:GITHUB_SHA", "source $Source", "version $Version", "run $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID", $(if ($Signed) { "signed yes" } else { "signed no" })) | Set-Content "$env:GITHUB_WORKSPACE\out\BUILD-INFO.txt" -Encoding ascii
           if ($Signed) { "### Kiwi VPN $Version for Windows (SIGNED test build)`n`nSHA-256 ``$Sha```n`nPrivate artifact, not published anywhere." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
           else { "### Kiwi VPN $Version for Windows (unsigned test build)`n`nSHA-256 ``$Sha```n`nNot published anywhere. Smart App Control blocks it until it's code signed." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
+
+      # TEST ONLY, never in a signed run: the update test's "previous version" (2.1.99, service built with --features update-test:
+      # TEST manifest keys, channel "test", host kiwi-update.test, and the thumbprint of a throwaway certificate made right here),
+      # and this run's public installer signed three ways (the pinned throwaway certificate, another throwaway one, none).
+      # Only the public halves (.cer) of the throwaway certificates leave this job.
+      - name: Update test build (TEST ONLY, private artifact)
+        if: env.SIGN != 'yes'
+        run: |
+          $ErrorActionPreference = "Stop"
+          $T = "$env:GITHUB_WORKSPACE\uptest"
+          New-Item -ItemType Directory -Force $T | Out-Null
+          $pinned = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Kiwi VPN CI update test pinned (TEST ONLY)" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(3) -HashAlgorithm SHA256
+          $other = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Kiwi VPN CI update test not pinned (TEST ONLY)" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(3) -HashAlgorithm SHA256
+          Export-Certificate -Cert $pinned -FilePath "$T\pinned.cer" | Out-Null
+          Export-Certificate -Cert $other -FilePath "$T\other.cer" | Out-Null
+          foreach ($c in "pinned.cer", "other.cer") { Import-Certificate -FilePath "$T\$c" -CertStoreLocation Cert:\LocalMachine\Root | Out-Null }
+          # the previous version: same source, test feature, says it is 2.1.99
+          $env:KIWI_UPDATE_TEST_PIN = $pinned.Thumbprint
+          $env:KIWI_UPDATE_TEST_VERSION = "2.1.99"
+          $env:CARGO_TARGET_DIR = "$env:GITHUB_WORKSPACE\target-uptest"
+          Push-Location service
+          cargo build --release --bins --features update-test
+          if ($LASTEXITCODE -ne 0) { throw "The update-test service didn't build" }
+          Pop-Location
+          $svc = "$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe"
+          if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($svc)).Contains("kiwi-update.test")) { throw "The update-test service isn't the test build" }
+          $env:CARGO_TARGET_DIR = "$env:GITHUB_WORKSPACE\target"
+          Copy-Item $svc app\src-tauri\bundle-files\kiwivpn-service.exe -Force
+          $Cfg = "$env:RUNNER_TEMP\uptest.conf.json"
+          '{ "version": "2.1.99" }' | Set-Content $Cfg -Encoding ascii
+          Push-Location app
+          foreach ($try in 1..3) {
+            npm run tauri -- build --config $Cfg -- --no-default-features
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($try -eq 3) { throw "The update-test installer didn't build" }
+            Start-Sleep 60
+          }
+          Pop-Location
+          $old = Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*2.1.99*-setup.exe" | Select-Object -First 1
+          if (-not $old) { throw "No 2.1.99 installer was produced" }
+          Copy-Item $old.FullName "$T\KiwiVPN-2.1.99-updatetest-Setup.exe"
+          Copy-Item "$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe" app\src-tauri\bundle-files\kiwivpn-service.exe -Force
+          # the update: this run's public installer
+          $pub = Get-ChildItem "$env:GITHUB_WORKSPACE\out\*-Setup.exe" | Select-Object -First 1
+          foreach ($n in "pinned", "other", "unsigned") { Copy-Item $pub.FullName "$T\KiwiVPN-2.2.0-$n-Setup.exe" }
+          function SignIt($file, $cert) {
+            foreach ($ts in "http://timestamp.digicert.com", "http://timestamp.sectigo.com", "http://timestamp.globalsign.com/tsa/r6advanced1") {
+              try {
+                $s = Set-AuthenticodeSignature -FilePath $file -Certificate $cert -HashAlgorithm SHA256 -TimestampServer $ts
+                if ($s.SignerCertificate -and $s.TimeStamperCertificate) { return }
+              } catch { Write-Host "timestamp $ts failed: $_" }
+              Start-Sleep 5
+            }
+            throw "Couldn't sign $file with a timestamp"
+          }
+          SignIt "$T\KiwiVPN-2.2.0-pinned-Setup.exe" $pinned
+          SignIt "$T\KiwiVPN-2.2.0-other-Setup.exe" $other
+          Get-ChildItem $T | ForEach-Object { $g = Get-AuthenticodeSignature $_.FullName; Write-Host ("{0,-36} {1,-12} {2}" -f $_.Name, $g.Status, $g.SignerCertificate.Subject) }
+          Remove-Item $pinned.PSPath, $other.PSPath -Force
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.SIGN != 'yes'
+        with:
+          name: KiwiVPN-update-test-${{ github.sha }}
+          path: uptest/
+          retention-days: 3
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -489,6 +575,13 @@ jobs:
           $log = "C:\Program Files\KiwiVPN\logs\service.log"
           if (Test-Path $log) { Get-Content $log -Tail 120 }
 
+      - name: Lift any strict kill switch left by a failed check
+        if: always()
+        run: |
+          tools\guard_check.exe unblock-strict
+          if (Test-Path "C:\Program Files\KiwiVPN\kiwivpn-service.exe") { & "C:\Program Files\KiwiVPN\kiwivpn-service.exe" unblock }
+          exit 0
+
       - name: Uninstall, and the internet is still there
         if: always()
         run: |
@@ -503,7 +596,7 @@ jobs:
         run: |
           $rows = @()
           foreach ($f in "ks-service-report.json", "ks-filters-report.json") { if (Test-Path $f) { $rows += Get-Content $f -Raw | ConvertFrom-Json } }
-          $md = "### Kiwi VPN 2.0 kill switch`n`n| Result | Check | Detail |`n|---|---|---|`n"
+          $md = "### Kiwi VPN 2.2 kill switch`n`n| Result | Check | Detail |`n|---|---|---|`n"
           foreach ($r in $rows) { $md += "| $($r.result) | $($r.name) | $(($r.detail -replace '\|', '/')) |`n" }
           $md | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           if ("${{ steps.service.outcome }}" -ne "success" -or "${{ steps.raw.outcome }}" -ne "success") { throw "Some kill switch checks failed (see the table)" }
@@ -516,12 +609,92 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # 2.2 signed auto-update on a fresh GitHub Windows machine, no account and no secrets (ci/update-test/run.ps1): the previous
+  # version (TEST build) refuses every bad manifest and installer, then updates itself to this build; service, protected state,
+  # kept tunnels folder and kill switch are checked afterwards.
+  update-test:
+    needs: build
+    if: ${{ !inputs.sign }}
+    runs-on: windows-2022
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: windows-client/ci
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: KiwiVPN-Windows-${{ github.sha }}
+          path: build
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: KiwiVPN-update-test-${{ github.sha }}
+          path: uptest
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: KiwiVPN-test-tools-${{ github.sha }}
+          path: tools
+
+      - name: Test keys match the service's TEST_KEYS
+        run: |
+          node windows-client\ci\update-test\manifest.mjs check
+          if ($LASTEXITCODE -ne 0) { throw "The CI test keys don't match the service" }
+
+      - name: Update test (refusals, then a real update)
+        id: run
+        continue-on-error: true
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File windows-client\ci\update-test\run.ps1 -Build build -UpTest uptest -Tools tools -Report update-report.json
+          if ($LASTEXITCODE -ne 0) { throw "Update test checks failed" }
+
+      - name: Service log
+        if: always()
+        run: |
+          $log = "C:\Program Files\KiwiVPN\logs\service.log"
+          if (Test-Path $log) { Get-Content $log -Tail 150 }
+
+      - name: Uninstall
+        if: always()
+        run: |
+          if (Test-Path "C:\Program Files\KiwiVPN\uninstall.exe") { Start-Process "C:\Program Files\KiwiVPN\uninstall.exe" -ArgumentList "/S" -Wait }
+          exit 0
+
+      - name: Report
+        if: always()
+        run: |
+          $rows = @()
+          if (Test-Path update-report.json) { $rows = @(Get-Content update-report.json -Raw | ConvertFrom-Json) }
+          $md = "### Kiwi VPN 2.2 signed auto-update`n`n| Result | Check | Detail |`n|---|---|---|`n"
+          foreach ($r in $rows) { $md += "| $($r.result) | $($r.name) | $(($r.detail -replace '\|', '/')) |`n" }
+          $md | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ("${{ steps.run.outcome }}" -ne "success") { throw "Some update checks failed (see the table)" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: KiwiVPN-update-test-report-${{ github.sha }}
+          path: update-report.json
+          retention-days: 14
+          if-no-files-found: ignore
+
   # Real VPN tests on a fresh GitHub Windows machine: install the build silently, connect to the real Kiwi servers,
   # then drive the real window. Uses the Actions secret KIWI_CI_SESSION (a Kiwi VPN app session: VPN API only, made by
   # windows-client/ci/session-tool/ci-session.mjs). Without it the job says so and does nothing. Its devices are deleted
   # at the end. Nothing is published; the firewall rule used for the failover test exists only on this runner.
   e2e:
     needs: build
+    # pushes to main always; a manual run only when asked (the shared production device rate limit)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_e2e }}
     runs-on: windows-2022
     timeout-minutes: 50
     defaults:

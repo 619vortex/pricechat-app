@@ -4,6 +4,7 @@ use crate::config;
 use crate::firewall::Guard;
 use crate::guard::{self, Plan, Protect};
 use crate::protocol::{self, Caller, Request, ServiceState, Status, PIPE_NAME};
+use crate::update_win::{self, Updater};
 use std::ffi::c_void;
 use std::io::Write;
 use std::mem::{size_of, zeroed};
@@ -31,7 +32,7 @@ pub const APP_EXE: &str = "KiwiVPN.exe";
 const MAX_CLIENTS: usize = 64;
 const TUNNEL_SERVICE: &str = "WireGuardTunnel$kiwi";
 /// SYSTEM and the Administrators group only.
-const PRIVATE_SDDL: &str = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)";
+pub(crate) const PRIVATE_SDDL: &str = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)";
 /// What the signed-in person may do on the pipe: read data, write data, read its attributes and owner, wait on it. Exactly this, because for a pipe the "append data" part of
 /// generic write is also the right to create another instance of it, which would let any program of theirs pose as the service on the service's own pipe, under its owner.
 pub const PIPE_CLIENT_ACCESS: u32 = 0x0012_0083;
@@ -39,7 +40,7 @@ pub const PIPE_CLIENT_ACCESS: u32 = 0x0012_0083;
 const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;0x120083;;;IU)";
 const SERVICE_SID_TYPE_UNRESTRICTED: u32 = 1;
 
-fn wide(s: &str) -> Vec<u16> {
+pub(crate) fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
@@ -58,9 +59,11 @@ fn resume_after_restart(tunnel: Arc<Tunnel>) {
     tunnel.resuming.store(true, Ordering::SeqCst);
     if conf_path().map(|p| p.exists()).unwrap_or(false) {
         *tunnel.resumed_at.lock().unwrap() = Some(now_seconds());
-        // the kill switch comes back before the tunnel does, so nothing leaks while the network comes up
-        if let Some(plan) = saved_plan() {
-            if let Err(e) = tunnel.engage(&plan) {
+        // the kill switch comes back before the tunnel does, so nothing leaks while the network comes up. Under the same lock as
+        // Connect and Disconnect, and only if the tunnel is still wanted: a Disconnect (or `unblock`) that came first wins.
+        let _one_at_a_time = tunnel.changing.lock().unwrap();
+        if let Some((plan, protect)) = saved_plan().filter(|_| conf_path().map(|p| p.exists()).unwrap_or(false)) {
+            if let Err(e) = tunnel.engage(&plan, protect.strict) {
                 log_event(&format!("guard: couldn't restore after the restart: {e}"));
             }
         }
@@ -100,25 +103,27 @@ fn app_paths() -> Vec<PathBuf> {
     out
 }
 
-fn plan_of(protect: &Protect, allow: Vec<guard::Net>, addresses: &[String]) -> Plan {
-    Plan { kill_switch: protect.kill_switch, allow_lan: protect.allow_lan, tunnel: guard::tunnel_nets(addresses), allow, apps: 2 }
+fn plan_of(protect: &Protect, allow: Vec<guard::Net>, addresses: &[String], endpoint: Option<std::net::SocketAddr>) -> Plan {
+    Plan { kill_switch: protect.kill_switch, allow_lan: protect.allow_lan, tunnel: guard::tunnel_nets(addresses), allow, apps: 2, endpoint, block_dot: protect.block_dot }
 }
 
-fn save_plan(protect: &Protect, addresses: &[String]) {
+fn save_plan(protect: &Protect, addresses: &[String], endpoint: Option<std::net::SocketAddr>) {
     let Ok(path) = guard_path() else { return };
-    let text = serde_json::json!({ "protect": protect, "addresses": addresses }).to_string();
+    let text = serde_json::json!({ "protect": protect, "addresses": addresses, "endpoint": endpoint.map(|e| e.to_string()) }).to_string();
     if std::fs::write(path, text).is_err() {
         log_event("guard: couldn't save the kill switch's settings for a restart");
     }
 }
 
-fn saved_plan() -> Option<Plan> {
+fn saved_plan() -> Option<(Plan, Protect)> {
     let text = std::fs::read_to_string(guard_path().ok()?).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     let protect: Protect = serde_json::from_value(v.get("protect")?.clone()).ok()?;
     let addresses: Vec<String> = serde_json::from_value(v.get("addresses")?.clone()).ok()?;
+    // absent in a 2.1 file: the service's UDP may then go anywhere until the next connect
+    let endpoint = v.get("endpoint").and_then(|e| e.as_str()).and_then(|e| e.parse().ok());
     let allow = protect.check().ok()?;
-    Some(plan_of(&protect, allow, &addresses))
+    Some((plan_of(&protect, allow, &addresses, endpoint), protect))
 }
 
 /// A host name endpoint is looked up now, before the kill switch is on: once it is, DNS only works inside the tunnel.
@@ -136,10 +141,10 @@ fn resolved(endpoint: &str) -> String {
     }
 }
 
-struct Descriptor(PSECURITY_DESCRIPTOR);
+pub(crate) struct Descriptor(PSECURITY_DESCRIPTOR);
 
 impl Descriptor {
-    fn new(sddl: &str) -> Result<Self, String> {
+    pub(crate) fn new(sddl: &str) -> Result<Self, String> {
         let mut sd: PSECURITY_DESCRIPTOR = null_mut();
         let ok = unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(wide(sddl).as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()) };
         if ok == 0 {
@@ -147,7 +152,7 @@ impl Descriptor {
         }
         Ok(Descriptor(sd))
     }
-    fn attributes(&self) -> SECURITY_ATTRIBUTES {
+    pub(crate) fn attributes(&self) -> SECURITY_ATTRIBUTES {
         SECURITY_ATTRIBUTES { nLength: size_of::<SECURITY_ATTRIBUTES>() as u32, lpSecurityDescriptor: self.0, bInheritHandle: 0 }
     }
 }
@@ -387,6 +392,8 @@ pub struct Tunnel {
     ever_connected: AtomicBool,
     /// When the app paused the tunnel to switch servers, keeping the kill switch on.
     paused_at: Mutex<Option<u64>>,
+    /// 2.2: the strict kill switch's persistent filters are in place (they outlive this process; read from Windows at start).
+    strict: AtomicBool,
 }
 
 fn now_seconds() -> u64 {
@@ -394,7 +401,7 @@ fn now_seconds() -> u64 {
 }
 
 /// The service's own record of what happened to the tunnel, in an administrators-only folder. Only fixed text, states and Windows error codes: never a config or a key.
-fn log_event(message: &str) {
+pub(crate) fn log_event(message: &str) {
     let Ok(dir) = exe_dir().map(|d| d.join("logs")) else { return };
     if let Ok(sd) = Descriptor::new(PRIVATE_SDDL) {
         let attrs = sd.attributes();
@@ -434,17 +441,50 @@ impl Tunnel {
             resumed_at: Mutex::new(None),
             ever_connected: AtomicBool::new(false),
             paused_at: Mutex::new(None),
+            strict: AtomicBool::new(false),
         }
     }
 
-    /// Puts a plan's rules in force, replacing any before them only once the new ones hold.
-    fn engage(&self, plan: &Plan) -> Result<(), String> {
+    /// Puts a plan's rules in force, replacing any before them only once the new ones hold. `strict`: also persistently (audit M3),
+    /// first, so the persistent set already allows the new server before the tunnel starts. A plan without it removes an earlier
+    /// strict set once the new rules hold.
+    fn engage(&self, plan: &Plan, strict: bool) -> Result<(), String> {
         let apps = app_paths();
         let refs: Vec<&Path> = apps.iter().map(PathBuf::as_path).collect();
+        if strict && plan.kill_switch {
+            let (count, boot) = crate::firewall::strict_engage(plan, &refs)?;
+            self.strict.store(true, Ordering::SeqCst);
+            log_event(&format!("guard: strict kill switch on, {count} persistent filters, boot-time {}", match boot {
+                Ok(n) => format!("{n} filters"),
+                Err(e) => format!("not added ({e})"),
+            }));
+        }
         let guard = Guard::engage(plan, &refs)?;
-        log_event(&format!("guard: on, kill switch {}, local network {}, {} kept off, {} filters", plan.kill_switch, plan.allow_lan, plan.allow.len(), guard.filters()));
+        log_event(&format!("guard: on, kill switch {}, local network {}, {} kept off, server {}, DNS over TLS blocked {}, {} filters", plan.kill_switch, plan.allow_lan, plan.allow.len(),
+                           if plan.endpoint.is_some() { "known" } else { "unknown" }, plan.block_dot, guard.filters()));
         *self.guard.lock().unwrap() = Some(guard);
+        if !(strict && plan.kill_switch) {
+            self.remove_strict("a connect without the strict kill switch");
+        }
         Ok(())
+    }
+
+    /// Removes the strict kill switch's persistent filters, if there are any.
+    fn remove_strict(&self, why: &str) {
+        if !self.strict.load(Ordering::SeqCst) && !crate::firewall::strict_present() {
+            return;
+        }
+        match crate::firewall::strict_remove() {
+            Ok(n) => {
+                self.strict.store(false, Ordering::SeqCst);
+                log_event(&format!("guard: strict kill switch off ({why}), {n} filters removed"));
+            }
+            Err(e) => log_event(&format!("guard: couldn't remove the strict kill switch ({why}): {e}")),
+        }
+    }
+
+    pub fn strict_held(&self) -> bool {
+        self.strict.load(Ordering::SeqCst)
     }
 
     fn release(&self, why: &str) {
@@ -454,7 +494,7 @@ impl Tunnel {
     }
 
     fn kill_active(&self) -> bool {
-        self.guard.lock().unwrap().as_ref().is_some_and(Guard::kill_switch)
+        self.guard.lock().unwrap().as_ref().is_some_and(Guard::kill_switch) || self.strict.load(Ordering::SeqCst)
     }
 
     pub fn connect(&self, text: &str, protect: &Protect) -> Status {
@@ -466,7 +506,7 @@ impl Tunnel {
         *self.resumed_at.lock().unwrap() = None;
         *self.paused_at.lock().unwrap() = None;
         self.ever_connected.store(false, Ordering::SeqCst);
-        log_event(&format!("connect: requested, kill switch {}", protect.kill_switch));
+        log_event(&format!("connect: requested, kill switch {}, strict {}", protect.kill_switch, protect.strict));
         let allow = match protect.check() {
             Ok(a) => a,
             Err(e) => return self.finish(Status::failed(e)),
@@ -480,9 +520,10 @@ impl Tunnel {
         };
         cfg.allowed_ips = guard::without_default_routes(&cfg.allowed_ips);
         cfg.endpoint = resolved(&cfg.endpoint);
-        let plan = plan_of(protect, allow, &cfg.addresses);
+        let endpoint = cfg.endpoint.parse::<std::net::SocketAddr>().ok();
+        let plan = plan_of(protect, allow, &cfg.addresses, endpoint);
         // on before the old tunnel closes, so switching servers never leaks
-        if let Err(e) = self.engage(&plan) {
+        if let Err(e) = self.engage(&plan, protect.strict) {
             log_event(&format!("guard: couldn't turn on: {e}"));
             if protect.kill_switch {
                 return self.finish(Status::failed(format!("The kill switch couldn't be turned on, so nothing was connected. ({e})")));
@@ -490,7 +531,7 @@ impl Tunnel {
         }
         match self.start(&cfg) {
             Ok(()) => {
-                save_plan(protect, &cfg.addresses);
+                save_plan(protect, &cfg.addresses, endpoint);
                 *self.started.lock().unwrap() = Some(now_seconds());
                 log_event("connect: tunnel started, waiting for the server");
                 self.status()
@@ -513,7 +554,9 @@ impl Tunnel {
     /// Every answer says what the service can do and whether the kill switch is blocking.
     pub fn finish(&self, mut status: Status) -> Status {
         status.kill_switch = self.kill_active();
+        status.strict = self.strict.load(Ordering::SeqCst);
         status.features = protocol::FEATURES.iter().map(|f| f.to_string()).collect();
+        status.version = Some(crate::update::running_version().to_string());
         status
     }
 
@@ -521,6 +564,11 @@ impl Tunnel {
     /// back. Without a kill switch, the DNS block never outlives the tunnel.
     fn watch(&self) {
         let Ok(_one_at_a_time) = self.changing.try_lock() else { return };
+        // `kiwivpn-service unblock` can remove the strict filters behind this process's back
+        if self.strict.load(Ordering::SeqCst) && !crate::firewall::strict_present() {
+            self.strict.store(false, Ordering::SeqCst);
+            log_event("guard: the strict kill switch was removed from outside (unblock)");
+        }
         if self.resuming.load(Ordering::SeqCst) {
             return;
         }
@@ -568,7 +616,9 @@ impl Tunnel {
             *self.started.lock().unwrap() = None;
             *self.since.lock().unwrap() = None;
             *self.resumed_at.lock().unwrap() = None;
-            *self.error.lock().unwrap() = Some(protocol::RELEASED.to_string());
+            // the strict kill switch's persistent filters stay (audit M3): only Disconnect or `unblock` removes them
+            let message = if self.strict.load(Ordering::SeqCst) { protocol::STRICT_HELD } else { protocol::RELEASED };
+            *self.error.lock().unwrap() = Some(message.to_string());
             return;
         }
         if state == ServiceState::Stopped {
@@ -689,7 +739,9 @@ impl Tunnel {
         *self.started.lock().unwrap() = None;
         *self.paused_at.lock().unwrap() = None;
         log_event("disconnect: requested");
-        match self.disconnect_inner() {
+        let closed = self.disconnect_inner();
+        self.remove_strict("Disconnect");
+        match closed {
             Ok(()) => {
                 let status = self.status();
                 log_event(&format!("disconnect: done, state {:?}", status.state));
@@ -908,7 +960,7 @@ fn caller_of(pipe: HANDLE) -> Caller {
     }
 }
 
-fn serve_client(pipe: HANDLE, tunnel: &Tunnel, check_callers: bool) {
+fn serve_client(pipe: HANDLE, tunnel: &Tunnel, updater: &Arc<Updater>, check_callers: bool) {
     let request = read_line(pipe).and_then(|l| protocol::parse_request(l.trim_end())).and_then(|r| {
         if !check_callers || protocol::allowed(&r, if matches!(r, Request::Status) { Caller::Other } else { caller_of(pipe) }) {
             Ok(r)
@@ -916,13 +968,27 @@ fn serve_client(pipe: HANDLE, tunnel: &Tunnel, check_callers: bool) {
             Err(protocol::NOT_ALLOWED.to_string())
         }
     });
-    let status = match request {
+    let mut status = match request {
         Ok(Request::Connect { config, protect }) => tunnel.connect(&config, &protect),
         Ok(Request::Disconnect) => tunnel.disconnect(),
         Ok(Request::Pause) => tunnel.pause(),
         Ok(Request::Status) => tunnel.status(),
+        Ok(Request::UpdateCheck) => {
+            updater.check(true);
+            tunnel.status()
+        }
+        Ok(Request::UpdateInstall) => {
+            // the download can take a while: it runs on its own, and the answer says "downloading"
+            let u = Arc::clone(updater);
+            std::thread::spawn(move || {
+                let _ = u.install(true);
+            });
+            std::thread::sleep(Duration::from_millis(200));
+            tunnel.status()
+        }
         Err(e) => tunnel.finish(Status::failed(e)),
     };
+    status.update = Some(updater.info());
     if let Ok(mut line) = serde_json::to_vec(&status) {
         line.push(b'\n');
         write_all(pipe, &line);
@@ -957,7 +1023,16 @@ fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> R
     let check_callers = sddl.is_some();
     let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let tunnel = Arc::new(Tunnel::new());
+    let updater = Arc::new(Updater::new());
     if check_callers {
+        if crate::firewall::strict_present() {
+            tunnel.strict.store(true, Ordering::SeqCst);
+            log_event("guard: the strict kill switch is in place from before this start");
+        }
+        update_win::after_start(&updater);
+        let checking = Arc::clone(&updater);
+        let watched_tunnel = Arc::clone(&tunnel);
+        std::thread::spawn(move || update_loop(checking, watched_tunnel));
         let resuming = Arc::clone(&tunnel);
         std::thread::spawn(move || resume_after_restart(resuming));
         let watched = Arc::clone(&tunnel);
@@ -994,10 +1069,11 @@ fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> R
         active.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let active = Arc::clone(&active);
         let tunnel = Arc::clone(&tunnel);
+        let updater = Arc::clone(&updater);
         let raw = pipe as usize;
         std::thread::spawn(move || {
             let pipe = raw as HANDLE;
-            serve_client(pipe, &tunnel, check_callers);
+            serve_client(pipe, &tunnel, &updater, check_callers);
             unsafe {
                 FlushFileBuffers(pipe);
                 CloseHandle(pipe); // closing, not DisconnectNamedPipe: that makes the client's read fail after it already has its answer
@@ -1006,6 +1082,32 @@ fn serve_with(stop: Arc<std::sync::atomic::AtomicBool>, sddl: Option<&str>) -> R
         });
     }
     Ok(())
+}
+
+/// Checks for updates two minutes after start, then every 6 hours (plus up to an hour, so installs don't all ask at once). A
+/// security or required update installs by itself only while no tunnel is wanted; anything else waits for the person's click.
+fn update_loop(updater: Arc<Updater>, tunnel: Arc<Tunnel>) {
+    use std::hash::{BuildHasher, Hasher};
+    std::thread::sleep(Duration::from_secs(120));
+    loop {
+        let info = updater.check(false);
+        let idle = !conf_path().map(|p| p.exists()).unwrap_or(false) && !tunnel.strict_held();
+        if matches!(info.state, crate::update::UpdateState::Available | crate::update::UpdateState::Required | crate::update::UpdateState::Failed)
+            && updater.wants_silent_install()
+            && idle
+            && updater.may_retry()
+        {
+            log_event("update: installing a security update while no tunnel is wanted");
+            let _ = updater.install(false);
+        }
+        let jitter = std::collections::hash_map::RandomState::new().build_hasher().finish() % 3600;
+        std::thread::sleep(Duration::from_secs(6 * 3600 + jitter));
+    }
+}
+
+/// True while a tunnel is wanted (its config exists until Disconnect).
+pub fn tunnel_wanted() -> bool {
+    conf_path().map(|p| p.exists()).unwrap_or(false)
 }
 
 /// Wakes `serve` so it can notice it's been told to stop.
@@ -1155,6 +1257,8 @@ pub fn install() -> Result<(), String> {
 }
 
 pub fn uninstall() -> Result<(), String> {
+    // a removed Kiwi must never leave the PC blocked: the strict kill switch's persistent filters go too
+    let _ = crate::firewall::strict_remove();
     stop_and_delete(TUNNEL_SERVICE)?;
     if let Ok(dir) = tunnels_dir() {
         let _ = std::fs::remove_dir_all(dir);
