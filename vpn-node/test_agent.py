@@ -554,19 +554,27 @@ def test_no_pipeline_that_fails_a_fresh_install():
 # ---- L1: health needs the token from anywhere but loopback; request threads are bounded ----
 @pytest.mark.parametrize("peer", ["127.0.0.1", "::1", "::ffff:127.0.0.1"])
 def test_health_without_the_token_only_on_loopback(agent, peer):
-    assert agent.handle("GET", "/v1/health", None, b"", peer=peer) == (200, {"ok": True})
+    assert agent.health_allowed(peer, None) is True
 
 
 @pytest.mark.parametrize("peer", ["203.0.113.5", "2001:db8::5", "10.66.0.2", "nonsense"])
 def test_health_from_elsewhere_needs_the_token(agent, peer):
-    assert agent.handle("GET", "/v1/health", None, b"", peer=peer) == (401, {"error": "unauthorized"})
-    assert agent.handle("GET", "/v1/health", "Bearer wrong", b"", peer=peer)[0] == 401
-    assert agent.handle("GET", "/v1/health", f"Bearer {TOKEN}", b"", peer=peer) == (200, {"ok": True})
+    assert agent.health_allowed(peer, None) is False
+    assert agent.health_allowed(peer, "Bearer wrong") is False
+    assert agent.health_allowed(peer, f"Bearer {TOKEN}") is True
 
 
-def test_a_deployed_backend_keeps_syncing_from_outside(agent):
-    # what backend/app/vpn/node.py does: /v1/status, /v1/peers, /v1/proxy-users with the token, never /v1/health
-    assert agent.handle("GET", "/v1/status", f"Bearer {TOKEN}", b"", peer="203.0.113.5")[0] != 401
+def test_health_over_http_from_a_non_loopback_caller_is_401(http_server, monkeypatch):
+    monkeypatch.setattr(A, "_loopback", lambda peer: False)  # as if the request came from the internet
+    assert request(http_server, "GET", "/v1/health", token=None)[0] == 401
+    assert request(http_server, "GET", "/v1/health")[0] == 200  # with the token
+    assert request(http_server, "GET", "/v1/status")[0] == 200  # what the backend calls keeps working
+
+
+def test_handle_keeps_its_signature_for_callers_that_wrap_it(agent):
+    # backend/tests/test_vpn_e2e.py wraps agent.handle(method, path, auth, body): it must stay a 4-argument call
+    import inspect
+    assert list(inspect.signature(agent.handle).parameters) == ["method", "path", "auth", "body"]
 
 
 def test_agent_threads_are_bounded(agent):

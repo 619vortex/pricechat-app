@@ -345,12 +345,14 @@ class Agent:
             return False
         return hmac.compare_digest(header[7:].strip().encode(), self.token)
 
-    def handle(self, method: str, path: str, auth: Optional[str], body: bytes, peer: Optional[str] = None) -> tuple[int, dict]:
-        """`peer` is the caller's address (None = in-process). /v1/health answers without the token only on loopback, for
-        kiwi-vpn-doctor and the installers; from anywhere else it needs the token like everything else (the backend never
-        calls it, it reads /v1/status)."""
+    def health_allowed(self, peer: str, auth: Optional[str]) -> bool:
+        """/v1/health answers without the token only on loopback (kiwi-vpn-doctor, the installers); from anywhere else it
+        needs the token like everything else. The backend never calls it: it reads /v1/status."""
+        return _loopback(peer) or self.authorized(auth)
+
+    def handle(self, method: str, path: str, auth: Optional[str], body: bytes) -> tuple[int, dict]:
         path = path.split("?", 1)[0]
-        if path == "/v1/health" and (peer is None or _loopback(peer) or self.authorized(auth)):
+        if path == "/v1/health":  # the HTTP handler has checked health_allowed() for callers from the network
             return (200, {"ok": True}) if method == "GET" else (405, {"error": "method"})
         if not self.authorized(auth):
             return 401, {"error": "unauthorized"}
@@ -420,8 +422,10 @@ def make_handler(agent: Agent):
             if n < 0 or n > MAX_BODY:
                 return self._send(413, {"error": "body too large"})
             body = self.rfile.read(n) if n else b""
-            code, payload = agent.handle(self.command, self.path,
-                                         self.headers.get("Authorization"), body, peer=str(self.client_address[0]))
+            auth = self.headers.get("Authorization")
+            if self.path.split("?", 1)[0] == "/v1/health" and not agent.health_allowed(str(self.client_address[0]), auth):
+                return self._send(401, {"error": "unauthorized"})
+            code, payload = agent.handle(self.command, self.path, auth, body)
             self._send(code, payload)
 
         def _send(self, code: int, payload: dict):
