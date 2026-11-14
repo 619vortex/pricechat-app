@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VpnAdminPage, type VpnOverview } from "./VpnAdmin";
+import { MemoryRouter } from "react-router-dom";
+import { AlertsGoNowhere, VpnAdminPage, type VpnOverview } from "./VpnAdmin";
 
 /** TEST FIXTURES only: a fake Kiwi VPN admin API. No real agents, tokens or certificates. */
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -341,5 +342,29 @@ describe("VPN admin: support reports", () => {
     await flush();
     await open(/Support/);
     expect(screen.getByText(/No reports yet/)).toBeTruthy();
+  });
+});
+
+describe("VPN admin: owner alerts that go nowhere", () => {
+  it("says loudly when server and backup alerts go nowhere, with a link to set the chat", async () => {
+    serve((key) => key === "GET /api/system/alerts"
+      ? [200, { enabled: true, telegram_chat: "", delivers: false, problem: "Owner alerts go nowhere: no owner Telegram chat is set", recent: [] }]
+      : [200, overview()]);
+    const { container } = render(<MemoryRouter><AlertsGoNowhere /></MemoryRouter>);
+    await flush();
+    expect(container.textContent).toMatch(/Alerts go nowhere\. no owner Telegram chat is set/);
+    expect(screen.getByRole("link", { name: /Set the alert chat/ }).getAttribute("href")).toBe("/settings?tab=jobs");
+  });
+
+  it("offers a test alert when alerts are delivered", async () => {
+    serve((key) => key === "GET /api/system/alerts"
+      ? [200, { enabled: true, telegram_chat: "424242", delivers: true, problem: null, recent: [] }]
+      : key === "POST /api/system/alerts/test" ? [200, { sent: true }] : [200, overview()]);
+    const { container } = render(<MemoryRouter><AlertsGoNowhere /></MemoryRouter>);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Send test alert" }));
+    await flush();
+    expect(calls.some((c) => c.startsWith("POST /api/system/alerts/test"))).toBe(true);
+    expect(container.textContent).toMatch(/Test alert sent/);
   });
 });

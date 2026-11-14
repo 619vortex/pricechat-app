@@ -25,10 +25,14 @@ export function OwnerAlertsCard() {
 
   if (!data) return <Card title="Owner alerts"><Loading /></Card>;
   return (
-    <Card title="Owner alerts" actions={<Badge tone={data.enabled && data.telegram_chat ? "good" : "neutral"}>{data.enabled && data.telegram_chat ? "On" : "Log only"}</Badge>}>
+    <Card title="Owner alerts" actions={<Badge tone={data.delivers === false ? "bad" : data.enabled && data.telegram_chat ? "good" : "neutral"}>{data.delivers === false ? "Go nowhere" : data.enabled && data.telegram_chat ? "On" : "Log only"}</Badge>}>
+      {data.delivers === false && data.problem && (
+        <p className="small" role="alert" style={{ color: "var(--bad)" }}><b>Alerts go nowhere.</b> {data.problem.replace(/^Owner alerts go nowhere: /, "")}</p>
+      )}
       <p className="muted">
-        A private Telegram message from the bot when a background job fails 3 runs in a row (the nightly backup: its first failure),
-        when it works again, and when a Brand Manager TikTok account signs out while AUTO is on. The same alert at most once every 6 h.
+        A private Telegram message from the bot when a background job fails 3 runs in a row (the nightly backup and the weekly restore test: their first failure),
+        when it works again, when the newest backup is older than 26 h, when a Kiwi VPN server goes offline, fills up or nears its traffic allowance,
+        and when a Brand Manager TikTok account signs out while AUTO is on. The same alert at most once every 6 h.
         Your numeric Telegram user id (ask @userinfobot); press Start in a private chat with the bot once.
       </p>
       <div className="row">

@@ -5,7 +5,8 @@
 - Each alert has a key; the same key goes out at most once per 6 h (stored in `owner_alerts`, so restarts don't spam).
 - A problem that was reported stays "open" until it is fixed; the fix sends one "recovered" message (no cooldown: it
   always pairs with an alert the owner already got).
-- Sources: a background job failing 3 runs in a row (the nightly backup: its first failure), and a Brand Manager TikTok
+- Sources: a background job failing 3 runs in a row (the nightly backup and the weekly restore test: their first failure),
+  the newest backup older than 26 h or the bucket unreadable (the hourly `system.backup_check` job), and a Brand Manager TikTok
   account that is expired / revoked / disconnected while AUTO is on, Brand Manager publishing that stopped by itself
   (AUTO blocked or failing, videos past their posting time, sends to TikTok that failed; the `system.alerts` job), and a Kiwi VPN server
   the sync couldn't reach twice in a row / back online / past 90% of its capacity (after each `vpn.sync`).
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 COOLDOWN = timedelta(hours=6)
 FAIL_AFTER = 3  # failed runs in a row before the owner hears about a job
-FAIL_AFTER_JOB = {"system.backup": 1}  # the nightly backup runs once a day: its first failure already matters
+FAIL_AFTER_JOB = {"system.backup": 1, "system.restore_test": 1, "system.backup_check": 1}  # daily / weekly / backup safety: the first failure matters
 TIKTOK_BAD = ("expired", "revoked", "disconnected")
 from app.vpn.service import OFFLINE_AFTER as VPN_OFFLINE_AFTER  # noqa: E402  (same count as the server going offline)
 VPN_FULL_AT, VPN_FULL_CLEAR = 0.9, 0.8  # "nearly full" once past 90% of capacity, re-armed only below 80%
@@ -128,7 +129,7 @@ async def job_outcome(db: Session, name: str, label: str, status: str, error: st
     key = f"job:{name}"
     if status == "failed" and failures >= FAIL_AFTER_JOB.get(name, FAIL_AFTER):
         now = now or utcnow()
-        title = "Nightly database backup FAILED" if name == "system.backup" else "Background job failing"
+        title = {"system.backup": "Nightly database backup FAILED", "system.restore_test": "Weekly backup restore test FAILED"}.get(name, "Background job failing")
         runs = "1 run" if failures == 1 else f"{failures} runs in a row"
         text = f"Price Chat alert: {title}\nJob: {label} ({name})\nFailed: {runs}\nError: {_first_line(error)}\nTime: {_when(now)}"
         return await notify_owner(db, key, text, settings=settings, transport=transport, now=now, open_=True)
@@ -239,6 +240,36 @@ async def check_brand_publishing(db: Session, *, settings: Settings | None = Non
     return out
 
 
+# --- database backups (the hourly system.backup_check job) -------------------------------------------------------------------
+
+BACKUP_KEY = "backup:stale"
+
+
+async def check_backup_freshness(db: Session, info: dict[str, Any] | None, error: str | None = None, *, settings: Settings | None = None,
+                                 transport: Any = None, now: datetime | None = None) -> dict[str, int]:
+    """`info` from db_backup.newest() (None with `error` when the bucket couldn't be read). One message when the newest
+    backup is older than 26 h, missing, or unreadable (again every 6 h while it lasts), one "recovered" when a fresh copy
+    is there. Complements the system.backup job's own failure alert: this one also catches a job that never ran."""
+    now = now or utcnow()
+    out = {"backup_stale": 0, "backup_recovered": 0}
+    if error is not None or info is None or info.get("stale"):
+        if error is not None or info is None:
+            why = f"The backup bucket can't be read: {_first_line(error)}"
+        elif not info.get("key"):
+            why = "There is no backup in the bucket (backups/db/ is empty)."
+        else:
+            why = f"The newest backup is {info['age_hours']:.0f} h old ({info['key'].rsplit('/', 1)[-1]}); one should land every 24 h."
+        text = (f"Price Chat alert: database backups are STALE\n{why}\nCheck the system.backup job (Admin › Settings › Background jobs) "
+                f"and the bucket secret.\nTime: {_when(now)}")
+        out["backup_stale"] += await notify_owner(db, BACKUP_KEY, text, settings=settings, transport=transport, now=now, open_=True)
+    elif _is_open(db, BACKUP_KEY):
+        text = f"Price Chat: recovered\nDatabase backups are fresh again: the newest is {info['age_hours']:.0f} h old.\nTime: {_when(now)}"
+        if await notify_owner(db, f"{BACKUP_KEY}:recovered", text, settings=settings, transport=transport, now=now, cooldown=False):
+            out["backup_recovered"] += 1
+            _close(db, BACKUP_KEY)
+    return out
+
+
 # --- Kiwi VPN servers (called by the vpn.sync job after each sync) -----------------------------------------------------------
 
 
@@ -345,9 +376,26 @@ async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport:
 # --- admin -------------------------------------------------------------------------------------------------------------
 
 
-def settings_out(db: Session) -> dict[str, Any]:
+NOWHERE = "Owner alerts go nowhere"
+
+
+def delivery_problem(db: Session, settings: Settings | None = None) -> str | None:
+    """Why an owner alert would only reach the logs right now, or None when it would be sent. Read-only."""
+    settings = settings or get_settings()
+    row = db.get(OwnerAlertSettings, 1)
+    if row is None or not row.telegram_chat.strip():
+        return f"{NOWHERE}: no owner Telegram chat is set (Admin › Settings › Background jobs › Owner alerts), so backup, VPN server and job alerts are only logged"
+    if not row.enabled:
+        return f"{NOWHERE}: owner alerts are turned off (Admin › Settings › Background jobs › Owner alerts), so they are only logged"
+    if not settings.telegram_configured:
+        return f"{NOWHERE}: no Telegram bot token on this server, so alerts can't be sent"
+    return None
+
+
+def settings_out(db: Session, settings: Settings | None = None) -> dict[str, Any]:
     row = settings_row(db)
     recent = db.scalars(select(OwnerAlert).where(OwnerAlert.last_sent_at.is_not(None)).order_by(OwnerAlert.last_sent_at.desc()).limit(10))
-    return {"enabled": row.enabled, "telegram_chat": row.telegram_chat,
+    problem = delivery_problem(db, settings)
+    return {"enabled": row.enabled, "telegram_chat": row.telegram_chat, "delivers": problem is None, "problem": problem,
             "recent": [{"key": a.key, "last_sent_at": a.last_sent_at, "sent_count": a.sent_count, "open": a.open,
                         "text": a.last_text} for a in recent]}

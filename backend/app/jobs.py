@@ -924,17 +924,56 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         out = await scrydex_sales.sync(ctx.db, s, days=10, transport=getattr(runtime, "pokemon_transport", None), max_requests=s.ebay_cards_per_sync + 50)
         return out["summary"]
 
-    async def system_backup(ctx: JobContext) -> dict[str, Any]:
-        import asyncio
-
-        from app.services import db_backup
-
+    def _backup_target(ctx: JobContext) -> None:
         url = ctx.db.get_bind().url
         if url.get_backend_name() != "sqlite" or not url.database:
             raise JobSkipped("Only a SQLite database file is backed up this way")
         if not s.portfolio_bucket:
             raise JobSkipped("No storage bucket configured (PORTFOLIO_BUCKET): the backup has nowhere off the volume to go")
-        return await asyncio.to_thread(db_backup.run, s, url.database)
+
+    async def system_backup(ctx: JobContext) -> dict[str, Any]:
+        import asyncio
+
+        from app.services import db_backup
+
+        _backup_target(ctx)
+        return await asyncio.to_thread(db_backup.run, s, ctx.db.get_bind().url.database)
+
+    async def system_backup_check(ctx: JobContext) -> dict[str, Any]:
+        """Hourly: is the newest backup in the bucket younger than 26 h? Alerts the owner once when not (or when the bucket
+        can't be read), "recovered" when it is again (app/alerts.py). Lists the bucket only; never touches the database file."""
+        import asyncio
+
+        from app import alerts
+        from app.services import db_backup
+
+        _backup_target(ctx)
+        info, error = None, None
+        try:
+            info = await asyncio.to_thread(db_backup.newest, s, ctx.now)
+        except Exception as e:  # noqa: BLE001 - a wrong secret / unreachable bucket is exactly what this job must report
+            from app.security.redact import redact_secrets
+
+            error = redact_secrets(f"{type(e).__name__}: {str(e)[:200]}")
+        out = await alerts.check_backup_freshness(ctx.db, info, error, settings=s, transport=runtime.telegram.transport, now=ctx.now)
+        return {**(info or {"error": error}), **out}
+
+    async def system_restore_test(ctx: JobContext) -> dict[str, Any]:
+        """Weekly: restores the newest backup into a temporary directory and checks it (integrity, alembic version, key row
+        counts). Never opens the live database. A failure fails the run, and the owner hears at the first one."""
+        import asyncio
+
+        from app.services import db_backup
+
+        _backup_target(ctx)
+        try:
+            from app.db.migrate import _script_heads
+
+            heads = _script_heads()
+            head = heads[0] if len(heads) == 1 else None
+        except Exception:  # noqa: BLE001 - only used to say whether the copy is on the code's newest migration
+            head = None
+        return await asyncio.to_thread(db_backup.restore_test, s, ctx.now, None, head)
 
     async def system_alerts(ctx: JobContext) -> dict[str, Any]:
         """Owner alerts that aren't a failed job: a Brand Manager TikTok sign-in lost / publishing stalled while AUTO is on (app/alerts.py)."""
@@ -1004,6 +1043,10 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 600, system_alerts, initial_delay_seconds=240, timeout_seconds=60),
         JobSpec("system.backup", "Nightly database backup", "Daily: a consistent copy of the whole database, integrity-checked, gzip-compressed into the private storage bucket (separate from the server's volume); the newest 14 are kept",
                 86400, system_backup, initial_delay_seconds=900, timeout_seconds=1800, retry_failed_seconds=3600),
+        JobSpec("system.backup_check", "Backup freshness check", "Hourly: checks the newest database backup in the bucket is younger than 26 h and tells the owner on Telegram when it isn't, or when the bucket can't be read (and again when it's fixed). Lists the bucket only",
+                3600, system_backup_check, initial_delay_seconds=1200, timeout_seconds=120),
+        JobSpec("system.restore_test", "Weekly backup restore test", "Weekly: downloads the newest database backup into a temporary folder, gunzips it, runs SQLite's full integrity check, reads its migration version and counts members and Kiwi VPN rows; the owner hears on Telegram if it fails. Never opens the live database",
+                7 * 86400, system_restore_test, initial_delay_seconds=5400, timeout_seconds=1800, retry_failed_seconds=6 * 3600),
         JobSpec("system.retention", "Data retention", "Daily: deletes old rows from tables that only grow (Brand Manager log and metrics, referral clicks, skipped /signal ideas, finished price alerts, activity log, expired member sessions, read notifications, card-scan records, Pokémon sync run logs, Exchange oracle history thinned to a day's last, usage tallies), at most 5,000 per table a run; anything still in use or counted in all-time stats is kept (app/retention.py)",
                 86400, system_retention, initial_delay_seconds=1500, timeout_seconds=600),
         JobSpec("pokemon.sales", "Pokémon verified sales (Scrydex sold listings)", "Weekly: completed sales of the Top 100 and nearby cards, each matched to the exact card + grade (~150 credits)",
@@ -1088,4 +1131,5 @@ JOB_SUMMARIES: dict[str, Callable[[dict[str, Any]], tuple[str, str] | None]] = {
     "cross.signals": lambda r: ("cross_signals_detected", f"Detected {_plural(_n(r, 'new'), 'new cross-platform signal')}") if _n(r, "new") else None,
     "topic.merges": lambda r: ("merge_suggested", f"Suggested {_plural(_n(r, 'suggested'), 'possible topic merge')}") if _n(r, "suggested") else None,
     "system.backup": lambda r: ("database_backed_up", r["summary"]) if r.get("summary") else None,
+    "system.restore_test": lambda r: ("backup_restore_tested", r["summary"]) if r.get("summary") else None,
 }

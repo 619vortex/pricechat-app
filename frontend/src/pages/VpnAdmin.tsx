@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { request } from "../api/client";
+import { Link } from "react-router-dom";
+import { api, request } from "../api/client";
 import { useApi } from "../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Field, Loading, PageHeader, Stat, Tabs, relativeTime } from "../components/ui";
 import { configQr, saveConfig } from "../website/vpnConfig";
@@ -539,6 +540,26 @@ function Support() {
 
 type Tab = "overview" | "servers" | "customers" | "payments" | "support";
 
+/** Server offline / full / bandwidth alerts and backup alerts reach the owner only through the owner-alert Telegram chat.
+    When none is set they go nowhere (2026-10-22..11-12: 21 failed backups reached only the logs), so say it here, loudly. */
+export function AlertsGoNowhere() {
+  const a = useApi(api.ownerAlerts);
+  const [note, setNote] = useState<string | null>(null);
+  if (!a.data) return null;
+  if (a.data.delivers !== false) {
+    return (
+      <p className="small vpna-note">Server alerts go to your Telegram.{" "}
+        <button className="btn btn-sm" onClick={() => void api.testOwnerAlert().then(() => setNote("Test alert sent: check Telegram"), (e) => setNote(errText(e)))}>Send test alert</button>
+        {note && <span className="muted"> {note}</span>}
+      </p>
+    );
+  }
+  return (
+    <p className="vpna-warn" role="alert"><b>Alerts go nowhere.</b> {(a.data.problem ?? "").replace(/^Owner alerts go nowhere: /, "")}{" "}
+      <Link to="/settings?tab=jobs">Set the alert chat</Link></p>
+  );
+}
+
 export function VpnAdminPage() {
   const r = useApi(() => request<VpnOverview>("/vpn/admin/overview"), 60_000);
   const d = r.data;
@@ -548,6 +569,7 @@ export function VpnAdminPage() {
       <PageHeader title="Kiwi VPN" subtitle="Your WireGuard VPN: who can use it, whether it costs anything, servers and devices. No traffic is logged."
         actions={<button className="btn" onClick={() => void r.reload()} disabled={r.loading}>Refresh</button>} />
       {r.failure ? <ApiErrorBanner error={r.failure} /> : null}
+      <AlertsGoNowhere />
       {r.loading && !d ? <Loading /> : null}
       {d && <>
         <Controls s={d.settings} canCharge={!!(d.billing?.usdt || d.billing?.card)} onSaved={r.reload} />
