@@ -556,3 +556,49 @@ def test_no_pipeline_that_fails_a_fresh_install():
         for n, line in enumerate(open(os.path.join(HERE, name), encoding="utf-8"), 1):
             if re.search(r"\$\([^()]*2>/dev/null\s*\|(?!\|)", line):
                 assert "|| true" in line, f"{name}:{n}: {line.strip()}"
+
+
+# ---- L1: health needs the token from anywhere but loopback; request threads are bounded ----
+@pytest.mark.parametrize("peer", ["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+def test_health_without_the_token_only_on_loopback(agent, peer):
+    assert agent.handle("GET", "/v1/health", None, b"", peer=peer) == (200, {"ok": True})
+
+
+@pytest.mark.parametrize("peer", ["203.0.113.5", "2001:db8::5", "10.66.0.2", "nonsense"])
+def test_health_from_elsewhere_needs_the_token(agent, peer):
+    assert agent.handle("GET", "/v1/health", None, b"", peer=peer) == (401, {"error": "unauthorized"})
+    assert agent.handle("GET", "/v1/health", "Bearer wrong", b"", peer=peer)[0] == 401
+    assert agent.handle("GET", "/v1/health", f"Bearer {TOKEN}", b"", peer=peer) == (200, {"ok": True})
+
+
+def test_a_deployed_backend_keeps_syncing_from_outside(agent):
+    # what backend/app/vpn/node.py does: /v1/status, /v1/peers, /v1/proxy-users with the token, never /v1/health
+    assert agent.handle("GET", "/v1/status", f"Bearer {TOKEN}", b"", peer="203.0.113.5")[0] != 401
+
+
+def test_agent_threads_are_bounded(agent):
+    import socket
+    import time
+    srv = A.AgentServer(("127.0.0.1", 0), A.make_handler(agent), max_connections=2)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        port = srv.server_address[1]
+        hold = [socket.create_connection(("127.0.0.1", port)) for _ in range(2)]  # two slow clients hold both threads
+        time.sleep(0.3)
+        extra = socket.create_connection(("127.0.0.1", port))
+        extra.settimeout(5)
+        extra.sendall(b"GET /v1/health HTTP/1.1\r\nHost: x\r\n\r\n")
+        try:
+            got = extra.recv(100)
+        except ConnectionResetError:
+            got = b""
+        assert got == b""  # closed at once, no thread for it
+        extra.close()
+        for s in hold:
+            s.close()
+        time.sleep(0.5)
+        assert request(port, "GET", "/v1/health", token=None)[0] == 200  # slots come back
+    finally:
+        srv.shutdown()
+        srv.server_close()

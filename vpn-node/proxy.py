@@ -5,7 +5,12 @@ Browsers can't run WireGuard, so the extension sends its traffic here over TLS. 
 sha256(password). A login that disappears from the file is cut off within seconds, including its open connections.
 
 Privacy: nothing is logged per connection: no client address, no destination, no URL. Only bytes per login are counted, for the
-monthly data cap. Destinations are resolved here, so the browser's DNS questions stay inside the tunnel.
+monthly data cap. Destinations are resolved here, so the browser's DNS questions stay inside the tunnel. With RESOLVER set (the
+installer sets 127.0.0.1, a no-logs unbound on this server) names are asked of that resolver alone, never the hosting provider's.
+
+Load: only logged-in connections count toward MAX_TOTAL; before login each source address may hold PRE_LOGIN_PER_IP connections
+and has HEAD_TIMEOUT seconds to send its request, so idle strangers can't fill the server for paying users. The address is used
+for that count in memory only, never written anywhere.
 
 Safety: the proxy reaches the public internet and nothing else. Every resolved address is checked before connecting, so a hostname
 that points at a private address is refused too: never this host, wg0, wg1, a private range or the cloud metadata service. install-proxy.sh
@@ -42,17 +47,22 @@ DEFAULTS = {
     "PUBLIC_IPS": "",
     # This server's own networks, refused like PUBLIC_IPS but never shown (comma-separated CIDRs, e.g. the provider's IPv6 /64).
     "OWN_NETS": "",
+    # The resolver to ask, e.g. 127.0.0.1 (install-proxy.sh's unbound). Empty = the system's (getaddrinfo), as before.
+    "RESOLVER": "",
 }
 CHECK_HOST = "check.kiwi-vpn.invalid"  # the extension's "am I really going through the tunnel?" request; answered here, never resolved
 BLOCKED_PORTS = frozenset({25, 465, 587})  # no mail
 MAX_HEAD = 16 * 1024
-HEAD_TIMEOUT = 20.0
+HEAD_TIMEOUT = 5.0
+TLS_HANDSHAKE_TIMEOUT = 10.0
 CONNECT_TIMEOUT = 10.0
 IDLE_TIMEOUT = 300.0
 DRAIN_AFTER_CLIENT_EOF = 30.0
 CHUNK = 64 * 1024
 MAX_PER_USER = 300
-MAX_TOTAL = 3000
+MAX_TOTAL = 3000  # logged-in connections
+PRE_LOGIN_PER_IP = 50  # connections from one address that haven't logged in yet
+DNS_TIMEOUT = 4.0
 RELOAD_EVERY = 2.0
 FLUSH_EVERY = 15.0
 _HOST = re.compile(r"^[A-Za-z0-9._-]{1,253}$")
@@ -103,6 +113,107 @@ def parse_target(raw: str) -> Optional[tuple[str, int]]:
     return host, port
 
 
+# ----- a small DNS client for RESOLVER (stdlib only): A + AAAA, UDP with a TCP retry when the answer is truncated -----
+def _dns_question(name: str, qtype: int, qid: int) -> bytes:
+    labels = name.rstrip(".").encode("idna").split(b".")
+    if not labels or any(not 0 < len(x) < 64 for x in labels):
+        raise UnicodeError("bad name")
+    return (qid.to_bytes(2, "big") + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+            + b"".join(bytes([len(x)]) + x for x in labels) + b"\x00" + qtype.to_bytes(2, "big") + b"\x00\x01")
+
+
+def _skip_name(msg: bytes, i: int) -> int:
+    while True:
+        n = msg[i]
+        if n == 0:
+            return i + 1
+        if n & 0xC0 == 0xC0:
+            return i + 2
+        i += 1 + n
+
+
+def parse_dns_answer(msg: bytes, qid: int) -> tuple[bool, list[str]]:
+    """(truncated, addresses) from a reply to `qid`. NXDOMAIN / no data = no addresses; anything malformed raises OSError."""
+    try:
+        if len(msg) < 12 or int.from_bytes(msg[:2], "big") != qid or not msg[2] & 0x80:
+            raise OSError("not the answer")
+        if msg[2] & 0x02:
+            return True, []
+        rcode = msg[3] & 0x0F
+        if rcode == 3:
+            return False, []
+        if rcode != 0:
+            raise OSError(f"resolver rcode {rcode}")
+        qd, an = int.from_bytes(msg[4:6], "big"), int.from_bytes(msg[6:8], "big")
+        i = 12
+        for _ in range(qd):
+            i = _skip_name(msg, i) + 4
+        out = []
+        for _ in range(an):
+            i = _skip_name(msg, i)
+            rtype, rlen = int.from_bytes(msg[i:i + 2], "big"), int.from_bytes(msg[i + 8:i + 10], "big")
+            data = msg[i + 10:i + 10 + rlen]
+            if len(data) != rlen or i + 10 > len(msg):
+                raise OSError("short answer")
+            if rtype == 1 and rlen == 4:
+                out.append(str(ipaddress.IPv4Address(data)))
+            elif rtype == 28 and rlen == 16:
+                out.append(str(ipaddress.IPv6Address(data)))
+            i += 10 + rlen
+        return False, out
+    except (IndexError, ValueError) as e:
+        raise OSError("bad answer") from e
+
+
+class _DnsUdp(asyncio.DatagramProtocol):
+    def __init__(self, qid: int) -> None:
+        self.qid = qid
+        self.done: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    def datagram_received(self, data: bytes, addr) -> None:
+        if not self.done.done() and len(data) >= 2 and int.from_bytes(data[:2], "big") == self.qid:
+            self.done.set_result(data)
+
+    def error_received(self, exc: Exception) -> None:
+        if not self.done.done():
+            self.done.set_exception(exc)
+
+
+async def _dns_ask(server: str, name: str, qtype: int, port: int = 53) -> list[str]:
+    qid = int.from_bytes(os.urandom(2), "big")
+    q = _dns_question(name, qtype, qid)
+    loop = asyncio.get_running_loop()
+    transport, proto = await loop.create_datagram_endpoint(lambda: _DnsUdp(qid), remote_addr=(server, port))
+    try:
+        transport.sendto(q)
+        truncated, ips = parse_dns_answer(await asyncio.wait_for(proto.done, DNS_TIMEOUT), qid)
+    finally:
+        transport.close()
+    if not truncated:
+        return ips
+    r, w = await asyncio.wait_for(asyncio.open_connection(server, port), DNS_TIMEOUT)
+    try:
+        w.write(len(q).to_bytes(2, "big") + q)
+        await w.drain()
+        size = int.from_bytes(await asyncio.wait_for(r.readexactly(2), DNS_TIMEOUT), "big")
+        return parse_dns_answer(await asyncio.wait_for(r.readexactly(size), DNS_TIMEOUT), qid)[1]
+    finally:
+        w.close()
+
+
+async def dns_lookup(server: str, host: str, port: int = 53) -> list[str]:
+    """IPv4 then IPv6 addresses of `host`, asked of `server` only. An address literal is returned as it is."""
+    try:
+        return [str(ipaddress.ip_address(host.strip("[]")))]
+    except ValueError:
+        pass
+    got = await asyncio.gather(_dns_ask(server, host, 1, port), _dns_ask(server, host, 28, port), return_exceptions=True)
+    ips = [ip for g in got if isinstance(g, list) for ip in g]
+    if not ips and any(isinstance(g, BaseException) for g in got):
+        raise OSError("resolver failed")
+    return ips
+
+
 class Refused(Exception):
     def __init__(self, status: bytes) -> None:
         super().__init__(status.decode())
@@ -113,14 +224,20 @@ class Proxy:
     def __init__(self, cfg: dict, dest_ok: Optional[Callable[[str], bool]] = None,
                  resolve: Optional[Callable[[str, int], "asyncio.Future"]] = None) -> None:
         self.cfg = {**DEFAULTS, **cfg}
-        self.own = frozenset(x.strip() for x in self.cfg["PUBLIC_IPS"].split(",") if x.strip())
+        # the first one is the exit address the check request shows (a floating IP goes first); all of them are refused
+        self.own_list = [x.strip() for x in self.cfg["PUBLIC_IPS"].split(",") if x.strip()]
+        self.own = frozenset(self.own_list)
         self.own_nets = parse_nets(self.cfg["OWN_NETS"])
         self.dest_ok = dest_ok or (lambda ip: public_only(ip, self.own, self.own_nets))
-        self.resolve = resolve or self._resolve
+        resolver = self.cfg["RESOLVER"].strip()
+        if resolver:
+            ipaddress.ip_address(resolver)  # a typo must stop the proxy, not fall back to the provider's resolver
+        self.resolve = resolve or ((lambda host, port: dns_lookup(resolver, host)) if resolver else self._resolve)
         self.users: dict[str, str] = {}
         self.counts: dict[str, list[int]] = {}  # username -> [from the client, to the client]; only ever grow while running
         self.live: dict[str, set[asyncio.Task]] = {}
-        self.total = 0
+        self.total = 0  # logged-in connections
+        self.pending: dict[str, int] = {}  # source address -> connections not logged in yet (memory only)
         self._stamp: Optional[tuple[int, int]] = None
         self._dirty = False
 
@@ -194,7 +311,14 @@ class Proxy:
         task = asyncio.current_task()
         name: Optional[str] = None
         upstream: Optional[asyncio.StreamWriter] = None
-        self.total += 1
+        counted = False
+        peer = writer.get_extra_info("peername")
+        src = str(peer[0]) if isinstance(peer, tuple) and peer else "?"
+        waiting = self.pending.get(src, 0)
+        if waiting >= PRE_LOGIN_PER_IP:  # too many unauthenticated connections from one address: close without a word
+            writer.close()
+            return
+        self.pending[src] = waiting + 1
         try:
             head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), HEAD_TIMEOUT)
             lines = head[:-4].split(b"\r\n")
@@ -208,14 +332,18 @@ class Proxy:
             if not is_proxy_form:  # someone opened this host directly: it isn't a website, and this doesn't invite a password box
                 raise Refused(b"404 Not Found")
             name = self.login(auth)
+            self._release(src)
+            src = ""
             if name is None:
                 writer.write(b'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="Kiwi VPN"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
                 await writer.drain()
                 return
             conns = self.live.setdefault(name, set())
-            if len(conns) >= MAX_PER_USER or self.total > MAX_TOTAL:
+            if len(conns) >= MAX_PER_USER or self.total >= MAX_TOTAL:
                 raise Refused(b"503 Service Unavailable")
             conns.add(task)
+            self.total += 1
+            counted = True
             count = self.counts.setdefault(name, [0, 0])
             if method == b"CONNECT":
                 t = parse_target(target)
@@ -249,7 +377,10 @@ class Proxy:
                 ConnectionError, OSError, ssl.SSLError):
             pass  # never logged: there's nothing here worth keeping about a person's connection
         finally:
-            self.total -= 1
+            if src:
+                self._release(src)
+            if counted:
+                self.total -= 1
             if name is not None and name in self.live:
                 self.live[name].discard(task)
                 if not self.live[name]:
@@ -258,9 +389,15 @@ class Proxy:
                 if w is not None:
                     w.close()
 
+    def _release(self, src: str) -> None:
+        n = self.pending.get(src, 0) - 1
+        if n > 0:
+            self.pending[src] = n
+        else:
+            self.pending.pop(src, None)
+
     async def _answer_check(self, writer: asyncio.StreamWriter) -> None:
-        ips = sorted(self.own)
-        body = json.dumps({"ok": True, "ip": ips[0] if ips else None}).encode()
+        body = json.dumps({"ok": True, "ip": self.own_list[0] if self.own_list else None}).encode()
         writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
         await writer.drain()
 
@@ -353,7 +490,7 @@ class Proxy:
 
     async def serve(self, ctx: Optional[ssl.SSLContext], host: str, port: int) -> asyncio.AbstractServer:
         self.reload_users()
-        kwargs = {"ssl": ctx, "ssl_handshake_timeout": 15.0} if ctx is not None else {}
+        kwargs = {"ssl": ctx, "ssl_handshake_timeout": TLS_HANDSHAKE_TIMEOUT} if ctx is not None else {}
         return await asyncio.start_server(self.handle, host, port, limit=MAX_HEAD, **kwargs)
 
 
