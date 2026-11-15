@@ -59,6 +59,15 @@ CASES = {
     "BREAKING all in one scan": ("hot", [sig("Exchange Lumora halts withdrawals after $250 million exploit", "CoinDesk", 30, seen_min=0),
                                          sig("Lumora halts withdrawals after $250 million exploit", "Reuters", 20, seen_min=0),
                                          sig("Crypto exchange Lumora halts withdrawals after $250 million exploit", "Bloomberg", 10, seen_min=0)]),
+    # exceptional off-beat stories (owner, 2026-11-15): kept as topics for financial impact or global significance; momentum still decides
+    "EXC louvre heist (global)": ("mid", [sig("Thieves steal crown jewels from the Louvre in daylight heist", o, m) for o, m in
+                                          (("Reuters", 55), ("AP", 50), ("BBC", 45), ("CNN", 40), ("The Guardian", 30), ("New York Times", 20))]),
+    "EXC club sale (financial)": ("mid", [sig("Los Angeles Lakers sold for $10 billion in record sports deal", "CNBC", 60),
+                                          sig("Lakers sold for $10 billion, a record sports deal", "Bloomberg", 40),
+                                          sig("Los Angeles Lakers sold in record $10 billion deal", "ESPN", 20, reliable=True)]),
+    "WEAK tennis final (6 outlets, a result)": ("weak", [sig("Sinner beats Alcaraz to win the ATP Finals title", o, m) for o, m in
+                                                         (("Reuters", 55), ("AP", 50), ("BBC", 45), ("CNN", 40), ("The Guardian", 30), ("New York Times", 20))]),
+    "WEAK celebrity tour (3 outlets)": ("weak", [sig("Taylor Swift announces new tour dates for 2027", o, m) for o, m in (("BBC", 50), ("CNN", 40), ("The Guardian", 30))]),
     "WEAK tennis": ("weak", [sig("Pegula saves match point to beat Noskova and reach WTA Finals semi-finals", "BBC", 60),
                              sig("Pegula saves match point to beat Noskova at WTA Finals", "The Guardian", 50),
                              sig("Pegula beats Noskova after saving match point at WTA Finals", "Reuters", 30)]),
@@ -108,3 +117,21 @@ def test_niche_coverage_counts_less_than_a_crossover() -> None:
     _, niche = _score(CASES["MID solana validators 3 crypto"][1])
     _, cross = _score(CASES["BREAKING hack (first scan)"][1])
     assert niche["growth"]["mainstream"] is False and cross["growth"]["mainstream"] is True and niche["velocity"] < cross["velocity"]
+
+
+def test_an_exceptional_off_beat_story_is_a_topic_but_must_still_earn_the_line() -> None:
+    cs = rank.cluster(CASES["EXC louvre heist (global)"][1])
+    assert len(cs) == 1 and cs[0].exception and cs[0].exception.startswith("global significance: 6 independent outlets")
+    sc, parts = rank.score(cs[0], NOW)
+    assert parts["exception"] and "off-beat but exceptional" in parts["why"] and sc < 75  # world news, no market impact: a suggestion
+    [deal] = rank.cluster(CASES["EXC club sale (financial)"][1])
+    assert deal.category is not None  # a $10 billion deal is a topic either way (here its own words already classify it)
+    assert rank.cluster(CASES["WEAK tennis final (6 outlets, a result)"][1]) == []
+    assert rank.money("Thieves take EUR jewels worth €88 million") == 88e6 and rank.money("a $1.2 billion fine") == 1.2e9 and rank.money("no sums") == 0
+
+
+def test_a_crime_with_a_huge_sum_is_kept_for_its_financial_impact() -> None:
+    heist = [sig("Thieves stole $600 million in gold bars in record heist", "Reuters", 50), sig("Record heist: thieves stole $600 million in gold bars", "BBC", 30)]
+    [c] = rank.cluster(heist)
+    assert c.exception == "financial impact: $600M"
+    assert rank.cluster(CASES["WEAK gold theft"][1]) == []  # $9 million: an ordinary crime story
