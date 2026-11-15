@@ -240,7 +240,8 @@ def test_an_anomaly_names_the_last_time_it_moved_this_much() -> None:
     series = daily(60000, [-9.0])
     p = datapost.anomaly("BTC-USD", series, NOW)
     assert p is not None and p.headline == "Bitcoin's biggest one-day drop in at least two years: −9.0%"
-    assert "−9.0% on the day" in p.lines[0] and p.interest >= 75
+    assert "−9.0% on the day" in p.told and "−9.0% on the day" not in " ".join(p.lines) and p.interest >= 75  # the chart and the checks have it, not the caption
+    assert p.lines == ["A typical day over the last 90 moved it 1.0%: today was 9.1 times that."]  # the takeaway
     with_earlier = daily(60000, [-9.5, *[0.5] * 200, -9.0])
     q = datapost.anomaly("BTC-USD", with_earlier, NOW)
     assert q is not None and "since " in q.headline  # the date we found, e.g. "since April 2026"

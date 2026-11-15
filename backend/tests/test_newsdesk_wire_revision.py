@@ -67,7 +67,9 @@ def test_clean_is_the_default_and_wire_is_opt_in(db: Session, monkeypatch: pytes
 
 @pytest.mark.parametrize("case", cases.CASES, ids=[c["name"] for c in cases.CASES])
 async def test_clean_output_is_byte_for_byte_what_production_writes(case: dict[str, Any]) -> None:
-    golden = json.loads((HERE / "newsdesk_clean_golden_1374981.json").read_text(encoding="utf-8"))[case["name"]]  # written by 1374981's code
+    # written by 1374981's code, regenerated 2026-11-15 for the owner's caption rules (sources and @thepricechat on one last line, each
+    # cashtag once and one at most): every difference against the 1374981 golden was read; the words and the checks' verdicts are unchanged
+    golden = json.loads((HERE / "newsdesk_clean_golden_20261115.json").read_text(encoding="utf-8"))[case["name"]]
     ev, rows = cases.build(case, NdEvent)
     pkg = await network.package(ev, settings=None, rows=rows, x_links=True, style="clean")
     assert {"telegram_html": pkg.telegram_html, "telegram_plain": pkg.telegram_plain, "x_text": pkg.x_text, "ok": pkg.ok} == golden
@@ -79,7 +81,7 @@ async def test_with_no_style_chosen_the_lane_posts_clean(client: Any, db: Sessio
               [("Unchained", cases.CASES[0]["rows"][0][1])], label="")
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, NOW)
-    assert tg.sent[0]["image"] is not None and tg.sent[0]["caption"].endswith('\n\n<a href="https://t.me/thepricechat">@thepricechat</a>')  # clean's shape
+    assert tg.sent[0]["image"] is not None and tg.sent[0]["caption"].endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')  # clean's shape: sources · @thepricechat, one line
     assert db.scalars(select(NdEvent)).one().facts["visual"].get("style") != "wire"  # (the signature on its own line, not the wire footer)
 
 

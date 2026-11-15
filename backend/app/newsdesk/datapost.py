@@ -62,10 +62,13 @@ class DataPost:
     bars: list[list[Any]] = field(default_factory=list)  # [name, pct] for rankings
     symbols: list[str] = field(default_factory=list)
     as_of: str = ""
+    # every figure the chart shows, for the checks (owner, 2026-11-15: the caption is the headline and one takeaway; the chart carries the
+    # data, so the full list is never in the caption, but the checks still verify the words and the card against all of it)
+    table: list[str] = field(default_factory=list)
 
     @property
     def told(self) -> str:
-        return " ".join([self.headline, *self.lines])
+        return " ".join([self.headline, *self.lines, *self.table])
 
     def out(self) -> dict[str, Any]:
         return {**asdict(self), "told": self.told}
@@ -170,9 +173,11 @@ def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime) ->
     since = f"since {month(last)}" if last else "in at least two years"
     days = (day - last).days if last else 730
     head = f"{cap(name)}'s biggest one-day {move} {since}: {pct(r)}"
-    lines = [f"{cap(name)} closed at {price(series[-1][1], symbol)}, {pct(r)} on the day.", f"A typical day over the last 90 moved it {sd:.1f}%: today was {z:.1f} times that."]
+    lines = [f"A typical day over the last 90 moved it {sd:.1f}%: today was {z:.1f} times that."]
+    table = [f"{cap(name)} closed at {price(series[-1][1], symbol)}, {pct(r)} on the day."]
     why = {"rarity": round(min(60.0, 12 * z), 1), "since": 25.0 if days >= 365 else 15.0 if days >= 180 else 5.0 if days >= 60 else 0.0, "reach": 15.0 if symbol in ("BTC-USD", "^GSPC", "^IXIC", "NVDA", "GC=F") else 8.0}
-    return DataPost("anomaly", f"anomaly:{symbol}", head, lines, int(min(100, sum(why.values()))), why, {symbol: _pts(series, 120)}, symbols=[symbol], as_of=day.isoformat())
+    return DataPost("anomaly", f"anomaly:{symbol}", head, lines, int(min(100, sum(why.values()))), why, {symbol: _pts(series, 120)}, symbols=[symbol], as_of=day.isoformat(),
+                    table=table)
 
 
 def battle(a: str, b: str, data: dict[str, list[tuple[datetime, float]]], now: datetime, days: int = 30) -> DataPost | None:
@@ -188,12 +193,13 @@ def battle(a: str, b: str, data: dict[str, list[tuple[datetime, float]]], now: d
     period = {30: "past 30 days", 90: "past three months", 365: "past year"}.get(days, f"past {days} days")
     win, lose = (a, b) if ra > rb else (b, a)
     head = f"{cap(NAME[a])} vs {NAME[b]} over the {period}: {pct(ra)} against {pct(rb)}"
-    lines = [f"{cap(NAME[a])} {pct(ra)}, {NAME[b]} {pct(rb)} over the {period}.", f"{cap(NAME[win])} leads by {gap:.1f} percentage points."]
+    lines = [f"{cap(NAME[win])} leads by {gap:.1f} percentage points."]
+    table = [f"{cap(NAME[a])} {pct(ra)}, {NAME[b]} {pct(rb)} over the {period}."]
     why = {"gap": round(min(55.0, gap * 2.2), 1), "rivalry": 20.0 if {a, b} & CRYPTO and {a, b} - CRYPTO else 12.0, "opposite": 15.0 if (ra > 0) != (rb > 0) else 0.0}
     if days >= 365:
         why["slow"] = -15.0  # a year-long gap is a good chart, rarely news today
     return DataPost("battle", f"battle:{a}:{b}:{days}", head, lines, int(min(100, sum(why.values()))), why, {a: _pts(sa, days), b: _pts(sb, days)}, symbols=[a, b],
-                    as_of=max(sa[-1][0], sb[-1][0]).isoformat())
+                    as_of=max(sa[-1][0], sb[-1][0]).isoformat(), table=table)
 
 
 def then_now(symbol: str, series: list[tuple[datetime, float]], now: datetime, days: int = 365) -> DataPost | None:
@@ -219,12 +225,34 @@ def ranking(data: dict[str, list[tuple[datetime, float]]], now: datetime, days: 
     spread = rt - rb
     if spread < 8:
         return None
-    head = f"The week's best and worst: {cap(NAME[top])} {pct(rt)}, {NAME[bottom]} {pct(rb)}"
-    lines = [", ".join(f"{cap(NAME[s])} {pct(r)}" for s, r in rows) + " (7 days)."]
+    head = f"The week's winners and losers: {cap(NAME[top])} {pct(rt)}, {NAME[bottom]} {pct(rb)}"
+    lines = [x for x in (group_line(rows),) if x]
+    table = [", ".join(f"{cap(NAME[s])} {pct(r)}" for s, r in rows) + " (7 days)."]
     why = {"spread": round(min(60.0, spread * 2), 1), "breadth": 10.0}
     shown = rows if len(rows) <= 10 else rows[:5] + rows[-5:]  # the card has room for ten: the five best and the five worst
     return DataPost("ranking", "ranking:7d", head, lines, int(min(100, sum(why.values()))), why, bars=[[cap(NAME[s]), round(r, 1)] for s, r in shown], symbols=[s for s, _ in rows],
-                    as_of=max(data[s][-1][0] for s, _ in rows).isoformat())
+                    as_of=max(data[s][-1][0] for s, _ in rows).isoformat(), table=table)
+
+
+GROUPS: list[tuple[str, set[str]]] = [("US stocks", {"^GSPC", "^IXIC"}), ("crypto", CRYPTO), ("commodities", {"GC=F", "SI=F", "CL=F"})]
+
+
+def group_line(rows: list[tuple[str, float]]) -> str:
+    """The week's takeaway in words, measured: which group did best and which worst (median of its members), "rose" / "fell" only when
+    every member of that group did. No figures (the chart has them) and no asset names (the headline has the two that matter)."""
+    by = {label: [r for s, r in rows if s in members] for label, members in GROUPS}
+    med = {k: statistics.median(v) for k, v in by.items() if len(v) >= 2}
+    if len(med) < 2:
+        return ""
+    best, worst = max(med, key=med.get), min(med, key=med.get)
+    up, down = all(r > 0 for r in by[best]), all(r < 0 for r in by[worst])
+    if up and down:
+        return f"{cap(best)} rose while {worst} fell the most."
+    if down:
+        return f"{cap(worst)} fell the most; {best} held up best."
+    if up:
+        return f"{cap(best)} rose the most; {worst} did worst."
+    return f"{cap(best)} did best and {worst} worst."
 
 
 def rotation(data: dict[str, list[tuple[datetime, float]]], now: datetime, days: int = 7) -> DataPost | None:
@@ -237,10 +265,12 @@ def rotation(data: dict[str, list[tuple[datetime, float]]], now: datetime, days:
     if spread < 4:
         return None
     head = f"Sector rotation this week: {NAME[top]} {pct(rt)}, {NAME[bottom]} {pct(rb)}"
-    lines = [", ".join(f"{NAME[s]} {pct(r)}" for s, r in rows) + " (SPDR sector funds, 7 days)."]
+    rose = sum(1 for _, r in rows if r > 0)
+    lines = [f"{rose} of the {len(rows)} sectors we track rose." if 0 < rose < len(rows) else ("Every sector we track rose." if rose else "Every sector we track fell.")]
+    table = [", ".join(f"{NAME[s]} {pct(r)}" for s, r in rows) + " (SPDR sector funds, 7 days)."]
     why = {"spread": round(min(55.0, spread * 5), 1), "opposite": 15.0 if rt > 0 > rb else 0.0}
     return DataPost("rotation", "rotation:7d", head, lines, int(min(100, sum(why.values()))), why, bars=[[NAME[s], round(r, 1)] for s, r in rows], symbols=[s for s, _ in rows],
-                    as_of=max(data[s][-1][0] for s, _ in rows).isoformat())
+                    as_of=max(data[s][-1][0] for s, _ in rows).isoformat(), table=table)
 
 
 def candidates(data: dict[str, list[tuple[datetime, float]]], now: datetime) -> list[DataPost]:

@@ -139,6 +139,24 @@ def _names_tag(before: str, tag: str) -> bool:
     return False
 
 
+def limit_cashtags(text: str, n: int) -> str:
+    """The text with at most n distinct cashtags, each only at its first mention (owner, 2026-11-15: "Tesla and Solana mentioned twice",
+    "too many cashtags"). A later or extra tag right after its name ("Ether $ETH") is dropped; one standing for the name ("$ETH rose")
+    becomes the bare symbol. n = 0 removes them all; n = 1 is one_cashtag."""
+    kept: list[str] = []
+
+    def repl(m: re.Match[str]) -> str:
+        space, tag = m.group(1), m.group(2)
+        if tag not in kept and len(kept) < n:
+            kept.append(tag)
+            return m.group(0)
+        if space and _names_tag(m.string[:m.start()], tag):
+            return ""
+        return space + tag
+
+    return _TAG_WITH_SPACE.sub(repl, text or "")
+
+
 def one_cashtag(text: str) -> str:
     """The text with only its first cashtag. A later tag right after its name ("Ether $ETH", as clean.cashtag writes it) is dropped, so
     the sentence reads as the reporting wrote it; a tag standing for the name ("$ETH rose", "$SOL -4%") becomes the bare symbol."""

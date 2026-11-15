@@ -705,8 +705,9 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
 
         pre = clean.prefix_for(ev)
         said = " ".join([str(getattr(ev, "summary", "") or ""), *(str(getattr(r, "summary", "") or "") for r in rows or [])])
-        x = clean.x_caption(c, links, prefix=pre, with_links=x_links, outlets=outs, case_source=said)
-        html, plain, checked = clean.telegram_caption(c, links, prefix=pre, outlets=outs, case_source=said)
+        chart = clean.is_chart_post(ev)
+        x = clean.x_caption(c, links, prefix=pre, with_links=x_links, outlets=outs, case_source=said, chart=chart)
+        html, plain, checked = clean.telegram_caption(c, links, prefix=pre, outlets=outs, case_source=said, chart=chart)
     else:
         x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs, kicker=kicker)
         html, plain = telegram_caption(c, links, line, breaking=breaking, outlets=outs, kicker=kicker)
