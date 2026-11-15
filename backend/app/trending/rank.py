@@ -86,7 +86,18 @@ def _strict_strength(text: str, desk_cat: str) -> float:
 def _vetoed(title: str, summary: str, strength: float) -> bool:
     fixture = re.search(r"\b\w+ vs\.? \w+", title, re.I) or re.search(r"\b[A-Z][a-z]+(?: [A-Z][a-z]+)? v [A-Z][a-z]+", title)  # "Wales v New Zealand"
     sport = _strength(f"{title} {summary}", SPORT) + (1.5 if fixture else 0.0)
+    if re.fullmatch(r"\s*[\w.&'-]+(?: [\w.&'-]+)? (?:vs\.?|v) [\w.&'-]+(?: [\w.&'-]+)?\s*", title, re.I) and not _title_on_beat(title):
+        return True  # production 2026-11-15: "sa vs ban" (a cricket match) took "geopolitics" from its posts' summaries; a bare fixture is a match
     return sport >= 2.0 and sport >= strength
+
+
+def _title_on_beat(title: str) -> bool:
+    """The title by itself names something on the beat ("Biden vs Putin", "Nvidia vs AMD"), not only its linked posts' summaries."""
+    from app.newsdesk.engine import KEYWORDS
+
+    if any(_strength(title, w) > 0 for w in (GEOPOLITICS, TECH, WORLD)):
+        return True
+    return any(_strict_strength(title, c) > 0 for c in KEYWORDS)
 
 
 # --- exceptional off-beat stories (owner, 2026-11-15: "major stories aren't excluded solely because they involve crime, entertainment or

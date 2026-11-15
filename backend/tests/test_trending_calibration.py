@@ -135,3 +135,12 @@ def test_a_crime_with_a_huge_sum_is_kept_for_its_financial_impact() -> None:
     [c] = rank.cluster(heist)
     assert c.exception == "financial impact: $600M"
     assert rank.cluster(CASES["WEAK gold theft"][1]) == []  # $9 million: an ordinary crime story
+
+
+def test_a_bare_fixture_is_a_match_even_when_its_posts_mention_world_news() -> None:
+    # production 2026-11-15 09:55 UTC: "sa vs ban" (South Africa v Bangladesh, cricket) was top1 as "geopolitics" from its posts' summaries
+    summary = "Ukraine says Russia missile strike hits Kyiv; NATO summit; sanctions"
+    for t in ("sa vs ban", "India vs Pakistan", "Wales v New Zealand", "Real Madrid vs Barcelona"):
+        assert rank.classify(t, summary) == (None, 0.0), t
+    assert rank.classify("Biden vs Putin", summary)[0] == "geopolitics"  # the title itself is on the beat
+    assert rank.classify("Bitcoin vs gold", "")[0] is not None
