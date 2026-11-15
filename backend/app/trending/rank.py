@@ -89,6 +89,61 @@ def _vetoed(title: str, summary: str, strength: float) -> bool:
     return sport >= 2.0 and sport >= strength
 
 
+# --- exceptional off-beat stories (owner, 2026-11-15: "major stories aren't excluded solely because they involve crime, entertainment or
+# another normally low-priority category") -------------------------------------------------------------------------------------------
+# A story the beat filter would drop stays a topic when it is exceptional: financial impact (a large sum, or market words with a real sum)
+# or global significance (many independent outlets, several of them mainstream). Match results never qualify on coverage alone. Being a
+# topic is all the exception gives: genuine momentum is still measured (no growth: capped at 60), and the 75 line, the sensitive-subject
+# rules and every gate still apply.
+EXC_MONEY = 500e6
+EXC_MONEY_WITH_MARKET = 50e6
+EXC_OUTLETS, EXC_MAINSTREAM = 6, 3
+MARKET_WORDS = {"shares": 1.5, "stock": 1.5, "stocks": 1.0, "market": 1.0, "markets": 1.0, "investors": 1.0, "valuation": 1.5, "ipo": 2.0, "takeover": 1.5,
+                "acquisition": 1.5, "buyout": 1.5, "bankruptcy": 2.0, "sanctions": 1.5, "insurers": 1.5, "insured": 1.0, "losses": 1.0, "economy": 1.0,
+                "revenue": 1.0, "sales": 0.5, "deal": 0.5, "fine": 0.5, "fined": 1.5, "settlement": 1.0, "lawsuit": 0.5}
+RESULTS = re.compile(r"\b(beats?|beaten|defeats?|wins?|won|draws?|match point|semi-?finals?|finals?|knock(?:s|ed)? out|goals?|scores?|title)\b", re.I)
+_MONEY = re.compile(r"(?:[$€£]\s?(\d+(?:\.\d+)?)\s?(bn|billion|b|m|mn|million|trillion|tn)\b)|(?:(\d+(?:\.\d+)?)\s?(billion|million|trillion)\s(?:dollars|euros|pounds))", re.I)
+_SCALE = {"m": 1e6, "mn": 1e6, "million": 1e6, "b": 1e9, "bn": 1e9, "billion": 1e9, "tn": 1e12, "trillion": 1e12}
+
+
+def money(text: str) -> float:
+    """The largest sum written in the text ($1.2 billion, €500m, £3bn), or 0."""
+    best = 0.0
+    for m in _MONEY.finditer(text or ""):
+        num, unit = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+        best = max(best, float(num) * _SCALE[unit.lower()])
+    return best
+
+
+def exceptional(sigs: list[Sig]) -> str | None:
+    """Why an off-beat story (crime, entertainment, sport, royals...) is still a topic, or None."""
+    reliable = [s for s in sigs if s.reliable]
+    if not reliable:
+        return None
+    text = " ".join(s.title for s in reliable[:8])
+    sum_ = money(text)
+    market, hits = _words(text, MARKET_WORDS)
+    if sum_ >= EXC_MONEY:
+        return f"financial impact: {short_money(sum_)}"
+    if sum_ >= EXC_MONEY_WITH_MARKET and market >= 1.5:
+        return f"financial impact: {short_money(sum_)} ({', '.join(hits[:2])})"
+    outlets = _outlets(reliable)
+    main = {k for k in outlets if k in {_okey(m) for m in MAINSTREAM}}
+    if len(outlets) >= EXC_OUTLETS and len(main) >= EXC_MAINSTREAM and not RESULTS.search(text):
+        return f"global significance: {len(outlets)} independent outlets, {len(main)} mainstream"
+    return None
+
+
+def short_money(n: float) -> str:
+    return f"${n / 1e9:.1f}B" if n >= 1e9 else f"${n / 1e6:.0f}M"
+
+
+def _okey(name: str) -> str:
+    from app.trending.sensitive import outlet_key
+
+    return outlet_key(name)
+
+
 def off_topic(title: str, summary: str = "") -> bool:
     """Sport or entertainment beyond what any market words in it weigh (classify's veto). Merely unclassified news is not off-topic."""
     if classify(title, summary)[0] is not None:
@@ -132,6 +187,7 @@ class Cluster:
     signals: list[Sig]
     category: str
     strength: float
+    exception: str | None = None  # an off-beat story kept for its financial impact or global significance (exceptional())
 
     @property
     def lead(self) -> Sig:
@@ -258,16 +314,25 @@ def cluster(signals: list[Sig]) -> list[Cluster]:
         from app.trending.sources import topical
 
         news = [x for x in g if x.reliable]
-        on = [x for x in news if not off_topic(x.title, x.summary) and topical(x.title)]
+        news = [x for x in news if topical(x.title)] if news else news  # features, reviews and round-ups never count, exceptional or not
+        on = [x for x in news if not off_topic(x.title, x.summary)]
+        exc = None
         if news and len(on) * 2 < len(news):
-            continue
+            exc = exceptional(news)
+            if exc is None:
+                continue
+            on = news  # an exceptional story keeps all its reporting
         g = [x for x in g if not x.reliable or x in on]
-        if not g:
+        if not g or (not news and any(x.reliable for x in g)):
             continue
         text = " ".join(x.title for x in g[:6])
         hint = next((x.category for x in g if x.category), None)
         cat, strength = classify(text, " ".join(x.summary for x in g[:3])[:600], hint)
-        if cat is not None:
+        if exc is not None:
+            if cat is None:  # its own words are off-beat: file it by what makes it exceptional
+                cat, strength = ("markets" if exc.startswith("financial") else "world"), 2.0
+            out.append(Cluster(g, cat, strength, exception=exc))
+        elif cat is not None:
             out.append(Cluster(g, cat, strength))
     return out
 
@@ -517,7 +582,7 @@ def score(c: Cluster, now: datetime, weights: dict[str, float] | None = None) ->
     parts = {"velocity": round(momentum, 1), "freshness": round(freshness, 1), "impact": round(impact, 1), "surprise": round(surprise, 1),
              "relevance": round(relevance, 1), "engagement": round(engagement, 1), "learned": round(mult, 3), "recent_2h": g["recent_2h"],
              "prior_6h": g["prior_6h"], "sources": sorted(types), "outlets": sorted(outlets), "age_hours": round(age, 1), "stale": stale,
-             "impact_words": imp_hits[:4], "surprise_words": sur_hits[:4], "timeline": timeline,
+             "impact_words": imp_hits[:4], "surprise_words": sur_hits[:4], "timeline": timeline, "exception": c.exception,
              "growth": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in g.items()}}
     parts["why"] = why(parts, round(total, 1))
     return round(total, 1), parts
@@ -536,6 +601,8 @@ def why(parts: dict[str, Any], total: float) -> str:
         bits.append("momentum: " + "; ".join(g["notes"][:2]))
     elif not g.get("measured"):
         bits.append("no measured growth (approval only)")
+    if parts.get("exception"):
+        bits.append(f"off-beat but exceptional ({parts['exception']})")
     if parts.get("impact_words"):
         bits.append("market impact: " + ", ".join(parts["impact_words"][:3]))
     if parts.get("surprise_words"):
