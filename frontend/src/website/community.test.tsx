@@ -373,7 +373,9 @@ describe("legal pages", () => {
     expect(privacy).toMatch(/Cloudflare \(1\.1\.1\.1\) for WireGuard devices/);
     expect(privacy).toMatch(/hosting provider's \(Hetzner's\) resolvers for the browser extension/);
     expect(privacy).toMatch(/aren't encrypted/);
-    expect(privacy).toMatch(/server's own resolver, which keeps no log/);  // stays true once the nodes run their own resolver
+    expect(privacy).toMatch(/server's own resolver or passed to a public resolver/);
+    expect(privacy).toMatch(/haven't yet verified that on every server, so we don't promise it/);  // owner 2026-11-15: no zero-DNS-log claim until verified
+    expect(privacy).not.toMatch(/keeps no log/);
     expect(privacy).toMatch(/IP address it last connected from/);  // WireGuard's in-memory endpoint (audit I1)
     expect(privacy).toMatch(/last handshake/);
     expect(privacy).toMatch(/Railway's and Vercel's\) request logs record them, including your IP address/);  // audit L5
@@ -393,7 +395,9 @@ describe("legal pages", () => {
     expect(aup).toMatch(/port scans/);
     expect(aup).toMatch(/isn't supported for now/);
     expect(aup).toMatch(/abuse report that we can verify/);
-    expect(aup).toMatch(/\[abuse contact address to be confirmed\]/);
+    expect(aup).toMatch(/still setting up a dedicated abuse address/);  // owner 2026-11-15: no address that doesn't exist
+    expect(aup).toMatch(/Telegram or X \(see Contact\)/);
+    expect(aup).not.toMatch(/@[\w-]+\.\w+|\[abuse contact/);  // no email address, no placeholder
     expect(aup).toMatch(/usually can't tell which account/);
     cleanup();
     const terms = (await show(<LegalPage kind="vpnterms" />)).container.textContent!;

@@ -353,7 +353,8 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
       ]],
       ["Your DNS lookups", [
         "Every site you open starts with a DNS lookup that turns its name into an address, so whoever answers those lookups can see the names of the sites you visit.",
-        "Depending on the server, they're answered by the server's own resolver, which keeps no log of them, or passed to a public resolver: Cloudflare (1.1.1.1) for WireGuard devices, or the hosting provider's (Hetzner's) resolvers for the browser extension. The extension's lookups to Hetzner aren't encrypted. Cloudflare and Hetzner handle them under their own privacy policies.",
+        "Depending on the server, they're answered by the server's own resolver or passed to a public resolver: Cloudflare (1.1.1.1) for WireGuard devices, or the hosting provider's (Hetzner's) resolvers for the browser extension. The extension's lookups to Hetzner aren't encrypted. Cloudflare and Hetzner handle them under their own privacy policies.",
+        "We're setting our servers' own resolvers up not to record lookups, but we haven't yet verified that on every server, so we don't promise it. We'll update this page when we have.",
         "A WireGuard device's config shows which one it uses on its DNS line: 1.1.1.1 means Cloudflare, and our server's own address means the server's resolver.",
       ]],
       ["The browser extension", [
@@ -454,7 +455,8 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "If your account is suspended, we'll tell you in your Kiwi Passport notifications where we can. Time lost to a suspension for breaking these rules isn't refunded (see /vpn/refunds). If you think we got it wrong, contact us and we'll look again.",
       ]],
       ["Reporting abuse", [
-        "To report abuse coming from a Kiwi VPN server, email [abuse contact address to be confirmed] with the server's address, the time with its time zone, and what happened. You can also message us on Telegram or X (see Contact).",
+        "We're still setting up a dedicated abuse address. Until it's ready, report abuse coming from a Kiwi VPN server through our support channels: message the Price Chat team on Telegram or X (see Contact). Kiwi VPN members can also use Support in the Kiwi VPN app.",
+        "Please include the server's address, the time with its time zone, and what happened.",
       ]],
       ["Changes", ["We'll update this page if these rules change. The Kiwi VPN terms (/vpn/terms) and privacy page (/vpn/privacy) still apply."]],
     ],
