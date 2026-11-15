@@ -66,8 +66,8 @@ async def test_admin_can_switch_back_to_clean(client: Any, db: Session, live: di
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=30))
     cap = tg.sent[0]["caption"]
-    # clean's own rules: a picture, the label the older scorer gave (a score under 80 is JUST IN there), the signature on its own line
-    assert tg.sent[0]["image"] is not None and cap.startswith("<b>JUST IN:</b>") and cap.endswith('\n\n<a href="https://t.me/thepricechat">@thepricechat</a>')
+    # clean's own rules: a picture, the label the older scorer gave (a score under 80 is JUST IN there), sources · @thepricechat on one line
+    assert tg.sent[0]["image"] is not None and cap.startswith("<b>JUST IN:</b>") and cap.endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')
 
 
 # ---------------------------------------------------------------- the breaking lane in the wire style

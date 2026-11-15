@@ -266,6 +266,9 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     if pkg is not None and meta.get("style") == "clean":  # a photographer's name the picture couldn't draw: credited in the caption
         from app.newsdesk import clean
 
+        if not clean.is_chart_post(ev) and clean.is_chart_post(ev, str(meta.get("layout") or "")):  # a story whose picture has the chart
+            clean.chart_recaption(pkg, ev, rows, x_links=network.x_links_on(desk_state))
+            ev.facts = {**(ev.facts or {}), "package": pkg.out()}  # X posts the same words, under the same picture
         pkg.telegram_html, pkg.telegram_plain = clean.with_credit(pkg.telegram_html, pkg.telegram_plain, meta)
     if pkg is not None and meta.get("style") == "wire":
         from app.newsdesk import wire

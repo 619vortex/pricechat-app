@@ -49,6 +49,47 @@ YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 UA = {"User-Agent": "Mozilla/5.0 (PriceChatNewsDesk/1.0; +https://pricechat.live)"}
 MAX_SENTENCES = 3
 TG_LIMIT = 1024
+# chart posts (owner, 2026-11-15, after a weekly ranking listed all 13 assets under its own chart): the chart carries the data, so the
+# caption is one strong headline and at most one takeaway, never a list of figures, at most three assets, no cashtags on Telegram, and
+# the sources with @thepricechat on one discreet last line. Data cards, market moves and recaps are always chart posts; a story is one
+# when its picture is a chart or a collage with candles (telegram.compose_visual re-captions it once the picture is known).
+CHART_KINDS = ("data", "market", "recap")
+CHART_LAYOUTS = ("data", "chart", "collage")
+CHART_SENTENCES = 2
+MAX_ASSETS = 3
+TG_CASHTAGS = 1  # a story on Telegram: one cashtag at most (X: one, checks.one_cashtag); a chart post: none
+_FIGURE = re.compile(r"[+−-]?\$?\d[\d,.]*\s?(?:%|[KMBT]\b|bn\b)")
+# our own measured move in brackets after an outlet's headline (app/newsdesk/headline: "(BTC -5.4% IN 24H)"): the chart beside it shows it
+_PRICE_TAG = re.compile(r"\s*\((?:\$?[A-Z][A-Z0-9.=^-]{0,9}\s)?[+−-]?\d+(?:\.\d+)?%\s+in\s+\d+\s?[HMhm]\)", re.I)
+# a feed's own sign-off copied into the summary (post 179: "Read the full story on CryptoSlate Understand the crypto stories that matter")
+_BOILER = re.compile(r"\s*(?:Read the full story (?:on|at) .*$|Read more (?:on|at) .*$|Continue reading.*$|The post .{3,120} appeared first on .*$|"
+                     r"Understand the crypto stories that matter.*$|Click here to .*$|Subscribe to .*$)", re.I | re.S)
+
+
+def is_chart_post(ev: Any, layout: str = "") -> bool:
+    return getattr(ev, "kind", "") in CHART_KINDS or layout in CHART_LAYOUTS
+
+
+def _assets(text: str) -> list[str]:
+    return [tag for _, tag in established(text)]
+
+
+def unboiled(text: str) -> str:
+    """A sentence without a feed's sign-off ("Read the full story on ...")."""
+    return _BOILER.sub("", text or "").strip()
+
+
+def chart_recaption(pkg: Any, ev: Any, rows: list[Any], *, x_links: bool = True) -> None:
+    """A story whose picture turned out to carry its chart (a collage with candles, or candles alone): both captions follow the chart
+    rules, since X posts the same picture. The words are the same verified copy; only fewer of them are kept."""
+    from app.newsdesk import network
+
+    said = " ".join([str(getattr(ev, "summary", "") or ""), *(str(getattr(r, "summary", "") or "") for r in rows or [])])
+    pre, outs = prefix_for(ev), network.outlets_of(ev)
+    pkg.telegram_html, pkg.telegram_plain, _ = telegram_caption(pkg.copy, pkg.links, prefix=pre, outlets=outs, case_source=said, chart=True)
+    pkg.x_text = x_caption(pkg.copy, pkg.links, prefix=pre, with_links=x_links, outlets=outs, case_source=said, chart=True)
+
+
 X_LIMIT = 280
 
 PREFIX = {"🚨 BREAKING": "BREAKING:", "🔴 ALERT": "ALERT:", "⚡ JUST IN": "JUST IN:", "🔄 UPDATE": "UPDATE:"}
@@ -177,26 +218,45 @@ def _words(t: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9$%.]+", t.lower()) if len(w) > 2}
 
 
-def sentences_of(c: Any, case_source: str = "") -> list[str]:
+def sentences_of(c: Any, case_source: str = "", *, chart: bool = False) -> list[str]:
     """The headline as a sentence, then up to two more: the context's sentences that add something (not a re-telling of the headline),
     then what it means for markets. An outlet's Title Case Headline is set in sentence case, a word keeping its capital only where the
-    reporting's own sentences (`case_source`: the articles' summaries and the context) capitalise it mid-sentence: names stay names."""
+    reporting's own sentences (`case_source`: the articles' summaries and the context) capitalise it mid-sentence: names stay names.
+    A feed's sign-off ("Read the full story on ...") never comes along. chart: a chart post's caption (see CHART_KINDS): the headline
+    without the bracketed move the chart shows, and at most one takeaway that is no list of figures and names no more than MAX_ASSETS
+    assets in all."""
     from app.newsdesk.network import _sentences, sentence_case
 
-    cased = sentence_case(c.headline, f"{c.context} {case_source}")
-    head = _sentence(_proper(cased) if cased != c.headline else cased)
+    headline = _PRICE_TAG.sub("", c.headline) if chart else c.headline
+    cased = sentence_case(headline, f"{c.context} {case_source}")
+    head = _sentence(_proper(cased) if cased != headline else cased)
     out = [head]
     seen = _words(head)
-    for s in [*_sentences(c.context), *([c.stakes] if c.stakes else [])]:
+    assets = set(_assets(head))
+    for s in [*_sentences(unboiled(c.context)), *([c.stakes] if c.stakes else [])]:
+        s = unboiled(s)
+        if not s:
+            continue
         s = _sentence(s)
         w = _words(s)
         if not w or len(w & seen) / len(w) > 0.6:
             continue
+        if chart and (len(_FIGURE.findall(s)) >= 3 or len(assets | set(_assets(s))) > MAX_ASSETS):
+            continue  # a list of figures, or more assets than a chart caption names: the chart has them
         out.append(s)
         seen |= w
-        if len(out) >= MAX_SENTENCES:
+        assets |= set(_assets(s))
+        if len(out) >= (CHART_SENTENCES if chart else MAX_SENTENCES):
             break
     return out
+
+
+def tagged(sents: list[str], limit: int) -> list[str]:
+    """The sentences with their cashtags (cashtag()), each tag once in the whole caption and at most `limit` of them."""
+    from app.newsdesk import checks
+
+    joined = "\u0000".join(cashtag(s)[0] for s in sents)
+    return checks.limit_cashtags(joined, limit).split("\u0000")
 
 
 def _source_links(links: list[Any], outlets: list[str] | None) -> tuple[str, str]:
@@ -210,32 +270,36 @@ def _source_links(links: list[Any], outlets: list[str] | None) -> tuple[str, str
     return "", ""
 
 
-def telegram_caption(c: Any, links: list[Any], *, prefix: str = "", outlets: list[str] | None = None, case_source: str = "") -> tuple[str, str, str]:
-    """(HTML, plain with the signature, plain without it: what the checks read). Picture first; then the story in 1-3 sentences, the
-    sources on one line, and @thepricechat."""
-    sents = sentences_of(c, case_source)
+def telegram_caption(c: Any, links: list[Any], *, prefix: str = "", outlets: list[str] | None = None, case_source: str = "",
+                     chart: bool = False) -> tuple[str, str, str]:
+    """(HTML, plain with the signature, plain without it: what the checks read). Picture first; then the story in 1-3 sentences (a chart
+    post: the headline and at most one takeaway, each on its own line for a phone screen, no cashtags), each cashtag once and one at most,
+    and the sources with @thepricechat on one last line."""
+    sents = sentences_of(c, case_source, chart=chart)
     while True:
-        first, tags = cashtag(sents[0])
-        rest = [cashtag(s)[0] for s in sents[1:]]
+        words = tagged(sents, 0 if chart else TG_CASHTAGS)
+        first, rest = words[0], words[1:]
         lead = f"<b>{_esc(prefix)}</b> {_esc(first)}" if prefix else _esc(first)
-        body_html = [lead + (" " + _esc(" ".join(rest)) if rest else "")]
-        body_plain = [(f"{prefix} {first}" if prefix else first) + (" " + " ".join(rest) if rest else "")]
+        sep = "\n\n" if chart else " "  # a chart post: the takeaway on its own line, easy to read under the chart on a phone
+        body_html = lead + (sep + _esc(sep.join(rest)) if rest else "")
+        body_plain = (f"{prefix} {first}" if prefix else first) + (sep + sep.join(rest) if rest else "")
         src_html, src_plain = _source_links(links, outlets)
-        if src_html:
-            body_html.append(src_html)
-            body_plain.append(src_plain)
-        html = "\n\n".join([*body_html, f'<a href="{HANDLE_URL}">{HANDLE}</a>'])
-        plain_body = "\n\n".join(body_plain)
+        sig_html = f'<a href="{HANDLE_URL}">{HANDLE}</a>'
+        footer_html = f"{src_html} · {sig_html}" if src_html else sig_html
+        html = f"{body_html}\n\n{footer_html}"
+        plain_body = f"{body_plain}\n\n{src_plain}" if src_plain else body_plain
         if len(html) <= TG_LIMIT or len(sents) == 1:
-            return html, f"{plain_body}\n\n{HANDLE}", plain_body
+            return html, (f"{plain_body} · {HANDLE}" if src_plain else f"{plain_body}\n\n{HANDLE}"), plain_body
         sents = sents[:-1]
 
 
-def x_caption(c: Any, links: list[Any], *, prefix: str = "", with_links: bool = True, outlets: list[str] | None = None, case_source: str = "") -> str:
-    """The same story for X: the hook (prefix + the headline with its cashtags), a second sentence when it fits, one source link."""
+def x_caption(c: Any, links: list[Any], *, prefix: str = "", with_links: bool = True, outlets: list[str] | None = None, case_source: str = "",
+              chart: bool = False) -> str:
+    """The same story for X: the hook (prefix + the headline with its cashtag), a second sentence when it fits, one source link. One
+    cashtag at most (X refuses API posts with more)."""
     from app.newsdesk.network import x_length
 
-    sents = [cashtag(s)[0] for s in sentences_of(c, case_source)]
+    sents = tagged(sentences_of(c, case_source, chart=chart), 1)
     head = f"{prefix} {sents[0]}" if prefix else sents[0]
     srcs = [x for x in links if getattr(x, "kind", "article") != "pricechat"]
     link = f"{srcs[0].name}: {srcs[0].url}" if (with_links and srcs) else (f"Via {' · '.join([x.name for x in srcs][:2] or (outlets or [])[:2])}" if (srcs or outlets) else "")
@@ -314,12 +378,14 @@ def caption_credit(meta: dict[str, Any]) -> tuple[str, str]:
 
 
 def with_credit(html: str, plain: str, meta: dict[str, Any]) -> tuple[str, str]:
-    """The caption with the photo's full credit above the signature, when the picture couldn't carry it."""
+    """The caption with the photo's full credit (its licence requires it), on its own line before the last line, when the picture couldn't
+    carry it. Otherwise the credit is on the picture and the caption has none."""
     c_html, c_plain = caption_credit(meta)
     if not c_html:
         return html, plain
-    sig = f'<a href="{HANDLE_URL}">{HANDLE}</a>'
-    return html.replace(sig, f"{c_html}\n\n{sig}"), plain.replace(HANDLE, f"{c_plain}\n\n{HANDLE}")
+    body, _, footer = html.rpartition("\n\n")
+    pbody, _, pfooter = plain.rpartition("\n\n")
+    return f"{body}\n\n{c_html}\n\n{footer}", f"{pbody}\n\n{c_plain}\n\n{pfooter}"
 
 
 def photo_picture(img: Image.Image, credit: str, size: tuple[int, int] = (W, H)) -> tuple[Image.Image, tuple[float, float, float, float]]:
