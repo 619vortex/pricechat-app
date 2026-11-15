@@ -585,7 +585,18 @@ jobs:
       - name: Uninstall, and the internet is still there
         if: always()
         run: |
-          if (Test-Path "C:\Program Files\KiwiVPN\uninstall.exe") { Start-Process "C:\Program Files\KiwiVPN\uninstall.exe" -ArgumentList "/S" -Wait }
+          # NSIS's uninstall.exe copies itself to %TEMP% and returns at once, so -Wait didn't wait: the check below ran mid-uninstall and the
+          # runner's orphan cleanup killed the still-running uninstaller (the kill-switch job then showed "cancelled"). A copy run with _?=
+          # uninstalls in place and returns when it is done.
+          $dir = "C:\Program Files\KiwiVPN"
+          if (Test-Path "$dir\uninstall.exe") {
+            Copy-Item "$dir\uninstall.exe" "$env:RUNNER_TEMP\kiwi-uninstall.exe" -Force
+            $u = Start-Process "$env:RUNNER_TEMP\kiwi-uninstall.exe" -ArgumentList "/S", "_?=$dir" -Wait -PassThru
+            "uninstaller exit code: $($u.ExitCode)"
+          }
+          if (Get-Service KiwiVPN -ErrorAction SilentlyContinue) { throw "The Kiwi VPN service is still installed after uninstalling" }
+          $left = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\*" }
+          if ($left) { throw "Kiwi VPN processes still running after uninstalling: $($left.Name -join ', ')" }
           Start-Sleep 3
           $ok = (Test-NetConnection 1.1.1.1 -Port 443 -WarningAction SilentlyContinue).TcpTestSucceeded
           "internet after uninstall: $ok"
@@ -666,7 +677,18 @@ jobs:
       - name: Uninstall
         if: always()
         run: |
-          if (Test-Path "C:\Program Files\KiwiVPN\uninstall.exe") { Start-Process "C:\Program Files\KiwiVPN\uninstall.exe" -ArgumentList "/S" -Wait }
+          # NSIS's uninstall.exe copies itself to %TEMP% and returns at once, so -Wait didn't wait: the check below ran mid-uninstall and the
+          # runner's orphan cleanup killed the still-running uninstaller (the kill-switch job then showed "cancelled"). A copy run with _?=
+          # uninstalls in place and returns when it is done.
+          $dir = "C:\Program Files\KiwiVPN"
+          if (Test-Path "$dir\uninstall.exe") {
+            Copy-Item "$dir\uninstall.exe" "$env:RUNNER_TEMP\kiwi-uninstall.exe" -Force
+            $u = Start-Process "$env:RUNNER_TEMP\kiwi-uninstall.exe" -ArgumentList "/S", "_?=$dir" -Wait -PassThru
+            "uninstaller exit code: $($u.ExitCode)"
+          }
+          if (Get-Service KiwiVPN -ErrorAction SilentlyContinue) { throw "The Kiwi VPN service is still installed after uninstalling" }
+          $left = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\*" }
+          if ($left) { throw "Kiwi VPN processes still running after uninstalling: $($left.Name -join ', ')" }
           exit 0
 
       - name: Report
@@ -781,7 +803,18 @@ jobs:
         run: |
           tools\e2e.exe cleanup
           Remove-NetFirewallRule -DisplayName "KiwiCI-failover-block" -ErrorAction SilentlyContinue
-          if (Test-Path "C:\Program Files\KiwiVPN\uninstall.exe") { Start-Process "C:\Program Files\KiwiVPN\uninstall.exe" -ArgumentList "/S" -Wait }
+          # NSIS's uninstall.exe copies itself to %TEMP% and returns at once, so -Wait didn't wait: the check below ran mid-uninstall and the
+          # runner's orphan cleanup killed the still-running uninstaller (the kill-switch job then showed "cancelled"). A copy run with _?=
+          # uninstalls in place and returns when it is done.
+          $dir = "C:\Program Files\KiwiVPN"
+          if (Test-Path "$dir\uninstall.exe") {
+            Copy-Item "$dir\uninstall.exe" "$env:RUNNER_TEMP\kiwi-uninstall.exe" -Force
+            $u = Start-Process "$env:RUNNER_TEMP\kiwi-uninstall.exe" -ArgumentList "/S", "_?=$dir" -Wait -PassThru
+            "uninstaller exit code: $($u.ExitCode)"
+          }
+          if (Get-Service KiwiVPN -ErrorAction SilentlyContinue) { throw "The Kiwi VPN service is still installed after uninstalling" }
+          $left = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\*" }
+          if ($left) { throw "Kiwi VPN processes still running after uninstalling: $($left.Name -join ', ')" }
 
       - name: Report
         if: always() && steps.gate.outputs.run == 'yes'
