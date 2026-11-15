@@ -143,7 +143,9 @@ def lite(db: Session, refresh: bool = False) -> list[LiteCard]:
 
 
 def _load(db: Session, ids: list[int]) -> list[PokemonCard]:
-    by = {c.id: c for c in db.scalars(select(PokemonCard).where(PokemonCard.id.in_(ids)))} if ids else {}
+    by: dict[int, PokemonCard] = {}
+    for i in range(0, len(ids), 500):  # SQLite caps bound variables per statement; the market table asks for thousands
+        by.update({c.id: c for c in db.scalars(select(PokemonCard).where(PokemonCard.id.in_(ids[i:i + 500])))})
     return [by[i] for i in ids if i in by]
 
 

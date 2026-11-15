@@ -267,6 +267,7 @@ async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic
     else:
         model_text = await writer.model(settings, b, transport=writer_transport)
         if model_text:
+            model_text = writer.keep_one_cashtag(model_text)
             result = _gate(model_text, b, reliable)
             if result["ok"]:
                 text, angle, used = model_text, "model", "model"

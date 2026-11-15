@@ -1,7 +1,8 @@
 """TEST FIXTURES for Trending Topics: made-up headlines, a made-up Google Trends feed, made-up Reddit listings and X answers, served by
 httpx.MockTransport. No real service is contacted."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from typing import Any
 
 import httpx
@@ -16,7 +17,7 @@ def google_rss(items: list[dict[str, Any]]) -> str:
         news = "".join(f"<ht:news_item><ht:news_item_title>{n['title']}</ht:news_item_title><ht:news_item_url>{n['url']}</ht:news_item_url>"
                        f"<ht:news_item_source>{n['source']}</ht:news_item_source></ht:news_item>" for n in it.get("news", []))
         out.append(f"<item><title>{it['query']}</title><ht:approx_traffic>{it.get('traffic', '20,000+')}</ht:approx_traffic>"
-                   f"<pubDate>Sat, 14 Nov 2026 09:00:00 +0000</pubDate>{news}</item>")
+                   f"<pubDate>{format_datetime(datetime.now(timezone.utc) - timedelta(hours=1))}</pubDate>{news}</item>")  # always fresh
     return ('<?xml version="1.0" encoding="UTF-8"?><rss xmlns:ht="https://trends.google.com/trending/rss" version="2.0"><channel>'
             f"<title>Daily Search Trends</title>{''.join(out)}</channel></rss>")
 
