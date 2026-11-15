@@ -14,10 +14,14 @@ export type TrendPost = { id: number; topic_id: number; category: string; status
 export type Sensitive = { kind: string; label: string; tier: "approval" | "strict"; matched?: string };
 export type Growth = { evidence: string[]; notes: string[]; measured: boolean; capped?: boolean; observed_min?: number; items_before?: number; items_now?: number;
   outlets_before?: number; outlets_now?: number; google_from?: number; google_to?: number; google_up?: boolean; recent_2h?: number; prior_6h?: number };
-export type TopicSource = { source: string; outlet: string; title: string; url: string; reliable: boolean; engagement: number; at: string | null; extra?: Record<string, unknown> };
+export type Timeline = { event_time: string; first_seen: string; last_update: string; source_count: number; outlets: number; outlets_1h: number; items_per_hour: number;
+  developing: boolean; new_outlets_2h: number };
+export type Latency = { post_id: number; status: string; at: string; event_to_publish_min: number | null; detect_to_publish_min: number | null; written_to_publish_min: number | null; score?: number };
+type LatencyStat = { median: number; max: number; n: number } | null;
+export type TopicSource ={ source: string; outlet: string; title: string; url: string; reliable: boolean; engagement: number; at: string | null; extra?: Record<string, unknown> };
 export type Topic = { id: number; title: string; category: string; status: string; score: number; peak_score: number; first_seen: string | null; last_seen: string | null;
-  parts: { velocity?: number; engagement?: number; freshness?: number; relevance?: number; discussion?: number; learned?: number; recent_2h?: number; sources?: string[]; outlets?: string[]; age_hours?: number;
-    growth?: Growth; sensitive?: Sensitive | null };
+  parts: { velocity?: number; engagement?: number; freshness?: number; impact?: number; surprise?: number; relevance?: number; learned?: number; recent_2h?: number; sources?: string[]; outlets?: string[]; age_hours?: number;
+    growth?: Growth; sensitive?: Sensitive | null; stale?: string | null; why?: string; timeline?: Timeline; latency?: Latency };
   sources: TopicSource[]; metrics: Record<string, number>; posted_at: string | null; post: TrendPost | null };
 export type SourceHealth = { name: string; last_scan?: string; items?: number; stored?: number; status: "ok" | "error" | "unavailable" | "off" | "idle"; problem: string | null;
   partial?: string; fails?: number; last_ok?: string | null; plan?: boolean; auth?: string | null };
@@ -29,6 +33,7 @@ export type Trending = { settings: TrendSettings; last_run: (Record<string, unkn
   coordination: { posts_24h: { newsdesk: number; trending: number; total: number }; shared_cap: number; next_newsdesk_slot: string | null; desk_blocked: string | null; spacing: string | null; cap: string | null; newsdesk_x_mode: "live" | "dry_run"; x_live: boolean };
   learning: { measured_posts: number; learning: boolean; needs: number; weights: Record<string, number>; totals: Record<string, number>; bounds: number[];
     per_category?: Record<string, { posts: number; impressions: number; likes: number; reposts: number; replies: number; rate: number }> };
+  latency?: { event_to_publish: LatencyStat; detect_to_publish: LatencyStat; written_to_publish: LatencyStat; recent: Latency[] };
   writer: "model" | "rules"; x: { configured: boolean; can_write: boolean; status: string; last_ok: Record<string, unknown> | null; last_error: { at: string; message: string } | null };
   cost: { per_post_usd: number; x_trends_per_request_usd: number; x_post_read_usd: number } };
 
@@ -36,7 +41,21 @@ const CATEGORY: Record<string, string> = { crypto: "Crypto", stocks: "Stocks", m
 const SOURCE: Record<string, string> = { news: "News", google: "Google Trends", reddit: "Reddit", x_trends: "X trends", x_accounts: "X accounts" };
 const HEALTH_TONE: Record<string, Tone> = { ok: "good", error: "bad", unavailable: "warn", off: "neutral", idle: "info" };
 const STATUS_TONE: Record<string, Tone> = { pending: "info", queued: "info", held: "warn", dry_run: "neutral", published: "good", failed: "bad", uncertain: "warn", rejected: "neutral", expired: "neutral" };
-const PARTS: [keyof Topic["parts"], string, number][] = [["velocity", "Velocity", 30], ["engagement", "Engagement", 25], ["freshness", "Freshness", 15], ["relevance", "Relevance", 20], ["discussion", "Discussion", 10]];
+const PARTS: [keyof Topic["parts"], string, number][] = [["velocity", "Momentum", 30], ["freshness", "Freshness", 25], ["impact", "Market impact", 15], ["surprise", "Surprise", 10],
+  ["relevance", "Relevance", 10], ["engagement", "Engagement", 10]];
+
+function minutes(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "-";
+  return n < 90 ? `${n} min` : `${(n / 60).toFixed(1)} h`;
+}
+
+/** When it happened, when we saw it, its newest item, how many sources and how fast it is spreading. */
+export function TimelineNote({ t }: { t?: Timeline }) {
+  if (!t) return null;
+  return <div className="small muted">event {relativeTime(t.event_time)} · first seen {relativeTime(t.first_seen)} · last update {relativeTime(t.last_update)}
+    {" · "}{t.source_count} source{t.source_count === 1 ? "" : "s"} · {t.items_per_hour}/h{t.outlets_1h ? ` · ${t.outlets_1h} outlet${t.outlets_1h === 1 ? "" : "s"} in the last hour` : ""}
+    {t.developing ? " · developing" : ""}</div>;
+}
 
 const body = (method: string, data: unknown): RequestInit => ({ method, body: JSON.stringify(data) });
 
@@ -178,14 +197,26 @@ export function TrendingTopics() {
         <p className="small muted">Google Trends: the official "Trending now" RSS feed. Reddit: Reddit's OAuth API (set REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET). X: trends ${data.cost.x_trends_per_request_usd} a request, account posts ${data.cost.x_post_read_usd} each. Nothing is scraped.</p>
       </Card>
 
+      {data.latency && (data.latency.recent?.length ?? 0) > 0 && <Card title="Speed: detection to publication">
+        <div className="stats">
+          <Stat label="Event → sent (median)" value={minutes(data.latency.event_to_publish?.median)} hint={`worst ${minutes(data.latency.event_to_publish?.max)} · ${data.latency.event_to_publish?.n ?? 0} posts`} />
+          <Stat label="First seen → sent (median)" value={minutes(data.latency.detect_to_publish?.median)} hint={`worst ${minutes(data.latency.detect_to_publish?.max)}`} />
+          <Stat label="Written → sent (median)" value={minutes(data.latency.written_to_publish?.median)} hint="time spent waiting on limits and spacing" />
+        </div>
+        <p className="small muted">Measured on each trend post (sent or recorded in dry run). Event = the first report of the story; first seen = our first scan that read it. Scans run every 5 minutes.</p>
+      </Card>}
+
       <Card title={`Trending now (${data.topics.length})`}>
         {data.topics.length === 0 ? <Empty>No topics yet: the first scan runs a few minutes after start, or press Scan now.</Empty> : (
           <table className="table small tt-topics"><thead><tr><th>Score</th><th>Topic</th><th>Why</th><th>Sources</th><th>Engagement</th><th>Suggested tweet</th></tr></thead>
             <tbody>{data.topics.map((t) => (
               <tr key={t.id}>
                 <td><Badge tone={scoreTone(t.score, s)}>{t.score.toFixed(0)}</Badge>{t.status !== "active" && <div className="small muted">{t.status}</div>}</td>
-                <td><b>{t.title}</b><div className="small muted">{CATEGORY[t.category] ?? t.category} · first seen {relativeTime(t.first_seen)}</div>
-                  <SensitiveBadge x={t.parts.sensitive} /></td>
+                <td><b>{t.title}</b><div className="small muted">{CATEGORY[t.category] ?? t.category}{t.parts.timeline ? "" : ` · first seen ${relativeTime(t.first_seen)}`}</div>
+                  <TimelineNote t={t.parts.timeline} />
+                  {t.parts.stale && <Badge tone="neutral">stale</Badge>} <SensitiveBadge x={t.parts.sensitive} />
+                  {t.parts.why && <div className="small">Why: {t.parts.why}</div>}
+                  {t.parts.latency && <div className="small muted">posted: event → sent {minutes(t.parts.latency.event_to_publish_min)}, first seen → sent {minutes(t.parts.latency.detect_to_publish_min)}</div>}</td>
                 <td>{PARTS.map(([k, name, max]) => <div key={k} className="small">{name} <ScoreBar value={Number(t.parts[k] ?? 0)} max={max} /> {Number(t.parts[k] ?? 0).toFixed(0)}</div>)}
                   {t.parts.learned !== undefined && t.parts.learned !== 1 && <div className="small muted">learned ×{t.parts.learned}</div>}
                   <GrowthNote g={t.parts.growth} /></td>

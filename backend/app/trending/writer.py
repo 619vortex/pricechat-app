@@ -203,13 +203,14 @@ def rules(b: Brief, angle: str | None = None) -> tuple[str, str]:
     rising = "interest" in options and b.google_to > b.google_from > 0
     order += (["interest", "detail"] if rising else ["detail", "interest"]) + ["coverage"]
     for name in order:
-        if name in options and len(first) + len(options[name]) + 2 <= 270:
+        if name in options and len(first) + len(options[name]) + 2 <= 240:  # short and sharp: the second sentence only if it fits
             return keep_one_cashtag(f"{first}\n\n{options[name]}"), name
     return (first if len(first) <= 280 else first[:277].rstrip() + "…"), "plain"
 
 
 VOICE = ("You write one tweet for Price Chat's X account about a story people are increasingly searching for and reading about. Write like a sharp "
-         "human editor: natural, plain, specific, varied. Under 240 characters, at most two short sentences. Sentence one: what happened, from "
+         "human editor: short, sharp, factual, like a wire headline: lead with the news itself, no scene-setting. Under 200 characters, at most "
+         "two short sentences. Sentence one: what happened, from "
          "the lead FACT, credited to its outlet (\"(via {outlet})\", \"{outlet} reports\" or \"{outlet}:\"). Sentence two, only if it adds "
          "something: one concrete detail or figure from another FACT (credit that outlet), or the measured interest exactly as a FACT states it. "
          "Every fact, figure and name must come from the FACTS, word for word where it matters; never add predictions, opinions, advice, "

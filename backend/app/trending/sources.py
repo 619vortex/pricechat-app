@@ -36,7 +36,7 @@ REDDIT_OAUTH = "https://oauth.reddit.com/r/{sub}/hot?limit={n}&raw_json=1"
 REDDIT_TOKEN = "https://www.reddit.com/api/v1/access_token"
 NAMES = {"news": "News Desk feeds", "google": "Google Trends", "reddit": "Reddit", "x_trends": "X trends", "x_accounts": "X major accounts"}
 # minutes between two reads of a source (the scan itself runs every job_trending_seconds)
-INTERVAL = {"news": 0, "google": 30, "reddit": 30, "x_trends": 60, "x_accounts": 60}
+INTERVAL = {"news": 0, "google": 10, "reddit": 15, "x_trends": 60, "x_accounts": 60}  # Google's RSS is free; X reads are paid
 # outlets whose reporting may back a factual claim (plus every News Desk feed's own name)
 RELIABLE_OUTLETS = {"reuters", "associated press", "ap news", "ap", "bloomberg", "financial times", "ft", "wall street journal", "wsj",
                     "the wall street journal", "cnbc", "bbc", "bbc news", "the guardian", "new york times", "the new york times", "npr",

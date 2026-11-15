@@ -19,7 +19,8 @@ from app.models.trending import TtPost, TtSettings
 from app.newsdesk import checks
 
 SENT_LIVE = ("published", "publishing", "uncertain")
-WINDOW = timedelta(hours=24)
+WINDOW = timedelta(hours=24)  # the caps
+SAME_STORY_WINDOW = timedelta(hours=48)  # one event, one post across both lanes: yesterday's story is never re-posted
 
 
 def _aware(d: datetime | None, now: datetime) -> datetime | None:
@@ -47,8 +48,8 @@ def same_story(a: str, b: str) -> bool:
 
 
 def newsdesk_conflict(db: Session, titles: list[str], now: datetime) -> str | None:
-    """The News Desk already has this story (posted, queued, dry run, or an event released for both platforms) in the last 24 h."""
-    since = now - WINDOW
+    """The News Desk already has this story (posted, queued, dry run, or an event released for both platforms) in the last 48 h."""
+    since = now - SAME_STORY_WINDOW
     posts = db.scalars(select(NdPost).where(NdPost.created_at >= since, NdPost.status.notin_(("rejected", "expired", "failed"))))
     for p in posts:
         theirs = [str((p.facts or {}).get(k) or "") for k in ("title", "headline")] + [p.text or ""]
@@ -62,8 +63,8 @@ def newsdesk_conflict(db: Session, titles: list[str], now: datetime) -> str | No
 
 
 def trend_covered(db: Session, titles: list[str], now: datetime) -> TtPost | None:
-    """For the News Desk: a trend post on the same story went out (or was recorded in dry run) in the last 24 h."""
-    rows = db.scalars(select(TtPost).where(TtPost.published_at >= now - WINDOW, TtPost.status.in_(SENT_LIVE + ("dry_run",))))
+    """For the News Desk: a trend post on the same story went out (or was recorded in dry run) in the last 48 h."""
+    rows = db.scalars(select(TtPost).where(TtPost.published_at >= now - SAME_STORY_WINDOW, TtPost.status.in_(SENT_LIVE + ("dry_run",))))
     for p in rows:
         theirs = [str(x.get("title") or "") for x in p.sources or []] + [p.text]
         if any(same_story(t, o) for t in titles if t for o in theirs if o):

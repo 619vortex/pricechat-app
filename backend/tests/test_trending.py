@@ -208,7 +208,9 @@ def test_ranking_rewards_velocity_breadth_and_relevance_and_drops_what_the_audie
     hot_score, parts = rank.score(hot_c, NOW)
     slow_score, _ = rank.score(next(c for c in clusters if any(s.id == 10 for s in c.signals)), NOW)
     assert hot_score > slow_score + 20 and hot_c.category == "crypto"
-    assert set(parts) >= {"velocity", "engagement", "freshness", "relevance", "discussion", "learned", "growth"} and parts["learned"] == 1.0
+    assert set(parts) >= {"velocity", "engagement", "freshness", "impact", "surprise", "relevance", "learned", "growth", "timeline", "why"} and parts["learned"] == 1.0
+    for k in ("event_time", "first_seen", "last_update", "source_count", "items_per_hour"):
+        assert k in parts["timeline"], k
     assert parts["growth"]["measured"] and "google" in parts["growth"]["evidence"]
 
 
@@ -233,11 +235,16 @@ def test_many_articles_but_flat_interest_stays_below_the_automatic_line() -> Non
     assert len(c.signals) == 10  # same-event coverage merges
     sc, parts = rank.score(c, NOW)
     assert sc < 75 and sc <= rank.NO_GROWTH_CAP and parts["growth"]["measured"] is False and parts["growth"]["evidence"] == []
-    # even at its freshest (all ten published in the last two hours, a burst), coverage alone can't reach the line
-    burst = [_seen_sig(i, ZEN[i % 5], OUTLETS[i], first_seen_min=0, published_min=5 + 10 * i) for i in range(10)]
+    # owner, 2026-11-15 (detect trends early): independent outlets breaking it within the last hour IS measured posting velocity
+    burst = [_seen_sig(i, ZEN[i % 5], OUTLETS[i], first_seen_min=0, published_min=5 + 5 * i) for i in range(10)]
     [b] = rank.cluster(burst)
     sc2, p2 = rank.score(b, NOW)
-    assert sc2 <= rank.NO_GROWTH_CAP < 75 and p2["growth"]["measured"] is False
+    assert p2["growth"]["measured"] is True and p2["growth"]["evidence"] == ["burst"] and p2["timeline"]["outlets_1h"] == 10
+    assert sc2 > sc  # the fresh burst outranks the same coverage spread over twelve hours
+    # two outlets in the hour is not a burst
+    pair = [_seen_sig(i, ZEN[i % 5], OUTLETS[i], first_seen_min=0, published_min=10 + 5 * i) for i in range(2)]
+    [pc] = rank.cluster(pair)
+    assert rank.score(pc, NOW)[1]["growth"]["measured"] is False
 
 
 def test_interest_growing_across_scans_raises_the_score_past_the_line() -> None:
@@ -822,7 +829,7 @@ async def test_each_scan_logs_sources_topics_top_five_and_the_decision_with_no_s
     hack_story(db, web)
     with caplog.at_level(logging.INFO, logger="app.trending.engine"):
         await tick(db, web)
-        await tick(db, web, NOW + timedelta(minutes=10))
+        await tick(db, web, NOW + timedelta(minutes=5))  # Google is read every 10 minutes
     lines = [r.getMessage() for r in caplog.records if r.name == "app.trending.engine"]
     startup = [x for x in lines if x.startswith("trending startup:")]
     assert len(startup) == 1  # once per process (per deploy)
@@ -832,7 +839,7 @@ async def test_each_scan_logs_sources_topics_top_five_and_the_decision_with_no_s
     assert len(scans) == 2 and "news=ok" in scans[0] and "google=ok" in scans[0] and "reddit=unavailable" in scans[0] and "x_trends=off" in scans[0]
     assert "google=ok (not due)" in scans[1]
     tops = [x for x in lines if x.startswith("trending top")]
-    assert tops and "Bybaz" in tops[0] and "growth=google" in tops[0] and " v" in tops[0] and "tweet " in tops[0]
+    assert tops and "Bybaz" in tops[0] and "growth=google" in tops[0] and " m" in tops[0] and " age=" in tops[0] and "tweet " in tops[0]
     pubs = [x for x in lines if x.startswith("trending publish:")]
     assert len(pubs) == 2 and pubs[0].startswith("trending publish: dry_run") and "dry run" in pubs[0].lower()
     assert len(lines) <= 1 + 2 * 7  # a few lines per scan
@@ -866,3 +873,72 @@ def test_a_topic_whose_reliable_items_are_mostly_off_topic_is_dropped() -> None:
              _sig(2, "All Blacks squad for Wales test match named", outlet="Guardian"),
              _sig(3, "wales v new zealand", source="google", outlet="Google Trends", reliable=False, eng=50_000, query="wales v new zealand")]
     assert all("All Blacks" not in s.title for c in rank.cluster(items) for s in c.signals)
+
+
+# --- today's news first (owner, 2026-11-15) -----------------------------------------------------------------------------------------
+
+
+def test_a_story_older_than_six_hours_is_stale_unless_it_develops() -> None:
+    old = [_seen_sig(i, ZEN[i % 5], OUTLETS[i], first_seen_min=560, published_min=480 + 20 * i, eng=2.0) for i in range(4)]
+    [c] = rank.cluster(old)
+    sc, parts = rank.score(c, NOW)
+    assert parts["stale"] and sc <= rank.STALE_CAP < 45 and parts["why"].startswith("Stale: first reported")
+    # a genuine development: two new independent outlets in the last two hours
+    more = old + [_seen_sig(10 + i, ZEN[i], OUTLETS[6 + i], first_seen_min=20, published_min=30 + 10 * i) for i in range(2)]
+    [d] = rank.cluster(more)
+    sc2, p2 = rank.score(d, NOW)
+    assert not p2["stale"] and p2["timeline"]["developing"] and p2["timeline"]["new_outlets_2h"] == 2 and sc2 > sc
+    # fresh: full freshness for the first three hours, fading to half at six
+    assert rank.freshness_of(NOW - timedelta(hours=2), NOW, NOW, False) == (1.0, None)
+    assert rank.freshness_of(NOW - timedelta(hours=6), NOW, NOW, False)[0] == pytest.approx(0.5)
+
+
+def test_market_impact_and_surprise_rank_a_story_higher() -> None:
+    calm = [_seen_sig(i, t, o, first_seen_min=30, published_min=40) for i, (t, o) in
+            enumerate([("Crypto exchange Lumora publishes its quarterly community update", "CoinDesk"), ("Crypto exchange Lumora community update published", "The Block")])]
+    shock = [_seen_sig(10 + i, t, o, first_seen_min=30, published_min=40) for i, (t, o) in
+             enumerate([("Crypto exchange Lumora unexpectedly halts withdrawals after $40 million hack", "CoinDesk"), ("Crypto exchange Lumora halts withdrawals after $40 million hack", "The Block")])]
+    _, pc = rank.score(rank.cluster(calm)[0], NOW)
+    _, ps = rank.score(rank.cluster(shock)[0], NOW)
+    assert ps["impact"] > pc["impact"] and ps["surprise"] > pc["surprise"] and "hack" in ps["impact_words"] and "unexpectedly" in ps["surprise_words"]
+
+
+async def test_publishing_records_the_measured_latency_and_admin_shows_the_timeline(db: Session, web: Web) -> None:
+    hack_story(db, web)
+    await tick(db, web)
+    [post] = [p for p in posts(db) if "Bybaz" in p.text]
+    assert post.status == "dry_run"
+    topic = db.get(TtTopic, post.topic_id)
+    lat = topic.parts["latency"]
+    assert lat["event_to_publish_min"] == 70 and lat["detect_to_publish_min"] == 0 and lat["written_to_publish_min"] is not None
+    tl = topic.parts["timeline"]
+    assert tl["outlets"] == 3 and tl["event_time"] < tl["last_update"] and topic.parts["why"]
+    s = engine.settings_row(db)
+    assert engine.latency_summary(s.state["latency"])["event_to_publish"]["median"] == 70  # the earliest report: the article Google linked at 09:00
+    await tick(db, web, NOW + timedelta(minutes=5))  # the next scan keeps what its post measured
+    db.expire_all()
+    assert db.get(TtTopic, post.topic_id).parts["latency"]["post_id"] == post.id
+
+
+async def test_a_queued_tweet_that_went_stale_while_waiting_is_never_sent(db: Session, web: Web) -> None:
+    hack_story(db, web)
+    s = engine.settings_row(db)
+    s.mode = "approval"
+    db.commit()
+    await tick(db, web)
+    [post] = [p for p in posts(db) if "Bybaz" in p.text]
+    post.status = "queued"
+    topic = db.get(TtTopic, post.topic_id)
+    topic.parts = {**topic.parts, "stale": "first reported 7 h ago, no new development in the last 2 h"}
+    db.commit()
+    got = await engine.publish_due(db, s, get_settings(), web.runtime, get_agent_config(db).id, NOW)
+    assert got == "expired" and db.get(TtPost, post.id).note.startswith("Went stale while it waited")
+
+
+def test_yesterdays_news_desk_story_still_blocks_a_trend_post(db: Session) -> None:
+    db.add(NdPost(kind="news", category="crypto", priority="scheduled", status="published", text=f"{HACK}\n\nSource: CoinDesk", key="event:30", fingerprint="",
+                  facts={"title": HACK, "headline": HACK.upper()}, sources=[], checks=[], metrics={}, created_at=NOW - timedelta(hours=30),
+                  published_at=NOW - timedelta(hours=30)))
+    db.commit()
+    assert (coordinate.newsdesk_conflict(db, [HACK], NOW) or "").startswith("covered by the News Desk")
+    assert coordinate.newsdesk_conflict(db, [HACK], NOW + timedelta(hours=20)) is None  # past 48 h

@@ -200,7 +200,8 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
                             parts=parts, signal_ids=ids, sources=srcs, metrics=metrics, first_seen=min(x.first_seen for x in c.signals), last_seen=now)
             db.add(topic)
         else:
-            topic.title, topic.category, topic.score, topic.parts = lead.title[:300], c.category, sc, parts
+            keep = {k: v for k, v in (topic.parts or {}).items() if k == "latency"}  # what its post measured stays with it
+            topic.title, topic.category, topic.score, topic.parts = lead.title[:300], c.category, sc, {**parts, **keep}
             topic.peak_score = max(topic.peak_score or 0, sc)
             topic.signal_ids = sorted(set(topic.signal_ids or []) | set(ids))[-200:]
             topic.sources, topic.metrics, topic.last_seen = srcs, metrics, now
@@ -361,6 +362,13 @@ async def publish_due(db: Session, s: TtSettings, settings: Settings, runtime: A
     if post is None:
         return None
     decision["post_id"] = post.id
+    topic = db.get(TtTopic, post.topic_id)
+    stale = ((topic.parts or {}).get("stale") if topic is not None else None)
+    if stale:  # it waited (spacing, caps) until it went stale: today's news or nothing
+        post.status, post.note = "expired", f"Went stale while it waited: {stale}"
+        decision["why"] = post.note
+        db.commit()
+        return "expired"
     why = waiting_reason(db, s, post, now)
     if why is not None:
         held = why.startswith("covered by the News Desk")
@@ -410,6 +418,7 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
         post.status, post.published_at, post.note = "dry_run", now, f"Dry run ({why}): recorded, not sent"
         if topic is not None:
             topic.status, topic.posted_at = "posted", now
+        record_latency(s, post, topic, now)
         db.commit()
         logger.info("trending DRY RUN [%s score %.1f]: %s", post.category, post.score, post.text.replace("\n", " / "))
         return "dry_run"
@@ -459,11 +468,41 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
     post.status, post.x_id, post.published_at, post.error = "published", x_id, now, None
     if topic is not None:
         topic.status, topic.posted_at = "posted", now
+    record_latency(s, post, topic, now)
     guard.record_attempt(req, None, None, "executed", reason="trending topics", external_id=x_id)
     _note(s, "x_last_ok", {"at": now.isoformat(), "post_id": post.id, "x_id": x_id})
     db.commit()
     logger.info("trending published %s (post %s)", x_id, post.id)
     return "published"
+
+
+LATENCY_KEEP = 30
+
+
+def record_latency(s: TtSettings, post: TtPost, topic: TtTopic | None, now: datetime) -> dict[str, Any]:
+    """Measured, per post: event (first report) -> first seen by our scans -> tweet written -> sent (or recorded in dry run). On the
+    topic (Admin), in the state's last LATENCY_KEEP (Admin's summary) and in the log."""
+    tl = ((topic.parts or {}).get("timeline") or {}) if topic is not None else {}
+
+    def mins(a: Any, b: datetime | None) -> int | None:
+        try:
+            at = _aware(datetime.fromisoformat(a) if isinstance(a, str) else a)
+        except ValueError:
+            return None
+        return int((b - at).total_seconds() // 60) if at is not None and b is not None else None
+
+    created = _aware(post.created_at)
+    lat = {"post_id": post.id, "status": post.status, "at": now.isoformat(), "event_to_publish_min": mins(tl.get("event_time"), now),
+           "detect_to_publish_min": mins(tl.get("first_seen") or (topic.first_seen if topic is not None else None), now),
+           "written_to_publish_min": mins(created, now), "score": post.score}
+    if topic is not None:
+        topic.parts = {**(topic.parts or {}), "latency": lat}
+    state = dict(s.state or {})
+    state["latency"] = ([lat] + list(state.get("latency") or []))[:LATENCY_KEEP]
+    s.state = state
+    logger.info("trending latency post %s (%s): event -> sent %s min, first seen -> sent %s min, written -> sent %s min", post.id, post.status,
+                lat["event_to_publish_min"], lat["detect_to_publish_min"], lat["written_to_publish_min"])
+    return lat
 
 
 def _note(s: TtSettings, key: str, value: dict[str, Any]) -> None:
@@ -564,9 +603,11 @@ def scan_log_lines(db: Session, s: TtSettings, read: dict[str, Any], topics: lis
             tw = f"tweet {p.status}" + (f" ({_safe(why, 70)})" if why else "")
         growth = ",".join(g.get("evidence") or []) or ("none, capped" if g.get("capped") else "none")
         notes = f" ({_safe('; '.join(g.get('notes') or []), 60)})" if g.get("notes") else ""
-        lines.append(f"trending top{i}: {t.score:.1f} [{t.category}] \"{_safe(t.title, 70)}\" v{pa.get('velocity', 0):g} e{pa.get('engagement', 0):g} "
-                     f"f{pa.get('freshness', 0):g} r{pa.get('relevance', 0):g} d{pa.get('discussion', 0):g} x{pa.get('learned', 1):g} "
-                     f"items={len(t.signal_ids or [])} growth={growth}{notes}" + (f" sensitive={sens.get('kind')}/{sens.get('tier')}" if sens else "") + f" | {tw}")
+        tl = pa.get("timeline") or {}
+        lines.append(f"trending top{i}: {t.score:.1f} [{t.category}] \"{_safe(t.title, 70)}\" m{pa.get('velocity', 0):g} f{pa.get('freshness', 0):g} "
+                     f"i{pa.get('impact', 0):g} s{pa.get('surprise', 0):g} r{pa.get('relevance', 0):g} e{pa.get('engagement', 0):g} x{pa.get('learned', 1):g} "
+                     f"age={pa.get('age_hours', 0):g}h outlets={tl.get('outlets', 0)} {tl.get('items_per_hour', 0):g}/h"
+                     + (" STALE" if pa.get("stale") else "") + f" items={len(t.signal_ids or [])} growth={growth}{notes}" + (f" sensitive={sens.get('kind')}/{sens.get('tier')}" if sens else "") + f" | {tw}")
     if published is None:
         lines.append(f"trending publish: none ({'automatic' if automatic(s) else 'approval mode'}, nothing queued)")
     else:
@@ -737,6 +778,16 @@ def settings_out(s: TtSettings) -> dict[str, Any]:
             "categories": {c: bool((s.categories or {}).get(c, True)) for c in rank.CATEGORIES}, "sources": sources.merged(s.sources)}
 
 
+def latency_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Median and worst of the measured latencies (minutes), with the recent rows."""
+    def stat(key: str) -> dict[str, int] | None:
+        vals = sorted(int(r[key]) for r in rows if isinstance(r.get(key), int))
+        return {"median": vals[len(vals) // 2], "max": vals[-1], "n": len(vals)} if vals else None
+
+    return {"event_to_publish": stat("event_to_publish_min"), "detect_to_publish": stat("detect_to_publish_min"),
+            "written_to_publish": stat("written_to_publish_min"), "recent": rows[:10]}
+
+
 def overview(db: Session, settings: Settings) -> dict[str, Any]:
     from app.connectors.state import get_connector_state
     from app.models.enums import Platform
@@ -757,6 +808,6 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
     return {"settings": settings_out(s), "last_run": state.get("last_run"), "health": state.get("health") or {}, "usage": state.get("usage") or {},
             "topics": [topic_out(t, posts.get(t.id)) for t in topics], "queue": rows("pending", "queued"), "held": rows("held", limit=20),
             "published": rows("published", "dry_run", "uncertain", "failed", limit=30), "coordination": coordinate.summary(db, s, now),
-            "learning": learning.report(db, now), "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "rules",
+            "learning": learning.report(db, now), "latency": latency_summary(state.get("latency") or []), "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "rules",
             "x": {"configured": creds.configured, "can_write": creds.user_context, "status": xstate.status, "last_ok": state.get("x_last_ok"), "last_error": state.get("x_last_error")},
             "cost": {"per_post_usd": float(settings.x_write_cost_estimate_usd), "x_trends_per_request_usd": 0.010, "x_post_read_usd": 0.005}}

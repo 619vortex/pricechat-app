@@ -9,7 +9,10 @@ const POST: TrendPost = { id: 7, topic_id: 3, category: "crypto", status: "pendi
 const HELD: TrendPost = { ...POST, id: 8, status: "held", text: "(no tweet: bandy)", sources: [], hold_reason: "No reliable source backs this topic yet (only social signals): held until an outlet reports it" };
 const DONE: TrendPost = { ...POST, id: 9, status: "published", x_id: "123", url: "https://x.com/i/status/123", metrics: { impression_count: 1200, like_count: 40, retweet_count: 6, reply_count: 3 } };
 const TOPIC: Topic = { id: 3, title: "Exchange Bybaz halts withdrawals after $40 million hack", category: "crypto", status: "active", score: 81, peak_score: 81, first_seen: "2026-11-14T09:40:00Z",
-  last_seen: "2026-11-14T10:00:00Z", parts: { velocity: 22, engagement: 21, freshness: 14, relevance: 20, discussion: 4, learned: 1, sources: ["news", "google"], outlets: ["CoinDesk", "Reuters"],
+  last_seen: "2026-11-14T10:00:00Z", parts: { velocity: 22, engagement: 8, freshness: 25, impact: 15, surprise: 5, relevance: 10, learned: 1, why: "81: fresh (0.5 h since the first report); momentum: +2 outlets",
+    timeline: { event_time: "2026-11-14T09:30:00Z", first_seen: "2026-11-14T09:40:00Z", last_update: "2026-11-14T09:55:00Z", source_count: 3, outlets: 2, outlets_1h: 2,
+      items_per_hour: 4, developing: false, new_outlets_2h: 2 },
+    latency: { post_id: 9, status: "published", at: "2026-11-14T10:00:00Z", event_to_publish_min: 30, detect_to_publish_min: 20, written_to_publish_min: 0 }, sources: ["news", "google"], outlets: ["CoinDesk", "Reuters"],
     growth: { evidence: ["scans", "google"], notes: ["+2 outlets, +3 items in 60 min", "Google 20K+ -> 200K+"], measured: true } },
   sources: [{ source: "news", outlet: "CoinDesk", title: "Exchange Bybaz halts withdrawals", url: "https://coindesk.test/1", reliable: true, engagement: 2, at: null },
     { source: "google", outlet: "Google Trends", title: "bybaz", url: "", reliable: false, engagement: 200000, at: null, extra: { approx_traffic: "200K+" } }],
@@ -67,6 +70,21 @@ describe("Trending Topics", () => {
     expect(document.body.textContent).toMatch(/Growth: more outlets across scans, Google Trends · \+2 outlets, \+3 items in 60 min; Google 20K\+ -> 200K\+/);
     expect(document.body.textContent).toMatch(/No measured growth \(capped below the automatic line\): approval only/);
     expect(screen.getByText(/sensitive: approval only · allegations about a named person/)).toBeTruthy();
+  });
+
+  it("shows each story's timeline, why it was selected and how fast it went out", async () => {
+    serve(state({}, { topics: [TOPIC], latency: { event_to_publish: { median: 30, max: 95, n: 4 }, detect_to_publish: { median: 20, max: 60, n: 4 },
+      written_to_publish: { median: 0, max: 40, n: 4 }, recent: [TOPIC.parts.latency!] } }));
+    render(<TrendingTopics />);
+    await settle();
+    const text = document.body.textContent ?? "";
+    expect(text).toMatch(/3 sources · 4\/h · 2 outlets in the last hour/);
+    expect(text).toMatch(/event .* · first seen .* · last update/);
+    expect(text).toMatch(/Why: 81: fresh \(0.5 h since the first report\); momentum: \+2 outlets/);
+    expect(text).toMatch(/posted: event → sent 30 min, first seen → sent 20 min/);
+    expect(text).toMatch(/Speed: detection to publication/);
+    expect(text).toMatch(/1.6 h/);  // worst event -> sent, 95 min
+    expect(text).toMatch(/Market impact/);
   });
 
   it("asks before enabling automatic publishing again, and sends the confirmation only after a yes", async () => {

@@ -1,6 +1,9 @@
-"""Group signals into topics and score them (0-100): growth velocity (30), engagement (25), freshness (15), audience relevance (20) and
-discussion potential (10), times a learned weight from our own posts' metrics (bounded to 0.8-1.2, app/trending/learning). Velocity comes
-only from measured growth (growth()); a topic with no measured growth is capped at NO_GROWTH_CAP, below the automatic line.
+"""Group signals into topics and score them (0-100), TODAY'S news first (owner, 2026-11-15): momentum (30: measured growth, posting
+velocity, search interest, engagement growth), freshness (25: full for 0-3 h, fading to 6 h, then stale), market impact (15), surprise
+(10), audience relevance (10) and engagement (10), times a learned weight from our own posts' metrics (bounded to 0.8-1.2,
+app/trending/learning). Momentum comes only from measured growth (growth()); a topic with no measured growth is capped at NO_GROWTH_CAP,
+below the automatic line. A story first reported more than STALE_AFTER ago is stale (capped at STALE_CAP, below the suggestion line)
+unless it has a genuinely new development: new independent outlets or a rise in searches in the last DEVELOPMENT_WINDOW.
 
 Deterministic and explainable: every topic keeps its parts, so Admin shows why it scored what it did."""
 
@@ -257,7 +260,8 @@ def cluster(signals: list[Sig]) -> list[Cluster]:
 
 NO_GROWTH_CAP = 60.0
 GROWTH_LOOKBACK = timedelta(hours=3)
-MIN_OBSERVED = timedelta(minutes=25)  # a topic first seen in this scan has no scan history yet
+MIN_OBSERVED = timedelta(minutes=15)  # a topic first seen in this scan has no scan history yet (scans run every 5 minutes)
+BURST_OUTLETS = 3  # independent reliable outlets first publishing it within the last hour: measured posting velocity
 TIERS = ((1_000_000, 1.0), (500_000, 0.9), (200_000, 0.75), (100_000, 0.65), (50_000, 0.55), (20_000, 0.45), (5_000, 0.35), (1_000, 0.25))
 
 
@@ -354,7 +358,23 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
     out.update({"recent_2h": len(recent), "prior_6h": len(prior)})
     if v_burst >= 0.3:
         out["notes"].append(f"{len(recent)} outlets in 2 h, {len(prior)} in the 6 h before")
-    vals = sorted([v_scan, v_google, v_engage, 0.6 * v_burst], reverse=True)
+    # posting velocity: independent outlets whose FIRST item on it is from the last hour, and none of them older than two hours. Early
+    # detection: it counts from the first scan, before any scan history exists; measured (publication times), never assumed.
+    firsts: dict[str, datetime] = {}
+    from app.trending.sensitive import outlet_key
+
+    for s in sig:
+        if s.reliable and s.outlet:
+            k = outlet_key(s.outlet)
+            firsts[k] = min(firsts.get(k, _seen(s)), _seen(s))
+    hour = [k for k, t in firsts.items() if t >= now - timedelta(hours=1)]
+    out["outlets_1h"] = len(hour)
+    v_post = 0.0
+    if len(hour) >= BURST_OUTLETS and len(hour) * 2 >= len(firsts):
+        v_post = min(1.0, len(hour) / 5)
+        out["evidence"].append("burst")
+        out["notes"].append(f"{len(hour)} outlets broke it in the last hour")
+    vals = sorted([v_scan, v_google, v_engage, 0.6 * v_burst, v_post], reverse=True)
     out["velocity"] = min(1.0, vals[0] + 0.3 * vals[1])
     out["measured"] = bool(out["evidence"])
     return out
@@ -365,37 +385,120 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
 NORM = {"google": 6.0, "reddit": 4.5, "x_trends": 6.0, "x_accounts": 4.0}  # log10 of the engagement that counts as "very high"
 
 
+FRESH_FULL = timedelta(hours=3)  # 0-3 h: today's news, full freshness
+STALE_AFTER = timedelta(hours=6)  # older than this from the first report: stale unless a genuinely new development
+DEVELOPMENT_WINDOW = timedelta(hours=2)
+STALE_CAP = 35.0  # below the suggestion line: a stale story is never tweeted, however much it still trends
+# market impact: what moves prices or positions (weights summed, capped); surprise: what nobody expected (same)
+IMPACT = {"federal reserve": 2.0, "fed": 1.5, "fomc": 2.0, "rate cut": 2.0, "rate hike": 2.0, "interest rate": 1.5, "inflation": 1.5, "cpi": 2.0,
+          "jobs report": 2.0, "payrolls": 2.0, "gdp": 1.5, "tariff": 1.5, "tariffs": 1.5, "sanction": 1.5, "sanctions": 1.5, "etf": 1.5, "sec": 1.5,
+          "hack": 2.0, "hacked": 2.0, "exploit": 2.0, "liquidation": 2.0, "liquidations": 2.0, "liquidated": 2.0, "bankruptcy": 2.0, "bankrupt": 2.0,
+          "default": 1.5, "halts": 1.5, "halted": 1.5, "delist": 1.5, "earnings": 1.0, "guidance": 1.0, "merger": 1.0, "acquisition": 1.0, "ipo": 1.0,
+          "crash": 1.5, "crashes": 1.5, "plunge": 1.5, "plunges": 1.5, "tumbles": 1.0, "soars": 1.5, "surges": 1.0, "sell-off": 1.5, "selloff": 1.5,
+          "record high": 1.5, "all-time high": 2.0, "lowest since": 1.5, "highest since": 1.0, "oil": 1.0, "opec": 1.5, "gold": 1.0, "treasury": 1.0,
+          "yields": 1.0, "recession": 1.5, "stablecoin": 1.0, "bitcoin": 1.0, "ethereum": 1.0, "outflows": 1.0, "inflows": 1.0, "missile": 1.0,
+          "ceasefire": 1.0, "strike": 0.5, "shutdown": 1.0}
+SURPRISE = {"unexpected": 2.0, "unexpectedly": 2.0, "surprise": 2.0, "surprises": 2.0, "shock": 2.0, "shocks": 2.0, "first time": 1.5,
+            "first-ever": 2.0, "unprecedented": 2.0, "emergency": 2.0, "abrupt": 1.5, "abruptly": 1.5, "historic": 1.0, "record": 1.0,
+            "biggest": 1.0, "worst": 1.0, "halts": 1.5, "suspends": 1.5, "resigns": 2.0, "ousted": 2.0, "collapse": 2.0, "collapses": 2.0,
+            "crash": 1.5, "crashes": 1.5, "plunges": 1.5, "soars": 1.5, "seized": 1.5, "seizes": 1.5, "arrested": 1.5, "lowest since": 1.5}
+CATEGORY_IMPACT = {"crypto": 1.0, "markets": 1.0, "stocks": 0.9, "geopolitics": 0.7, "technology": 0.5, "world": 0.3}
+_BIG_MOVE = re.compile(r"\b(\d{1,3}(?:\.\d+)?)\s?%")
+
+
+def _words(text: str, table: dict[str, float]) -> tuple[float, list[str]]:
+    low = text.lower()
+    hits = [k for k in table if re.search(rf"\b{re.escape(k)}\b", low)]
+    return sum(table[k] for k in hits), hits
+
+
+def freshness_of(event_time: datetime, last_update: datetime, now: datetime, developing: bool) -> tuple[float, str | None]:
+    """(0-1, stale reason or None). Full for the first three hours from the first report, fading to half at six; past six hours only a
+    genuinely new development (in the last two hours) keeps it alive, at a low level, and only while that development is fresh."""
+    age = now - event_time
+    if age <= FRESH_FULL:
+        return 1.0, None
+    if age <= STALE_AFTER:
+        return 1.0 - 0.5 * (age - FRESH_FULL) / (STALE_AFTER - FRESH_FULL), None
+    if developing and now - last_update <= DEVELOPMENT_WINDOW:
+        return 0.35, None
+    return 0.05, f"first reported {age.total_seconds() / 3600:.0f} h ago, no new development in the last {int(DEVELOPMENT_WINDOW.total_seconds() // 3600)} h"
+
+
 def score(c: Cluster, now: datetime, weights: dict[str, float] | None = None) -> tuple[float, dict[str, Any]]:
     sig = c.signals
     weights = weights or {}
     g = growth(c, now)
-    velocity = 30 * g["velocity"]
+    momentum = 30 * g["velocity"]
 
     types = {s.source for s in sig}
     outlets = {s.outlet for s in sig if s.reliable}
     norms = [min(1.0, math.log10(max(s.engagement, 1)) / NORM[s.source]) for s in sig if s.source in NORM]
     norms.append(min(0.3, len(_outlets(sig)) / 10))  # coverage alone: low
-    engagement = 25 * min(1.0, 0.75 * max(norms) + 0.25 * min(1.0, len(types) / 3))
-
-    first = min(_seen(s) for s in sig)
-    newest = max((s.published_at or s.first_seen) for s in sig)
-    age = max(0.0, (now - first).total_seconds() / 3600)
-    freshness = 15 * math.exp(-age / 8) * (0.5 if now - newest > timedelta(hours=6) else 1.0)
-
-    relevance = 20 * RELEVANCE.get(c.category, 0.4) * (0.6 + 0.4 * min(1.0, c.strength / 3))
-
     comments = sum(float(s.extra.get("comments") or 0) for s in sig)
-    discussion = 10 * min(1.0, 0.4 * min(1.0, (len(types) - 1) / 2) + 0.4 * min(1.0, comments / 500) + 0.2 * min(1.0, len(_outlets(sig)) / 4))
+    engagement = 10 * min(1.0, 0.6 * max(norms) + 0.2 * min(1.0, len(types) / 3) + 0.2 * min(1.0, comments / 500))
+
+    # the timeline: when it happened (its first report), when we first saw it, its newest item
+    pool = [s for s in sig if s.reliable] or sig
+    event_time = min(_seen(s) for s in pool)
+    first_seen = min(s.first_seen for s in sig)
+    last_update = max(_seen(s) for s in sig)
+    age = max(0.0, (now - event_time).total_seconds() / 3600)
+    new_outlets = len(_outlets([s for s in sig if _seen(s) >= now - DEVELOPMENT_WINDOW]) - _outlets([s for s in sig if _seen(s) < now - DEVELOPMENT_WINDOW]))
+    google_rise = bool(g.get("google_up")) and int(g.get("google_minutes") or 999) <= DEVELOPMENT_WINDOW.total_seconds() / 60
+    developing = new_outlets >= 2 or google_rise
+    fresh, stale = freshness_of(event_time, last_update, now, developing)
+    freshness = 25 * fresh
+
+    text = " ".join(s.title for s in pool[:6])
+    imp_w, imp_hits = _words(text, IMPACT)
+    big = max((float(m.group(1)) for m in _BIG_MOVE.finditer(text)), default=0.0)
+    impact = 15 * min(1.0, 0.4 * CATEGORY_IMPACT.get(c.category, 0.3) + 0.6 * min(1.0, imp_w / 3 + (0.3 if big >= 5 else 0.0)))
+    sur_w, sur_hits = _words(text, SURPRISE)
+    surprise = 10 * min(1.0, sur_w / 3 + (0.4 if big >= 10 else 0.0))
+
+    relevance = 10 * RELEVANCE.get(c.category, 0.4) * (0.6 + 0.4 * min(1.0, c.strength / 3))
 
     mult = weights.get(f"cat:{c.category}", 1.0)
     src_w = [weights.get(f"src:{t}", 1.0) for t in types]
     mult *= sum(src_w) / len(src_w) if src_w else 1.0
     mult = max(0.8, min(1.2, mult))
-    total = min(100.0, (velocity + engagement + freshness + relevance + discussion) * mult)
+    total = min(100.0, (momentum + freshness + impact + surprise + relevance + engagement) * mult)
     g["capped"] = not g["measured"] and total > NO_GROWTH_CAP
     if not g["measured"]:
         total = min(total, NO_GROWTH_CAP)  # no measured growth: never at the automatic line, however many outlets have it
-    parts = {"velocity": round(velocity, 1), "engagement": round(engagement, 1), "freshness": round(freshness, 1), "relevance": round(relevance, 1),
-             "discussion": round(discussion, 1), "learned": round(mult, 3), "recent_2h": g["recent_2h"], "prior_6h": g["prior_6h"], "sources": sorted(types),
-             "outlets": sorted(outlets), "age_hours": round(age, 1), "growth": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in g.items()}}
+    if stale:
+        total = min(total, STALE_CAP)  # yesterday's story is not today's news, however much it still trends
+    span_h = max(0.25, min(2.0, (now - event_time).total_seconds() / 3600))
+    items_2h = sum(1 for s in sig if _seen(s) >= now - timedelta(hours=2))
+    timeline = {"event_time": event_time.isoformat(), "first_seen": first_seen.isoformat(), "last_update": last_update.isoformat(),
+                "source_count": len(_outlets(sig)) + len(types - {"news"}), "outlets": len(_outlets(sig)), "outlets_1h": g.get("outlets_1h", 0),
+                "items_per_hour": round(items_2h / span_h, 1), "developing": developing, "new_outlets_2h": new_outlets}
+    parts = {"velocity": round(momentum, 1), "freshness": round(freshness, 1), "impact": round(impact, 1), "surprise": round(surprise, 1),
+             "relevance": round(relevance, 1), "engagement": round(engagement, 1), "learned": round(mult, 3), "recent_2h": g["recent_2h"],
+             "prior_6h": g["prior_6h"], "sources": sorted(types), "outlets": sorted(outlets), "age_hours": round(age, 1), "stale": stale,
+             "impact_words": imp_hits[:4], "surprise_words": sur_hits[:4], "timeline": timeline,
+             "growth": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in g.items()}}
+    parts["why"] = why(parts, round(total, 1))
     return round(total, 1), parts
+
+
+def why(parts: dict[str, Any], total: float) -> str:
+    """Why this story ranks where it does, in one line (Admin and the scan log)."""
+    if parts.get("stale"):
+        return f"Stale: {parts['stale']}"
+    t = parts.get("timeline") or {}
+    bits = []
+    age = float(parts.get("age_hours") or 0)
+    bits.append(f"{'fresh' if age <= 3 else 'aging'} ({age:.1f} h since the first report)" + (", developing" if t.get("developing") and age > 3 else ""))
+    g = parts.get("growth") or {}
+    if g.get("notes"):
+        bits.append("momentum: " + "; ".join(g["notes"][:2]))
+    elif not g.get("measured"):
+        bits.append("no measured growth (approval only)")
+    if parts.get("impact_words"):
+        bits.append("market impact: " + ", ".join(parts["impact_words"][:3]))
+    if parts.get("surprise_words"):
+        bits.append("surprise: " + ", ".join(parts["surprise_words"][:2]))
+    bits.append(f"{t.get('outlets', 0)} outlet{'' if t.get('outlets') == 1 else 's'}")
+    return f"{total:g}: " + "; ".join(bits)
