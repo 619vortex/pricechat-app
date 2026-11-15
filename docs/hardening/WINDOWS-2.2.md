@@ -33,6 +33,17 @@ tested only on GitHub Actions. On this PC only `npm ci`, `npx vitest run` (99 pa
 | 43571026082 | 63b0bb5 (8fb92d3) | success | success | 40/41 (strict `unblock` race; GitHub shows "cancelled") | 0/1, broken setup check in run.ps1 | skipped |
 | 43573165764 | 53e5cd9 (3c62a9b) | success | success | **success, 19 + 22 = 41/41** | 34/35 (after commit, the "no keys" message was overwritten) | skipped |
 | **43574419119** (final) | **f871b4b (4afbec5)** | **success** | **success** | **41/41 checks pass, every step succeeds**; GitHub still marks the job "cancelled" during runner cleanup | **success, 35/35** | **success, 37 VPN + 12 window checks** (the one real-account run) |
+| 43683280763 | f051fd9 (12bb5e9) | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
+| 43684595279 | e57950c (31f83af) | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
+| 43685983005 | 4fa06b6 | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
+
+**The kill-switch job's "cancelled" (investigated 2026-11-15): a GitHub runner artefact, not a product or test failure.** Every step,
+including "Complete job", succeeds; GitHub records "cancelled" one second after "Cleaning up orphan processes". Ruled out, one run each:
+the uninstaller still running (fixed anyway: NSIS `uninstall.exe /S` copies itself to TEMP and returns, so `-Wait` didn't wait; CI now runs a
+copy with `_?=` and checks the service and processes are gone, in kill-switch and update-test), Kiwi processes or services left behind
+(none: only Windows' NetSetupSvc/DsmSvc started during the adapter tests), and the network settling (api.github.com answered 6 times in a
+row before the job ended). The same code was green once (43573165764: the only source difference to the next run is a log message in
+update_win.rs, which this job never runs). Read the job's step results and its "41/41" report, not its badge. Not a release blocker.
 
 Exact test counts (final run):
 
