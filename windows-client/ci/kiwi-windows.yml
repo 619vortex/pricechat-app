@@ -602,6 +602,18 @@ jobs:
           "internet after uninstall: $ok"
           if (-not $ok) { throw "No internet after uninstalling" }
 
+      # 2026-11-15: every step succeeds but GitHub marks the job "cancelled" one second after "Cleaning up orphan processes" (twice, also
+      # with the uninstall properly awaited). Name whatever this job left running, then stop it ourselves before the runner does.
+      - name: Processes this job left running
+        if: always()
+        run: |
+          $since = (Get-Process -Id $PID).StartTime.AddMinutes(-30)
+          $mine = Get-CimInstance Win32_Process | Where-Object { $_.CreationDate -gt $since -and $_.ProcessId -ne $PID -and $_.Name -notmatch '^(Runner\.|conhost|powershell|pwsh|cmd)' }
+          $mine | Select-Object ProcessId, ParentProcessId, Name, CreationDate, @{n = "Cmd"; e = { ($_.CommandLine -replace '\s+', ' ').Substring(0, [Math]::Min(160, ($_.CommandLine + '').Length)) } } | Format-Table -AutoSize | Out-String -Width 300
+          Get-Service | Where-Object { $_.Status -eq "Running" -and ($_.Name -match 'kiwi|wireguard|wintun|guard') } | Format-Table Name, Status, DisplayName -AutoSize
+          foreach ($p in $mine) { if ($p.ExecutablePath -match '\\(tools|KiwiVPN|build)\\' -or $p.Name -match 'guard_check|kiwi') { "stopping $($p.Name) ($($p.ProcessId))"; Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } }
+          exit 0
+
       - name: Report
         if: always()
         run: |
