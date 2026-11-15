@@ -503,9 +503,11 @@ def record_latency(s: TtSettings, post: TtPost, topic: TtTopic | None, now: date
         return int((b - at).total_seconds() // 60) if at is not None and b is not None else None
 
     created = _aware(post.created_at)
+    written = mins(created, now)
     lat = {"post_id": post.id, "status": post.status, "at": now.isoformat(), "event_to_publish_min": mins(tl.get("event_time"), now),
            "detect_to_publish_min": mins(tl.get("first_seen") or (topic.first_seen if topic is not None else None), now),
-           "written_to_publish_min": mins(created, now), "score": post.score}
+           # `now` is the scan's start and the tweet is stamped a moment later, in the same scan (production post 90: "written -> sent -1 min")
+           "written_to_publish_min": max(0, written) if written is not None else None, "score": post.score}
     if topic is not None:
         topic.parts = {**(topic.parts or {}), "latency": lat}
     state = dict(s.state or {})
