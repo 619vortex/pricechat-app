@@ -22,6 +22,10 @@ RELEVANCE = {"crypto": 1.0, "stocks": 0.9, "markets": 0.9, "geopolitics": 0.75, 
 TECH = {"artificial intelligence": 2.0, "openai": 2.0, "chatgpt": 2.0, "anthropic": 2.0, "semiconductor": 2.0, "chipmaker": 2.0, "chips": 1.0,
         "microsoft": 1.5, "google": 1.0, "alphabet": 1.5, "meta": 1.0, "spacex": 1.5, "quantum": 1.5, "cyberattack": 2.0, "data breach": 2.0,
         "outage": 1.5, "smartphone": 1.0, "iphone": 1.5, "robot": 1.0, "startup": 1.0, "antitrust": 1.5, "tech": 1.0, "ai": 1.5}
+GEOPOLITICS = {"putin": 2.0, "xi jinping": 2.0, "xi": 1.5, "kremlin": 2.0, "nato": 2.0, "summit": 1.5, "g7": 2.0, "g20": 2.0, "sanctions": 2.0,
+               "military": 1.5, "missile": 2.0, "missiles": 2.0, "airstrike": 2.0, "airstrikes": 2.0, "troops": 1.5, "ceasefire": 2.0, "invasion": 2.0,
+               "nuclear": 1.5, "iran": 1.5, "israel": 1.5, "ukraine": 1.5, "russia": 1.5, "taiwan": 1.5, "north korea": 2.0, "gaza": 1.5, "pentagon": 1.5,
+               "trade talks": 2.0, "trade deal": 2.0, "tariff": 1.5, "tariffs": 1.5, "white house": 1.0, "president": 0.5, "prime minister": 0.5}
 WORLD = {"earthquake": 2.5, "hurricane": 2.5, "typhoon": 2.5, "wildfire": 2.0, "flood": 1.5, "pandemic": 2.0, "outbreak": 2.0, "explosion": 1.5,
          "evacuat": 1.5, "tsunami": 2.5, "volcano": 2.0, "climate": 1.0, "pope": 1.0, "royal": 0.5}
 
@@ -36,7 +40,11 @@ SPORT = {"league": 1.5, "premier league": 2.0, "super league": 2.0, "champions l
          # entertainment and celebrity: not this account's beat either
          "elton john": 2.0, "celebrity": 2.0, "chat show": 2.0, "talk show": 2.0, "radio show": 1.5, "red carpet": 2.5, "box office": 2.0,
          "album": 1.5, "concert": 1.5, "tour dates": 2.0, "oscars": 2.5, "grammys": 2.5, "emmys": 2.5, "strictly come dancing": 2.5,
-         "eurovision": 2.5, "reality show": 2.0, "royal family": 1.5, "king charles": 1.5, "jokes": 1.0, "sitcom": 2.0, "tv series": 1.5}
+         "eurovision": 2.5, "reality show": 2.0, "royal family": 1.5, "king charles": 1.5, "jokes": 1.0, "sitcom": 2.0, "tv series": 1.5,
+         # 2026-11-15 production: tennis, reality TV, critics' reviews and a gold-bar burglary led topics
+         "wta": 2.5, "atp": 2.5, "match point": 2.5, "semi-finals": 1.5, "semi-final": 1.5, "grand slam": 2.0, "reality tv": 2.5, "love island": 2.5,
+         "tv show": 2.0, "netflix series": 2.0, "drama": 1.0, "thriller": 1.5, "princess": 1.5, "prince": 1.0, "stole": 2.0, "heist": 2.0,
+         "burglar": 2.0, "burglary": 2.0, "robbery": 2.0, "murder": 2.0}
 STEMS = {"evacuat"}  # matched as a word start; every other word must match whole ("ai" is not "aid", "meta" is not "metal")
 
 
@@ -48,6 +56,8 @@ def _strength(text: str, words: dict[str, float]) -> float:
 def classify(title: str, summary: str = "", hint: str | None = None) -> tuple[str | None, float]:
     """(category, keyword strength) or (None, 0): nothing our audience follows (sport, celebrities, weather in one town...)."""
     desk_cat, desk_strength = nd_classify(title, summary, hint if hint in FROM_DESK else None)
+    if desk_cat and _strict_strength(f"{title} {summary}", desk_cat) <= 0:
+        desk_cat, desk_strength = None, 0.0  # only a short keyword's prefix matched ("dow" in "down", "eth" in "ethics")
     best, strength = (FROM_DESK.get(desk_cat or ""), desk_strength) if desk_cat else (None, 0.0)
     if desk_cat == "viral":  # "record high" says how big, not what about: a named market wins ("Bitcoin hits record high" is crypto)
         from app.newsdesk.engine import KEYWORDS
@@ -56,13 +66,21 @@ def classify(title: str, summary: str = "", hint: str | None = None) -> tuple[st
         top = max(subject, key=lambda c: subject[c])
         if subject[top] > 0:
             best, strength = FROM_DESK[top], min(strength, 4.0)
-    for cat, words in (("technology", TECH), ("world", WORLD)):
+    for cat, words in (("geopolitics", GEOPOLITICS), ("technology", TECH), ("world", WORLD)):
         s = min(_strength(f"{title} {summary}", words), 4.0)
-        if s > strength or (best == "world" and cat == "technology" and s >= strength and s > 0):
+        if s > strength or (best == "world" and cat in ("technology", "geopolitics") and s >= strength and s > 0):
             best, strength = cat, s
     if _vetoed(title, summary, strength):
         return None, 0.0  # a match, a league, a player, a celebrity: not this account's beat, whatever else the headlines mention
     return best, strength
+
+
+def _strict_strength(text: str, desk_cat: str) -> float:
+    """The News Desk category's keyword weight with keywords of four letters or fewer matched as whole words."""
+    from app.newsdesk.engine import KEYWORDS
+
+    low = text.lower()
+    return sum(w for k, w in KEYWORDS.get(desk_cat, {}).items() if re.search(rf"\b{re.escape(k)}" + (r"\b" if len(k) <= 4 else ""), low))
 
 
 def _vetoed(title: str, summary: str, strength: float) -> bool:
@@ -237,8 +255,10 @@ def cluster(signals: list[Sig]) -> list[Cluster]:
         # all its members' headlines together. A reliable news item that is off-topic on its own (sport, celebrities: classify() -> None)
         # never sits in a topic; a topic whose reliable items are mostly off-topic is dropped. Google/Reddit/X items keep their place
         # (a trend query has no category of its own; its articles decide).
+        from app.trending.sources import topical
+
         news = [x for x in g if x.reliable]
-        on = [x for x in news if not off_topic(x.title, x.summary)]
+        on = [x for x in news if not off_topic(x.title, x.summary) and topical(x.title)]
         if news and len(on) * 2 < len(news):
             continue
         g = [x for x in g if not x.reliable or x in on]
@@ -262,6 +282,13 @@ NO_GROWTH_CAP = 60.0
 GROWTH_LOOKBACK = timedelta(hours=3)
 MIN_OBSERVED = timedelta(minutes=15)  # a topic first seen in this scan has no scan history yet (scans run every 5 minutes)
 BURST_OUTLETS = 3  # independent reliable outlets first publishing it within the last hour: measured posting velocity
+# general news outlets: a story they pick up has crossed over from its niche. Coverage-based momentum (scans, bursts) counts in full only
+# with one of them; three crypto trade sites on a routine crypto story is their beat, not a trend (2026-11-15 calibration)
+MAINSTREAM = {"reuters", "bloomberg", "associated press", "ap", "ap news", "cnbc", "financial times", "ft", "wall street journal", "wsj", "bbc",
+              "bbc news", "new york times", "the new york times", "the guardian", "al jazeera", "axios", "politico", "cnn", "nbc news", "cbs news",
+              "abc news", "dw", "sky news", "nikkei asia", "the washington post", "washington post", "marketwatch", "yahoo finance", "fortune",
+              "forbes", "business insider", "the economist", "barron's", "npr", "france 24", "le monde", "abc australia", "the hill"}
+NICHE_FACTOR = 0.6
 TIERS = ((1_000_000, 1.0), (500_000, 0.9), (200_000, 0.75), (100_000, 0.65), (50_000, 0.55), (20_000, 0.45), (5_000, 0.35), (1_000, 0.25))
 
 
@@ -368,12 +395,23 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
             k = outlet_key(s.outlet)
             firsts[k] = min(firsts.get(k, _seen(s)), _seen(s))
     hour = [k for k, t in firsts.items() if t >= now - timedelta(hours=1)]
-    out["outlets_1h"] = len(hour)
+    two = [k for k, t in firsts.items() if t >= now - timedelta(hours=2)]
+    out["outlets_1h"], out["outlets_2h"] = len(hour), len(two)
     v_post = 0.0
     if len(hour) >= BURST_OUTLETS and len(hour) * 2 >= len(firsts):
-        v_post = min(1.0, len(hour) / 5)
+        v_post = min(1.0, len(hour) / BURST_OUTLETS)
         out["evidence"].append("burst")
         out["notes"].append(f"{len(hour)} outlets broke it in the last hour")
+    elif len(two) >= BURST_OUTLETS and len(two) * 3 >= len(firsts) * 2:  # two thirds new: acceleration, not steady coverage
+        v_post = min(1.0, len(two) / 4)
+        out["evidence"].append("burst")
+        out["notes"].append(f"{len(two)} outlets broke it in the last 2 h")
+    mainstream = any(outlet_key(s.outlet) in {outlet_key(m) for m in MAINSTREAM} for s in sig if s.reliable and s.outlet)
+    out["mainstream"] = mainstream
+    if not mainstream:
+        v_scan, v_burst, v_post = NICHE_FACTOR * v_scan, NICHE_FACTOR * v_burst, NICHE_FACTOR * v_post
+        if v_scan or v_post:
+            out["notes"].append("niche outlets only")
     vals = sorted([v_scan, v_google, v_engage, 0.6 * v_burst, v_post], reverse=True)
     out["velocity"] = min(1.0, vals[0] + 0.3 * vals[1])
     out["measured"] = bool(out["evidence"])
@@ -397,7 +435,9 @@ IMPACT = {"federal reserve": 2.0, "fed": 1.5, "fomc": 2.0, "rate cut": 2.0, "rat
           "crash": 1.5, "crashes": 1.5, "plunge": 1.5, "plunges": 1.5, "tumbles": 1.0, "soars": 1.5, "surges": 1.0, "sell-off": 1.5, "selloff": 1.5,
           "record high": 1.5, "all-time high": 2.0, "lowest since": 1.5, "highest since": 1.0, "oil": 1.0, "opec": 1.5, "gold": 1.0, "treasury": 1.0,
           "yields": 1.0, "recession": 1.5, "stablecoin": 1.0, "bitcoin": 1.0, "ethereum": 1.0, "outflows": 1.0, "inflows": 1.0, "missile": 1.0,
-          "ceasefire": 1.0, "strike": 0.5, "shutdown": 1.0}
+          "ceasefire": 1.0, "strike": 0.5, "shutdown": 1.0, "rate hikes": 2.0, "rate cuts": 2.0, "rate rises": 2.0, "rate rise": 2.0,
+          "military": 1.0, "attack": 1.0, "attacks": 1.0, "airstrike": 1.0, "airstrikes": 1.0, "invasion": 2.0, "nuclear": 1.0, "summit": 1.0,
+          "trade talks": 1.0, "trade deal": 1.0, "targets": 0.5}
 SURPRISE = {"unexpected": 2.0, "unexpectedly": 2.0, "surprise": 2.0, "surprises": 2.0, "shock": 2.0, "shocks": 2.0, "first time": 1.5,
             "first-ever": 2.0, "unprecedented": 2.0, "emergency": 2.0, "abrupt": 1.5, "abruptly": 1.5, "historic": 1.0, "record": 1.0,
             "biggest": 1.0, "worst": 1.0, "halts": 1.5, "suspends": 1.5, "resigns": 2.0, "ousted": 2.0, "collapse": 2.0, "collapses": 2.0,
@@ -434,7 +474,7 @@ def score(c: Cluster, now: datetime, weights: dict[str, float] | None = None) ->
     types = {s.source for s in sig}
     outlets = {s.outlet for s in sig if s.reliable}
     norms = [min(1.0, math.log10(max(s.engagement, 1)) / NORM[s.source]) for s in sig if s.source in NORM]
-    norms.append(min(0.3, len(_outlets(sig)) / 10))  # coverage alone: low
+    norms.append(min(0.5, len(_outlets(sig)) / 6))  # coverage alone: half at most
     comments = sum(float(s.extra.get("comments") or 0) for s in sig)
     engagement = 10 * min(1.0, 0.6 * max(norms) + 0.2 * min(1.0, len(types) / 3) + 0.2 * min(1.0, comments / 500))
 

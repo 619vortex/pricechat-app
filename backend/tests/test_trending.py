@@ -942,3 +942,25 @@ def test_yesterdays_news_desk_story_still_blocks_a_trend_post(db: Session) -> No
     db.commit()
     assert (coordinate.newsdesk_conflict(db, [HACK], NOW) or "").startswith("covered by the News Desk")
     assert coordinate.newsdesk_conflict(db, [HACK], NOW + timedelta(hours=20)) is None  # past 48 h
+
+
+async def test_the_tweet_x_receives_carries_one_cashtag_end_to_end(db: Session, web: Web) -> None:
+    """2026-11-15 production: lead and detail each got a cashtag ("$XRP, $XRP" / "$BTC, $XRP") and 27 tweets were held. The whole path:
+    scan -> topic -> writer -> gates -> queue -> publish, News Desk live, X connected: the body X receives has exactly one cashtag."""
+    import json
+
+    runtime = newsdesk_live(db, web)
+    s = engine.settings_row(db)
+    s.hot_score = 50  # this test is about the words, not the line
+    db.commit()
+    story(db, "XRP crashes to its lowest since November 2024 as money leaves crypto", "CoinDesk", 1, NOW, 25)
+    story(db, "Bitcoin slips 3% while XRP falls 9% in a week of $400 million outflows", "Reuters", 2, NOW, 15)
+    story(db, "XRP crashes to lowest since November 2024 as money leaves crypto markets", "The Block", 3, NOW, 10)
+    web.google = [{"query": "xrp", "traffic": "200K+", "news": [{"title": "XRP crashes to its lowest since November 2024 as money leaves crypto", "url": "https://coindesk.test/x", "source": "CoinDesk"}]}]
+    await engine.tick(db, get_settings(), runtime, get_agent_config(db).id, NOW, transport=web.transport)
+    [post] = [p for p in posts(db) if "XRP" in p.text and p.status == "published"]  # the Reuters BTC/XRP story is its own topic, pending
+    sent = [json.loads(b)["text"] for b in web.posted]
+    assert post.text in sent
+    for text in sent:  # every tweet that reached X, this one and any other topic's
+        assert len(gates.cashtags(text)) <= 1, text
+    assert len(gates.cashtags(post.text)) == 1

@@ -83,7 +83,9 @@ def merged(stored: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
 # round-ups, archives and stock-picking lists are not a topic, whatever their words
 NOT_A_TOPIC = re.compile(r"\b(what happened in|from the archives|week in review|round-?up|recap|newsletter|morning brief|daily brief|things to know|"
                          r"\d+ [\w ]{0,25}stocks\b|stocks? to (buy|watch)|could bounce back|an analyst says|deciphering)\b"
-                         r"|^\d+ (big |key )?(questions|charts|things|takeaways|ways|lessons)\b", re.I)
+                         r"|^\d+ (big |key )?(questions|charts|things|takeaways|ways|lessons)\b"
+                         # features and critics' reviews are not news (2026-11-15: "Meet the seven co-founders of Anthropic" led a topic)
+                         r"|^(meet|inside|who (is|are)|the rise of|a look at)\b|\breview\s*[–—:-]|\bis my fav(ou)?rite\b|\bwe tried\b|\bhands-on\b", re.I)
 
 
 def topical(title: str) -> bool:
