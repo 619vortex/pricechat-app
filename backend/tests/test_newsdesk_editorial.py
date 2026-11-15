@@ -424,3 +424,33 @@ async def test_a_market_post_whose_numbers_fail_is_never_drawn_or_posted() -> No
     with pytest.raises(visual.NumbersRefused):
         await visual.for_event(bad, now=SLOT)
     assert bad.facts["number_check"]["ok"] is False
+
+
+def test_production_2026_11_15_major_stories_count_as_important() -> None:
+    # the 08:00-12:00 UTC desk made no news event: these were turned away as "not market chaos" with no importance to overturn it
+    from app.newsdesk import brief
+
+    assert brief._amount_usd("stocks lose $4.2tn") == 4.2e12 and brief._amount_usd("$1.2 trillion") == 1.2e12  # was 0
+    assert editorial.significance("Data centre construction stocks lose $4.2tn as boom in AI trade unravels").kind == "macro"
+    assert editorial.significance("Moscow confirms Trump, Xi and Putin to meet in China").kind == "geopolitics"
+    assert editorial.significance("Iran Strikes Bahrain Base, Repeats Path to US Deal Remains Open").kind == "geopolitics"
+    assert editorial.significance("Iran targets Bahrain airbase as strikes resume in Gulf - Middle East crisis live") is None  # a live blog
+    for routine in ("Macron urges unity as Francophonie summit opens in Cambodia", "US talks with India on trade", "Startup raises $200 million",
+                    "Baseball base hits record", "Fans pack the base camp"):
+        assert editorial.significance(routine) is None, routine
+
+
+def test_production_2026_11_15_outlets_on_one_hard_event_corroborate() -> None:
+    reports = ["Bahrain issues first nationwide alert in months as Iran claims attack on base hosting US helicopters",
+               "Bahrain issues first threat alerts since September as Iran says it attacked US base",
+               "Iran Strikes Bahrain Base, Repeats Path to US Deal Remains Open",  # Title Case: every word looks like a name
+               "Bahrain intercepts Iranian aerial attacks as Tehran says it attacked US base"]  # Tehran is Iran
+    for i, a in enumerate(reports):
+        for b in reports[i + 1:]:
+            assert editorial._same_hard_event(a, b), (a, b)
+    assert editorial._same_meeting("Moscow confirms Trump, Xi and Putin to meet in China",
+                                   "Anthony Albanese welcomes Trump-Xi-Putin summit – even as European leaders express reservations")
+    for a, b in (("Israeli strike kills six in Gaza", "Israeli strike kills 20 in Gaza"), ("Israeli strike hits Gaza hospital", "Israeli footballer dies in Gaza"),
+                 ("Iran attacks Bahrain base", "Iran and Bahrain sign trade deal"), ("Russian missiles strike Kyiv", "Ukrainian drones hit Moscow refinery"),
+                 ("Trump to meet Xi", "Trump meets Putin")):
+        assert not (editorial._same_hard_event(a, b) or editorial._same_meeting(a, b)), (a, b)

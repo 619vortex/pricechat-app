@@ -56,8 +56,8 @@ SYMBOLS = {"CL=F": "OIL", "BZ=F": "OIL", "BRENT": "OIL", "OIL": "OIL", "OIL (WTI
            "GC=F": "GOLD", "SI=F": "SILVER", "^GSPC": "SPX", "S&P 500": "SPX", "DJI": "SPX", "^DJI": "SPX", "DOW JONES": "SPX", "^IXIC": "IXIC", "NASDAQ": "IXIC",
            "US-STOCKS": "SPX", "CRYPTO": "CRYPTO", "HG=F": "COPPER"}
 COUNTRIES: dict[str, re.Pattern[str]] = {
-    "IRAN": re.compile(r"\biran\w*\b", re.I), "ISRAEL": re.compile(r"\b(israel\w*|gaza|hamas|hezbollah)\b", re.I),
-    "RUSSIA": re.compile(r"\b(russia\w*|kremlin|putin)\b", re.I), "UKRAINE": re.compile(r"\b(ukrain\w*|kyiv|zelensk\w*)\b", re.I),
+    "IRAN": re.compile(r"\b(iran\w*|tehran)\b", re.I), "ISRAEL": re.compile(r"\b(israel\w*|gaza|hamas|hezbollah)\b", re.I),
+    "RUSSIA": re.compile(r"\b(russia\w*|kremlin|putin|moscow)\b", re.I), "UKRAINE": re.compile(r"\b(ukrain\w*|kyiv|zelensk\w*)\b", re.I),
     "CHINA": re.compile(r"\b(china|chinese|beijing|xi jinping)\b", re.I), "SAUDI": re.compile(r"\b(saudi\w*|riyadh|aramco)\b", re.I),
     "NKOREA": re.compile(r"\b(north korea\w*|pyongyang|lazarus)\b", re.I), "TAIWAN": re.compile(r"\btaiwan\w*\b", re.I),
     "VENEZUELA": re.compile(r"\bvenezuel\w*\b", re.I), "YEMEN": re.compile(r"\b(yemen\w*|houthis?)\b", re.I), "QATAR": re.compile(r"\b(qatar\w*|doha)\b", re.I),
@@ -402,7 +402,16 @@ def decisions(db: Any, now: datetime, hours: int = 24, limit: int = 150) -> list
 
 _rx = lambda p: re.compile(p, re.I)  # noqa: E731
 GEO_EVENT = _rx(r"\b(wars?|missiles?|air ?strikes?|strikes? on|attack(?:s|ed)?|invasion|invade\w*|ceasefire|truce|peace (?:talks|deal|plan|hopes)|nuclear|troops|"
-                r"drones?|shot down|downs? missiles|blockade|embargo|coup|annex\w*)\b")
+                r"drones?|shot down|downs? missiles|blockade|embargo|coup|annex\w*|"
+                # production 2026-11-15: "Iran Strikes Bahrain Base", "Iran targets Bahrain airbase" (five outlets) never counted
+                r"(?:strikes?|struck|targets?|targeted|hits?) (?:\w+ ){0,2}(?:air ?|military |naval )?bases?|air ?bases?|military bases?|naval bases?)\b")
+# a meeting of two of the great powers' leaders (production 2026-11-15: "Moscow confirms Trump, Xi and Putin to meet in China")
+POWERS_MEET = _rx(r"\b(summit|to meet|meets?|meeting|talks)\b")
+POWERS = {"USA": re.compile(r"\b(Trump|Biden|White House|Washington|U\.S\.|US)\b"), "CHINA": re.compile(r"\b(China|Chinese|Beijing|Xi)\b"),
+          "RUSSIA": re.compile(r"\b(Russia\w*|Kremlin|Putin|Moscow)\b")}
+# a market-wide loss or gain of $100bn or more (production 2026-11-15: "Data centre construction stocks lose $4.2tn as boom in AI trade unravels")
+MARKET_SWING = _rx(r"\b(lose|loses|lost|wipe[sd]?|wiped out|erase[sd]?|shed|sheds|plunge\w*|crash\w*|tumbl\w*|slump\w*|sell-?off|rout|add(?:s|ed)?|gain(?:s|ed)?)\b")
+MARKET_NOUN = _rx(r"\b(stocks?|shares|markets?|sector|index|indices|equities|crypto|market value|market cap\w*)\b")
 SANCTIONS = _rx(r"\b(sanction\w*|export controls?|tariffs?)\b")
 MEGA = _rx(r"\b(nvidia|apple|microsoft|google|alphabet|amazon|meta|tesla|openai|anthropic|jpmorgan|goldman sachs|blackrock|binance|coinbase|tether|circle|"
            r"strategy|microstrategy|robinhood|berkshire|saudi aramco|aramco|samsung|tsmc|intel|boeing|visa|mastercard|paypal)\b")
@@ -434,7 +443,7 @@ class Significance:
     why: str
 
 
-LIVE = re.compile(r"\blive\s*:|\blive (?:updates|blog)\b|\bas it happened\b", re.I)
+LIVE = re.compile(r"\blive\s*:|\blive (?:updates|blog)\b|\bas it happened\b|\bcrisis live\s*$|[-–—] live\s*$", re.I)  # "... - Middle East crisis live"
 
 
 def significance(title: str, summary: str = "") -> Significance | None:
@@ -446,6 +455,11 @@ def significance(title: str, summary: str = "") -> Significance | None:
     countries = countries_in(t)
     if GEO_EVENT.search(t) and countries:
         return Significance("geopolitics", 30.0, f"geopolitics: {GEO_EVENT.search(t).group(0).lower()} ({', '.join(sorted(countries))})")
+    powers = sorted(k for k, rx in POWERS.items() if rx.search(t))
+    if POWERS_MEET.search(t) and len(powers) >= 2:
+        return Significance("geopolitics", 26.0, f"great-power meeting ({', '.join(powers)})")
+    if MARKET_SWING.search(t) and MARKET_NOUN.search(t) and brief._amount_usd(t) >= 1e11:
+        return Significance("macro", 26.0, f"market-wide swing of ${brief._amount_usd(t) / 1e9:,.0f}B")
     if SANCTIONS.search(t) and countries:
         return Significance("geopolitics", 24.0, f"sanctions ({', '.join(sorted(countries))})")
     if MEGA.search(t) and CORP_SHOCK.search(t):
@@ -490,7 +504,38 @@ def corroborating(story: Any, rows: list[Any], hours: float = 12) -> list[Any]:
         # and the same event, not the same country (owner, 2026-11-14, post 166: a hospital strike and a footballer's death shared ISRAEL)
         if (len(shared) >= 2 or (shared and near >= 0.15)) and checks.same_event(story.title or "", o.title or ""):
             out.append(o)
+        elif _same_hard_event(story.title or "", o.title or "") or _same_meeting(story.title or "", o.title or ""):
+            out.append(o)
     return out
+
+
+# production 2026-11-15: four outlets reported Iran attacking a base in Bahrain ("Bahrain issues first nationwide alert ... Iran claims attack
+# on base", "Iran Strikes Bahrain Base ...", "Bahrain intercepts Iranian aerial attacks as Tehran says it attacked US base") and none
+# corroborated another: places never count as a subject, and Title Case headlines turn every word into a "name". A hard event is the
+# same when both name the same two or more places, both say the same kind of hard event, and no figure contradicts.
+VIOLENCE = _rx(r"\b(attack\w*|strik\w*|struck|air ?strikes?|missiles?|drones?|bomb\w*|shell\w*|shot down|intercept\w*|hits?|targets?|targeted|invasion|invade\w*)\b")
+TRUCE = _rx(r"\b(ceasefire|truce|peace (?:talks|deal|plan))\b")
+
+
+def _where(title: str) -> set[str]:
+    countries = countries_in(title)
+    return countries | {p for p in checks.places_in(title) if not any(COUNTRIES[c].search(p) for c in countries)}
+
+
+def _same_hard_event(a: str, b: str) -> bool:
+    if len(_where(a) & _where(b)) < 2 or not (GEO_EVENT.search(a) and GEO_EVENT.search(b)):
+        return False
+    if checks.similarity(checks.fingerprint(a), checks.fingerprint(b)) < 0.1:
+        return False  # "Russian missiles strike Kyiv" / "Ukrainian drones hit Moscow refinery": the same two countries, two events
+    if not ((VIOLENCE.search(a) and VIOLENCE.search(b)) or (TRUCE.search(a) and TRUCE.search(b))):
+        return False
+    fa, fb = {k for k, *_ in checks._figures(a)}, {k for k, *_ in checks._figures(b)}
+    return not (fa and fb and not fa & fb)  # "kills six" and "kills 20": not shown to be one event
+
+
+def _same_meeting(a: str, b: str) -> bool:
+    pa, pb = ({k for k, rx in POWERS.items() if rx.search(t)} for t in (a, b))
+    return bool(POWERS_MEET.search(a) and POWERS_MEET.search(b)) and len(pa) >= 2 and pa == pb
 
 
 def _who(title: str) -> set[str]:

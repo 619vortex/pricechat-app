@@ -289,7 +289,7 @@ def _stat(title: str, tag: str, measured: tuple[str, float, float] | None) -> st
     """The one figure the card shows large: a dollar amount from the story, or the measured move."""
     m = brief.AMOUNT.search(title or "")
     if m:  # "$1 billion" -> "$1B", "$46 million" -> "$46M": the source's own figure, written short
-        return f"${m.group(1)}{'B' if m.group(2).lower() in ('billion', 'bn', 'b') else 'M'}"
+        return f"${m.group(1)}{'T' if m.group(2).lower() in ('trillion', 'tn') else 'B' if m.group(2).lower() in ('billion', 'bn', 'b') else 'M'}"
     if measured:
         return f"{'+' if measured[1] > 0 else '-'}{abs(measured[1]):.1f}%"
     pm = brief.PERCENT.search(title or "")

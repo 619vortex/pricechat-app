@@ -82,7 +82,8 @@ FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (  # only a country the headlin
     (_rx(r"\bargentina\b"), "🇦🇷"), (_rx(r"\b(turkey|türkiye)\b"), "🇹🇷"), (_rx(r"\bpakistan\b"), "🇵🇰"),
 )
 TOPIC_EMOJI = {"macro": "🏛️", "hack": "⚠️", "scam": "⚠️", "failure": "⚠️", "liquidations": "💥", "move": "📉", "whale": "🐋", "controversy": "⚖️", "etf": "📊"}
-AMOUNT = _rx(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(billion|bn|b|million|mn|m)\b")
+AMOUNT = _rx(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(trillion|tn|billion|bn|b|million|mn|m)\b")  # trillions: production 2026-11-15 read "$4.2tn" as $0
+UNIT_USD = {"trillion": 1e12, "tn": 1e12, "billion": 1e9, "bn": 1e9, "b": 1e9}
 PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s?%")
 UP_WORDS = _rx(r"\b(soar\w*|surg\w+|skyrocket\w*|rockets?|spik\w+|rall(?:y|ies|ied)|all-time high|record high|jumps?|best (?:day|week|month)|pump\w*)\b")
 OUTLET_TAIL = re.compile(r"\s+[-|–—]\s+[A-Z][\w .'&]{1,30}$")
@@ -112,7 +113,7 @@ class Brief:
 def _amount_usd(text: str) -> float:
     best = 0.0
     for n, unit in AMOUNT.findall(text):
-        best = max(best, float(n.replace(",", "")) * (1e9 if unit.lower() in ("billion", "bn", "b") else 1e6))
+        best = max(best, float(n.replace(",", "")) * UNIT_USD.get(unit.lower(), 1e6))
     return best
 
 
