@@ -602,16 +602,20 @@ jobs:
           "internet after uninstall: $ok"
           if (-not $ok) { throw "No internet after uninstalling" }
 
-      # 2026-11-15: every step succeeds but GitHub marks the job "cancelled" one second after "Cleaning up orphan processes" (twice, also
-      # with the uninstall properly awaited). Name whatever this job left running, then stop it ourselves before the runner does.
-      - name: Processes this job left running
+      # 2026-11-15: every step succeeds but GitHub marks the job "cancelled" one second after "Cleaning up orphan processes" (three runs, also
+      # with the uninstall properly awaited). Run 43684595279 showed no Kiwi process or service left; Windows' network setup services
+      # (NetSetupSvc, DsmSvc) started while the tests added and removed tunnel adapters. Let the network settle before the job ends.
+      - name: Network settled before the runner reports
         if: always()
         run: |
-          $since = (Get-Process -Id $PID).StartTime.AddMinutes(-30)
-          $mine = Get-CimInstance Win32_Process | Where-Object { $_.CreationDate -gt $since -and $_.ProcessId -ne $PID -and $_.Name -notmatch '^(Runner\.|conhost|powershell|pwsh|cmd)' }
-          $mine | Select-Object ProcessId, ParentProcessId, Name, CreationDate, @{n = "Cmd"; e = { ($_.CommandLine -replace '\s+', ' ').Substring(0, [Math]::Min(160, ($_.CommandLine + '').Length)) } } | Format-Table -AutoSize | Out-String -Width 300
-          Get-Service | Where-Object { $_.Status -eq "Running" -and ($_.Name -match 'kiwi|wireguard|wintun|guard') } | Format-Table Name, Status, DisplayName -AutoSize
-          foreach ($p in $mine) { if ($p.ExecutablePath -match '\\(tools|KiwiVPN|build)\\' -or $p.Name -match 'guard_check|kiwi') { "stopping $($p.Name) ($($p.ProcessId))"; Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } }
+          Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Format-Table Name, InterfaceDescription, Status -AutoSize | Out-String -Width 200
+          $good = 0
+          for ($i = 0; $i -lt 24 -and $good -lt 6; $i++) {
+            $ok = (Test-NetConnection api.github.com -Port 443 -WarningAction SilentlyContinue).TcpTestSucceeded
+            $good = if ($ok) { $good + 1 } else { 0 }
+            Start-Sleep 5
+          }
+          "api.github.com answered $good times in a row"
           exit 0
 
       - name: Report
