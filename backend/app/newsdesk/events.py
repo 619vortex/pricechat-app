@@ -45,7 +45,8 @@ class Policy:
     # owner, 2026-11-10: important stories were losing their scores while they waited for a slot (Ukraine talks 67 -> 43, Saudi pipeline
     # 56 -> 31). Verified important news (verified_important) keeps its eligibility up to hold_hours, its best score fading hold_decay a
     # point an hour after the first slot interval, and is rechecked (significance, repeats, diversity, the checks) when its slot comes.
-    hold_hours: timedelta = timedelta(hours=10)
+    # owner, 2026-11-15 (today's news first): 6 h, not 10. Past six hours a story is stale; only a real development (an update) goes.
+    hold_hours: timedelta = timedelta(hours=6)
     hold_decay: float = 1.0
     # major breaking news, confirmed by two or more independent credible outlets, goes at once instead of waiting for a slot
     # owner, 2026-11-10: 70, and only clear financial, market or major geopolitical significance (editorial.breaking_worthy); routine
@@ -55,7 +56,9 @@ class Policy:
     breaking_max_age: timedelta = timedelta(minutes=90)  # from first publication: breaking means it just happened
     breaking_per_day: int = 2
     breaking_gap: timedelta = timedelta(minutes=90)  # since the last post of any kind
-    breaking_before_slot: timedelta = timedelta(minutes=45)  # this close to a slot, the slot takes it
+    breaking_before_slot: timedelta = timedelta(minutes=45)  # this close to a slot, breaking news goes now AS that slot's post (owner, 2026-11-15)
+    aging_from: timedelta = timedelta(hours=3)  # slot ranking: a story older than this ranks lower, up to aging_penalty points at news_ttl
+    aging_penalty: float = 10.0
     opening_bar: int = 64  # what a regular post must score at the start of a window: early on, something better may still come
     extra_bar: int = 80
     extra_per_day: int = 3
@@ -228,10 +231,32 @@ def slot_label(t: datetime) -> str:
 
 
 def slot_filled(db: Session, t: datetime, p: Policy) -> NdEvent | None:
-    """The event released for the slot starting at t (anything released from t until the next slot)."""
+    """The event released for the slot starting at t (anything released from t until the next slot, or breaking news released just
+    before it as that slot's post: facts.slot_at)."""
     later = [x for x in slot_times(t + timedelta(minutes=1), p, back_hours=0) if x > t]
     end = later[0] if later else t + timedelta(hours=4)
-    return db.scalar(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.released_at >= t, NdEvent.released_at < end).order_by(NdEvent.released_at).limit(1))
+    ev = db.scalar(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.released_at >= t, NdEvent.released_at < end).order_by(NdEvent.released_at).limit(1))
+    if ev is not None:
+        return ev
+    early = db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.slot == "slot", NdEvent.released_at >= t - p.breaking_before_slot - timedelta(minutes=5),
+                                             NdEvent.released_at < t))
+    return next((e for e in early if str((e.facts or {}).get("slot_at") or "") == t.isoformat()), None)
+
+
+def aging(ev: NdEvent, now: datetime, p: Policy) -> float:
+    """Slot ranking only: points off a news story older than aging_from, growing to aging_penalty at news_ttl (today's news first)."""
+    if ev.kind not in ("news", "data"):
+        return 0.0
+    age, start, end = _age(ev, now), p.aging_from.total_seconds() / 60, p.news_ttl.total_seconds() / 60
+    if age <= start:
+        return 0.0
+    return p.aging_penalty * min(1.0, (age - start) / max(1.0, end - start))
+
+
+def latency(ev: NdEvent, now: datetime) -> dict[str, int | None]:
+    """Measured minutes: the story's first report -> now, and our first sight of it -> now."""
+    seen = _utc(ev.first_seen, now)
+    return {"event_to_release_min": int(_age(ev, now)), "detect_to_release_min": int((now - seen).total_seconds() // 60) if seen else None}
 
 
 def priority(ev: NdEvent, p: Policy) -> bool:
@@ -849,7 +874,7 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
 
     def rank(e: NdEvent) -> tuple[float, int]:
         return (-(e.virality + (p.priority_bonus if priority(e, p) else 0) + editorial.rank_bonus(e) - editorial.diversity(e, covered, now)[0] - damp(e)
-                  - filler(e) + surprise(e) + float((e.facts or {}).get("angle_bonus") or 0)), e.id)
+                  - filler(e) + surprise(e) + float((e.facts or {}).get("angle_bonus") or 0) - aging(e, now, p)), e.id)
 
     for ev in sorted(waiting, key=rank):
         f = ev.facts or {}
@@ -903,14 +928,15 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
             continue
         ev.status, ev.slot, ev.released_at, ev.label = RELEASED, "slot", now, label
-        ev.facts = {**f, "slot_at": slot.isoformat()}
+        ev.facts = {**f, "slot_at": slot.isoformat(), "latency": latency(ev, now)}
         editorial.stamp(ev, now)
         best = float(f.get("peak") or 0)
         ev.why = (f"the {slot_label(slot)} Dubai slot: scores {ev.virality:g}" + (f" (best {best:g})" if best > ev.virality else "")
                   + f" ({virality.describe(ev.parts or {})})" + (", a priority subject" if priority(ev, p) else "")
                   + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
         ev.x_status = ev.tg_status = "pending"
-        logger.info("newsdesk events: released #%s for the %s Dubai slot [%s %s]: %s", ev.id, slot_label(slot), int(ev.virality), ev.evidence, ev.headline[:100])
+        logger.info("newsdesk events: released #%s for the %s Dubai slot [%s %s] (event %s min, seen %s min ago): %s", ev.id, slot_label(slot), int(ev.virality),
+                    ev.evidence, ev.facts["latency"]["event_to_release_min"], ev.facts["latency"]["detect_to_release_min"], ev.headline[:100])
         return ev
     return None
 
@@ -918,17 +944,22 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
 def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent], waiting: list[NdEvent]) -> NdEvent | None:
     """Between slots: major breaking news goes at once. Verified important (two or more independent credible outlets), first published
     within breaking_max_age, scoring breaking_bar now, and every rule a slot post meets (repeats, diversity, the checks). At most
-    breaking_per_day, never within breaking_gap of another post, and never just before a slot (the slot takes it)."""
-    if next_slot(now, p) - now < p.breaking_before_slot:
-        return None
+    breaking_per_day, never within breaking_gap of another post. Just before a slot (breaking_before_slot) it no longer waits: it goes now
+    AS that slot's post (facts.slot_at, slot_filled), so the day's number of posts is unchanged; min_gap from the last post still applies."""
+    upcoming = next_slot(now, p)
+    early = upcoming - now < p.breaking_before_slot
     day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
-    if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
-        return None
-    if p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
-        return None
     last = max((_utc(e.released_at, now) for e in day), default=None)
-    if last is not None and now - last < p.breaking_gap:
-        return None
+    if early:
+        if slot_filled(db, upcoming, p) is not None or (last is not None and now - last < p.min_gap):
+            return None
+    else:
+        if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
+            return None
+        if p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
+            return None
+        if last is not None and now - last < p.breaking_gap:
+            return None
     covered = editorial.coverage(db, now)
     for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
         # the discovery points rank slot stories; they never make a story breaking (the 70 bar is judged without them)
@@ -956,14 +987,18 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         if problem:
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
             continue
-        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, "breaking", now, label
+        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, ("slot" if early else "breaking"), now, label
+        ev.facts = {**f, "latency": latency(ev, now), **({"slot_at": upcoming.isoformat(), "early": True} if early else {})}
         editorial.stamp(ev, now)
         n = len(outlets_of(ev))
         ev.why = (f"breaking ({because}): scores {ev.virality:g} ({virality.describe(ev.parts or {})}), confirmed by {n} outlets, {int(_age(ev, now))} min old; "
-                  f"posted now instead of waiting for the {slot_label(next_slot(now, p))} Dubai slot"
+                  + (f"posted now as the {slot_label(upcoming)} Dubai slot's post instead of waiting for it" if early else
+                     f"posted now instead of waiting for the {slot_label(upcoming)} Dubai slot")
                   + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
         ev.x_status = ev.tg_status = "pending"
-        logger.info("newsdesk events: released #%s as BREAKING [%s %s, %d outlets]: %s", ev.id, int(ev.virality), ev.evidence, n, ev.headline[:100])
+        logger.info("newsdesk events: released #%s as BREAKING%s [%s %s, %d outlets] (event %s min, seen %s min ago): %s", ev.id,
+                    f" for the {slot_label(upcoming)} Dubai slot" if early else "", int(ev.virality), ev.evidence, n,
+                    ev.facts["latency"]["event_to_release_min"], ev.facts["latency"]["detect_to_release_min"], ev.headline[:100])
         return ev
     return None
 

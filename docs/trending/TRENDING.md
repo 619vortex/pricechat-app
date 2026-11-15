@@ -8,15 +8,15 @@ Code: `backend/app/trending/` (engine, sources, rank, writer, gates, coordinate,
 routes `backend/app/api/routes/trending.py` (`/api/x/trending`), Admin `frontend/src/pages/x/TrendingTopics.tsx`,
 tests `backend/tests/test_trending.py`, `frontend/src/pages/x/TrendingTopics.test.tsx`. Migration `0114_trending_topics`.
 
-## Pipeline (one tick, job `newsdesk.trending`, every `JOB_TRENDING_SECONDS` = 600 s)
+## Pipeline (one tick, job `newsdesk.trending`, every `JOB_TRENDING_SECONDS` = 300 s, 5 minutes since 2026-11-15)
 
 1. **Read the sources that are due** (`sources.py`, official access only, nothing scraped):
 
    | Source | Access | Default | Interval | Reliable for facts |
    | --- | --- | --- | --- | --- |
    | News Desk feeds | the `nd_stories` the News Desk already reads (35+ RSS feeds); no extra request | on | every tick | yes |
-   | Google Trends | official "Trending now" RSS, `https://trends.google.com/trending/rss?geo=US` (+GB) | on | 30 min | the trend no; its linked articles yes when the outlet is known |
-   | Reddit | OAuth (`REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`, app-only) on `oauth.reddit.com`; public `.json` only if the owner ticks it | on, but needs setup | 30 min | no |
+   | Google Trends | official "Trending now" RSS, `https://trends.google.com/trending/rss?geo=US` (+GB) | on | 10 min | the trend no; its linked articles yes when the outlet is known |
+   | Reddit | OAuth (`REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`, app-only) on `oauth.reddit.com`; public `.json` only if the owner ticks it | on, but needs setup | 15 min | no |
    | X trends | X API v2 `GET /2/trends/by/woeid/1` ($0.010 a request) | **off** (new cost) | 60 min | no |
    | X major accounts | X recent search `from:Reuters OR from:business ...` ($0.005 a post read) | **off** (cost) | 60 min | only news-org accounts |
 
@@ -63,6 +63,26 @@ tests `backend/tests/test_trending.py`, `frontend/src/pages/x/TrendingTopics.tes
 6. **Monitor**: owner alert (`alerts.notify_owner`, 6 h dedupe, one "recovered" message) when a source fails 3 reads in a row or X
    refuses a post; `/api/health` deep check `trending` (warn on failing sources, a stop, or no run for an hour); the scheduler's own
    job-failure alerts apply to `newsdesk.trending` like any job.
+
+## Today's news first (owner, 2026-11-15)
+
+- **Score (0-100)**: momentum 30 (measured growth: scans, Google Trends, engagement growth, and *posting velocity*: 3+ independent
+  reliable outlets first publishing it within the last hour, at least half of its outlets, counted from the first scan), freshness 25
+  (full for 0-3 h from the first report, fading to half at 6 h), market impact 15 (category + impact words + a 5%+ move), surprise 10,
+  audience relevance 10, engagement 10. No measured growth: capped at 60. The automatic line (75), daily max, gaps and caps are unchanged.
+- **Stale**: first reported more than 6 h ago and no genuine development (2+ new independent outlets or a rise in Google searches in the
+  last 2 h) -> capped at 35, below the suggestion line: never tweeted. A queued tweet whose topic went stale while it waited expires.
+- **One event, one post**: News Desk and Trending check each other's posts over 48 h (`SAME_STORY_WINDOW`), so yesterday's story is never
+  re-posted because it still trends. The 24 h caps are unchanged.
+- **Admin** shows per topic: event time (first report), first seen (our first scan), last update, source count, items per hour,
+  outlets in the last hour, developing, and *why* it was selected; plus a speed card: event -> sent, first seen -> sent, written -> sent
+  (median / worst), measured on every post (`tt_settings.state.latency`, `topic.parts.latency`, log line `trending latency post ...`).
+- **News Desk**: breaking news (same bar: 70, verified by 2+ outlets, breaking-worthy, under 90 min old) no longer waits when a slot is
+  under 45 min away: it goes now as that slot's post (`facts.slot_at`, `facts.early`), so the day's number of posts is unchanged. Slot
+  ranking takes up to 10 points off stories older than 3 h (at 6 h); verified important stories are held 6 h, not 10. Release and X
+  publish log lines carry `event N min, seen N min ago`.
+- **Sources not used**: X's "Today's News" / Explore has no public API; X trends (`/2/trends/by/woeid`) and account reads are paid and
+  stay off until the owner turns them on. Reddit needs `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET`.
 
 ## Sensitive subjects (`sensitive.py`, owner 2026-11-14)
 

@@ -129,21 +129,25 @@ def test_a_verified_important_story_keeps_its_best_score_fading_a_point_an_hour(
     p = events.policy({})
     ev = NdEvent(key="h", kind="news", topic="geopolitics", evidence="two outlets", virality=43, title="Ukraine peace talks resume",
                  sources=[{"name": "CNBC"}, {"name": "Bloomberg"}], facts={"importance": {"kind": "geopolitics"}, "peak": 67,
-                                                                            "published_at": (SLOT - timedelta(hours=7)).isoformat()})
-    assert events.held_score(ev, SLOT, p) == pytest.approx(64)  # 67, three hours past the first 4 h interval
-    ev.facts = {**ev.facts, "published_at": (SLOT - timedelta(hours=11)).isoformat()}
-    assert events.held_score(ev, SLOT, p) == 43  # past the 10 h hold: its own current score
+                                                                            "published_at": (SLOT - timedelta(hours=5)).isoformat()})
+    assert events.held_score(ev, SLOT, p) == pytest.approx(66)  # 67, one hour past the first 4 h interval
     ev.facts = {**ev.facts, "published_at": (SLOT - timedelta(hours=7)).isoformat()}
+    assert events.held_score(ev, SLOT, p) == 43  # past the 6 h hold (owner, 2026-11-15: today's news first): its own current score
+    ev.facts = {**ev.facts, "published_at": (SLOT - timedelta(hours=5)).isoformat()}
     ev.sources = [{"name": "CNBC"}]
     assert events.held_score(ev, SLOT, p) == 43  # one outlet: not held
 
 
-def test_a_held_story_is_not_expired_at_six_hours(db: Session) -> None:
-    ev = _news(db, "x", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=7 * 60, peak=67)
-    ev.expires_at = SLOT - timedelta(hours=1)  # its 6 h news window is over
+def test_a_held_story_lives_to_six_hours_and_no_longer(db: Session) -> None:
+    ev = _news(db, "x", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=5 * 60, peak=67)
+    ev.expires_at = SLOT - timedelta(minutes=10)
     db.commit()
     events._expire(db, [ev], SLOT, events.policy({}))
     assert ev.status == "candidate" and ev.expires_at > SLOT
+    old = _news(db, "x2", "Saudi pipeline talks stall again in Riyadh", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=7 * 60, peak=67)
+    old.expires_at = SLOT - timedelta(minutes=10)
+    events._expire(db, [old], SLOT, events.policy({}))
+    assert old.status == "missed"  # stale past six hours, however important it was
     single = _news(db, "y", "Something reported once", 43, ["CNBC"], age_min=7 * 60, peak=67, evidence="attributed")
     single.expires_at = SLOT - timedelta(hours=1)
     events._expire(db, [single], SLOT, events.policy({}))
@@ -151,7 +155,7 @@ def test_a_held_story_is_not_expired_at_six_hours(db: Session) -> None:
 
 
 def test_the_held_story_takes_the_slot_it_would_have_missed(db: Session) -> None:
-    ev = _news(db, "z", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=7 * 60, peak=67)
+    ev = _news(db, "z", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=5 * 60, peak=67)
     got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
     assert got is not None and got.id == ev.id
 
@@ -178,10 +182,19 @@ def test_breaking_needs_two_outlets_a_major_score_freshness_and_importance(db: S
     assert events.release(db, BETWEEN, events.policy({})) is None, why
 
 
-def test_breaking_waits_for_the_slot_when_one_is_near_and_never_crowds_another_post(db: Session) -> None:
-    near = SLOT + timedelta(hours=3, minutes=30)  # 30 minutes before the next slot: the slot takes it
-    _news(db, "b3", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=near)
-    assert events.release(db, near, events.policy({})) is None
+def test_breaking_near_a_slot_goes_now_as_that_slots_post_and_never_crowds_another_post(db: Session) -> None:
+    p = events.policy({})
+    near = SLOT + timedelta(hours=3, minutes=30)  # 30 minutes before the next slot: it no longer waits (owner, 2026-11-15)
+    ev = _news(db, "b3", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=near)
+    got = events.release(db, near, p)
+    upcoming = events.next_slot(near, p)
+    assert got is not None and got.id == ev.id and got.slot == "slot" and got.facts["slot_at"] == upcoming.isoformat() and got.facts["early"]
+    assert "instead of waiting for it" in got.why and got.facts["latency"]["event_to_release_min"] == 25
+    db.commit()
+    assert events.slot_filled(db, upcoming, p) is not None  # the slot had its post: the day's count is unchanged
+    _news(db, "b3b", "Bank of Japan raises rates in a surprise move", 60, ["Financial Times", "Bloomberg"], age_min=20, now=upcoming + timedelta(minutes=2),
+          topic="macro")
+    assert events.release(db, upcoming + timedelta(minutes=2), p) is None
     db.query(NdEvent).delete()
     db.add(NdEvent(key="prev", kind="news", title="Fed holds rates", headline="FED HOLDS RATES", topic="macro", evidence="official", status="released",
                    slot="slot", released_at=BETWEEN - timedelta(minutes=60), facts={}))
@@ -318,3 +331,15 @@ def test_a_big_enough_controversy_still_goes(db: Session) -> None:
     ev = _news(db, "c4", "Defiant Hegseth defends Iran war as he faces impeachment vote", 70, ["Bloomberg", "Financial Times"], age_min=30)
     got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
     assert got is not None and got.id == ev.id
+
+
+def test_slot_ranking_puts_todays_news_first(db: Session) -> None:
+    p = events.policy({})
+    assert events.aging(_news(db, "f1", "Fresh story one", 60, ["CNBC", "Bloomberg"], age_min=60), SLOT, p) == 0
+    assert events.aging(_news(db, "f2", "Aging story two", 60, ["CNBC", "Bloomberg"], age_min=270), SLOT, p) == pytest.approx(5)
+    db.query(NdEvent).delete()
+    db.commit()
+    old = _news(db, "o", "Ukraine peace talks resume this week in Abu Dhabi", 64, ["CNBC", "Bloomberg"], age_min=5 * 60 + 30)
+    new = _news(db, "n", "Saudi oil terminal hit by a missile strike", 60, ["CNBC", "Bloomberg"], age_min=40)
+    got = events.release(db, SLOT + timedelta(minutes=1), p)
+    assert got is not None and got.id == new.id and old.status == "candidate"  # 64 at 5.5 h ranks under 60 at 40 min

@@ -667,7 +667,11 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     guard.record_attempt(req, None, None, "news", reason="news desk", external_id=x_id)
     _note_x(s, post, now, ok=True, outcome="published")
     db.commit()
-    logger.info("newsdesk published %s (post %s, event %s, picture %s)", x_id, post.id, (post.facts or {}).get("event_id"), "yes" if media else "no")
+    ev_id = (post.facts or {}).get("event_id")
+    ev_row = db.get(events.NdEvent, ev_id) if ev_id else None
+    lat = events.latency(ev_row, now) if ev_row is not None else {}
+    logger.info("newsdesk published %s (post %s, event %s, picture %s; event -> X %s min, first seen -> X %s min)", x_id, post.id, ev_id, "yes" if media else "no",
+                lat.get("event_to_release_min"), lat.get("detect_to_release_min"))
     return "published"
 
 
