@@ -75,6 +75,20 @@ def with_one_cashtag(text: str, source_text: str) -> str:
     return text
 
 
+_PAREN_TAG = re.compile(r"\s?\((\$[A-Za-z]{1,6})\)")
+
+
+def keep_one_cashtag(text: str) -> str:
+    """The whole tweet keeps only its first cashtag (X refuses API posts with more than one, even the same one twice): a later
+    "($TAG)" the writer added goes, any other later tag becomes the bare symbol (checks.one_cashtag)."""
+    from app.trending.gates import CASHTAG_ANY
+
+    first = CASHTAG_ANY.search(text or "")
+    if not first:
+        return text
+    return checks.one_cashtag(text[:first.end()] + _PAREN_TAG.sub("", text[first.end():]))
+
+
 def _sentence(t: str) -> str:
     t = t.strip()
     return t if t[-1:] in ".!?…" else t + "."
@@ -178,7 +192,8 @@ def rules(b: Brief, angle: str | None = None) -> tuple[str, str]:
     options: dict[str, str] = {}
     if d := detail(b):
         form = _pick(b.key + ":detail", ("{o}: {h}", "{o} adds: {h}", "From {o}: {h}"))
-        options["detail"] = form.format(o=d[0], h=_sentence(with_one_cashtag(d[1], b.source_text)))
+        h = d[1] if "$" in first else with_one_cashtag(d[1], b.source_text)  # one cashtag for the whole tweet
+        options["detail"] = form.format(o=d[0], h=_sentence(h))
     if line := interest_line(b):
         options["interest"] = line
     if cov := coverage_line(b):
@@ -189,7 +204,7 @@ def rules(b: Brief, angle: str | None = None) -> tuple[str, str]:
     order += (["interest", "detail"] if rising else ["detail", "interest"]) + ["coverage"]
     for name in order:
         if name in options and len(first) + len(options[name]) + 2 <= 270:
-            return f"{first}\n\n{options[name]}", name
+            return keep_one_cashtag(f"{first}\n\n{options[name]}"), name
     return (first if len(first) <= 280 else first[:277].rstrip() + "…"), "plain"
 
 

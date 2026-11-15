@@ -413,6 +413,19 @@ def test_at_most_one_cashtag() -> None:
     assert gates.gate(f"{one} (via CoinDesk)", source_text=src, source_names=["CoinDesk"], reliable_count=1)["ok"]
 
 
+def test_the_whole_tweet_keeps_one_cashtag_across_lead_and_detail() -> None:
+    # production 2026-11-15: the opener and the detail line each got a tag ("$XRP, $XRP" / "$BTC, $XRP") and every such tweet was held
+    lead = "XRP crashes to its lowest since November 2024 as money leaves crypto"
+    for other in ("XRP falls 9% to $1.80 as outflows hit $400 million", "Bitcoin slips 3% while XRP falls 9% in a week of $400 million outflows"):
+        for i in range(6):
+            b = _brief(key=f"x:{i}", headline=lead, outlet="CoinDesk", others=[("Reuters", other)], outlets=["CoinDesk", "Reuters"])
+            text, angle = writer.rules(b)
+            assert angle == "detail" and len(gates.cashtags(text)) == 1, text
+            assert gates.gate(text, source_text=b.source_text, source_names=["CoinDesk", "Reuters"], reliable_count=2)["ok"], text
+    assert writer.keep_one_cashtag("XRP ($XRP) falls.\n\nReuters: XRP ($XRP) and Bitcoin ($BTC) slide; $ETH too.") == "XRP ($XRP) falls.\n\nReuters: XRP and Bitcoin slide; ETH too."
+    assert writer.keep_one_cashtag("No tags at all") == "No tags at all"
+
+
 async def test_a_social_only_topic_is_held_for_lack_of_a_reliable_source(db: Session, web: Web) -> None:
     s = engine.settings_row(db)
     s.sources = {**s.sources, "news": {"on": False}, "reddit": {**s.sources["reddit"], "public_json": True, "subreddits": ["CryptoCurrency"]}}
