@@ -964,3 +964,22 @@ async def test_the_tweet_x_receives_carries_one_cashtag_end_to_end(db: Session, 
     for text in sent:  # every tweet that reached X, this one and any other topic's
         assert len(gates.cashtags(text)) <= 1, text
     assert len(gates.cashtags(post.text)) == 1
+
+
+async def test_a_topic_that_crosses_the_line_after_an_unsent_draft_gets_a_fresh_tweet(db: Session) -> None:
+    # production 2026-11-15: Iran/Bahrain reached 75.8 but its draft for approval (written below the line) had expired unsent and blocked it
+    s = engine.settings_row(db)
+    topic = TtTopic(key="t-bahrain", title="Iran attacks Bahrain base", category="geopolitics", status="active", score=62.0, parts={},
+                    first_seen=NOW - timedelta(hours=3), last_seen=NOW)
+    db.add(topic)
+    db.flush()
+    old = TtPost(topic_id=topic.id, category="geopolitics", status="expired", text="x", score=62.0, sources=[], checks=[], metrics={}, created_at=NOW - timedelta(hours=2))
+    db.add(old)
+    db.commit()
+    assert engine._has_post(db, topic, s, NOW)  # still below the line: one draft per topic
+    topic.score = 75.8
+    assert engine.automatic(s) and not engine._has_post(db, topic, s, NOW)  # over the line: written again
+    hot = TtPost(topic_id=topic.id, category="geopolitics", status="pending", text="y", score=75.8, sources=[], checks=[], metrics={}, created_at=NOW)
+    db.add(hot)
+    db.commit()
+    assert engine._has_post(db, topic, s, NOW)  # a draft written over the line is never replaced again (no churn every scan)

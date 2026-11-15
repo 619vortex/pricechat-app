@@ -313,7 +313,18 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
 
 def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:
     since = now - timedelta(hours=s.topic_cooldown_hours)
-    return db.scalar(select(TtPost.id).where(TtPost.topic_id == topic.id, TtPost.created_at >= since, TtPost.status != "rejected").limit(1)) is not None
+    earlier = list(db.scalars(select(TtPost).where(TtPost.topic_id == topic.id, TtPost.created_at >= since, TtPost.status != "rejected")))
+    if not earlier:
+        return False
+    # production 2026-11-15: the first topic over the line (Iran/Bahrain, 75.8) had only a draft written for approval at 60-something that
+    # expired unsent, and that draft blocked it for 24 h. A topic that has since crossed the automatic line gets a fresh tweet, written and
+    # checked again (every gate, the sensitive rules, the limits), when all it had were unsent drafts from below the line.
+    if automatic(s) and topic.score >= s.hot_score and all(p.status in ("pending", "expired") and (p.score or 0) < s.hot_score for p in earlier):
+        for p in earlier:
+            if p.status == "pending":
+                p.status, p.note = "expired", "Replaced: the topic crossed the automatic line, so a fresh tweet was written and checked"
+        return False
+    return True
 
 
 def _recent_duplicate(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:
