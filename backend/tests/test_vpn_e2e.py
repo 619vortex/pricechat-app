@@ -273,7 +273,7 @@ def test_sync_against_the_agent(client: TestClient, db: Session, agent: RunningA
     vpn.sync_all(db)
     dev = next(d for d in c.get("/api/members/vpn").json()["devices"] if d["id"] == d1["id"])
     assert (dev["rx_bytes"], dev["tx_bytes"]) == (12345, 67890)
-    assert dt.datetime.fromisoformat(dev["last_handshake"]).timestamp() == hs
+    assert dt.datetime.fromisoformat(dev["last_handshake"]).timestamp() == hs - hs % 300  # kept to 5 minutes (audit L4)
 
     # a member who loses eligibility is revoked at the agent
     drop.status = "banned"
@@ -336,3 +336,13 @@ def test_agent_restart_reapplies_peers_and_sync_is_clean(client: TestClient, db:
     assert (row.rx_bytes, row.tx_bytes) == (600, 800)
     assert {d["id"] for d in c.get("/api/members/vpn").json()["devices"]} == {d["id"] for d in devs}
     assert db.get(VpnServer, sid).online is True
+
+
+def test_activity_times_are_kept_to_five_minutes() -> None:
+    # audit L4: when a device or browser login was last used is stored to 5 minutes, never to the second
+    from app.vpn import service
+
+    at = dt.datetime(2026, 11, 16, 5, 7, 42, 123456, tzinfo=dt.timezone.utc)
+    assert service.coarse(at) == dt.datetime(2026, 11, 16, 5, 5, tzinfo=dt.timezone.utc)
+    assert service.coarse(service.coarse(at)) == service.coarse(at)
+    assert service.LIVE_WINDOW >= dt.timedelta(seconds=2 * service.ACTIVITY_STEP)  # the live counts still see an active client

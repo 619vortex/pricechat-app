@@ -1270,6 +1270,15 @@ def _ts(seconds: int) -> datetime | None:
     return datetime.fromtimestamp(seconds, tz=timezone.utc) if seconds > 0 else None
 
 
+ACTIVITY_STEP = 300  # seconds (audit L4): when a device or browser login was last used is kept to 5 minutes, never to the second.
+# The live counts look back LIVE_WINDOW (10 min) and an active WireGuard client re-handshakes every 2 minutes, so they are unchanged.
+
+
+def coarse(at: datetime) -> datetime:
+    """An activity time rounded down to ACTIVITY_STEP."""
+    return at.replace(microsecond=0) - timedelta(seconds=int(at.timestamp()) % ACTIVITY_STEP)
+
+
 def _usage(dev: VpnDevice, peer: dict[str, Any], month: str) -> None:
     if dev.usage_month != month:
         dev.usage_month, dev.rx_bytes, dev.tx_bytes = month, 0, 0
@@ -1279,7 +1288,7 @@ def _usage(dev: VpnDevice, peer: dict[str, Any], month: str) -> None:
     dev.rx_counter, dev.tx_counter = rx, tx
     hs = _ts(int(peer["latest_handshake"]))
     if hs is not None:
-        dev.last_handshake = hs
+        dev.last_handshake = coarse(hs)
 
 
 def _sync_state(db: Session, acct: VpnAccount, r: Rules, now: datetime, enabled: bool) -> str:
@@ -1315,7 +1324,7 @@ def _sync_browsers(db: Session, agent: node.NodeClient, browsers: list[VpnBrowse
             if rx != b.rx_counter or tx != b.tx_counter:
                 b.rx_bytes += rx - b.rx_counter if rx >= b.rx_counter else rx  # a smaller counter: the proxy restarted
                 b.tx_bytes += tx - b.tx_counter if tx >= b.tx_counter else tx
-                b.rx_counter, b.tx_counter, b.last_active = rx, tx, now
+                b.rx_counter, b.tx_counter, b.last_active = rx, tx, coarse(now)
         if state != "active" and not _keep_off(state, acct, now):
             db.delete(b)  # blocked or banned, or out of time for too long; its login goes with the unknown ones below
             out["revoked"] += 1
