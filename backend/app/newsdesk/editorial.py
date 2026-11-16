@@ -570,12 +570,21 @@ def importance_score(sig: Significance, *, evidence: str, outlets: int, outlets_
 # largest export terminal, confirmed by two outlets, scored 56. Only a hard event (never talk) with a direct market tie earns it.
 MARKET_TIE = _rx(r"\b(oil|crude|brent|wti|refiner(?:y|ies)|oil (?:field|terminal|facility|facilities)|export terminal|pipelines?|gas ?fields?|lng|"
                  r"tankers?|shipping|strait|suez|red sea|bab el-mandeb|aramco|opec|power grid|chip ?plants?|semiconductor|stock exchange|central bank)\b")
+# production 2026-11-15: "Iran launches drone attacks against US military base in Bahrain" scored 60 with three outlets and could never reach
+# the breaking bar. An attack in a Gulf producer moves oil as surely as one on a pipeline; an attack on US forces is a direct escalation
+# with the world's largest military. Both are hard events only (hard_event: never talk, threats or hedged reports).
+OIL_REGION = _rx(r"\b(bahrain|qatar|kuwait|uae|united arab emirates|abu dhabi|saudi\w*|riyadh|oman|persian gulf|gulf states?|hormuz)\b")
+US_FORCES = re.compile(r"(?:\bUS\b|\bU\.S\.|\b[Aa]merican\b|\bNATO\b)(?:\W+\w+){0,2}?\W+(?:military |air |naval |army )?(?:bases?|troops|forces|warships?|soldiers|"
+                       r"service ?members|personnel|embassy|airbase|destroyers?|carriers?)\b")
+ESCALATION_POINTS = 12.0
 
 
 def consequence(sig: Significance, title: str) -> float:
     t = title or ""
-    if sig.kind == "geopolitics" and GEO_HARD.search(t) and not TALK.search(t) and (MARKET_TIE.search(t) or assets_in(t) & {"OIL", "GOLD", "BTC", "ETH"}):
+    if sig.kind == "geopolitics" and hard_event(t) and (MARKET_TIE.search(t) or OIL_REGION.search(t) or assets_in(t) & {"OIL", "GOLD", "BTC", "ETH"}):
         return 15.0
+    if sig.kind == "geopolitics" and hard_event(t) and US_FORCES.search(t):
+        return ESCALATION_POINTS
     if sig.kind == "corporate" and CORP_BIG.search(t) and MEGA.search(t):
         return 6.0
     return 0.0
@@ -666,9 +675,27 @@ STRONG_DEVELOPMENT = re.compile(r"\b(arrest\w*|charged|indict\w*|sentenc\w*|guil
 
 # Breaking between slots (owner, 2026-11-10): clear financial, market or major geopolitical significance only. A hard geopolitical event
 # (strikes, invasion, a ceasefire, a blockade, sanctions), never talk about one; and never routine political controversy.
-GEO_HARD = _rx(r"\b(missiles?|air ?strikes?|strikes? on|struck|attack(?:s|ed)? on|invasion|invade\w*|ceasefire|truce|peace deal (?:signed|agreed|reached)|"
+GEO_HARD = _rx(r"\b(missiles?|air ?strikes?|strikes? (?:on|against)|struck|attack(?:s|ed)? (?:on|against)|invasion|invade\w*|ceasefire|truce|peace deal (?:signed|agreed|reached)|"
                r"declares? war|war (?:breaks out|begins)|nuclear (?:test|strike|attack)|troops (?:enter|cross|deploy\w*)|shot down|blockade|embargo|"
-               r"coup|annex\w*|closes? the strait|strait of hormuz)\b")
+               r"coup|annex\w*|closes? the strait|strait of hormuz|"
+               # production 2026-11-15: "Iran launches drone attacks against US military base in Bahrain" (two outlets) was "no hard event",
+               # so it waited 130 minutes for a slot. The same base-targeting forms GEO_EVENT learned in 2789df6 count here too.
+               r"(?:drone|rocket|aerial|air|missile|ballistic) (?:attacks?|strikes?|barrages?|assault)|launch(?:es|ed)? (?:\w+ )?(?:drones?|missiles?|rockets?|attacks?|strikes?)|"
+               r"intercept(?:s|ed)? (?:\w+ ){0,2}(?:drones?|missiles?|rockets?|attacks?)|bomb(?:s|ed|ing) (?:of )?|shell(?:s|ed|ing) |"
+               r"(?:strikes?|struck|targets?|targeted|hits?) (?:\w+ ){0,2}(?:air ?|military |naval )?bases?)\b")
+# a hard event only reads as one when it isn't hedged or threatened: "Iran may attack US bases", "fears of missile strikes", "plans air strikes"
+SPECULATIVE = _rx(r"\b(may|might|could|would|fears?|feared|threat\w*|plans?|planning|prepar\w+|possible|potential|risk of|poised|ready to|if)\b")
+
+
+def hard_event(title: str) -> bool:
+    """A hard geopolitical event told as one: a GEO_HARD act ahead of any talk word ("Bahrain intercepts Iranian aerial attacks as Tehran
+    says it attacked US base" is an attack; "Trump says strikes on Iran will continue" is talk), and nothing hedged or threatened."""
+    t = title or ""
+    hard = GEO_HARD.search(t)
+    if hard is None or SPECULATIVE.search(t):
+        return False
+    talk = TALK.search(t)
+    return talk is None or hard.start() < talk.start()
 POLITICAL_ROUTINE = _rx(r"\b(impeach\w*|decr(?:y|ies|ied)|defends?|defended|slams?|blasts?|criticis\w*|criticiz\w*|rebuk\w*|feud|spat|row over|mocks?|"
                         r"lashes out|hits back|fires back|campaign\w*|poll\w*|rally|hearing|testif\w*|approval rating|opinion|analysis|"
                         r"explainer|what to know)\b")
@@ -685,7 +712,7 @@ def breaking_worthy(title: str, topic: str = "", importance: dict[str, Any] | No
         return False, "routine political controversy or commentary"
     kind = str((importance or {}).get("kind") or "")
     if kind == "geopolitics" or topic == "geopolitics":
-        if (GEO_HARD.search(t) or (SANCTIONS.search(t) and countries_in(t))) and not TALK.search(t):
+        if hard_event(t) or (SANCTIONS.search(t) and countries_in(t) and not TALK.search(t)):
             return True, "major geopolitical event"
         return False, "geopolitics, but no hard event (talk, positions, reactions)"
     if kind == "corporate":

@@ -950,16 +950,25 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     early = upcoming - now < p.breaking_before_slot
     day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
     last = max((_utc(e.released_at, now) for e in day), default=None)
+    fresh = [e for e in waiting if e.kind in ("news", "update") and verified_important(e) and _age(e, now) <= p.breaking_max_age.total_seconds() / 60]
+
+    def held(reason: str) -> None:  # the breaking lane is closed: say so for each fresh verified story it holds back (logged once per reason)
+        for e in fresh:
+            _note_breaking_miss(e, reason, now)
+        return None
+
     if early:
-        if slot_filled(db, upcoming, p) is not None or (last is not None and now - last < p.min_gap):
-            return None
+        if slot_filled(db, upcoming, p) is not None:
+            return held(f"the {slot_label(upcoming)} Dubai slot is already filled")
+        if last is not None and now - last < p.min_gap:
+            return held("under 20 minutes since the last post")
     else:
         if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
-            return None
+            return held(f"{p.breaking_per_day} breaking posts in 24 hours already")
         if p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
-            return None
+            return held(f"{p.breaking_per_6h} breaking posts in six hours already")
         if last is not None and now - last < p.breaking_gap:
-            return None
+            return held(f"under {int(p.breaking_gap.total_seconds() // 60)} minutes since the last post")
     covered = editorial.coverage(db, now)
     for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
         # the discovery points rank slot stories; they never make a story breaking (the 70 bar is judged without them)
@@ -968,12 +977,14 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         if wire_way:
             because = wire_way
         else:
-            if ev.kind not in ("news", "update") or bare < p.breaking_bar or not verified_important(ev):
+            if ev.kind not in ("news", "update") or not verified_important(ev) or _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
                 continue
             worthy, because = editorial.breaking_worthy(ev.title or "", ev.topic or "", (ev.facts or {}).get("importance"))
             if not worthy:
+                _note_breaking_miss(ev, because, now)
                 continue
-            if _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
+            if bare < p.breaking_bar:
+                _note_breaking_miss(ev, f"{because}, but scores {bare:g} without discovery points, under the breaking bar of {p.breaking_bar}", now)
                 continue
         if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1]:
             continue
@@ -1001,6 +1012,26 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
                     ev.facts["latency"]["event_to_release_min"], ev.facts["latency"]["detect_to_release_min"], ev.headline[:100])
         return ev
     return None
+
+
+_MISSES_LOGGED: dict[tuple[int, str, str], None] = {}
+
+
+def _note_breaking_miss(ev: NdEvent, reason: str, now: datetime) -> None:
+    """Why a fresh, verified important story did not break between slots: kept on the event (facts.breaking_miss, Admin shows facts) and
+    logged once per reason, so production shows exactly what held a story back (2026-11-16: the Iran drone strike on a US base in Bahrain
+    waited 130 minutes for a slot and nothing said why)."""
+    f = ev.facts or {}
+    if f.get("breaking_miss") != reason:
+        ev.facts = {**f, "breaking_miss": reason}
+    key = (ev.id, ev.title or "", reason)  # the facts are rewritten when a story is re-scored, so the log keeps its own memory (per process)
+    if key in _MISSES_LOGGED:
+        return
+    _MISSES_LOGGED[key] = None
+    while len(_MISSES_LOGGED) > 2000:
+        _MISSES_LOGGED.pop(next(iter(_MISSES_LOGGED)))
+    logger.info("newsdesk events: #%s not breaking (%s) [%s %s, %d outlets, %d min old]: %s", ev.id, reason, int(ev.virality), ev.evidence,
+                len(outlets_of(ev)), int(_age(ev, now)), (ev.headline or ev.title or "")[:100])
 
 
 def _wire_breaking(db: Session, ev: NdEvent, now: datetime, p: Policy, out: list[NdEvent], bare: float) -> str:
@@ -1114,6 +1145,10 @@ def note_skip(db: Session, now: datetime, p: Policy) -> None:
         return
     skips[slot.isoformat()] = SKIP_REASON
     row.state = {**(row.state or {}), "skipped_slots": dict(sorted(skips.items())[-24:])}
+    # what the desk passed over, in the logs (2026-11-16: two overnight slots went empty and production had no record of why)
+    best = sorted(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")), key=lambda e: (-e.virality, e.id))[:3]
+    logger.info("newsdesk events: skipped the %s Dubai slot; best waiting: %s", slot_label(slot),
+                " | ".join(f"#{e.id} {int(e.virality)} {e.evidence} \"{(e.headline or e.title or '')[:70]}\": {(e.why or '')[:120]}" for e in best) or "none")
     db.commit()
 
 
