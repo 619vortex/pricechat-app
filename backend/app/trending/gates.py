@@ -111,3 +111,29 @@ def gate(text: str, *, source_text: str, source_names: list[str], reliable_count
         add("final_gate", False, p)
     ok = all(c["passed"] for c in out)
     return {"ok": ok, "checks": out, "reason": next((c["detail"] for c in out if not c["passed"]), "")}
+
+
+# --- the editorial bar and the story's identity (owner, 2026-11-16) --------------------------------------------------------------------
+# Run when the tweet is written and again immediately before it is sent. Trend post 152 told a Guardian journalist's diary and an
+# unrelated Reuters COP31 report as one story: a tweet now tells exactly one article's story, and that story must be worth a post.
+CASHTAG_WORDS = re.compile(r"\(\$[A-Za-z]{1,6}\)|(?<![\w$])\$[A-Za-z]{1,6}\b")
+WORLD_MAJOR = 2.0  # a "world" story is in scope only as a major disaster or emergency (earthquake, hurricane, outbreak), not climate talks
+
+
+def story_problems(text: str, *, lead_title: str, lead_summary: str, measured: str, outlet: str, category: str) -> list[str]:
+    """Why this tweet must not go out, or []: the lead story isn't worth a post (app/newsdesk/quality), it is off this account's beat, or the
+    tweet says something that isn't in the lead story (another article's words: two stories told as one)."""
+    from app.newsdesk import quality
+    from app.trending import rank
+
+    out = []
+    why = quality.weak_story(lead_title)
+    if why:
+        out.append(f"not worth a post: {why}")
+    if category == "world" and rank._strength(lead_title, rank.WORLD) < WORLD_MAJOR:
+        out.append("off this account's beat (crypto, markets, technology, geopolitics, the economy): a world story that is no major emergency")
+    allowed = checks.tokens(" ".join([lead_title, lead_summary, measured, outlet, "via reports"]))
+    extra = checks.tokens(CASHTAG_WORDS.sub(" ", text or "")) - allowed
+    if extra:
+        out.append(f"words that aren't in the lead story ({', '.join(sorted(extra)[:5])}): one tweet tells one article's story")
+    return out

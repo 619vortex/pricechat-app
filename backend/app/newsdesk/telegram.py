@@ -278,6 +278,11 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     final_plain = pkg.telegram_plain if pkg is not None else plain
     told_all = f"{network.source_text_of(ev, rows if ev.kind != 'recap' else [])} {f.get('told') or ''} {ev.title} {ev.summary}"
     problems = checks.final_gate(final_plain, told_all, str(meta.get("symbol") or ""), wire=style == "wire")
+    from app.newsdesk import quality
+
+    problems += quality.event_problems(ev, rows)  # owner, 2026-11-16: still worth a post, and one story only, right before it goes
+    if db is not None and (told := quality.already_posted(db, ev, now)):
+        problems.append(told)
     if problems:
         logger.warning("tgnews: event %s held by the final check: %s", ev.id, "; ".join(problems))
         return None, "final check: " + "; ".join(problems)

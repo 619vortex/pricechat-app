@@ -293,6 +293,25 @@ def _joins(s: Sig, seed: Sig) -> bool:
     return related(seed.title, s.title)
 
 
+def _split_google_units(units: dict[str, list[Sig]]) -> None:
+    """A Google search term links whatever articles mention it: for "cop31" a Guardian diary ("what it's like to cover a Cop climate summit")
+    and a Reuters report ("UN climate chief urges speed as COP31 confronts fossil fuel divide"), which trend post 152 then told as one story
+    (2026-11-16). The term keeps only the articles that tell the same event as its lead article (a topical one first); every other article
+    stands on its own and must find its own event by the strict rule (related)."""
+    from app.trending.sources import topical
+
+    for key in [k for k in units if k.startswith("google:")]:
+        unit = units[key]
+        arts = [s for s in unit if s.extra.get("kind") == "article"]
+        if len(arts) < 2:
+            continue
+        anchor = min(arts, key=lambda s: (not topical(s.title), not s.reliable, -s.engagement, s.id))
+        for s in arts:
+            if s is not anchor and not related(anchor.title, s.title):
+                unit.remove(s)
+                units[f"id:{s.id}"] = [s]
+
+
 def cluster(signals: list[Sig]) -> list[Cluster]:
     """Seed-based grouping: reliable and engaged signals first; each later unit joins the first topic whose seed it matches (_joins), else
     starts its own. An inverted index on the seeds' words keeps it near-linear."""
@@ -302,6 +321,7 @@ def cluster(signals: list[Sig]) -> list[Cluster]:
         # one search term is one unit whatever the country (US and GB link the same article: one signal, one group)
         key = re.sub(r"^google:[A-Za-z]{2}:", "google:", str(s.extra.get("group") or "")) or f"id:{s.id}"
         units.setdefault(key, []).append(s)
+    _split_google_units(units)
     groups: list[list[Sig]] = []
     seeds: list[Sig] = []
     index: dict[str, set[int]] = {}

@@ -651,17 +651,20 @@ def x_links_on(state: dict[str, Any] | None) -> bool:
 
 
 STYLES = ("wire", "clean", "classic")
-# clean by default (owner, 2026-11-12); the wire style (app/newsdesk/wire, 2026-11-14) is opt-in: Admin switches between wire, clean and
-# classic, and deploying it changes nothing live until the owner picks Wire. Tests of the classic layout set "classic" (tests/conftest.py),
-# the clean and wire tests their own.
-DEFAULT_STYLE = "clean"
+# The wire style is the standard (owner, 2026-11-16, after the post audit: "one strong factual headline and at most one useful supporting
+# sentence ... real licensed photos or meaningful charts; otherwise publish text-only"). The clean style's generic photos (a Kremlin skyline
+# on a satellite story, the Knesset on a Gaza strike), its headline-only fallback card and its "JUST IN:" on stories hours old are retired:
+# a stored "clean" choice posts as wire. Classic stays Admin's explicit rollback. Tests of the classic layout set "classic"
+# (tests/conftest.py), the clean tests their own (CLEAN_RETIRED off).
+DEFAULT_STYLE = "wire"
+CLEAN_RETIRED = True
 
 
 def post_style(state: dict[str, Any] | None) -> str:
-    """clean (owner, 2026-11-12: the picture speaks, a short caption, @thepricechat) unless Admin chose wire (2026-11-14: short factual
-    headlines, earned tags, real charts or text only) or the older classic layout."""
+    """wire (short factual headlines, earned tags, real photos or charts, else text only) unless Admin chose the older classic layout."""
     s = str((state or {}).get("post_style") or DEFAULT_STYLE)
-    return s if s in STYLES else DEFAULT_STYLE
+    s = s if s in STYLES else DEFAULT_STYLE
+    return "wire" if s == "clean" and CLEAN_RETIRED else s
 
 
 def _wire_draft_problems(c: Copy, source_text: str) -> list[str]:

@@ -295,6 +295,9 @@ def markets_gone_mad(posts: list[DataPost]) -> DataPost | None:
 # --- offering them to the desk ---------------------------------------------------------------------------------------------
 
 MGM_KICKER = "MARKETS GONE MAD"
+# Bitcoin vs gold over the past year (post 115), Bitcoin vs the Nasdaq over the past year (post 124): evergreen comparisons that said nothing
+# new that day. A data post is only something measured today or this week: a one-day anomaly, the week's ranking or sector rotation.
+EVERGREEN = ("battle", "then_now")
 DATA_DAYS = 7  # the same subject (Bitcoin vs gold, the weekly ranking) at most once a week
 LINK = "https://finance.yahoo.com/quote/{symbol}"
 
@@ -335,6 +338,8 @@ def offer(db: Any, now: datetime, data: dict[str, list[tuple[datetime, float]]],
         for p in posts:
             if p.interest < DATA_BAR:
                 break
+            if p.kind in EVERGREEN:
+                continue  # a year-long comparison is true any day: it never fills a slot (owner, 2026-11-16)
             if p.subject in shown or f"data:{today}:{p.subject}" in keys or (mad_now and p.subject == mgm.subject):
                 continue  # the MARKETS GONE MAD subject is posted once, as that
             ev = _event(p, f"data:{today}:{p.subject}", now, bar + 1 + (p.interest - DATA_BAR) / 5, now + timedelta(hours=8))

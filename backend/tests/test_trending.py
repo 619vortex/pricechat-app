@@ -369,42 +369,52 @@ def test_the_gate_holds_template_lines_engagement_bait_and_generic_questions() -
 
 def _brief(**kw: Any) -> writer.Brief:
     b = writer.Brief(key=kw.pop("key", "t:7"), category=kw.pop("category", "crypto"), headline=kw.pop("headline", HACK), outlet=kw.pop("outlet", "CoinDesk"), **kw)
-    b.source_text = " ".join([b.headline] + [h for _, h in b.others]) + " " + " ".join(writer.measured_lines(b))
+    b.source_text = f"{b.headline} {b.summary} " + " ".join(writer.measured_lines(b))  # the lead article alone (engine.brief_of)
     return b
 
 
-def test_the_rules_writer_is_natural_varied_sourced_and_asks_nothing() -> None:
+SUMMARY = "Bybaz said 12,000 accounts were affected by the $40 million hack and withdrawals will stay closed until Friday."
+
+
+def test_the_rules_writer_is_one_headline_one_sentence_and_one_story() -> None:
+    # owner, 2026-11-16: one strong factual headline, at most one supporting sentence from the SAME article, no source introductions
     others = [("Reuters", "Bybaz says 12,000 accounts were affected by the $40 million hack")]
-    seen = set()
-    for i in range(12):
-        b = _brief(key=f"t:{i}", others=others, outlets=["CoinDesk", "Reuters"])
+    for i in range(6):
+        b = _brief(key=f"t:{i}", others=others, outlets=["CoinDesk", "Reuters"], summary=SUMMARY)
         text, angle = writer.rules(b)
-        seen.add(text.split("\n\n")[0].replace(HACK, "H"))
-        assert len(text) <= 280 and "CoinDesk" in text and HACK in text and "?" not in text and angle == "detail"
-        assert "12,000 accounts" in text and "Reuters" in text  # the second sentence: a concrete figure from another reliable outlet
+        head, second, tail = text.split("\n\n")
+        assert head == f"{HACK}." and second == SUMMARY and tail == "Via CoinDesk" and angle == "support", text
+        assert "Reuters" not in text and "reports" not in text and "?" not in text and len(text) <= 280
         assert not gates.EMOJI.search(text) and not gates.BAIT.search(text)
         res = gates.gate(text, source_text=b.source_text, source_names=["CoinDesk"], reliable_count=2)
         assert res["ok"], (text, res["reason"])
-    assert len(seen) >= 2  # the opening varies by topic ("(via CoinDesk)", "CoinDesk reports.", "CoinDesk:")
+    # another outlet's headline is never the second sentence, however much it adds
+    alone = _brief(others=others, outlets=["CoinDesk", "Reuters"])
+    assert writer.rules(alone) == (f"{HACK}.\n\nVia CoinDesk", "plain")
+    # a summary that only repeats the headline adds nothing
+    assert writer.rules(_brief(summary=HACK + "."))[1] == "plain"
     # the measured interest, only when Google gave a traffic figure
     g = _brief(google=True, google_query="bybaz", google_geo="US", google_traffic="500K+", google_to=500_000)
     text, angle = writer.rules(g)
-    assert angle == "interest" and text.endswith("Searches for Bybaz have topped 500K on Google in the US.")
+    assert angle == "interest" and text.endswith("Searches for Bybaz have topped 500K on Google in the US.\n\nVia CoinDesk")
     assert gates.gate(text, source_text=g.source_text, source_names=["CoinDesk"], reliable_count=1, buzz_ok=True)["ok"]
     rising = _brief(google=True, google_query="bybaz", google_geo="US", google_from=20_000, google_to=200_000, google_minutes=130)
-    assert writer.rules(rising)[0].endswith("Google searches for Bybaz in the US went from 20K+ to 200K+ in about 2 hours.")
+    assert writer.rules(rising)[0].endswith("Google searches for Bybaz in the US went from 20K+ to 200K+ in about 2 hours.\n\nVia CoinDesk")
     none = _brief()
-    assert writer.rules(none) == (writer.opener(none), "plain") and "Searches" not in writer.rules(none)[0]
+    assert writer.rules(none) == (f"{writer.opener(none)}\n\nVia CoinDesk", "plain") and "Searches" not in writer.rules(none)[0]
     cov = _brief(outlets=["CoinDesk", "Reuters", "The Block", "AP"])
-    assert writer.rules(cov)[0].endswith("Reuters, The Block and AP have it too.")
+    assert "have it too" not in writer.rules(cov)[0] and "Also reported" not in writer.rules(cov)[0]
 
 
 def test_the_model_writer_gets_the_same_constraints() -> None:
-    b = _brief(others=[("Reuters", "Bybaz says 12,000 accounts were affected")], google=True, google_query="bybaz", google_geo="US", google_to=200_000)
+    b = _brief(others=[("Reuters", "Bybaz says 12,000 accounts were affected")], google=True, google_query="bybaz", google_geo="US", google_to=200_000,
+               summary=SUMMARY)
     system, user = writer.prompt(b)
-    for must in ("no engagement bait", "By default ask no question", "No hook or teaser lines", "must come from the FACTS", "untrusted text"):
+    for must in ("no engagement bait", "By default ask no question", "No hook or teaser lines", "must come from the FACTS", "untrusted text",
+                 "no source introduction", "Via CoinDesk", "All the FACTS tell one story"):
         assert must in system
-    assert "Headline (Reuters): Bybaz says 12,000 accounts were affected" in user and "Measured by Price Chat: Searches for Bybaz have topped 200K" in user
+    assert "Reuters" not in user  # another article's headline is never given to the writer (one article, one story)
+    assert f"The same article's report (CoinDesk): {SUMMARY}" in user and "Measured by Price Chat: Searches for Bybaz have topped 200K" in user
     s = _brief(headline="Airstrike on a camp kills 12, officials say", outlet="BBC", category="geopolitics")
     s.sensitive = sensitive.classify(s.headline)
     system, _ = writer.prompt(s)
@@ -420,15 +430,16 @@ def test_at_most_one_cashtag() -> None:
     assert gates.gate(f"{one} (via CoinDesk)", source_text=src, source_names=["CoinDesk"], reliable_count=1)["ok"]
 
 
-def test_the_whole_tweet_keeps_one_cashtag_across_lead_and_detail() -> None:
-    # production 2026-11-15: the opener and the detail line each got a tag ("$XRP, $XRP" / "$BTC, $XRP") and every such tweet was held
+def test_the_whole_tweet_keeps_one_cashtag_across_lead_and_support() -> None:
+    # production 2026-11-15: the opener and the second line each got a tag ("$XRP, $XRP" / "$BTC, $XRP") and every such tweet was held
     lead = "XRP crashes to its lowest since November 2024 as money leaves crypto"
-    for other in ("XRP falls 9% to $1.80 as outflows hit $400 million", "Bitcoin slips 3% while XRP falls 9% in a week of $400 million outflows"):
+    for summary in ("XRP fell 9% to $1.80 on Monday as outflows from crypto funds hit $400 million.",
+                    "Bitcoin slipped 3% while XRP fell 9% in a week of $400 million outflows from crypto funds."):
         for i in range(6):
-            b = _brief(key=f"x:{i}", headline=lead, outlet="CoinDesk", others=[("Reuters", other)], outlets=["CoinDesk", "Reuters"])
+            b = _brief(key=f"x:{i}", headline=lead, outlet="CoinDesk", summary=summary, outlets=["CoinDesk", "Reuters"])
             text, angle = writer.rules(b)
-            assert angle == "detail" and len(gates.cashtags(text)) == 1, text
-            assert gates.gate(text, source_text=b.source_text, source_names=["CoinDesk", "Reuters"], reliable_count=2)["ok"], text
+            assert angle == "support" and len(gates.cashtags(text)) == 1, text
+            assert gates.gate(text, source_text=b.source_text, source_names=["CoinDesk"], reliable_count=2)["ok"], text
     assert writer.keep_one_cashtag("XRP ($XRP) falls.\n\nReuters: XRP ($XRP) and Bitcoin ($BTC) slide; $ETH too.") == "XRP ($XRP) falls.\n\nReuters: XRP and Bitcoin slide; ETH too."
     assert writer.keep_one_cashtag("No tags at all") == "No tags at all"
 
@@ -700,7 +711,11 @@ def test_each_sensitive_category_is_recognised_and_written_plainly(kind: str, ti
     b.sensitive = c
     b.source_text = title + " " + " ".join(writer.measured_lines(b))
     text, angle = writer.rules(b)
-    assert angle == f"sensitive:{kind}" and text.startswith(f"BBC reports: {title}") and text.endswith("Also reported by Reuters.")
+    # one plain attributed sentence: the headline's own attribution ("..., officials say") plus the credit, or "..., BBC reports."
+    said = sensitive.ATTRIBUTION.search(title) is not None or writer.ATTRIBUTED.search(title) is not None
+    want = f"{title}.\n\nVia BBC" if writer.ATTRIBUTED.search(title) else f"{title}, BBC reports."
+    assert angle == f"sensitive:{kind}" and text == want, (text, said)
+    assert "Also reported" not in text and "Reuters" not in text
     assert "?" not in text and not gates.EMOJI.search(text) and "Searches" not in text  # no hook, question, emoji or interest statistics
     res = gates.gate(text, source_text=b.source_text, source_names=["BBC"], reliable_count=2)
     assert res["ok"], res["reason"]
@@ -752,7 +767,7 @@ async def test_automatic_mode_never_publishes_an_allegation_about_a_named_person
     await tick(db, web)
     [post] = [p for p in posts(db) if "Smith" in p.text]
     assert post.status == "pending" and "approval only" in (post.note or "") and post.angle == "sensitive:allegation"
-    assert "?" not in post.text and post.text.startswith(("BBC reports:", "Reuters reports:", "AP reports:"))
+    assert "?" not in post.text and post.text.endswith(("Via BBC", "Via Reuters", "Via AP", "BBC reports.", "Reuters reports.", "AP reports."))
 
 
 async def test_automatic_mode_may_publish_a_disaster_only_with_two_independent_outlets(db: Session, web: Web) -> None:
@@ -764,7 +779,7 @@ async def test_automatic_mode_may_publish_a_disaster_only_with_two_independent_o
     await tick(db, web)
     [post] = [p for p in posts(db) if "earthquake" in p.text]
     assert post.angle == "sensitive:disaster" and post.status == "dry_run", (post.status, post.note, post.text)  # two outlets, attributed: it may go
-    assert "Also reported by" in post.text and "Searches" not in post.text
+    assert post.text.endswith("reports.") and "Also reported by" not in post.text and "Searches" not in post.text
 
 
 async def test_a_disaster_with_one_outlet_waits_for_the_owner(db: Session, web: Web) -> None:

@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.newsdesk import NdEvent, NdStory
-from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, moves, sources, virality
+from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, moves, quality, sources, virality
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,8 @@ def policy(desk_state: dict[str, Any] | None = None) -> Policy:
 
     if network.post_style(desk_state) == "wire":
         p.wire = True
-        p.breaking_per_day = WIRE_BREAKING_PER_DAY
+        # the daily breaking cap stays the desk's own (2026-11-16: the wire style became the standard; publishing limits unchanged)
+        p.breaking_per_day = min(p.breaking_per_day, WIRE_BREAKING_PER_DAY)
         p.breaking_per_6h = WIRE_BREAKING_PER_6H
     return p
 
@@ -885,6 +886,14 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         if held_back:
             ev.why = held_back
             continue
+        weak = quality.weak_story(ev.title or "") if ev.kind in ("news", "update") else None
+        if weak:  # owner, 2026-11-16: zero posts is better than a weak one; the bar and the ranking never overrule this
+            ev.why = f"not worth a post: {weak}"
+            continue
+        told = quality.already_posted(db, ev, now)
+        if told:  # what the channel actually delivered this week, whatever the events' own records say
+            ev.status, ev.why = "superseded", told
+            continue
         f = ev.facts or {}
         if ev.kind == "update":
             parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None
@@ -987,6 +996,14 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
                 _note_breaking_miss(ev, f"{because}, but scores {bare:g} without discovery points, under the breaking bar of {p.breaking_bar}", now)
                 continue
         if _repeat(ev, covered, now) or _blocked(ev) or editorial.diversity(ev, covered, now)[1]:
+            continue
+        weak = quality.weak_story(ev.title or "") if ev.kind in ("news", "update") else None
+        if weak:  # owner, 2026-11-16: round-ups, features, filler and routine statements never go out, however they score
+            _note_breaking_miss(ev, f"not worth a post: {weak}", now)
+            continue
+        told = quality.already_posted(db, ev, now)
+        if told:  # what the channel actually delivered this week, whatever the events' own records say
+            ev.status, ev.why = "superseded", told
             continue
         if ev.kind == "update":
             parent = db.get(NdEvent, ev.parent_id) if ev.parent_id else None

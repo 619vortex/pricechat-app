@@ -189,7 +189,7 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
         topic = next((owner[i] for i in ids if i in owner and owner[i] not in touched), None)
         lead = c.lead
         srcs = [{"source": x.source, "outlet": x.outlet, "title": x.title, "url": x.url, "reliable": x.reliable, "engagement": x.engagement,
-                 "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind")}}
+                 "summary": (x.summary or "")[:500] if x.reliable else "", "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind")}}
                 # the topic's lead first: the writer leads with sources[0] (2026-11-16: a quote-led feature led trend post 152)
                 for x in sorted(c.signals, key=lambda x: (x is not lead, not x.reliable, rank.quote_led(x.title), -x.engagement))[:12]]
         metrics: dict[str, Any] = {"signals": len(c.signals)}
@@ -238,7 +238,7 @@ def brief_of(topic: TtTopic) -> tuple[writer.Brief | None, list[dict[str, Any]]]
                      google_from=float(g.get("google_from") or 0) if g.get("google_up") else 0.0,
                      google_to=float(g.get("google_to") or (google or {}).get("engagement") or 0), google_minutes=int(g.get("google_minutes") or 0),
                      reddit_sub=(reddit or {}).get("outlet", "")[2:] if reddit else "", x_trend=x_trend, outlets=outlets,
-                     others=[(x["outlet"], x["title"]) for x in reliable[1:8]], sensitive=sens)
+                     others=[(x["outlet"], x["title"]) for x in reliable[1:8]], sensitive=sens, summary=str(lead.get("summary") or ""))
     measured = []
     if google:
         measured.append("on Google's trending searches")
@@ -246,13 +246,33 @@ def brief_of(topic: TtTopic) -> tuple[writer.Brief | None, list[dict[str, Any]]]
         measured.append(f"a top thread on {reddit['outlet']}")
     if x_trend:
         measured.append("trending on X")
-    b.source_text = " ".join(f"{x['title']}" for x in reliable) + " " + " ".join(measured + writer.measured_lines(b))
+    # the facts a tweet may state: the lead article's own headline and report, and what we measured; never another article's words
+    # (2026-11-16: trend post 152 told two different stories as one)
+    b.source_text = f"{lead['title']} {b.summary} " + " ".join(measured + writer.measured_lines(b))
     return b, reliable
 
 
 def _gate(text: str, b: writer.Brief | None, reliable: list[dict[str, Any]]) -> dict[str, Any]:
-    return gates.gate(text, source_text=b.source_text if b else "", source_names=[b.outlet] if b else [], reliable_count=len(reliable),
-                      buzz_ok=bool(b and (b.google or b.x_trend)), discussion_ok=bool(b and b.reddit_sub))
+    result = gates.gate(text, source_text=b.source_text if b else "", source_names=[b.outlet] if b else [], reliable_count=len(reliable),
+                        buzz_ok=bool(b and (b.google or b.x_trend)), discussion_ok=bool(b and b.reddit_sub))
+    if b is None:
+        return result
+    problems = gates.story_problems(text, lead_title=b.headline, lead_summary="", measured=b.source_text, outlet=b.outlet, category=b.category)
+    result["checks"] = list(result["checks"]) + [{"check": "story", "passed": not problems, "detail": "; ".join(problems) or "one story, worth a post"}]
+    if problems and result["ok"]:
+        result["ok"], result["reason"] = False, problems[0]
+    return result
+
+
+def final_problems(post: TtPost) -> list[str]:
+    """The last check, immediately before a tweet is sent (owner, 2026-11-16): the story it tells is still worth a post, on this account's
+    beat, and the words are the lead article's alone. Written from what the post itself stored when it was checked."""
+    srcs = post.sources or []
+    if not srcs:
+        return ["no reliable source stored with the post"]
+    lead = srcs[0]
+    return gates.story_problems(post.text or "", lead_title=str(lead.get("title") or ""), lead_summary="", measured=post.source_text or "",
+                                outlet=str(lead.get("name") or ""), category=post.category or "")
 
 
 async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic, now: datetime, *, writer_transport: Any = None) -> TtPost:
@@ -443,6 +463,12 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
         return "already claimed"
     db.refresh(post)
     topic = db.get(TtTopic, post.topic_id)
+    problems = final_problems(post)
+    if problems:  # never sent, in dry run either: it is held with the reason, for the owner to see in Admin
+        post.status, post.hold_reason, post.note = "held", f"Final check: {problems[0]}", "; ".join(problems)[:500]
+        db.commit()
+        logger.info("trending: post %s held by the final check: %s", post.id, "; ".join(problems))
+        return "held"
     if not coordinate.x_live(db, s):
         why = "Trending's own dry-run switch" if not s.live else "the News Desk's X lane is in dry run"
         post.status, post.published_at, post.note = "dry_run", now, f"Dry run ({why}): recorded, not sent"

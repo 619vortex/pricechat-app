@@ -54,14 +54,17 @@ def _real_default() -> str:
     return m.group(1)
 
 
-def test_clean_is_the_default_and_wire_is_opt_in(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _real_default() == "clean"  # (tests/conftest.py runs the older tests in classic: read what production runs)
+def test_wire_is_the_default_and_clean_is_retired(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    # owner, 2026-11-16: "one strong factual headline and at most one useful supporting sentence ... real licensed photos or meaningful
+    # charts; otherwise publish text-only". Production reads the real default (tests/conftest.py runs the older tests in classic).
+    assert _real_default() == "wire" and network.CLEAN_RETIRED
     monkeypatch.setattr(network, "DEFAULT_STYLE", _real_default())
-    assert network.post_style({}) == network.post_style(None) == "clean" and network.post_style({"post_style": "bogus"}) == "clean"
-    assert network.state(db)["post_style"] == "clean"
+    assert network.post_style({}) == network.post_style(None) == "wire" and network.post_style({"post_style": "bogus"}) == "wire"
+    assert network.post_style({"post_style": "clean"}) == "wire" and network.post_style({"post_style": "classic"}) == "classic"
+    assert network.state(db)["post_style"] == "wire"
     p = events.policy({})
-    assert not p.wire and p.breaking_per_day == 2 and p.breaking_per_6h == 0  # the breaking lane exactly as before
-    assert network.configure(db, post_style="wire")["post_style"] == "wire"  # the owner opts in from Admin
+    assert p.wire and p.breaking_per_day == 2  # the daily breaking cap as before
+    assert network.configure(db, post_style="clean")["post_style"] == "wire"
     assert events.policy(engine.settings_row(db).state).wire
 
 
@@ -75,14 +78,14 @@ async def test_clean_output_is_byte_for_byte_what_production_writes(case: dict[s
     assert {"telegram_html": pkg.telegram_html, "telegram_plain": pkg.telegram_plain, "x_text": pkg.x_text, "ok": pkg.ok} == golden
 
 
-async def test_with_no_style_chosen_the_lane_posts_clean(client: Any, db: Session, live: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+async def test_with_no_style_chosen_the_lane_posts_wire(client: Any, db: Session, live: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     monkeypatch.setattr(network, "DEFAULT_STYLE", _real_default())
     _released(db, "c1", "Deutsche Bank's Bitcoin and Ether Custody Is Open to Clients, Bank Says", cases.CASES[0]["rows"][0][3],
               [("Unchained", cases.CASES[0]["rows"][0][1])], label="")
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, NOW)
-    assert tg.sent[0]["image"] is not None and tg.sent[0]["caption"].endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')  # clean's shape: sources · @thepricechat, one line
-    assert db.scalars(select(NdEvent)).one().facts["visual"].get("style") != "wire"  # (the signature on its own line, not the wire footer)
+    # no public figure and no named site: no stock photo of a bank's headquarters and no headline card, a text post
+    assert tg.sent[0]["image"] is None and db.scalars(select(NdEvent)).one().facts["visual"] == {"style": "wire", "kind": "text", "layout": "text"}
 
 
 # ================================================================ 1. casing and qualifiers
@@ -261,16 +264,27 @@ def wired(db: Session, live: dict[str, Any]) -> dict[str, Any]:  # noqa: F811
     return live
 
 
-async def test_just_in_goes_out_as_one_short_text_post(client: Any, db: Session, wired: dict[str, Any]) -> None:
+async def test_talks_ahead_of_a_meeting_never_go_out(client: Any, db: Session, wired: dict[str, Any]) -> None:
+    # News Desk post 116 (X 2121519072441467219, 2026-11-14): "JUST IN: China, US discuss tariffs, farm trade ahead of Xi-Trump meeting"
+    # was talks before a meeting, no outcome. The final editorial check holds it on both platforms (owner, 2026-11-16).
     rows = cases.CASES[1]["rows"][0]
+    _released(db, "j0", rows[2], rows[3], [(rows[0], rows[1])], label=brief.JUST_IN, age=6, evidence="attributed")
+    tg = TextTg()
+    await lane.tick(db, get_settings(), tg, NOW)
+    assert tg.sent == []
+    assert "routine statement or talks with no outcome" in (db.scalars(select(NdEvent)).one().tg_note or "")
+
+
+async def test_just_in_goes_out_as_one_short_text_post(client: Any, db: Session, wired: dict[str, Any]) -> None:
+    rows = cases.CASES[2]["rows"][0]
     _released(db, "j1", rows[2], rows[3], [(rows[0], rows[1])], label=brief.JUST_IN, age=6, evidence="attributed")
     tg = TextTg()
     sent = await lane.tick(db, get_settings(), tg, NOW)
     assert sent["sent"] == 501 and tg.sent[0]["image"] is None
     assert tg.sent[0]["caption"] == (
-        "<b>JUST IN:</b> China, US discuss tariffs, farm trade ahead of Xi-Trump meeting. Beijing has repeatedly urged Washington to implement "
-        "the $60 billion tariff-reduction deal, calling it a prerequisite for increasing purchases of US farm goods.\n\n"
-        '🔗 <a href="https://www.cnbc.com/2026/11/14/china-us-tariffs-xi-trump-meeting.html">CNBC</a> · <a href="https://t.me/thepricechat">@thepricechat</a>')
+        "<b>JUST IN:</b> Bitcoin $BTC breaks below $70,000 as liquidations sweep through leveraged longs. More than $1 billion in crypto "
+        "positions were forced shut in 12 hours as bitcoin broke below $70,000.\n\n"
+        '🔗 <a href="https://unchainedcrypto.com/bitcoin-breaks-below-70000-as-liquidations-sweep-through-leveraged-longs/">Unchained</a> · <a href="https://t.me/thepricechat">@thepricechat</a>')
 
 
 async def test_an_update_replies_to_the_original_telegram_message(client: Any, db: Session, wired: dict[str, Any]) -> None:

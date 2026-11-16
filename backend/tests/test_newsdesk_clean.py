@@ -244,6 +244,7 @@ async def test_a_data_post_keeps_its_comparison_card() -> None:
 
 def test_style_setting_defaults_to_clean_and_can_go_back(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(network, "DEFAULT_STYLE", "clean")
+    monkeypatch.setattr(network, "CLEAN_RETIRED", False)  # the retired clean style, tested as it was (Admin can no longer pick it)
     assert network.state(db)["post_style"] == "clean"
     assert network.configure(db, post_style="classic")["post_style"] == "classic"
     assert network.configure(db, post_style="poster")["post_style"] == "classic"  # only the two known styles

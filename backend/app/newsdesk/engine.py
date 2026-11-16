@@ -571,6 +571,22 @@ def _note_x(s: NdSettings, post: NdPost, now: datetime, *, ok: bool, outcome: st
     s.state = state
 
 
+def _editorial_hold(db: Session, post: NdPost, now: datetime | None = None) -> str:
+    """Why an event's post must not go out after all, or "": the story still clears the editorial bar and every outlet behind it reports this
+    same event (app/newsdesk/quality). Posts that aren't an event's (manual, test) are the owner's own."""
+    from app.newsdesk import quality
+
+    event_id = (post.facts or {}).get("event_id")
+    ev = db.get(NdEvent, event_id) if event_id else None
+    if ev is None:
+        return ""
+    rows = [db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:6]]
+    problems = quality.event_problems(ev, [r for r in rows if r is not None])
+    if now is not None and (told := quality.already_posted(db, ev, now)):
+        problems.append(told)
+    return "; ".join(problems)
+
+
 async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime, *, force_live: bool = False) -> str:
     """Send one post, or record what a dry run would have sent. Returns its final status. One post's failure never raises: it is recorded on the
     post (and in the desk's x_last_error) so the next tick goes on. force_live: the owner's one test post, sent even while the desk is in dry run."""
@@ -583,6 +599,12 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     if checks.cashtag_count(post.text) > checks.X_MAX_CASHTAGS:  # X answers 403 to an API post with more than one cashtag
         post.text = checks.one_cashtag(post.text)
         db.commit()
+    held = _editorial_hold(db, post, now)
+    if held and not force_live:  # the final editorial check (owner, 2026-11-16), in dry run too: what would never go out is never recorded as sent
+        post.status, post.error = "rejected", f"Final editorial check: {held}"
+        db.commit()
+        logger.info("newsdesk: post %s held by the final editorial check: %s", post.id, held)
+        return "rejected"
     if s.mode != "live" and not force_live:
         post.status, post.published_at = "dry_run", now
         db.commit()

@@ -29,6 +29,7 @@ DRAFT = {"headline": "Missile hits Aramco's Ras Tanura, the kingdom's largest oi
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(network, "DEFAULT_STYLE", "clean")
+    monkeypatch.setattr(network, "CLEAN_RETIRED", False)  # the retired clean style, tested as it was (Admin can no longer pick it)
 
 
 async def _release_and_render(client: Any, db: Session, live: dict[str, Any]) -> tuple[NdEvent, Any]:  # noqa: F811
