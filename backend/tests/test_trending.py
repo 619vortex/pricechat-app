@@ -990,7 +990,7 @@ def test_a_feature_never_counts_and_a_quote_led_headline_never_leads_a_topic() -
     # Cop climate summit." went out as the COP31 topic's lead
     feature = "‘It is not unusual to go 48 hours with little sleep’: what it’s like to cover a Cop climate summit"
     assert not sources.topical(feature)
-    for t in ("A day in the life of a Fed economist", "Behind the scenes at the Bitcoin conference", "I spent a week trading only memecoins"):
+    for t in ("Four reasons to be hopeful about this year's COP", "5 key takeaways from the Fed meeting", "A day in the life of a Fed economist", "Behind the scenes at the Bitcoin conference", "I spent a week trading only memecoins"):
         assert not sources.topical(t), t
     for t in ("UN climate chief urges speed as COP31 confronts fossil fuel divide", "Trump letter from the White House to Xi", "‘We will retaliate’: Iran warns US"):
         assert sources.topical(t), t
