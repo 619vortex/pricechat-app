@@ -168,9 +168,53 @@ def test_trend_posts_90_and_167_rewritten() -> None:
 
 # --- 4. pictures: real or none ---------------------------------------------------------------------------------------------------------
 
-def test_the_clean_style_with_its_stock_photos_and_headline_cards_is_retired(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(network, "DEFAULT_STYLE", "wire")
-    assert network.post_style({"post_style": "clean"}) == "wire" == network.post_style({})
+def test_the_three_styles_stay_distinct_and_admin_shows_what_publishes(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    # owner, 2026-11-16 (second message): "don't silently turn Clean into Wire"
+    monkeypatch.setattr(network, "DEFAULT_STYLE", "clean")
+    for style in ("clean", "wire", "classic"):
+        assert network.post_style({"post_style": style}) == style
+        assert network.configure(db, post_style=style)["post_style"] == style == network.state(db)["post_style"]
+    assert network.post_style({}) == "clean"
+
+
+def test_the_clean_style_skips_city_and_country_stand_in_photos() -> None:
+    from app.newsdesk import clean, visual
+
+    # Telegram 177 (Kremlin skyline on a satellite story) and 180 (the Knesset on a Gaza strike): never searched for in the clean style
+    for head in ("Ukraine, Russia race to build military satellite networks as war rages on", "Israeli air strike kills senior Hamas commander in Gaza"):
+        kept = [must for _, must in visual.subject_queries(head) if must not in clean.STAND_INS]
+        assert kept == [], (head, kept)
+    # the company or institution a story is about still has its photo
+    assert "nvidia" in [m for _, m in visual.subject_queries("Nvidia hires Wachtell to investigate CEO") if m not in clean.STAND_INS]
+    assert "eccles|federal reserve" in [m for _, m in visual.subject_queries("Fed holds rates") if m not in clean.STAND_INS]
+
+
+def test_every_style_says_the_story_in_one_headline_and_at_most_one_sentence() -> None:
+    from app.newsdesk import clean
+
+    copy = network.Copy(headline="Bybaz exchange hacked for $40 million", short="Bybaz hacked",
+                        context="Bybaz said 12,000 accounts were affected. Withdrawals stay closed until Friday. The exchange hired auditors.",
+                        stakes="Traders pulled $90 million from rival venues.", question="Will Bybaz reopen?")
+    links = [network.Link("CoinDesk", "https://coindesk.test/a", "article")]
+    for text in (clean.x_caption(copy, links), network.x_caption(copy, links)):
+        story = text.split("\n\n")
+        assert "Withdrawals" not in text and "Traders pulled" not in text and "?" not in text, text
+        assert story[0].startswith("Bybaz exchange hacked") and len(story) <= 3, text
+
+
+def test_a_title_case_headline_is_set_in_sentence_case_without_losing_names() -> None:
+    # trend post 167 replay: "Oil prices fall as fears of a global supply Glut Return"
+    from app.newsdesk import wire
+
+    wire.learn_vocabulary(["Oil slipped as traders weighed a supply glut and a possible return of OPEC barrels.",
+                           "Analysts warned the glut could deepen. Investors fear a return to oversupply.",
+                           "A glut of crude kept prices low, while the return of exports weighed.",
+                           "Visa said it would settle in USDC. The deal with Visa expands. Payments via Visa grew. Visa rose."])
+    assert wire.headline_case(OIL_167, "") == "Oil prices fall as fears of a global supply glut return"
+    assert "on Visa, Anchorage Digital says" in wire.headline_case(
+        "Western Union\u2019s USDPT Stablecoin Becomes a Settlement Option on Visa, Anchorage Digital Says", "")
+    assert wire.headline_case("Israeli Strike on Nasser Hospital Kills at Least Six", "Strikes hit Nasser Hospital in Khan Younis.") \
+        == "Israeli strike on Nasser Hospital kills at least six"
 
 
 # --- 5. slots are never filled with evergreen comparisons ----------------------------------------------------------------------------
@@ -212,8 +256,9 @@ async def test_the_bahrain_attack_goes_out_as_text_not_a_headline_card() -> None
     ev = SimpleNamespace(id=489, kind="news", title=head, headline=head, summary="Iran targeted an air base in Bahrain.", facts={}, label="",
                          slot="slot", evidence="two outlets", topic="geopolitics", released_at=None, first_seen=None, sources=[])
     t = httpx.MockTransport(lambda req: httpx.Response(200, json={"query": {"search": []}}))
-    img, meta = await visual.for_event(ev, transport=t, style=network.post_style({"post_style": "clean"}))
-    assert img == b"" and meta == {"style": "wire", "kind": "text", "layout": "text"}
+    for style, want in (("clean", "clean"), ("wire", "wire")):  # each style keeps its own name, and neither draws a headline card
+        img, meta = await visual.for_event(ev, transport=t, style=network.post_style({"post_style": style}))
+        assert img == b"" and meta == {"style": want, "kind": "text", "layout": "text"}, meta
 
 
 @pytest.mark.parametrize("title", [
@@ -244,3 +289,35 @@ def test_a_story_the_channel_already_delivered_never_goes_out_again(db: Session)
     assert quality.already_posted(db, other, NOW) is None
     # a week later it may be news again (a new development comes as an update anyway)
     assert quality.already_posted(db, again, NOW + timedelta(days=8)) is None
+
+
+@pytest.mark.parametrize("head,want", [
+    # ordinary words lowered, with no reporting at hand (trend post 167 replay)
+    ("Oil Prices Fall as Fears of a Global Supply Glut Return", "Oil prices fall as fears of a global supply glut return"),
+    ("Saudi Crude Output Jumps 26% as Riyadh Reports Near Pre-War Production", "Saudi crude output jumps 26% as Riyadh reports near pre-war production"),
+    ("Mercado Bitcoin Begins Post-Hack Reopening Without a Timeline for Withdrawals",
+     "Mercado Bitcoin begins post-hack reopening without a timeline for withdrawals"),
+    # names kept: name-only words, names that are also words after a name, brands, multi-word places, hyphenated names
+    ("Israeli Strike on Nasser Hospital Kills at Least Six", "Israeli strike on Nasser Hospital kills at least six"),
+    ("Western Union’s USDPT Stablecoin Becomes a Settlement Option on Visa, Anchorage Digital Says",
+     "Western Union’s USDPT stablecoin becomes a settlement option on Visa, Anchorage Digital says"),
+    ("Nvidia Hires Wachtell Lipton to Investigate CEO’s Affair With Chinese Executive",
+     "Nvidia hires Wachtell Lipton to investigate CEO’s affair with Chinese executive"),
+    ("Block Shares Jump After Square Revenue Beats", "Block shares jump after Square revenue beats"),
+    ("Strategy Buys More Bitcoin as Saylor Doubles Down", "Strategy buys more Bitcoin as Saylor doubles down"),
+    ("Houthis Fire Missiles at Tankers in Red Sea", "Houthis fire missiles at tankers in Red Sea"),
+    ("European Union Fines Google Over Search Ranking", "European Union fines Google over search ranking"),
+    ("Hamas Leader Abdel-Malek Killed in Strike", "Hamas leader Abdel-Malek killed in strike"),
+])
+def test_title_case_headlines_in_sentence_case_without_losing_names(head: str, want: str) -> None:
+    from app.newsdesk import wire
+
+    assert wire.headline_case(head, "") == want
+    assert network.sentence_case(head, "") == want  # the clean and classic styles case headlines the same way
+
+
+def test_a_word_the_feeds_mostly_capitalise_stays_a_name() -> None:
+    from app.newsdesk import wire
+
+    wire.learn_vocabulary(["The deal with Return Capital closed. Return Capital said it would buy. Analysts at Return Capital agreed."] * 3)
+    assert "Return" in wire.headline_case("Oil Majors Sell Stakes to Return", "")

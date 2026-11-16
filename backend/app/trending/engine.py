@@ -168,6 +168,10 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
     """Cluster the last day's signals, score them, keep each cluster on the same topic row across scans (shared signals)."""
     rows = list(db.scalars(select(TtSignal).where(TtSignal.last_seen >= now - TOPIC_WINDOW)))
     sigs = [rank.Sig.of(r) for r in rows]
+    from app.newsdesk import wire
+
+    if any(x.reliable and x.summary for x in sigs):  # the casing reads ordinary words from today's reporting (writer.lead_sentence)
+        wire.learn_vocabulary(t for x in sigs if x.reliable for t in (x.title, x.summary))
     clusters = rank.cluster(sigs)
     weights = learning.weights(db, now)
     state = dict(s.state or {})

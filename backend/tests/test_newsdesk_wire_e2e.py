@@ -59,15 +59,18 @@ async def test_breaking_news_goes_out_text_only_on_telegram_and_x(client: Any, d
     assert db.get(NdPost, db.get(NdEvent, ev.id).x_post_id).status == "published"
 
 
-async def test_a_stored_clean_choice_posts_as_wire(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
-    # owner, 2026-11-16: the clean style's stock photos and headline cards are retired; an Admin setting of "clean" posts the wire way
+async def test_admin_can_switch_back_to_clean(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
     network.configure(db, post_style="clean")
     _both_report(live)
     await _desk_tick(db)
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=30))
+    cap = tg.sent[0]["caption"]
+    # clean's own rules: the label the older scorer gave (a score under 80 is JUST IN there), sources · @thepricechat on one line; no real
+    # photo of this story exists in the test, so a text post (2026-11-16: no stand-in photo, no headline card)
+    assert cap.startswith("<b>JUST IN:</b>") and cap.endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
-    assert ev.facts["visual"]["style"] == "wire" and tg.sent[0]["caption"].count("\n\n") == 1  # the story, then one footer line
+    assert ev.facts["visual"]["style"] == "clean" and tg.sent[0]["image"] is None
 
 
 # ---------------------------------------------------------------- the breaking lane in the wire style
@@ -91,7 +94,7 @@ def _earlier_breaking(db: Session, hours: list[float]) -> None:
 
 def test_an_exceptional_measured_move_breaks_in_the_wire_style_only(db: Session) -> None:
     ev = _move(db, "m1")
-    assert events.release(db, BETWEEN, events.policy({"post_style": "classic"})) is None  # the classic layout: moves wait for a slot
+    assert events.release(db, BETWEEN, events.policy({"post_style": "clean"})) is None  # the older styles: moves wait for a slot
     got = events.release(db, BETWEEN, events.policy({}))
     assert got is not None and got.id == ev.id and got.slot == "breaking" and "exceptional market move" in got.why
 
@@ -113,7 +116,7 @@ def test_breaking_has_a_rolling_cap_and_a_daily_one(db: Session) -> None:
     _move(db, "m3")
     assert events.release(db, BETWEEN, events.policy({})) is None
     db.query(NdEvent).delete()
-    _earlier_breaking(db, [7, 12])  # two today, none in six hours: the desk's daily cap of 2 (unchanged by the wire style, 2026-11-16)
+    _earlier_breaking(db, [7, 12])  # two today, none in six hours: the desk's daily cap of 2 (unchanged in the wire style, 2026-11-16)
     _move(db, "m4")
     assert events.release(db, BETWEEN, events.policy({})) is None
     db.query(NdEvent).delete()

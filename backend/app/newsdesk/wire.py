@@ -248,6 +248,9 @@ def headline_case(head: str, reporting: str) -> str:
         if low in NAME_TAILS and prev_named and (not seen or low in in_name):
             out.append(w)  # the end of the name before it: "Deutsche Bank", "Gaza Sports Club"
             continue
+        if not seen and low not in ORDINARY and name_word(low, prev_named):
+            out.append(w)  # English has it as a name ("Nasser"), or the second word of one ("Western Union"): it keeps its capital
+            continue
         if seen:
             form = max(set(seen), key=lambda f: (seen.count(f), f[:1].islower()))
             tail = core[len(form):] if core.lower().startswith(form.lower()) else ""  # a trailing full stop ("U.S.")
@@ -256,12 +259,120 @@ def headline_case(head: str, reporting: str) -> str:
         if low in in_name and low not in ORDINARY:
             out.append(w)  # only ever inside a name in the reporting, and no ordinary word: a name ("Abdel-Malek", "Nasser")
             continue
+        if low not in in_name and (ordinary_in_reporting(low) or ordinary_word(low)):
+            # the desk's reporting writes it as an ordinary word, or English has it only as one ("glut", "pre-war"): never a name
+            lowered = "-".join(seg.lower() if ordinary_word(seg.lower()) or ordinary_in_reporting(seg.lower()) or seg.lower() in PREFIXES else seg
+                               for seg in core.split("-"))
+            out.append(f"{pre}{lowered}{poss}{post}")
+            continue
         if low not in in_name and low not in ORDINARY and low not in checks.STOP and len(low) > 3 \
                 and (not COMMON_SUFFIX.search(low) or (prev_named and not VERB_SUFFIX.search(low))):
             out.append(w)  # the reporting never writes it: a word that reads as a name keeps its capital ("Wachtell", "Mahmoud Kamal")
             continue
         out.append(f"{pre}{core[:1].lower()}{core[1:]}{poss}{post}")
-    return clean._proper(" ".join(out))
+    return _named_phrases(head, clean._proper(" ".join(out)))
+
+
+# --- the desk's own reading of ordinary words (2026-11-16: "Oil Prices Fall as Fears of a Global Supply Glut Return" became "... supply Glut
+# Return": with no reporting on the story itself, an unknown capitalised word is kept as a possible name). Learned from what the desk's
+# feeds wrote mid-sentence in sentence-case text over the last days: a word written in lower case at least VOCAB_MIN times and at least
+# VOCAB_RATIO times as often as capitalised is an ordinary word ("glut", "return"). A name keeps its capital: the coverage capitalises it
+# ("Visa", "Nasser"), or the story's own reporting does (headline_case checks that first).
+_VOCAB: dict[str, tuple[int, int]] = {}
+VOCAB_MIN = 3
+VOCAB_RATIO = 4
+
+
+def learn_vocabulary(texts: Any) -> int:
+    """Replace the reading from these texts (headlines and summaries). Returns how many words it knows."""
+    global _VOCAB
+    counts: dict[str, list[int]] = {}
+    for text in texts:
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
+            if not sentence or title_cased(sentence) or sentence.isupper():
+                continue  # Title Case and capitals say nothing about which words are names
+            for i, tok in enumerate(re.findall(r"[\w’'&.$-]+", sentence)):
+                core = _core(tok)[1].rstrip(".")
+                if i == 0 or not core.isalpha() or len(core) < 3 or _name_like(core):
+                    continue
+                c = counts.setdefault(core.lower(), [0, 0])
+                c[0 if core[:1].islower() else 1] += 1
+    _VOCAB = {k: (a, b) for k, (a, b) in counts.items()}
+    return len(_VOCAB)
+
+
+def ordinary_in_reporting(low: str) -> bool:
+    lower, capital = _VOCAB.get(low, (0, 0))
+    return lower >= VOCAB_MIN and lower >= VOCAB_RATIO * capital
+
+
+# English words that exist only as ordinary words (SCOWL, assets/ordinary_words.txt.gz: no proper-noun entry, so never "Visa", "Union",
+# "Apple" or "Nasser"), minus the brand and asset names that are also ordinary words. A word the feeds mostly capitalise keeps its capital.
+_DICTIONARY: frozenset[str] | None = None
+BRAND_WORDS = frozenset("""block circle meta strategy shell square ether ethereum bitcoin solana ripple polygon avalanche cardano chainlink tron near
+aptos sui stellar cosmos polkadot maker compound curve aave uniswap binance coinbase kraken gemini robinhood visa apple amazon oracle alphabet
+target gap ford chevron exxon boeing intel micron palantir snowflake zoom uber lyft pinterest slack signal discord telegram twitter tiktok
+threads jupiter mantra sonic hyperliquid tether stripe plaid revolut monzo wise mercado anchorage fidelity vanguard invesco franklin ark
+grayscale bitwise galaxy pantera paradigm coreweave arm nvidia tesla spacex openai anthropic mistral claude copilot windows office azure
+android pixel starlink starship blue origin sky virgin orange vodafone shopify square cash venmo""".split())
+
+
+_NAMES: frozenset[str] = frozenset()  # a name only in English (Nasser): keeps its capital
+_BOTH: frozenset[str] = frozenset()  # both (Union, Visa): a name after another name ("Western Union"), else as the reporting says
+
+
+def _dictionary() -> frozenset[str]:
+    global _DICTIONARY, _NAMES, _BOTH
+    if _DICTIONARY is None:
+        import gzip
+        from pathlib import Path
+
+        plain, names, both = set(), set(), set()
+        try:
+            with gzip.open(Path(__file__).parent / "assets" / "ordinary_words.txt.gz", "rt", encoding="utf-8") as f:
+                for line in f:
+                    w = line.strip()
+                    if not w or w.startswith("#"):
+                        continue
+                    (names if w[0] == "^" else both if w[0] == "~" else plain).add(w.lstrip("^~"))
+        except OSError:
+            pass  # no list: unknown capitals stay, as before
+        _DICTIONARY, _NAMES, _BOTH = frozenset(plain), frozenset(names), frozenset(both)
+    return _DICTIONARY
+
+
+def ordinary_word(low: str) -> bool:
+    """English has it only as an ordinary word ("glut"; "pre-war": every part), it is no brand, and the feeds don't mostly capitalise it."""
+    parts = [p for p in (low or "").split("-") if p]
+    if not parts or any(p in BRAND_WORDS or (p not in _dictionary() and not (i == 0 and p in PREFIXES and len(parts) > 1)) for i, p in enumerate(parts)):
+        return False
+    lower, capital = _VOCAB.get(low, (0, 0))
+    return not (capital and capital >= lower)  # the feeds write it capitalised at least as often: it is somebody's name here
+
+
+PREFIXES = frozenset("pre post anti non ex mid multi co re self cross inter over under semi sub super ultra".split())
+# names of more than one word that read as ordinary words one by one: kept as the headline writes them ("Houthis fire missiles at tankers
+# in Red Sea", not "red sea")
+NAMED_PHRASES = ("Red Sea", "Black Sea", "South China Sea", "Strait of Hormuz", "Persian Gulf", "Gulf of Mexico", "Middle East", "West Bank",
+                 "Gaza Strip", "Wall Street", "White House", "Federal Reserve", "European Union", "European Central Bank", "European Commission",
+                 "Bank of England", "Bank of Japan", "People's Bank of China", "Western Union", "United Nations", "Security Council",
+                 "Supreme Court", "Silicon Valley", "North Korea", "South Korea", "Hong Kong", "New York", "Saudi Arabia", "United States",
+                 "United Kingdom", "Treasury Department", "Justice Department", "State Department", "Labor Department", "Commerce Department",
+                 "Federal Open Market Committee", "World Bank", "International Monetary Fund", "Golden Gate", "Pacific Ocean", "Atlantic Ocean")
+
+
+def _named_phrases(head: str, cased: str) -> str:
+    for phrase in NAMED_PHRASES:
+        if phrase.lower() in cased.lower() and phrase in head:
+            cased = re.sub(re.escape(phrase), phrase, cased, flags=re.I)
+    return cased
+
+
+def name_word(low: str, after_name: bool) -> bool:
+    """English has it only as a name (Nasser, Riyadh), or as both and it follows a name ("Western Union")."""
+    _dictionary()
+    parts = [p for p in (low or "").split("-") if p]
+    return any(p in _NAMES for p in parts) or (after_name and low in _BOTH)
 
 
 def title_cased(text: str) -> bool:

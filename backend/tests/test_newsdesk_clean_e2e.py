@@ -29,7 +29,6 @@ DRAFT = {"headline": "Missile hits Aramco's Ras Tanura, the kingdom's largest oi
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(network, "DEFAULT_STYLE", "clean")
-    monkeypatch.setattr(network, "CLEAN_RETIRED", False)  # the retired clean style, tested as it was (Admin can no longer pick it)
 
 
 async def _release_and_render(client: Any, db: Session, live: dict[str, Any]) -> tuple[NdEvent, Any]:  # noqa: F811
@@ -57,16 +56,16 @@ def _telegram_words(cap: str) -> None:
         assert poster not in cap  # no byline, no explainer: the story, its sources, the community
 
 
-async def test_a_story_with_a_licensed_photo_posts_it_on_both_without_a_chart_it_didnt_earn(client: Any, db: Session, live: dict[str, Any],  # noqa: F811
+async def test_a_city_stand_in_is_never_its_photo_and_it_gets_no_chart_it_didnt_earn(client: Any, db: Session, live: dict[str, Any],  # noqa: F811
                                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[list[str]] = []
 
     async def discover(client_: Any, queries: list[str], terms: list[str], **kw: Any) -> list[Any]:
         seen.append(terms)
-        if "ras tanura" not in " ".join(terms).lower() and "riyadh" not in " ".join(terms).lower():
-            return []
+        if not any(w in " ".join(terms).lower() for w in ("ras tanura", "aramco")):
+            return []  # a city stand-in (Riyadh's skyline) is never searched for (owner, 2026-11-16)
         return [photos.LicensedPhoto(url="https://upload.wikimedia.org/ras-tanura.jpg", page="https://commons.wikimedia.org/wiki/File:Ras_Tanura.jpg",
-                                     title="File:Riyadh skyline.jpg", creator="Jane Doe", licence="CC BY-SA 4.0", provider="wikimedia", source="wikimedia",
+                                     title="File:Aramco oil terminal, Ras Tanura, Saudi Arabia.jpg", creator="Jane Doe", licence="CC BY-SA 4.0", provider="wikimedia", source="wikimedia",
                                      licence_url="https://creativecommons.org/licenses/by-sa/4.0/", width=1600, height=1200)]
 
     async def fetch(client_: Any, p: Any, min_width: int = 0) -> Image.Image:
@@ -84,40 +83,51 @@ async def test_a_story_with_a_licensed_photo_posts_it_on_both_without_a_chart_it
     monkeypatch.setattr(clean, "fetch_bars", oil)
     monkeypatch.setattr(clean, "download", download)
     ev, at = await _release_and_render(client, db, live)
+    # 2026-11-16: this used to post Riyadh's skyline for a strike on Ras Tanura (a city stand-in). The named site's photo needs a place the
+    # story names to check it against (wire.site_photo_fits) and "Saudi" is a nationality: nothing real fits, so a text post on both
     tg = live["tg"]
+    texts: list[str] = []
+
+    async def send_message(chat: Any, text: str, **kw: Any) -> dict[str, Any]:
+        texts.append(text)
+        return {"message_id": 900, "chat": {"id": -100123, "type": "channel"}}
+
+    tg.send_message = send_message
     sent = await lane.tick(db, get_settings(), tg, at + timedelta(minutes=2))
-    assert sent["sent"] and len(tg.sent) == 1
-    cap = tg.sent[0]["caption"]
-    _telegram_words(cap)
-    assert Image.open(io.BytesIO(tg.sent[0]["image"])).size == (1600, 900)  # the licensed photo, full width
+    assert sent["sent"] and tg.sent == [] and len(texts) == 1
+    _telegram_words(texts[0])
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    v = ev.facts["visual"]
-    assert v["style"] == "clean" and v["layout"] == "photo" and "CC BY-SA 4.0" in v["credit_line"] and v["licence"]
-    assert ["riyadh"] in seen or any("riyadh" in " ".join(t) for t in seen)  # the place the story names (Saudi: Riyadh)
+    assert ev.facts["visual"] == {"style": "clean", "kind": "text", "layout": "text"}
+    assert not any("riyadh" in " ".join(t).lower() for t in seen)  # the stand-in is never even searched for
     x = live["x"]
     assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
     text = x.posts[0]["text"]
     assert "Missile hits Aramco's Ras Tanura" in text and "https://www.dw.com/en/missile-strike-hits-saudi-aramco-terminal/a-79912345" in text
     assert network.x_length(text) <= 280 and "@" not in text
-    assert x.uploads[0] == tg.sent[0]["image"]  # the very same picture on X
+    assert x.uploads == [] and x.posts[0]["media"] is None  # text on X too
     post = db.get(NdPost, db.get(NdEvent, ev.id).x_post_id)
     assert post.status == "published"
 
 
-async def test_nothing_real_fits_the_gpus_labelled_illustration_goes_out(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
-    ev, at = await _release_and_render(client, db, live)  # no licensed photo found, no prices: the GPU's picture
+async def test_nothing_real_fits_a_text_post_goes_out(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
+    # owner, 2026-11-16: no illustration standing in for a photo, no headline-only card: text only, on both platforms
+    ev, at = await _release_and_render(client, db, live)  # no licensed photo found, no prices
     tg = live["tg"]
+    texts: list[str] = []
+
+    async def send_message(chat: Any, text: str, **kw: Any) -> dict[str, Any]:
+        texts.append(text)
+        return {"message_id": 900, "chat": {"id": -100123, "type": "channel"}}
+
+    tg.send_message = send_message
     sent = await lane.tick(db, get_settings(), tg, at + timedelta(minutes=2))
-    assert sent["sent"]
-    _telegram_words(tg.sent[0]["caption"])
-    assert Image.open(io.BytesIO(tg.sent[0]["image"])).size == (1600, 900)
+    assert sent["sent"] and tg.sent == [] and len(texts) == 1
+    _telegram_words(texts[0])
     db.expire_all()
-    v = db.get(NdEvent, ev.id).facts["visual"]
-    assert v["layout"] == "ai" and v["ai_illustration"] is True
+    assert db.get(NdEvent, ev.id).facts["visual"] == {"style": "clean", "kind": "text", "layout": "text"}
     assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
-    assert live["x"].uploads[0] == tg.sent[0]["image"]
-    assert db.scalars(select(NdRenderJob)).first().status == "done"
+    assert live["x"].uploads == [] and live["x"].posts[0]["media"] is None
 
 
 async def test_admin_can_go_back_to_the_classic_layout(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811

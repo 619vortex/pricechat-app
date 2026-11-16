@@ -1,6 +1,6 @@
 """The clean post style (app/newsdesk/clean): words, cashtags, labels, the signature, and the picture chosen per story. No network."""
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -59,6 +59,10 @@ def test_labels_are_the_ones_the_desk_earned() -> None:
     assert clean.prefix_for(ev("x")) == ""  # no label earned: no label shown
     assert clean.prefix_for(ev("x", kind="update")) == "UPDATE:"
     assert clean.prefix_for(ev("x", kind="data", kicker="MARKETS GONE MAD")) == "MARKETS GONE MAD:"
+    # owner, 2026-11-16: never "JUST IN" on a story hours old (News Desk post 117 went out "JUST IN" long after it broke)
+    stale = ev("x", label="⚡ JUST IN")
+    stale.released_at, stale.facts = AT, {"published_at": (AT - timedelta(hours=3)).isoformat()}
+    assert clean.prefix_for(stale) == ""
 
 
 LINKS = [Link("Reuters", "https://www.reuters.com/markets/nvidia-falls"), Link("CNBC", "https://www.cnbc.com/2026/11/12/nvidia.html")]
@@ -70,8 +74,9 @@ def test_the_telegram_caption_is_label_story_sources_and_the_community() -> None
              stakes="Chipmakers fell with it in late trading.", question="Is the AI trade cooling?")
     html, plain, checked = clean.telegram_caption(c, LINKS, prefix="JUST IN:")
     assert html.startswith("<b>JUST IN:</b> Nvidia $NVDA falls 4% after hours on weaker data-centre guidance. Revenue guidance came in at $54 billion")
-    assert "Chipmakers fell with it" in html and html.count("Nvidia fell 4%") == 0  # the re-telling of the headline is dropped
-    assert "Is the AI trade cooling?" not in html  # no question, no "why it matters", no byline: 1-3 sentences
+    assert html.count("Nvidia fell 4%") == 0  # the re-telling of the headline is dropped
+    # owner, 2026-11-16: the headline and at most one supporting sentence, in every style
+    assert "Chipmakers fell with it" not in html and "Is the AI trade cooling?" not in html
     assert '🔗 <a href="https://www.reuters.com/markets/nvidia-falls">Reuters</a> · <a href="https://www.cnbc.com/2026/11/12/nvidia.html">CNBC</a>' in html
     assert html.endswith('<a href="https://t.me/thepricechat">@thepricechat</a>') and plain.endswith("@thepricechat")
     assert "@" not in checked and "Source: Reuters · CNBC" in checked  # the checks read the story, the signature is ours
@@ -224,12 +229,13 @@ async def test_no_photo_but_prices_is_the_chart(monkeypatch: pytest.MonkeyPatch)
     assert meta["layout"] == "chart" and meta["symbol"] == "BTC-USD" and Image.open(io.BytesIO(data)).size == (1600, 900)
 
 
-async def test_nothing_real_uses_the_gpu_illustration_labelled(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_nothing_real_is_a_text_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    # owner, 2026-11-16: real photos or meaningful charts, otherwise text only; no illustration, no headline-only card
     from app.newsdesk import render_queue
 
     monkeypatch.setattr(render_queue, "background_for", lambda db, eid: (photo(1920, 1080), {"model": "Qwen/Qwen-Image-2512", "job": 3}))
     data, meta = await clean.picture(ev("Mercado Bitcoin reopens after hack"), now=AT, db=object())
-    assert meta["layout"] == "ai" and meta["ai_illustration"] is True and meta["render_job"] == 3
+    assert data == b"" and meta == {"style": "clean", "kind": "text", "layout": "text"}
 
 
 async def test_a_data_post_keeps_its_comparison_card() -> None:
@@ -244,7 +250,6 @@ async def test_a_data_post_keeps_its_comparison_card() -> None:
 
 def test_style_setting_defaults_to_clean_and_can_go_back(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(network, "DEFAULT_STYLE", "clean")
-    monkeypatch.setattr(network, "CLEAN_RETIRED", False)  # the retired clean style, tested as it was (Admin can no longer pick it)
     assert network.state(db)["post_style"] == "clean"
     assert network.configure(db, post_style="classic")["post_style"] == "classic"
     assert network.configure(db, post_style="poster")["post_style"] == "classic"  # only the two known styles

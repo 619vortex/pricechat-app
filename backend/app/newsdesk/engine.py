@@ -697,6 +697,17 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     return "published"
 
 
+def _learn_casing(db: Session, now: datetime) -> None:
+    """What the feeds write as ordinary words, for setting Title Case headlines in sentence case without losing a name (wire.headline_case)."""
+    from app.newsdesk import wire
+
+    try:
+        rows = db.execute(select(NdStory.title, NdStory.summary).where(NdStory.created_at >= now - timedelta(days=3))).all()
+        wire.learn_vocabulary(t for r in rows for t in (r[0], r[1]))
+    except Exception as e:  # noqa: BLE001 - casing falls back to keeping unknown capitals
+        logger.info("newsdesk: casing vocabulary not refreshed (%s)", type(e).__name__)
+
+
 def _retry(post: NdPost, reason: str, now: datetime, minutes: int = 5) -> None:
     if post.attempts >= MAX_ATTEMPTS:
         post.status, post.error = "failed", f"Gave up after {post.attempts} tries: {reason[:200]}"
@@ -724,6 +735,7 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
     async with httpx.AsyncClient(transport=transport) as client:
         collected = await collect(db, s, client, now)
         quotes = await sources.fetch_quotes(client, moves.watch_items(s.watchlist or []))
+    _learn_casing(db, now)
     posts = _recent_posts(db, now)
     # the shared desk decides for X and Telegram alike; the daily market table is X-only and off unless Admin turns it on (state.snapshot)
     decided = await events.decide(db, now, quotes=quotes, watchlist=s.watchlist or [], categories=s.categories or {}, market=market, second_opinion=sources.second_opinion,

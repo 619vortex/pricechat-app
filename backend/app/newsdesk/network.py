@@ -261,20 +261,12 @@ def headline_case(title: str) -> str:
 
 
 def sentence_case(head: str, source_text: str) -> str:
-    """A writer's Title Case Headline In Sentence Case: a word keeps its capital only where the reporting capitalises it mid-sentence
-    (a name), or it is an acronym or ticker (NEAR, USDC, CEO). Already sentence case: unchanged."""
-    words = head.split()
-    long = [w for w in words[1:] if len(re.sub(r"\W", "", w)) > 3]
-    if not long or sum(1 for w in long if w[:1].isupper()) / len(long) < 0.6:
-        return head
-    out = [words[0]]
-    for w in words[1:]:
-        core = re.sub(r"[’']s$", "", re.sub(r"[^\w’'&.-]", "", w))
-        named = core and (re.search(rf"(?<![.!?]\s)(?<!^)\b{re.escape(core)}\b", source_text or "")
-                          or (re.search(rf"\b{re.escape(core)}\b", source_text or "") and not re.search(rf"\b{re.escape(core.lower())}\b", source_text or "")))
-        keep = not w[:1].isupper() or core.isupper() or re.search(r"[\d&]", core) or named
-        out.append(w if keep else w[:1].lower() + w[1:])
-    return " ".join(out)
+    """A writer's Title Case Headline In Sentence Case, the same way in every style (owner, 2026-11-16): app/newsdesk/wire.headline_case,
+    which keeps a name's capital (the reporting writes it that way, or English has the word only as a name) and lowers an ordinary word
+    ("supply glut"). Already sentence case: unchanged."""
+    from app.newsdesk import wire
+
+    return wire.headline_case(head, source_text or "")
 
 
 def shorten(text: str, limit: int) -> str:
@@ -556,8 +548,8 @@ def x_caption(c: Copy, links: list[Link], *, with_links: bool = True, breaking: 
     if own is not None:
         use = [own, *use[:1]]
     names = [x.name for x in links if x.kind != "pricechat"] or list(outlets or [])  # no direct article: the outlets still credited by name
-    plans = [(ctx, c.stakes, c.question, use), (ctx, c.stakes, c.question, use[:1]), (ctx, "", c.question, use[:1]), (ctx, "", "", use[:1]),
-             (ctx[:1], "", "", use[:1]), ([], "", "", use[:1]), ([], "", "", [])]
+    # the headline and at most one supporting sentence in every style (owner, 2026-11-16): no stakes line, no question on X
+    plans = [(ctx[:1], "", "", use), (ctx[:1], "", "", use[:1]), ([], "", "", use[:1]), ([], "", "", [])]
     for sents, stakes, question, ls in plans:
         blocks = [head]
         if sents:
@@ -651,20 +643,17 @@ def x_links_on(state: dict[str, Any] | None) -> bool:
 
 
 STYLES = ("wire", "clean", "classic")
-# The wire style is the standard (owner, 2026-11-16, after the post audit: "one strong factual headline and at most one useful supporting
-# sentence ... real licensed photos or meaningful charts; otherwise publish text-only"). The clean style's generic photos (a Kremlin skyline
-# on a satellite story, the Knesset on a Gaza strike), its headline-only fallback card and its "JUST IN:" on stories hours old are retired:
-# a stored "clean" choice posts as wire. Classic stays Admin's explicit rollback. Tests of the classic layout set "classic"
-# (tests/conftest.py), the clean tests their own (CLEAN_RETIRED off).
-DEFAULT_STYLE = "wire"
-CLEAN_RETIRED = True
+# Three distinct styles, and Admin shows exactly the one that publishes (owner, 2026-11-16): clean by default (owner, 2026-11-12), wire
+# (app/newsdesk/wire, 2026-11-14) and the older classic layout. The editorial bar is the same in every style: story selection, event
+# matching, filler and repeat checks (app/newsdesk/quality), at most one supporting sentence, and no stand-in or headline-only pictures in
+# clean and wire. Tests of the classic layout set "classic" (tests/conftest.py), the clean and wire tests their own.
+DEFAULT_STYLE = "clean"
 
 
 def post_style(state: dict[str, Any] | None) -> str:
-    """wire (short factual headlines, earned tags, real photos or charts, else text only) unless Admin chose the older classic layout."""
+    """The style Admin chose (clean, wire or classic), else clean: exactly what gets published."""
     s = str((state or {}).get("post_style") or DEFAULT_STYLE)
-    s = s if s in STYLES else DEFAULT_STYLE
-    return "wire" if s == "clean" and CLEAN_RETIRED else s
+    return s if s in STYLES else DEFAULT_STYLE
 
 
 def _wire_draft_problems(c: Copy, source_text: str) -> list[str]:

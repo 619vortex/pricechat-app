@@ -47,7 +47,7 @@ GRID, AXIS = (28, 28, 28), (150, 150, 150)
 CHART_BARS = 96  # 15-minute candles: the last 24 hours
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 UA = {"User-Agent": "Mozilla/5.0 (PriceChatNewsDesk/1.0; +https://pricechat.live)"}
-MAX_SENTENCES = 3
+MAX_SENTENCES = 2  # the headline and at most one supporting sentence (owner, 2026-11-16: concise in every style)
 TG_LIMIT = 1024
 # chart posts (owner, 2026-11-15, after a weekly ranking listed all 13 assets under its own chart): the chart carries the data, so the
 # caption is one strong headline and at most one takeaway, never a list of figures, at most three assets, no cashtags on Telegram, and
@@ -92,6 +92,7 @@ def chart_recaption(pkg: Any, ev: Any, rows: list[Any], *, x_links: bool = True)
 
 X_LIMIT = 280
 
+JUST_IN_LABEL, BREAKING_LABEL = "⚡ JUST IN", "🚨 BREAKING"
 PREFIX = {"🚨 BREAKING": "BREAKING:", "🔴 ALERT": "ALERT:", "⚡ JUST IN": "JUST IN:", "🔄 UPDATE": "UPDATE:"}
 
 # Cashtags, owner 2026-11-13 after "$1.2B of North Korea's stolen Binance $BNB crypto": a ticker only where the sentence itself establishes
@@ -156,7 +157,15 @@ def prefix_for(ev: Any) -> str:
         return "MARKETS GONE MAD:"
     if kicker.startswith("UPDATE") or getattr(ev, "kind", "") == "update":
         return "UPDATE:"
-    return PREFIX.get(str(getattr(ev, "label", "") or ""), "")
+    label = str(getattr(ev, "label", "") or "")
+    if label in (JUST_IN_LABEL, BREAKING_LABEL):  # the desk's own label, still true when it goes out: never "JUST IN" on a story hours old
+        from app.newsdesk import wire
+
+        age = wire.age_at_release(ev)
+        limit = wire.BREAKING_MINUTES if label == BREAKING_LABEL else wire.JUST_IN_MINUTES
+        if age is not None and age > limit:
+            return ""
+    return PREFIX.get(label, "")
 
 
 def established(text: str) -> list[tuple[re.Pattern[str], str]]:
@@ -569,6 +578,9 @@ MARKET_PHOTOS = [(re.compile(r"\b(s&p|dow|nasdaq|wall street|stocks?)\b", re.I),
                  (re.compile(r"\bgold\b", re.I), "gold bullion bars", "gold")]
 
 
+STAND_INS = {"tehran", "knesset", "kremlin", "kyiv|maidan", "riyadh", "doha", "dubai", "beijing", "tokyo", "white house", "capitol", "pentagon", "court"}
+
+
 async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool) -> tuple[Image.Image, dict[str, Any]] | None:
     """A licensed photo of the story's subject: the person first (when a person is the subject and the story isn't sensitive), else the
     company or place (app/newsdesk/visual.subject_queries). Every licence and relevance rule of app/newsdesk/photos applies."""
@@ -579,7 +591,9 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool) ->
     person = person_subject(ev)
     if person:
         plans.append(([person, f"{person} portrait"], [person]))  # its own search: the person is the subject (see the neutral filter below)
-    queries = visual.subject_queries(f"{ev.headline} {ev.title}")
+    # the company or institution the story is about, never a city or country stand-in (2026-11-16 audit: the Kremlin skyline on a
+    # satellite story, the Knesset on a Gaza strike); a major incident's named site comes from wire's rule below
+    queries = [(q, must) for q, must in visual.subject_queries(f"{ev.headline} {ev.title}") if must not in STAND_INS]
     if getattr(ev, "kind", "") in ("market", "recap"):
         queries += [(q, must) for rx, q, must in MARKET_PHOTOS if rx.search(f"{ev.headline} {ev.title}")]
     for term in dict.fromkeys(must for _, must in queries):
@@ -664,21 +678,17 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
     if len(bars) >= 20:
         data, meta = single_chart(bars, label)
         return data, {**base, **meta, "kind": "chart", "bars": bars, "label": label, "symbol": subject[0] if subject else ""}
-    if db is not None and getattr(ev, "id", None):
-        from app.newsdesk import render_queue
+    if getattr(ev, "kind", "") in ("news", "update"):  # the named site of a major incident (wire's rule), credited
+        from app.newsdesk import wire
 
-        try:
-            bg = render_queue.background_for(db, ev.id)
-        except Exception:  # noqa: BLE001
-            bg = None
-        if bg is not None:
-            model = str(bg[1].get("model") or "")
-            short = "Qwen-Image" if "qwen" in model.lower() else "FLUX.2 klein" if "klein" in model.lower() else "AI model"
-            data, meta = ai_picture(bg[0], short)
-            return data, {**base, **meta, "kind": "cinematic", "ai_illustration": True, "model": model, "render_job": bg[1].get("job")}
-    # nothing real and no illustration: the desk's own plain card (headline only) rather than no post
-    data, meta = await visual.for_event(ev, used=used, transport=transport, market=market, now=now, db=db, style="classic")
-    return data, {**meta, "style": "classic"}
+        site = await wire._site_photo(ev, used, transport)
+        if site is not None:
+            img, pmeta = site
+            credit = image_credit(pmeta)
+            data, meta = single_photo(img, credit)
+            return data, {**base, **pmeta, **meta, "kind": "photo", "credit_line": credit}
+    # nothing real: a text post (owner, 2026-11-16: no headline-only card, no illustration standing in for a photo)
+    return b"", {**base, "kind": "text", "layout": "text"}
 
 
 async def download(url: str, transport: Any = None) -> Image.Image:
@@ -694,6 +704,8 @@ async def download(url: str, transport: Any = None) -> Image.Image:
 async def redraw(ev: Any, meta: dict[str, Any], *, transport: Any = None, db: Any = None, now: datetime | None = None) -> tuple[bytes, dict[str, Any]] | None:
     """The same clean picture again from what was stored (X posts what Telegram showed): the same photo, the same candles."""
     layout = meta.get("layout")
+    if layout == "text":
+        return b"", meta  # a text post on Telegram stays a text post on X
     if layout in ("collage", "photo") and meta.get("url"):
         img = await download(meta["url"], transport)
         credit = str(meta.get("credit_line") or image_credit(meta))

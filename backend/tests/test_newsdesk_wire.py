@@ -304,14 +304,14 @@ def test_surprising_consequential_stories_rank_first_and_filler_ranks_lower() ->
 
 
 def test_the_policy_follows_the_style(db: Session) -> None:
-    # owner, 2026-11-16: the wire style is the standard and a stored "clean" posts as wire; the daily breaking cap stays the desk's own 2
     p = events.policy({})
+    # the daily breaking cap stays the desk's own 2 in every style (owner, 2026-11-16: existing publishing limits preserved)
     assert p.wire and p.breaking_per_day == 2 and p.breaking_per_6h == 2 and p.breaking_gap == timedelta(minutes=90)
-    assert events.policy({"post_style": "clean"}).wire
-    q = events.policy({"post_style": "classic"})
-    assert not q.wire and q.breaking_per_day == 2 and q.breaking_per_6h == 0
+    for style in ("clean", "classic"):
+        q = events.policy({"post_style": style})
+        assert not q.wire and q.breaking_per_day == 2 and q.breaking_per_6h == 0
     assert network.state(db)["post_style"] == "wire"
-    assert network.configure(db, post_style="clean")["post_style"] == "wire"
+    assert network.configure(db, post_style="clean")["post_style"] == "clean"
     assert network.configure(db, post_style="classic")["post_style"] == "classic"
     assert network.configure(db, post_style="wire")["post_style"] == "wire"
 

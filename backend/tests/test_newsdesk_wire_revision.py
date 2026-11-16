@@ -54,17 +54,14 @@ def _real_default() -> str:
     return m.group(1)
 
 
-def test_wire_is_the_default_and_clean_is_retired(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
-    # owner, 2026-11-16: "one strong factual headline and at most one useful supporting sentence ... real licensed photos or meaningful
-    # charts; otherwise publish text-only". Production reads the real default (tests/conftest.py runs the older tests in classic).
-    assert _real_default() == "wire" and network.CLEAN_RETIRED
+def test_clean_is_the_default_and_wire_is_opt_in(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _real_default() == "clean"  # (tests/conftest.py runs the older tests in classic: read what production runs)
     monkeypatch.setattr(network, "DEFAULT_STYLE", _real_default())
-    assert network.post_style({}) == network.post_style(None) == "wire" and network.post_style({"post_style": "bogus"}) == "wire"
-    assert network.post_style({"post_style": "clean"}) == "wire" and network.post_style({"post_style": "classic"}) == "classic"
-    assert network.state(db)["post_style"] == "wire"
+    assert network.post_style({}) == network.post_style(None) == "clean" and network.post_style({"post_style": "bogus"}) == "clean"
+    assert network.state(db)["post_style"] == "clean"
     p = events.policy({})
-    assert p.wire and p.breaking_per_day == 2  # the daily breaking cap as before
-    assert network.configure(db, post_style="clean")["post_style"] == "wire"
+    assert not p.wire and p.breaking_per_day == 2 and p.breaking_per_6h == 0  # the breaking lane exactly as before
+    assert network.configure(db, post_style="wire")["post_style"] == "wire"  # the owner opts in from Admin
     assert events.policy(engine.settings_row(db).state).wire
 
 
@@ -72,20 +69,22 @@ def test_wire_is_the_default_and_clean_is_retired(db: Session, monkeypatch: pyte
 async def test_clean_output_is_byte_for_byte_what_production_writes(case: dict[str, Any]) -> None:
     # written by 1374981's code, regenerated 2026-11-15 for the owner's caption rules (sources and @thepricechat on one last line, each
     # cashtag once and one at most): every difference against the 1374981 golden was read; the words and the checks' verdicts are unchanged
+    # 2026-11-16: custody and saudi re-cased by the shared name-safe casing ("riyadh" -> "Riyadh", "pre-War" -> "pre-war", "Bank says" -> "bank says")
     golden = json.loads((HERE / "newsdesk_clean_golden_20261115.json").read_text(encoding="utf-8"))[case["name"]]
     ev, rows = cases.build(case, NdEvent)
     pkg = await network.package(ev, settings=None, rows=rows, x_links=True, style="clean")
     assert {"telegram_html": pkg.telegram_html, "telegram_plain": pkg.telegram_plain, "x_text": pkg.x_text, "ok": pkg.ok} == golden
 
 
-async def test_with_no_style_chosen_the_lane_posts_wire(client: Any, db: Session, live: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+async def test_with_no_style_chosen_the_lane_posts_clean(client: Any, db: Session, live: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     monkeypatch.setattr(network, "DEFAULT_STYLE", _real_default())
     _released(db, "c1", "Deutsche Bank's Bitcoin and Ether Custody Is Open to Clients, Bank Says", cases.CASES[0]["rows"][0][3],
               [("Unchained", cases.CASES[0]["rows"][0][1])], label="")
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, NOW)
-    # no public figure and no named site: no stock photo of a bank's headquarters and no headline card, a text post
-    assert tg.sent[0]["image"] is None and db.scalars(select(NdEvent)).one().facts["visual"] == {"style": "wire", "kind": "text", "layout": "text"}
+    assert tg.sent[0]["caption"].endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')  # clean's shape: sources · @thepricechat, one line
+    # no photo of the bank itself here and no stand-in: a clean text post (2026-11-16), still the clean style
+    assert tg.sent[0]["image"] is None and db.scalars(select(NdEvent)).one().facts["visual"] == {"style": "clean", "kind": "text", "layout": "text"}
 
 
 # ================================================================ 1. casing and qualifiers

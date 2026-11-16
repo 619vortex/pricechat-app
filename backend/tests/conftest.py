@@ -411,3 +411,11 @@ def _classic_post_style(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.newsdesk import network
 
     monkeypatch.setattr(network, "DEFAULT_STYLE", "classic")
+
+
+@pytest.fixture(autouse=True)
+def _no_learned_casing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: the casing vocabulary the desk learns from its feeds (app/newsdesk/wire.learn_vocabulary) starts empty in every test."""
+    from app.newsdesk import wire
+
+    monkeypatch.setattr(wire, "_VOCAB", {})
