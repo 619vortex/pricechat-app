@@ -162,6 +162,13 @@ def off_topic(title: str, summary: str = "") -> bool:
     return _vetoed(title, summary, 0.0)
 
 
+QUOTE_LED = re.compile(r"^\s*['‘\"“«]")
+
+
+def quote_led(title: str) -> bool:
+    return bool(QUOTE_LED.match(title or ""))
+
+
 @dataclass
 class Sig:
     """What ranking needs of a signal (a TtSignal row or a plain dict in tests)."""
@@ -202,9 +209,11 @@ class Cluster:
 
     @property
     def lead(self) -> Sig:
-        """The headline the topic is named after: a reliable outlet's, else the most engaged signal's."""
+        """The headline the topic is named after: a reliable outlet's, else the most engaged signal's. A headline that opens with a
+        quotation ("'It is not unusual to go 48 hours with little sleep': what it's like...") leads only when no plain one exists: the
+        tweet leads with what happened, not with someone's words (2026-11-16 production, trend post 152)."""
         pool = [s for s in self.signals if s.reliable] or self.signals
-        return max(pool, key=lambda s: (s.reliable, s.engagement, -s.first_seen.timestamp()))
+        return max(pool, key=lambda s: (s.reliable, not quote_led(s.title), s.engagement, -s.first_seen.timestamp()))
 
     @property
     def reliable(self) -> list[Sig]:

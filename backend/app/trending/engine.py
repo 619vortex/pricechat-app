@@ -190,7 +190,8 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
         lead = c.lead
         srcs = [{"source": x.source, "outlet": x.outlet, "title": x.title, "url": x.url, "reliable": x.reliable, "engagement": x.engagement,
                  "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind")}}
-                for x in sorted(c.signals, key=lambda x: (not x.reliable, -x.engagement))[:12]]
+                # the topic's lead first: the writer leads with sources[0] (2026-11-16: a quote-led feature led trend post 152)
+                for x in sorted(c.signals, key=lambda x: (x is not lead, not x.reliable, rank.quote_led(x.title), -x.engagement))[:12]]
         metrics: dict[str, Any] = {"signals": len(c.signals)}
         for x in c.signals:
             metrics[x.source] = round(float(metrics.get(x.source, 0)) + x.engagement, 1)
@@ -319,12 +320,30 @@ def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool
     # production 2026-11-15: the first topic over the line (Iran/Bahrain, 75.8) had only a draft written for approval at 60-something that
     # expired unsent, and that draft blocked it for 24 h. A topic that has since crossed the automatic line gets a fresh tweet, written and
     # checked again (every gate, the sensitive rules, the limits), when all it had were unsent drafts from below the line.
-    if automatic(s) and topic.score >= s.hot_score and all(p.status in ("pending", "expired") and (p.score or 0) < s.hot_score for p in earlier):
+    # 2026-11-16: the same for a draft HELD below the line (a gate said no to an earlier, weaker telling), and for one held only because no
+    # reliable outlet had reported it yet, once one has. A draft written or held at the line itself, a sent one, or one the owner decided on
+    # still blocks, so a topic gets one fresh attempt at the line, never a new draft every scan.
+    if not automatic(s) or topic.score < s.hot_score:
+        return True
+    reliable_now = brief_of(topic)[0] is not None
+    if all(_replaceable(p, s, reliable_now) for p in earlier):
         for p in earlier:
-            if p.status == "pending":
+            if p.status in ("pending", "held"):
                 p.status, p.note = "expired", "Replaced: the topic crossed the automatic line, so a fresh tweet was written and checked"
         return False
     return True
+
+
+UNSENT = ("pending", "expired", "held")
+
+
+def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool) -> bool:
+    """May this earlier draft give way to a fresh tweet now that its topic is over the automatic line?"""
+    if p.status not in UNSENT or p.approved_at is not None or p.original_text:
+        return False  # sent, sending, approved or edited by the owner: their decision stands
+    if p.status == "held" and (p.hold_reason or "").startswith("No reliable source"):
+        return reliable_now
+    return (p.score or 0) < s.hot_score
 
 
 def _recent_duplicate(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:

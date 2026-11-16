@@ -983,3 +983,59 @@ async def test_a_topic_that_crosses_the_line_after_an_unsent_draft_gets_a_fresh_
     db.add(hot)
     db.commit()
     assert engine._has_post(db, topic, s, NOW)  # a draft written over the line is never replaced again (no churn every scan)
+
+
+def test_a_feature_never_counts_and_a_quote_led_headline_never_leads_a_topic() -> None:
+    # production 2026-11-16, trend post 152: "The Guardian: 'It is not unusual to go 48 hours with little sleep': what it's like to cover a
+    # Cop climate summit." went out as the COP31 topic's lead
+    feature = "‘It is not unusual to go 48 hours with little sleep’: what it’s like to cover a Cop climate summit"
+    assert not sources.topical(feature)
+    for t in ("A day in the life of a Fed economist", "Behind the scenes at the Bitcoin conference", "I spent a week trading only memecoins"):
+        assert not sources.topical(t), t
+    for t in ("UN climate chief urges speed as COP31 confronts fossil fuel divide", "Trump letter from the White House to Xi", "‘We will retaliate’: Iran warns US"):
+        assert sources.topical(t), t
+    quoted = _sig(1, "‘We will not back down’: COP31 talks stall over fossil fuel phase-out", outlet="The Guardian", eng=3.0)
+    plain = _sig(2, "UN climate chief urges speed as COP31 confronts fossil fuel divide", outlet="Reuters", eng=2.0)
+    c = rank.Cluster([quoted, plain], "world", 2.0)
+    assert c.lead is plain
+    assert rank.Cluster([quoted], "world", 2.0).lead is quoted  # the only telling still leads
+
+
+async def test_a_topic_held_for_want_of_a_source_gets_its_tweet_once_an_outlet_reports_it(db: Session) -> None:
+    s = engine.settings_row(db)
+    social = [{"source": "google", "outlet": "Google Trends", "title": "fed rate cut", "url": "", "reliable": False, "engagement": 5.0, "at": NOW.isoformat(), "extra": {}}]
+    topic = TtTopic(key="t-fed", title="fed rate cut", category="economics", status="active", score=78.0, parts={}, sources=social,
+                    first_seen=NOW - timedelta(hours=1), last_seen=NOW)
+    db.add(topic)
+    db.flush()
+    held = TtPost(topic_id=topic.id, category="economics", status="held", text="(no tweet)", score=78.0, sources=[], checks=[], metrics={},
+                  hold_reason="No reliable source backs this topic yet (only social signals): held until an outlet reports it", created_at=NOW - timedelta(minutes=30))
+    db.add(held)
+    db.commit()
+    assert engine._has_post(db, topic, s, NOW)  # still no outlet: no new draft every scan
+    topic.sources = [{"source": "news", "outlet": "Reuters", "title": "Fed cuts rates by a quarter point", "url": "https://r/1", "reliable": True, "engagement": 3.0,
+                      "at": NOW.isoformat(), "extra": {}}, *social]
+    assert not engine._has_post(db, topic, s, NOW)  # an outlet reported it: written and checked afresh
+    assert held.status == "expired" and "Replaced" in held.note
+
+
+async def test_a_draft_held_below_the_line_gives_way_once_but_one_held_at_the_line_stands(db: Session) -> None:
+    s = engine.settings_row(db)
+    topic = TtTopic(key="t-intel", title="Investors sue Intel after 29% plunge", category="stocks", status="active", score=60.0, parts={},
+                    first_seen=NOW - timedelta(hours=2), last_seen=NOW)
+    db.add(topic)
+    db.flush()
+    low = TtPost(topic_id=topic.id, category="stocks", status="held", text="x", score=60.0, sources=[], checks=[], metrics={},
+                 hold_reason="Sensitive topic (legal action): the source's hedge words must stay", created_at=NOW - timedelta(hours=1))
+    db.add(low)
+    db.commit()
+    assert engine._has_post(db, topic, s, NOW)
+    topic.score = 76.0
+    assert not engine._has_post(db, topic, s, NOW)
+    at_line = TtPost(topic_id=topic.id, category="stocks", status="held", text="y", score=76.0, sources=[], checks=[], metrics={},
+                     hold_reason="Sensitive topic (legal action): the source's hedge words must stay", created_at=NOW)
+    db.add(at_line)
+    db.commit()
+    assert engine._has_post(db, topic, s, NOW)  # the gate's answer at the line stands: no churn
+    approved = TtPost(topic_id=topic.id, category="stocks", status="expired", text="z", score=60.0, sources=[], checks=[], metrics={}, approved_at=NOW, created_at=NOW)
+    assert not engine._replaceable(approved, s, True)  # the owner's decision is never overridden
