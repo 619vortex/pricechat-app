@@ -79,6 +79,11 @@ owner to run; Claude never runs rotations or touches servers in this task.
 - Verify: Admin shows the new worker online, the old one gone; the next News Desk slot gets its image; `gitleaks git . -c .gitleaks.toml --log-opts=-1` is clean.
 - History still contains the old token: that's fine once it's disabled. Rewriting history isn't needed (no remote).
 - Claude can prepare: the untrack commit. Owner: steps 3-5.
+- **Prepared 2026-11-16: `ops/r1/rotate-worker-token.ps1`** does steps 1, 2 and 4 in one go once the owner has created the new worker
+  (step 3): backup to `%USERPROFILE%\.pricechat-secrets` (owner-only ACL), `git rm --cached` on main (the file stays on disk: use this
+  instead of merging `chore/untrack-worker-env`, which deletes it), the new token as hidden input (never printed), only the
+  `PRICECHAT_WORKER_TOKEN` line replaced, the three workers restarted (News Desk GPU, World Monitor, AI worker) and checked for a 401.
+  Run without `-Apply` first (preview, changes nothing). Then step 5 in Admin.
 
 ### R2. Railway breach, data at rest (C3 then C2). Urgent.
 Order matters: bucket keys first, then the master key, then purge backups made under the old key.
