@@ -190,3 +190,15 @@ def test_detection_is_never_before_the_first_report(db: Session) -> None:
     engine.watch_ledger(db, s, [t], now)
     e = (s.state or {})["ledger"][0]
     assert e["latency_min"]["detect"] == 0
+
+
+def test_an_explainer_led_topic_gets_no_incident_boost() -> None:
+    """Production 2026-11-17 06:53: an explainer four days after the FAA ground stop topped Trending at 78.1 on the incident boost."""
+    def sig(i, title, outlet, mins):
+        return rank.Sig(id=i, source="news", title=title, outlet=outlet, reliable=True, engagement=1.0, first_seen=NOW - timedelta(minutes=mins),
+                        last_seen=NOW, published_at=NOW - timedelta(minutes=mins))
+    c = rank.Cluster([sig(1, "Experts and reporters break down FAA meltdown, explaining what's responsible", "CBS News", 140),
+                      sig(2, "FAA ends hours-long nationwide ground stop", "Axios", 120)], "technology", 2.0)
+    _, parts = rank.score(c, NOW)
+    assert not parts["incident"]["major"]
+    assert parts["impact"] < 13.5 and parts["surprise"] < 6
