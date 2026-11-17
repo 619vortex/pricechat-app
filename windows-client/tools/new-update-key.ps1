@@ -6,8 +6,11 @@
 #
 # Uses OpenSSL from Git for Windows (signed, so Smart App Control lets it run). Afterwards:
 #   1. Paste the two printed lines into PRODUCTION_KEYS in windows-client/service/src/update.rs and commit (public keys only).
-#   2. GitHub > 619vortex/KIWIVPN > Settings > Environments > New environment "kiwi-publish" (deployment branches: main only).
-#      Add secret KIWI_MANIFEST_KEY = the whole text of k1.pem. k2.pem goes nowhere online.
+#   2. Keep k1 OFFLINE for now: sign each manifest on this PC with tools/sign-update-manifest.mjs --key <k1.pem on the USB stick>.
+#      Only when a "Publish update" workflow exists AND the environment can be protected (required reviewers need GitHub Pro on a
+#      private repo; today this PC's deploy key can push to main, so any workflow change could read an environment secret):
+#      GitHub > 619vortex/KIWIVPN > Settings > Environments > "kiwi-publish" (main only), secret KIWI_MANIFEST_KEY = k1.pem's text.
+#      k2.pem goes nowhere online, ever.
 #   3. Back up k1.pem and k2.pem: the password manager, and an encrypted USB stick (e.g. a 7-Zip AES-256 archive whose
 #      passphrase is kept apart). Then delete the folder this script made: the keys must not stay on the PC.
 param([string]$Out = (Join-Path $env:USERPROFILE ("kiwi-update-keys-" + (Get-Date -Format "yyyyMMdd-HHmmss"))))
@@ -48,5 +51,5 @@ Write-Host "pub const PRODUCTION_KEYS: &[Key] = &["
 $lines | ForEach-Object { Write-Host $_ }
 Write-Host "];"
 Write-Host ""
-Write-Host "2. GitHub environment kiwi-publish (main only): secret KIWI_MANIFEST_KEY = the text of k1.pem."
+Write-Host "2. Keep k1 offline: sign manifests on this PC (tools/sign-update-manifest.mjs). No GitHub secret until a protected publish workflow exists."
 Write-Host "3. Back up k1.pem and k2.pem offline (password manager + encrypted USB), then delete $full."
