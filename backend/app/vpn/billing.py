@@ -363,16 +363,33 @@ def _apply_np(db: Session, pay: VpnPayment, status: str, actually_paid: Any, cur
         added = _credit(db, acct, pay, min(paid, MAX_USD * 2), now)
         return status, acct.id if added > 0 else None
     if status == "refunded":
-        _take_back(acct, pay)
+        _take_back(acct, pay, db, now)
     elif status in ("failed", "expired", "cancelled") and pay.status == "pending":
         _set_status(db, pay, "pending", "failed" if status == "cancelled" else status)
     return status, None
 
 
-def _take_back(acct: VpnAccount | None, pay: VpnPayment) -> None:
-    if acct is not None and acct.paid_until is not None and pay.seconds:
-        acct.paid_until = _aware(acct.paid_until) - timedelta(seconds=pay.seconds)
-    pay.status, pay.seconds, pay.paid_usd = "refunded", 0, 0.0
+def _take_back(acct: VpnAccount | None, pay: VpnPayment, db: Session, now: datetime) -> None:
+    """The provider says it returned this payment. Only the time not yet used comes off: time already used is in the past, and
+    taking a whole payment's days off would eat into the days of payments made after it."""
+    unused = _unused_seconds(db, acct, pay, now)
+    if acct is not None and acct.paid_until is not None and unused:
+        acct.paid_until = _aware(acct.paid_until) - timedelta(seconds=unused)
+    pay.status, pay.seconds, pay.paid_usd = "refunded", pay.seconds - unused, 0.0
+
+
+def _unused_seconds(db: Session, acct: VpnAccount | None, pay: VpnPayment, now: datetime) -> int:
+    """How much of this payment's time is still ahead. Paid time stacks in the order payments were credited (after any trial), so
+    the time left belongs to the newest payments first; this one's unused part is what's left after the payments credited after it."""
+    if acct is None or acct.paid_until is None or pay.seconds <= 0 or pay.credited_at is None:
+        return 0
+    trial = _aware(acct.trial_ends_at)
+    left = (_aware(acct.paid_until) - max(now, trial if trial is not None and trial > now else now)).total_seconds()
+    order = (_aware(pay.credited_at), pay.id)
+    later = sum(p.seconds for p in db.scalars(select(VpnPayment).where(VpnPayment.account_id == acct.id, VpnPayment.status == "credited",
+                                                                       VpnPayment.id != pay.id, VpnPayment.credited_at.is_not(None)))
+                if (_aware(p.credited_at), p.id) > order)
+    return int(max(0, min(pay.seconds, left - later)))
 
 
 def nowpayments_webhook(db: Session, raw: bytes, signature: str | None, now: datetime | None = None) -> tuple[str, int | None]:
@@ -520,14 +537,75 @@ def credit_by_hand(db: Session, pay: VpnPayment, usd: float, reason: str, acct: 
     return target
 
 
-def refund_by_hand(db: Session, pay: VpnPayment, reason: str) -> None:
-    """Admin has returned the money in NOWPayments: record it, and take the time back."""
+# --- refunds (Admin) --------------------------------------------------------------------------------------------------
+# What the published refund policy (/vpn/refunds) promises, and what the Admin action does:
+#  - "cancel": the EU/UK 14-day right to cancel. With the checkout's start-now consent on record, the unused part of that payment
+#    at its own rate, and we pay the network fee. Without that consent, the whole payment.
+#  - "other": a fault on our side or the service closing: the unused part, less the network and processing fees.
+# Either way only the unused time ends (time already used is in the past, and later payments keep theirs). No money moves here:
+# Admin sends it in NOWPayments or from the wallet first. A payment is refunded once: its status changes by compare-and-swap, so a
+# double click or two admins at once record it once, and the provider's own "refunded" report afterwards changes nothing.
+
+CANCEL_DAYS = 14
+REFUND_KINDS = ("cancel", "other")
+REFUND_ACTION = "vpn_payment_refund"
+
+
+def refund_quote(db: Session, pay: VpnPayment, now: datetime | None = None) -> dict[str, Any]:
+    """What this payment can be refunded right now under the policy. Read-only: no money moves and nothing changes."""
+    now = now or utcnow()
     if pay.status == "refunded":
         raise BillingError("That payment is already recorded as refunded.", 409)
-    _take_back(db.get(VpnAccount, pay.account_id) if pay.account_id is not None else None, pay)
-    pay.note = f"Refunded: {reason}"[:200]
-    logger.info("vpn: payment %s recorded as refunded", pay.id)
+    if pay.status != "credited" or pay.paid_usd <= 0 or pay.seconds <= 0:
+        raise BillingError("Nothing has been credited for this payment, so there's no paid time to refund. Check it in NOWPayments first.", 409)
+    acct = db.get(VpnAccount, pay.account_id) if pay.account_id is not None else None
+    if acct is None:
+        raise BillingError("This payment has no account any more, so its unused time can't be worked out. Handle it by hand.", 409)
+    unused = _unused_seconds(db, acct, pay, now)
+    unused_usd = math.floor(round(pay.paid_usd * unused / pay.seconds * 100, 6)) / 100
+    in_window = now - _aware(pay.credited_at) <= timedelta(days=CANCEL_DAYS)
+    consent = pay.id in start_now_ids(db, [pay.id])
+    cancel_usd = (unused_usd if consent else round(pay.paid_usd, 2)) if in_window else None
+    return {"id": pay.id, "receipt": f"KV-{pay.id:06d}", "paid_usd": round(pay.paid_usd, 2), "days_paid": round(pay.seconds / 86400, 2),
+            "days_unused": round(unused / 86400, 2), "unused_seconds": unused, "unused_usd": unused_usd, "start_now": consent,
+            "within_cancel_window": in_window, "cancel_until": (_aware(pay.credited_at) + timedelta(days=CANCEL_DAYS)).isoformat(),
+            "max_usd": {"cancel": cancel_usd, "other": unused_usd}}
+
+
+def refund_by_hand(db: Session, pay: VpnPayment, reason: str, usd: float | None = None, kind: str | None = None,
+                   now: datetime | None = None) -> dict[str, Any]:
+    """Admin has already sent `usd` back: record it, and end the payment's unused time. `kind` defaults to "cancel" inside the 14
+    days and "other" after them, and `usd` to the most the policy allows for that kind."""
+    now = now or utcnow()
+    acct = db.get(VpnAccount, pay.account_id) if pay.account_id is not None else None
+    if acct is not None:
+        db.refresh(acct, with_for_update=True)  # one change to this account's time at a time
+    db.refresh(pay)
+    quote = refund_quote(db, pay, now)
+    kind = kind or ("cancel" if quote["within_cancel_window"] else "other")
+    if kind not in REFUND_KINDS:
+        raise BillingError("Choose cancel or other.", 400)
+    most = quote["max_usd"][kind]
+    if most is None:
+        raise BillingError(f"The 14 days to cancel ended on {quote['cancel_until'][:10]}. A refund for a fault on our side is 'other'.", 409)
+    usd = most if usd is None else round(float(usd), 2)
+    if not math.isfinite(usd) or usd < 0 or usd > most + 0.005:
+        raise BillingError(f"The refund policy allows up to ${most:.2f} for this refund.", 400)
+    unused = quote["unused_seconds"]
+    if not db.execute(update(VpnPayment).where(VpnPayment.id == pay.id, VpnPayment.status == "credited").values(status="refunded")
+                      .execution_options(synchronize_session=False)).rowcount:
+        db.rollback()
+        raise BillingError("That payment is already recorded as refunded.", 409)
+    if acct is not None and unused:
+        acct.paid_until = _aware(acct.paid_until) - timedelta(seconds=unused)
+    pay.status, pay.seconds, pay.paid_usd = "refunded", pay.seconds - unused, round(max(0.0, pay.paid_usd - usd), 2)
+    pay.note = f"Refunded ${usd:.2f} ({kind}; {unused / 86400:.1f} unused days ended): {reason}"[:200]
+    db.add(MemberAuditLog(member_id=acct.member_id if acct is not None else None, actor="admin", action=REFUND_ACTION,
+                          details={"payment_id": pay.id, "receipt": quote["receipt"], "kind": kind, "usd": usd, "unused_seconds": unused,
+                                   "start_now": quote["start_now"]}))
+    logger.info("vpn: payment %s recorded as refunded (%s, $%.2f, %d s ended)", pay.id, kind, usd, unused)
     db.commit()
+    return {**quote, "kind": kind, "refunded_usd": usd, "status": "refunded"}
 
 
 def history(db: Session, acct: VpnAccount, limit: int = 50) -> list[dict[str, Any]]:

@@ -535,6 +535,11 @@ function BlockKey({ onDone }: { onDone: () => Promise<void> }) {
   );
 }
 
+type VpnRefundQuote = {
+  receipt: string; paid_usd: number; days_paid: number; days_unused: number; unused_usd: number; start_now: boolean;
+  within_cancel_window: boolean; cancel_until: string; max_usd: { cancel: number | null; other: number };
+};
+
 function Payments({ on }: { on: boolean }) {
   const r = useApi(() => request<{ items: VpnPaymentRow[] }>("/vpn/admin/payments"), 60_000);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
@@ -556,9 +561,25 @@ function Payments({ on }: { on: boolean }) {
     const who = owner ? (/^\d+$/.test(owner.trim()) ? { account_id: Number(owner.trim()) } : { key: owner.trim() }) : {};
     void act(`/vpn/admin/payments/${p.id}/credit`, { usd: Number(usd), reason, ...who }, "Credited.");
   }
-  function refund(p: VpnPaymentRow) {
-    const reason = window.prompt("Record a refund you've already made in NOWPayments? This takes the time back and moves no money. Why was it refunded?");
-    if (reason) void act(`/vpn/admin/payments/${p.id}/refund`, { reason }, "Recorded as refunded.");
+  async function refund(p: VpnPaymentRow) {
+    // The refund policy (/vpn/refunds): a cancellation within 14 days gets the unused part (the whole payment without start-now
+    // consent); other refunds the unused part less fees. Only unused time ends. Nothing here moves money: send it first.
+    setNote(null);
+    let q: VpnRefundQuote;
+    try { q = await request<VpnRefundQuote>(`/vpn/admin/payments/${p.id}/refund`); } catch (e) { setNote({ ok: false, text: errText(e) }); return; }
+    const kind = q.within_cancel_window
+      ? (window.confirm(`Is the customer cancelling within the 14 days (until ${q.cancel_until.slice(0, 10)})?\nOK = a cancellation. Cancel = a fault on our side or the service closing.`) ? "cancel" : "other")
+      : "other";
+    const most = q.max_usd[kind] ?? 0;
+    const rule = kind === "cancel"
+      ? (q.start_now ? "the unused part at this payment's rate, and we pay the network fee" : "the whole payment, as there's no start-now consent on record")
+      : "the unused part, less the network and processing fees";
+    const usd = window.prompt(`${q.receipt}: paid $${q.paid_usd.toFixed(2)} for ${q.days_paid} days; ${q.days_unused} days unused, worth $${q.unused_usd.toFixed(2)}.\n`
+      + `The refund policy gives back ${rule}: at most $${most.toFixed(2)}.\n\n`
+      + `Send the money first (NOWPayments or the wallet), then enter the USD amount you actually sent. The ${q.days_unused} unused days end now. This moves no money.`, most.toFixed(2));
+    if (usd === null || usd.trim() === "") return;
+    const reason = window.prompt("Why? This is kept with the payment.");
+    if (reason) void act(`/vpn/admin/payments/${p.id}/refund`, { reason, kind, usd: Number(usd) }, `Recorded: $${Number(usd).toFixed(2)} refunded, ${q.days_unused} unused days ended.`);
   }
   return (
     <Card title="Payments">
