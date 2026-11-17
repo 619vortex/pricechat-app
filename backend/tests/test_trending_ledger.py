@@ -140,3 +140,53 @@ def test_scores_carry_first_report_and_verification() -> None:
     _, parts = rank.score(c[0], NOW)
     assert parts["timeline"]["first_report"] == (NOW - timedelta(minutes=30)).isoformat()
     assert parts["timeline"]["verified"] and parts["incident"]["verified"]
+
+
+# --- production fixes from the ledger's first run (2026-11-17 05:51) -----------------------------------------------------------------
+
+
+def test_one_shared_signal_never_hands_a_topic_and_its_post_to_another_story(db: Session) -> None:
+    now = utcnow()
+    old = TtTopic(key="t:cop", title="UN climate chief urges speed as COP31 confronts fossil fuel divide", category="world", status="posted", score=75.4,
+                  peak_score=75.4, signal_ids=list(range(1, 21)), sources=[], metrics={}, parts={}, first_seen=now, last_seen=now)
+    db.add(old)
+    db.flush()
+    assert not engine.same_topic(old, [20, 501, 502], "Wizards' defense collapses in seventh straight loss")
+    assert engine.same_topic(old, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 601], "COP31 talks: UN climate chief urges speed")  # mostly its signals
+    assert engine.same_topic(old, [20, 700], "UN climate chief urges speed as COP31 confronts the fossil fuel divide")  # the same event
+
+
+def test_a_stale_news_desk_candidate_no_longer_holds_a_trend_post(db: Session) -> None:
+    from app.models.newsdesk import NdEvent
+    from app.trending import coordinate
+
+    now = utcnow()
+    title = "Ukraine Hits Crimean Bridge in Record Drone Strike on Russia"
+    ev = NdEvent(key="story:test-crimea", kind="news", title=title, headline=title, status="candidate", created_at=now - timedelta(minutes=20))
+    db.add(ev)
+    db.commit()
+    assert coordinate.newsdesk_conflict(db, [title], now) is not None  # young: the breaking lane may still take it
+    ev.created_at = now - timedelta(hours=3)
+    db.commit()
+    import unittest.mock as m
+
+    with m.patch.object(coordinate, "next_slot", lambda db, now: now + timedelta(hours=2)):
+        assert coordinate.newsdesk_conflict(db, [title], now) is None  # three hours a candidate, no slot soon: Trending may post
+    with m.patch.object(coordinate, "next_slot", lambda db, now: now + timedelta(minutes=20)):
+        assert coordinate.newsdesk_conflict(db, [title], now) is not None  # the slot is about to take it
+    ev.status = "released"
+    db.commit()
+    with m.patch.object(coordinate, "next_slot", lambda db, now: now + timedelta(hours=2)):
+        assert coordinate.newsdesk_conflict(db, [title], now) is not None  # released: one story, one post
+
+
+def test_detection_is_never_before_the_first_report(db: Session) -> None:
+    now = utcnow()
+    s = engine.settings_row(db)
+    engine.watch_ledger(db, s, [], now - timedelta(hours=1))
+    t = _topic(db, now, 80.0)
+    t.parts = {**t.parts, "timeline": {**t.parts["timeline"], "first_report": (now + timedelta(minutes=30)).isoformat()}}
+    db.commit()
+    engine.watch_ledger(db, s, [t], now)
+    e = (s.state or {})["ledger"][0]
+    assert e["latency_min"]["detect"] == 0

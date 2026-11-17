@@ -194,8 +194,8 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
         sc, parts = rank.score(c, now, weights)
         parts["sensitive"] = sensitive.classify(" ".join(x.title for x in (c.reliable or c.signals)[:8]))
         ids = sorted(x.id for x in c.signals)
-        topic = next((owner[i] for i in ids if i in owner and owner[i] not in touched), None)
         lead = c.lead
+        topic = next((owner[i] for i in ids if i in owner and owner[i] not in touched and same_topic(owner[i], ids, lead.title)), None)
         srcs = [{"source": x.source, "outlet": x.outlet, "title": x.title, "url": x.url, "reliable": x.reliable, "engagement": x.engagement,
                  "summary": (x.summary or "")[:500] if x.reliable else "", "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind")}}
                 # the topic's lead first: the writer leads with sources[0] (2026-11-16: a quote-led feature led trend post 152)
@@ -222,6 +222,18 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
             t.status, t.score = "cooling", round((t.score or 0) * 0.7, 1)
     db.flush()
     return touched
+
+
+def same_topic(topic: TtTopic, ids: list[int], lead_title: str) -> bool:
+    """May this cluster continue an existing topic row? Only when it is the same story: most of the cluster's signals are the topic's, most
+    of the topic's are in the cluster, or the headlines tell the same event. Production 2026-11-17 ledger: topic 20513, which carried trend
+    post 152 (a COP31 story), had become "Wizards' defense collapses in seventh straight loss" through one shared signal, inheriting the
+    post (so the new story counted as "already has a tweet") and the old peak score."""
+    mine = set(topic.signal_ids or [])
+    shared = len(mine & set(ids))
+    if shared and (shared * 2 >= len(ids) or shared * 2 >= len(mine)):
+        return True
+    return coordinate.same_story(topic.title or "", lead_title or "")
 
 
 def brief_of(topic: TtTopic) -> tuple[writer.Brief | None, list[dict[str, Any]]]:
@@ -358,7 +370,8 @@ def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool
     if not automatic(s) or topic.score < s.hot_score:
         return True
     reliable_now = brief_of(topic)[0] is not None
-    if all(_replaceable(p, s, reliable_now) for p in earlier):
+    desk_clear = coordinate.newsdesk_conflict(db, [topic.title] + [str(x.get("title") or "") for x in (topic.sources or [])[:3] if x.get("reliable")], now) is None
+    if all(_replaceable(p, s, reliable_now, desk_clear) for p in earlier):
         for p in earlier:
             if p.status in ("pending", "held"):
                 p.status, p.note = "expired", "Replaced: the topic crossed the automatic line, so a fresh tweet was written and checked"
@@ -369,12 +382,14 @@ def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool
 UNSENT = ("pending", "expired", "held")
 
 
-def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool) -> bool:
+def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool, desk_clear: bool = False) -> bool:
     """May this earlier draft give way to a fresh tweet now that its topic is over the automatic line?"""
     if p.status not in UNSENT or p.approved_at is not None or p.original_text:
         return False  # sent, sending, approved or edited by the owner: their decision stands
     if p.status == "held" and (p.hold_reason or "").startswith("No reliable source"):
         return reliable_now
+    if p.status == "held" and (p.hold_reason or "").startswith("covered by the News Desk (event") and "candidate" in (p.hold_reason or ""):
+        return desk_clear  # the News Desk never took it (coordinate.CANDIDATE_HOLD): Trending may now
     return (p.score or 0) < s.hot_score
 
 
@@ -788,8 +803,11 @@ def watch_ledger(db: Session, s: TtSettings, topics: list[TtTopic], now: datetim
             e["published"], e["via"] = _iso(_aware(p.published_at)), f"trend post {p.id} ({p.status})"
         elif (desk := _covered_by_desk(db, reason)) is not None and desk.get("at"):
             e["published"], e["via"] = desk["at"], f"News Desk post {desk['post']} ({desk['status']})"
+        if e["first_report"] and (_mins(e["detected"], e["first_report"]) or 0) > 0:
+            e["first_report"] = e["detected"]  # the topic row is older than its current signals: we saw it first
         base = e["first_report"]
         e["latency_min"] = {"detect": _mins(base, e["detected"]), "verify": _mins(base, e["verified"]) if e["verified"] else None,
+                            "crossed": _mins(base, e["crossed"]) if e["crossed"] else None,
                             "publish": _mins(base, e["published"]) if e["published"] else None,
                             "detect_to_publish": _mins(e["detected"], e["published"]) if e["published"] else None}
         sig_old = (old.get("status"), old.get("reason"), old.get("verified"), old.get("published"))
@@ -797,6 +815,7 @@ def watch_ledger(db: Session, s: TtSettings, topics: list[TtTopic], now: datetim
             lt = e["latency_min"]
             lines.append(f"trending ledger: topic {t.id} [{e['kind']}] \"{_safe(t.title, 70)}\" report {str(base or '')[5:16]}Z"
                          f" | detected +{lt['detect']}m | verified {('+' + str(lt['verify']) + 'm') if lt['verify'] is not None else '-'}"
+                         f" | crossed 75 {('+' + str(lt['crossed']) + 'm') if lt['crossed'] is not None else '-'}"
                          f" | published {('+' + str(lt['publish']) + 'm via ' + str(e['via'])) if lt['publish'] is not None else '-'}"
                          f" | peak {e['peak_score']:g} | {status}" + (f" ({_safe(reason, 80)})" if reason else "") + (" [backfilled]" if backfilled else ""))
         book[key] = e
@@ -816,7 +835,7 @@ def ledger_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         vals = sorted(v for r in live if isinstance(v := (r.get("latency_min") or {}).get(k), int))
         return {"median": vals[len(vals) // 2], "max": vals[-1], "n": len(vals)} if vals else None
 
-    return {"events": len(rows), "measured_live": len(live), "detect": stat("detect"), "verify": stat("verify"), "publish": stat("publish"),
+    return {"events": len(rows), "measured_live": len(live), "detect": stat("detect"), "verify": stat("verify"), "crossed": stat("crossed"), "publish": stat("publish"),
             "published": sum(1 for r in rows if r.get("published")), "rows": rows}
 
 

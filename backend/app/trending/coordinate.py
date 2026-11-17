@@ -27,6 +27,12 @@ INCIDENT_EXTRA_PER_DAY = 2
 INCIDENT_GAP_MINUTES = 60
 WINDOW = timedelta(hours=24)  # the caps
 SAME_STORY_WINDOW = timedelta(hours=48)  # one event, one post across both lanes: yesterday's story is never re-posted
+# A News Desk CANDIDATE (not yet released) holds a trend post back only while the desk may still take it soon: for its first 30 minutes
+# (the breaking lane) or when a slot is under an hour away. Production 2026-11-16: "Ukraine Hits Crimean Bridge in Record Drone Strike"
+# (event #513, three outlets) was refused the breaking lane (90-minute gap, then 61 < 70), stayed a candidate, and held Trending back for
+# the rest of the day: neither lane posted it. If Trending posts first, the News Desk's X lane skips the event (engine.deliver_x).
+CANDIDATE_HOLD = timedelta(minutes=30)
+SLOT_SOON = timedelta(minutes=60)
 
 
 def _aware(d: datetime | None, now: datetime) -> datetime | None:
@@ -62,7 +68,11 @@ def newsdesk_conflict(db: Session, titles: list[str], now: datetime) -> str | No
         if any(same_story(t, o) for t in titles for o in theirs if o):
             return f"covered by the News Desk (post {p.id}, {p.status})"
     evs = db.scalars(select(NdEvent).where(NdEvent.created_at >= since, NdEvent.status.in_(("released", "candidate"))))
+    nxt = next_slot(db, now)
+    slot_soon = nxt is not None and nxt - now <= SLOT_SOON
     for e in evs:
+        if e.status == "candidate" and not slot_soon and now - (_aware(e.created_at, now) or now) > CANDIDATE_HOLD:
+            continue
         if any(same_story(t, o) for t in titles for o in (e.title, e.headline) if o):
             return f"covered by the News Desk (event {e.id}, {e.status})"
     return None
