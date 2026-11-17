@@ -313,7 +313,7 @@ async def test_search_returns_traceable_evidence_and_grounded_answer(db: Session
 # --- agent integration -----------------------------------------------------------------------------
 
 
-async def test_agent_receives_labelled_relevant_community_context(db: Session, source: TelegramSource, fake_provider: FakeProvider, agent_config: AgentConfig) -> None:
+async def test_agent_receives_labelled_relevant_community_context(db: Session, source: TelegramSource, fake_provider: FakeProvider, agent_config: AgentConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.agent_service import build_agent
     from app.services.runtime import AppRuntime
 
@@ -324,6 +324,8 @@ async def test_agent_receives_labelled_relevant_community_context(db: Session, s
     db.commit()
     runtime = AppRuntime.from_settings(Settings(), fake_provider, emb)
     fake_provider.calls.clear()
+    # raw messages are picked from the last 30 days by the clock; the messages are dated around the test's fixed NOW
+    monkeypatch.setattr("app.community.context.utcnow", lambda: NOW)
 
     reply = await build_agent(db, runtime, "c-community").respond(AgentRequest("What is the community saying: are bitcoin funding rates spiking today?"))
     system = fake_provider.calls[0][0][0].content

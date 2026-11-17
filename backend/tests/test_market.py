@@ -267,7 +267,15 @@ def test_expiry_late_payment_refund_offers_and_cancel(client: TestClient, db: Se
     assert cancelled["status"] == "cancelled" and db.get(MarketListing, lid).status == "active"
 
 
-def test_redemption_locks_the_card_and_retires_the_claim_only_on_delivery(client: TestClient, db: Session, setup) -> None:  # type: ignore[no-untyped-def]
+def test_redemption_locks_the_card_and_retires_the_claim_only_on_delivery(client: TestClient, db: Session, setup, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from cryptography.fernet import Fernet
+    from pydantic import SecretStr
+
+    from app.config.settings import get_settings
+    from app.security.secrets import dpapi_available
+
+    if not dpapi_available():  # Linux CI / production: the address is sealed with APP_ENCRYPTION_KEY (Windows dev uses DPAPI)
+        monkeypatch.setattr(get_settings(), "app_encryption_key", SecretStr(Fernet.generate_key().decode()))
     owner = _member(db, "holder", client)
     lid = _sandbox(client, db, "holder", 200)
     assert client.post(f"/api/members/market/listings/{lid}/cancel").json()["status"] == "cancelled"

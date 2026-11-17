@@ -36,6 +36,7 @@ tested only on GitHub Actions. On this PC only `npm ci`, `npx vitest run` (99 pa
 | 43683280763 | f051fd9 (12bb5e9) | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
 | 43684595279 | e57950c (31f83af) | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
 | 43685983005 | 4fa06b6 | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
+| **44069835693** (2026-11-17) | **573d9ad (e227431)** | **success** (Rust service 53 incl. the 2 new update.rs tests, client 58, vitest 99) | **success** | **success, 19 + 22 = 41/41** | **success, 35/35** (row 7: placeholder keys branch) | skipped |
 
 **The kill-switch job's "cancelled" (investigated 2026-11-15): a GitHub runner artefact, not a product or test failure.** Every step,
 including "Complete job", succeeds; GitHub records "cancelled" one second after "Cleaning up orphan processes". Ruled out, one run each:
