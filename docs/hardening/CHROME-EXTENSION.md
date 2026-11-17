@@ -132,7 +132,7 @@ revoked-login check (one page load after the revoke, then only the popup) passed
 
 - ZIP: `vpn-extension/store/dist/kiwi-vpn-chrome-1.0.5.zip` (not in git; `python vpn-extension/build.py` rebuilds it
   byte for byte: fixed timestamps)
-- SHA-256: `da6e0e83ad28b6d4b1927dd4d5df807ac049177c0d2244654c4a9c1bc9e4e1a9`
+- SHA-256: `2119c6c1e0b102ce53f12553fb5c3ca4ca4ae2700d6989e9f726ebf616a4cd41`
 - Release record: `vpn-extension/store/releases/1.0.5.json`
 - Tested as the store's own extension ID (the public key from the published 1.0.0 CRX) by `prepare`.
 - `build.py` also rewrites `frontend/public/downloads/kiwi-vpn-extension.zip` (the testers' download). That file was
@@ -183,9 +183,9 @@ node vpn-extension/store/release.mjs upload 1.0.5       # the exact tested ZIP b
 Then fill the dashboard by hand (D), and only then, at your own terminal:
 
 ```
-node vpn-extension/store/release.mjs submit 1.0.5       # type exactly:  submit 1.0.5 da6e0e83
+node vpn-extension/store/release.mjs submit 1.0.5       # type exactly:  submit 1.0.5 2119c6c1
 node vpn-extension/store/release.mjs status             # later: "approved" / staged; nothing reaches users yet
-node vpn-extension/store/release.mjs go-live 1.0.5      # after approval, type:  go-live 1.0.5 da6e0e83
+node vpn-extension/store/release.mjs go-live 1.0.5      # after approval, type:  go-live 1.0.5 2119c6c1
 ```
 
 `submit` needs `upload` first (it refuses otherwise) and submits **staged**: approval doesn't publish; `go-live` does. While
@@ -273,7 +273,7 @@ the e2e harness takes `msedge.exe` as its browser argument if you want to run it
 
 - Store (CWS update check for `jeadaadhacdikcbahliklcaaeaddeloa`): still serves **1.0.0** (CRX sha256 `d5d433ba…`). Nothing uploaded since.
 - `python vpn-extension/build.py` from this branch's source rebuilds `kiwi-vpn-chrome-1.0.5.zip` byte for byte:
-  sha256 `da6e0e83ad28b6d4b1927dd4d5df807ac049177c0d2244654c4a9c1bc9e4e1a9` = `store/releases/1.0.5.json` = the ZIP in
+  sha256 `2119c6c1e0b102ce53f12553fb5c3ca4ca4ae2700d6989e9f726ebf616a4cd41` = `store/releases/1.0.5.json` = the ZIP in
   D:/pc-wt/kiwi-ext-105. `vpn-extension/` here is identical to feat/kiwi-ext-105.
 - Tests: `node --test vpn-extension/lib.test.js vpn-extension/store/cws.test.mjs` 27/27; browser e2e
   (`node vpn-extension/e2e/run.mjs <venv python> %LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe <shots>`) 48/48.
@@ -288,7 +288,7 @@ the e2e harness takes `msedge.exe` as its browser argument if you want to run it
 ## 13. Submission prep re-verified 2026-11-17 (feat/kiwi-release-rc)
 
 - `python vpn-extension/build.py` on this branch: `kiwi-vpn-chrome-1.0.5.zip` and `kiwi-vpn-edge-1.0.5.zip` are both
-  sha256 `da6e0e83ad28b6d4b1927dd4d5df807ac049177c0d2244654c4a9c1bc9e4e1a9`, 30,579 bytes = `store/releases/1.0.5.json` = the
+  sha256 `2119c6c1e0b102ce53f12553fb5c3ca4ca4ae2700d6989e9f726ebf616a4cd41`, 30,579 bytes = `store/releases/1.0.5.json` = the
   ZIP in D:/pc-wt/kiwi-ext-105 (built 2026-11-14 11:35). The testers' ZIP in `frontend/public/downloads` came out unchanged.
 - In the ZIP: the 10 expected files at the top level, each byte-identical to the source; manifest version 1.0.5, **no `key`**,
   permissions `proxy, storage, webRequest, webRequestAuthProvider, privacy` + host `<all_urls>` (same as live 1.0.0), no content
