@@ -44,7 +44,12 @@ SPORT = {"league": 1.5, "premier league": 2.0, "super league": 2.0, "champions l
          # 2026-11-15 production: tennis, reality TV, critics' reviews and a gold-bar burglary led topics
          "wta": 2.5, "atp": 2.5, "match point": 2.5, "semi-finals": 1.5, "semi-final": 1.5, "grand slam": 2.0, "reality tv": 2.5, "love island": 2.5,
          "tv show": 2.0, "netflix series": 2.0, "drama": 1.0, "thriller": 1.5, "princess": 1.5, "prince": 1.0, "stole": 2.0, "heist": 2.0,
-         "burglar": 2.0, "burglary": 2.0, "robbery": 2.0, "murder": 2.0}
+         "burglar": 2.0, "burglary": 2.0, "robbery": 2.0, "murder": 2.0,
+         # 2026-11-17 production: "The biggest entertainment event of the year isn't a movie: it's 'Grand Theft Auto VI'" became a technology
+         # topic on Google's GTA trend. Games and films are entertainment; one game name alone never vetoes ("Take-Two shares jump as GTA VI...")
+         "video game": 1.5, "video games": 1.5, "gta": 1.0, "grand theft auto": 1.0, "playstation": 1.0, "xbox": 1.0, "nintendo": 1.0,
+         "gaming": 1.0, "gamers": 1.0, "trailer": 1.5, "movie": 1.5, "movies": 1.5, "film": 1.0, "entertainment": 1.5, "streaming series": 1.5,
+         "game of the year": 2.5, "video game awards": 2.5, "game awards": 2.5}
 STEMS = {"evacuat"}  # matched as a word start; every other word must match whole ("ai" is not "aid", "meta" is not "metal")
 
 

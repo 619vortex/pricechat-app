@@ -214,3 +214,16 @@ def test_shopping_deals_are_not_topics_but_retail_news_is() -> None:
     for news in ["Black Friday sales slump as shoppers pull back", "Apple cuts iPhone 17 price in China by 10%",
                  "Retailers brace for record Black Friday spending", "Bitcoin drops 8% to $66,000"]:
         assert sources.topical(news), news
+
+
+def test_entertainment_features_are_not_topics_but_gaming_company_news_is() -> None:
+    """Production 2026-11-17 09:10-09:36: an opinion feature on GTA VI was a 'technology' topic with a tweet pending approval."""
+    from app.trending import sources
+
+    feature = "The biggest entertainment event of the year isn’t a movie — it’s ‘Grand Theft Auto VI’"
+    assert not sources.topical(feature)
+    assert rank.classify(feature)[0] is None
+    assert rank.classify("GTA 6 trailer breaks YouTube record")[0] is None  # entertainment
+    assert rank.classify("Take-Two shares jump as GTA VI launch date is set")[0] == "stocks"  # company news stays
+    assert rank.classify("Nintendo shares plunge 9% after weak Switch 2 forecast")[0] is not None
+    assert sources.topical("Take-Two shares jump as GTA VI launch date is set")
