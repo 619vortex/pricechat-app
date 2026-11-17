@@ -62,6 +62,13 @@ Previous run (head 40e9cdf, after merging trial monitor mode b91cc9d): backend *
 | Windows 2.2 | Generate update keys offline, put public keys in PRODUCTION_KEYS, create `kiwi-publish` env, signed build | Placeholder keys = no updates; installer dying midway and strict-mode boot filters across a real reboot untested | Clean kill-switch CI re-run; website deploy hosts the manifest | $0 (existing signing certificate) |
 | Second provider | Approve each purchase | EDIS throttles at 1 TB (set a 1,000 GB allowance); 2 GB price unconfirmed; maybe no cloud firewall (8443 then relies on untested `AGENT_ALLOW`) | Nodes branch (`install --host`, AGENT_ALLOW) | Deleting sin1+hil1 −$30.68; EDIS hel2/sgp1/lon1/ams1 +$26.64; FIP −$3.50; B2 $0 → net −$7.54 (today $74.95 → $67.41) |
 
+## First real payment (2026-11-17, feat/kiwi-release-prep)
+
+Payments' test mode (`VPN_PAYMENTS_PUBLIC`, default off: payments switched on in Admin reach only the owner signed in to Admin and
+named testers), crediting exactly once under simultaneous webhook/reconcile reports, and webhook visibility for Admin and the logs.
+No migration. Owner runbook: FIRST-PAYMENT.md. Until it's deployed, don't switch payments on: production's VPN is open, so the
+old switch would offer payment to everyone.
+
 ## Urgency ranking
 
 1. Owner alert chat set and tested (works on today's production: the test endpoint is already live).
