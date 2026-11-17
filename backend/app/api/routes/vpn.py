@@ -523,13 +523,24 @@ def admin_credit_payment(payment_id: int, payload: CreditInput, db: DbSession) -
 
 class RefundInput(StrictInput):
     reason: str = Field(min_length=3, max_length=160)
+    usd: float | None = Field(default=None, ge=0, le=1000)  # what was actually sent back; default the most the policy allows
+    kind: Literal["cancel", "other"] | None = None  # the 14-day right to cancel, or a fault on our side (/vpn/refunds)
+
+
+@router.get("/vpn/admin/payments/{payment_id}/refund")
+def admin_refund_quote(payment_id: int, db: DbSession) -> dict[str, Any]:
+    """What the refund policy allows for this payment now: its unused days and their value. Changes nothing."""
+    try:
+        return service.admin_refund_quote(db, payment_id)
+    except VpnError as e:
+        raise _fail(e) from e
 
 
 @router.post("/vpn/admin/payments/{payment_id}/refund")
 def admin_refund_payment(payment_id: int, payload: RefundInput, db: DbSession) -> dict[str, Any]:
-    """Records a refund already made in NOWPayments, and takes the time back. It doesn't move any money itself."""
+    """Records a refund already sent, and ends that payment's unused time. It doesn't move any money itself."""
     try:
-        return service.admin_refund_payment(db, payment_id, payload.reason)
+        return service.admin_refund_payment(db, payment_id, payload.reason, payload.usd, payload.kind)
     except VpnError as e:
         raise _fail(e) from e
 

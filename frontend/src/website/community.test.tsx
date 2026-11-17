@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { JoinPage, LeaderboardPage, LegalPage, OWNER_MARKERS } from "./community";
+import { JoinPage, LeaderboardPage, LegalPage, OWNER_MARKERS, missingOwnerFacts } from "./community";
 import { START_NOW } from "./vpn";
 import { ProfilePage } from "./passport";
 import { Website } from "./Website";
@@ -357,7 +357,8 @@ describe("legal pages", () => {
     expect(terms).toMatch(/Nothing renews or charges by itself/);
     expect(terms).toMatch(/added after any paid time or free trial/);
     expect(terms).toMatch(/Last updated \d+ \w+ 20\d\d/);
-    expect(screen.queryByRole("note")).toBeNull();  // in force; a missing owner fact is left out, never shown (owner 2026-11-17)
+    // in force, but the missing trader details are named plainly at the top (owner 2026-11-17, second instruction)
+    expect(screen.getByRole("note").textContent).toMatch(/Not yet published\..*legal name of the business that sells Kiwi VPN.*governing law.*won't take public payments/);
     expect(terms).not.toMatch(/Stripe|credit card|Draft/i);
     cleanup();
     const refunds = (await show(<LegalPage kind="vpnrefunds" />)).container.textContent!;
@@ -365,7 +366,7 @@ describe("legal pages", () => {
     expect(refunds).toMatch(/Check now/);
     expect(refunds).toMatch(/KV-/);
     expect(refunds).toMatch(/rights the law gives you/);
-    expect(screen.queryByRole("note")).toBeNull();
+    expect(screen.getByRole("note").textContent).toMatch(/business email address/);
   });
 
   it("Kiwi VPN terms name the provider, age, liability, law and the right to cancel, with every unknown fact a visible owner marker", async () => {
@@ -379,10 +380,13 @@ describe("legal pages", () => {
     expect(terms).toMatch(/doesn't allow us to limit/);
     expect(terms).toMatch(/mandatory consumer laws of the country where you live/);
     expect(terms).toMatch(/within 14 days of paying/);
-    // owner 2026-11-17: no placeholder is ever published; an owner fact not filled in is left out of the text
+    // owner 2026-11-17: no placeholder, no invented fact, and "the Price Chat team" is never offered as the trader's identity
     expect(container.querySelector("mark.site-owner-marker")).toBeNull();
-    expect(terms).not.toMatch(/\[OWNER|company number|VAT number|governed by the law of/);
-    expect(terms).toMatch(/Kiwi VPN is a Price Chat service provided by the Price Chat team/);
+    expect(terms).not.toMatch(/\[OWNER|\(company number|VAT number [A-Z0-9]|governed by the law of/);
+    expect(terms).not.toMatch(/provided by the Price Chat team/);
+    expect(terms).toMatch(/Kiwi VPN is a Price Chat service provided by its operator, whose legal name and postal address are not yet published \(see the notice at the top of this page\), “we” in these terms/);
+    expect(terms).toMatch(/The law that governs these terms and the courts for disputes are not yet published/);
+    expect(terms).toMatch(/whether this includes VAT or sales tax is not yet published/);
     expect(terms).toMatch(/message us on Telegram or X \(see Contact\)/i);
     expect(terms).not.toMatch(/Avigad|Dubai|@pricechat\.live/);  // no business fact filled in by guesswork
     // site paths are links
@@ -443,9 +447,11 @@ describe("legal pages", () => {
     expect(privacy).toMatch(/within one month/);
     expect(privacy).toMatch(/data protection authority/);
     expect(container.querySelector("mark.site-owner-marker")).toBeNull();
-    expect(privacy).not.toMatch(/\[OWNER|For those transfers we rely on/);
-    expect(privacy).toMatch(/for as long as tax and accounting law requires\./);
-    expect(privacy).toMatch(/The Price Chat team decides how the personal data/);
+    expect(privacy).not.toMatch(/\[OWNER|For those transfers we rely on|Price Chat team decides/);
+    expect(privacy).toMatch(/for as long as tax and accounting law requires \(the exact period is not yet published\)\./);
+    expect(privacy).toMatch(/Kiwi VPN's operator, whose legal name and postal address are not yet published \(see the notice at the top of this page\), decides how the personal data/);
+    expect(privacy).toMatch(/The safeguard we rely on for those transfers is not yet published\./);
+    expect(screen.getByRole("note").textContent).toMatch(/legal safeguard for data transfers/);
   });
 
   it("Kiwi VPN acceptable use is in force, covering abuse, P2P, suspension, reporting and visibility", async () => {
@@ -512,6 +518,22 @@ describe("legal pages publish no placeholders (owner, 2026-11-17)", () => {
     serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
     const text = (await show(<LegalPage kind={kind} />)).container.textContent!;
     expect(text).not.toMatch(/\[OWNER|OWNER:|Being finalised/);
-    expect(text).not.toMatch(/ ,|\(\s*\)|\s\./);  // no holes left where a fact was taken out
+    expect(text).not.toMatch(/ ,|\(\s*\)|\s\.|,,/);  // no holes left where a fact was taken out
+    expect(text).not.toMatch(/(provided by|controller[^.]*is) the Price Chat team/i);  // never a stand-in for the trader's identity
+  });
+
+  it("the Kiwi VPN pages that need owner facts open with a notice naming each one; the others have none", async () => {
+    for (const kind of ["vpnprivacy", "vpnterms", "vpnrefunds"] as const) {
+      expect(missingOwnerFacts(kind).length).toBeGreaterThan(0);
+    }
+    expect(missingOwnerFacts("vpnterms")).toEqual(expect.arrayContaining([
+      "the legal name of the business that sells Kiwi VPN", "its postal address", "a business email address",
+      "its company registration number (if it has one)", "its VAT number (if it is VAT-registered)", "the governing law", "the courts for disputes",
+      "whether the $9.99 price includes VAT or sales tax",
+    ]));
+    expect(missingOwnerFacts("vpnaup")).toEqual([]);
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    await show(<LegalPage kind="vpnaup" />);
+    expect(screen.queryByRole("note")).toBeNull();
   });
 });

@@ -1223,15 +1223,25 @@ def admin_credit_payment(db: Session, payment_id: int, usd: float, reason: str, 
     return {"id": payment_id, "status": pay.status, "account": target.id, "paid_until": _iso(target.paid_until)}
 
 
-def admin_refund_payment(db: Session, payment_id: int, reason: str) -> dict[str, Any]:
+def admin_refund_quote(db: Session, payment_id: int) -> dict[str, Any]:
     pay = db.get(VpnPayment, payment_id)
     if pay is None:
         raise VpnError("Payment not found.", 404)
     try:
-        billing.refund_by_hand(db, pay, reason)
+        return billing.refund_quote(db, pay)
     except billing.BillingError as e:
         raise VpnError(str(e), e.status) from None
-    return {"id": payment_id, "status": pay.status}
+
+
+def admin_refund_payment(db: Session, payment_id: int, reason: str, usd: float | None = None, kind: str | None = None) -> dict[str, Any]:
+    pay = db.get(VpnPayment, payment_id)
+    if pay is None:
+        raise VpnError("Payment not found.", 404)
+    try:
+        out = billing.refund_by_hand(db, pay, reason, usd, kind)
+    except billing.BillingError as e:
+        raise VpnError(str(e), e.status) from None
+    return {**out, "id": payment_id, "status": pay.status}
 
 
 def reconcile_payments(db: Session, now: datetime | None = None) -> dict[str, Any]:

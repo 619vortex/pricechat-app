@@ -2,62 +2,124 @@
 R1 (docs/hardening/CREDENTIALS.md): rotate the PC's Price Chat worker token (C1) without stopping production.
 
 Run it yourself, at a terminal, AFTER creating the new worker in Admin > Brand Manager > Settings > AI > Workers (the new pcw_
-token is shown once). The old token keeps working until you disable it in Admin (step 5), so nothing stops if this is interrupted.
+token is shown once). The old token keeps working until you disable it in Admin, so nothing stops if this is interrupted.
 
-  powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1            # preview: says what it would do, changes nothing
-  powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1 -Apply     # do it
+  powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1              # preview: says what it would do, changes nothing
+  powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1 -Apply       # do it
+  powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1 -Rollback    # put the newest backup back and restart
 
 What -Apply does, in order (it stops at the first problem):
   1. Backs up C:\AI\price-chat\worker\worker.env to %USERPROFILE%\.pricechat-secrets\worker.env.<time> (readable by you only).
   2. Untracks worker/worker.env on main with `git rm --cached` (the file stays on disk; .gitignore already lists it) and commits
-     only that path. Skipped if it is already untracked. This replaces merging chore/untrack-worker-env, which would delete the file.
+     only that removal. It refuses if anything else is already staged, so none of your other work is swept into the commit.
+     Skipped if it is already untracked. (Fixed 2026-11-17: the earlier `git commit -- worker/worker.env` always failed.)
   3. Asks for the new token (hidden input, never printed or logged), checks its shape, and replaces only the
      PRICECHAT_WORKER_TOKEN line; every other setting in worker.env stays as it is.
   4. Restarts the three workers that read worker.env: the scheduled tasks "Price Chat News Desk GPU" and "Price Chat World Monitor",
-     and the AI worker (start_worker.pyw, Startup shortcut). Jobs pause for about a minute; nothing is lost (jobs wait in the queue).
-  5. Waits up to 3 minutes and reports whether each worker came back, and whether any log shows a 401 (the token was refused).
-Then, in Admin: confirm the new worker shows online, disable and delete the old worker entry. If Railway has
+     and the AI worker (start_worker.pyw). Jobs pause for about a minute; nothing is lost (jobs wait in the queue).
+  5. Waits up to 3 minutes and reports whether each worker came back, and whether any log line written AFTER the restart shows a
+     401 (the token was refused). If it was, it puts the backup back and restarts again by itself, so the old token keeps working.
+Then, in Admin: confirm the new worker shows online, and only then disable and delete the old worker entry. If Railway has
 BM_WORKER_BOOTSTRAP_SHA256 set to the old token's hash, remove it.
-Rollback: copy the backup from step 1 back over worker.env and run step 4 again (the old token works until you disable it).
+
+Rollback (-Rollback, or -Rollback -Backup <file>): copies the newest backup (or the one named) over worker.env, restarts the
+workers and checks them. This only works while the old worker is still enabled in Admin, which is why you disable it last.
+The step-2 untrack commit is never undone: the file must stay out of git either way.
 #>
-param([switch]$Apply)
+param([switch]$Apply, [switch]$Rollback, [string]$Backup = "", [string]$Repo = "C:\AI\price-chat")
 $ErrorActionPreference = "Stop"
-$repo = "C:\AI\price-chat"
+$repo = $Repo
 $env_file = Join-Path $repo "worker\worker.env"
 $tasks = @("Price Chat News Desk GPU", "Price Chat World Monitor")
 $aiWorker = Join-Path $repo "worker\start_worker.pyw"
 $aiPython = Join-Path $repo "worker\.venv\Scripts\pythonw.exe"
 $logs = @("worker.log", "newsdesk_images.log", "newsdesk_images.out.log", "worldmonitor.out.log") | ForEach-Object { Join-Path $repo "worker\$_" }
+$scripts = @("start_worldmonitor.pyw", "start_newsdesk_images.pyw", "start_worker.pyw")
+$secrets = Join-Path $env:USERPROFILE ".pricechat-secrets"
 
 function Say($m) { Write-Host "  $m" }
+
+function Get-Workers {
+    @(Get-CimInstance Win32_Process -Filter "name like 'pythonw%'" | Where-Object { $cl = $_.CommandLine; $scripts | Where-Object { $cl -like "*worker\$_*" } })
+}
+
+# How many of the three worker scripts are running (a venv's pythonw launches two processes per script).
+function Count-Workers { @(Get-Workers | ForEach-Object { $cl = $_.CommandLine; $scripts | Where-Object { $cl -like "*worker\$_*" } } | Sort-Object -Unique).Count }
+
+function Restart-Workers {
+    foreach ($t in $tasks) { if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue } }
+    Get-Workers | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 3
+    foreach ($t in $tasks) { if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Start-ScheduledTask -TaskName $t } }
+    if ((Test-Path $aiPython) -and (Test-Path $aiWorker)) { Start-Process -FilePath $aiPython -ArgumentList "`"$aiWorker`"" -WorkingDirectory (Split-Path $aiWorker) }
+}
+
+# Only what the logs gain after the restart counts: an old 401 line from before must not look like a refusal of the new token.
+function Get-LogSizes { $s = @{}; foreach ($l in $logs) { $s[$l] = if (Test-Path $l) { (Get-Item $l).Length } else { 0 } }; $s }
+function Get-NewLogText($sizes) {
+    foreach ($l in $logs) {
+        if (-not (Test-Path $l)) { continue }
+        $start = [int64]$sizes[$l]
+        if ((Get-Item $l).Length -lt $start) { $start = 0 }  # the log was rotated: all of it is new
+        $fs = [IO.File]::Open($l, 'Open', 'Read', 'ReadWrite')
+        try { [void]$fs.Seek($start, 'Begin'); (New-Object IO.StreamReader($fs)).ReadToEnd() -split "`n" } finally { $fs.Dispose() }
+    }
+}
+
+# Returns $true when nothing was refused.
+function Wait-Workers($sizes) {
+    $deadline = (Get-Date).AddMinutes(3)
+    do {
+        Start-Sleep -Seconds 15
+        $running = Count-Workers
+        $refused = @(Get-NewLogText $sizes | Where-Object { $_ -match '\b401\b|Unauthorized|refused this worker.s token' })
+    } while ((Get-Date) -lt $deadline -and $running -lt 3 -and $refused.Count -eq 0)
+    Say "worker scripts running: $running of 3$(if ($refused.Count) { '; the server REFUSED the token (401)' })"
+    return ($refused.Count -eq 0)
+}
+
 if (-not (Test-Path $env_file)) { throw "worker.env not found at $env_file" }
-$tracked = (& git -C $repo ls-files -- worker/worker.env) -ne $null -and (& git -C $repo ls-files -- worker/worker.env) -ne ""
+
+if ($Rollback) {
+    $from = if ($Backup) { $Backup } else { Get-ChildItem $secrets -Filter "worker.env.*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName }
+    if (-not $from -or -not (Test-Path $from)) { throw "no backup found in ${secrets}: nothing to roll back to" }
+    Write-Host "R1 ROLLBACK: restoring $from"
+    Copy-Item $from $env_file -Force
+    $sizes = Get-LogSizes
+    Restart-Workers
+    if (Wait-Workers $sizes) { Write-Host "Rolled back. The old worker must still be enabled in Admin." -ForegroundColor Green }
+    else { Write-Host "Still refused: the old worker has probably been disabled in Admin. Re-enable it, or create a new worker and run -Apply." -ForegroundColor Red; exit 1 }
+    return
+}
+
+$tracked = [bool](& git -C $repo ls-files -- worker/worker.env)
 $branch = (& git -C $repo branch --show-current).Trim()
+$staged = [bool](& git -C $repo diff --cached --name-only)
 $hasLine = (Get-Content $env_file) -match '^\s*PRICECHAT_WORKER_TOKEN\s*='
 
 Write-Host "R1 worker token rotation ($(if ($Apply) {'APPLY'} else {'preview, nothing changes'}))"
 Say "worker.env: present; PRICECHAT_WORKER_TOKEN line: $(if ($hasLine) {'yes'} else {'NO'})"
-Say "git: branch $branch, worker.env $(if ($tracked) {'TRACKED (will be untracked)'} else {'already untracked'})"
+Say "git: branch $branch, worker.env $(if ($tracked) {'TRACKED (will be untracked)'} else {'already untracked'}), other staged changes: $(if ($staged) {'YES (step 2 would stop)'} else {'none'})"
 foreach ($t in $tasks) { $s = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue; Say "task '$t': $(if ($s) {$s.State} else {'not installed'})" }
-$ai = @(Get-CimInstance Win32_Process -Filter "name like 'pythonw%'" | Where-Object { $_.CommandLine -like "*start_worker.pyw*" })
-Say "AI worker processes: $($ai.Count)"
+Say "worker scripts running: $(Count-Workers) of 3"
+Say "backups so far: $(@(Get-ChildItem $secrets -Filter 'worker.env.*' -ErrorAction SilentlyContinue).Count) in $secrets"
 if (-not $Apply) { Write-Host "Preview only. Create the new worker in Admin first, then run again with -Apply."; return }
 if (-not $hasLine) { throw "worker.env has no PRICECHAT_WORKER_TOKEN line: nothing to replace" }
+if ($tracked -and $branch -ne "main") { throw "the main checkout is on '$branch', not main: switch it back, then run again" }
+if ($tracked -and $staged) { throw "other changes are staged in ${repo}; commit or unstage them first so step 2 commits only the untrack" }
 
 # 1. backup, readable by the current user only
-$dir = Join-Path $env:USERPROFILE ".pricechat-secrets"
-New-Item -ItemType Directory -Force $dir | Out-Null
-& icacls $dir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
-$backup = Join-Path $dir ("worker.env." + (Get-Date -Format "yyyyMMdd-HHmmss"))
+New-Item -ItemType Directory -Force $secrets | Out-Null
+& icacls $secrets /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" | Out-Null
+$backup = Join-Path $secrets ("worker.env." + (Get-Date -Format "yyyyMMdd-HHmmss"))
 Copy-Item $env_file $backup
 Say "1. backed up to $backup"
 
-# 2. untrack on main (the file stays on disk)
+# 2. untrack on main (the file stays on disk); only the staged removal is committed
 if ($tracked) {
-    if ($branch -ne "main") { throw "the main checkout is on '$branch', not main: switch it back, then run again" }
     & git -C $repo rm --cached --quiet -- worker/worker.env
-    & git -C $repo commit --quiet -m "Stop tracking worker/worker.env (CREDENTIALS.md R1, step 2)" -- worker/worker.env
-    if ($LASTEXITCODE -ne 0) { throw "git commit failed: worker.env is unchanged on disk; fix git and run again" }
+    & git -C $repo commit --quiet -m "Stop tracking worker/worker.env (CREDENTIALS.md R1, step 2)"
+    if ($LASTEXITCODE -ne 0) { & git -C $repo reset --quiet -- worker/worker.env; throw "git commit failed: the index is put back and worker.env is unchanged; fix git and run again" }
     if (-not (Test-Path $env_file)) { Copy-Item $backup $env_file; throw "worker.env vanished after untracking: restored from the backup" }
     Say "2. untracked on main ($((& git -C $repo log --oneline -1).Trim())); the file is still on disk"
 } else { Say "2. already untracked" }
@@ -77,32 +139,18 @@ try {
 }
 Say "3. worker.env updated (only the token line)"
 
-# 4. restart the workers
-$since = Get-Date
-foreach ($t in $tasks) {
-    if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
-    }
-}
-$script = @("start_worldmonitor.pyw", "start_newsdesk_images.pyw", "start_worker.pyw")
-Get-CimInstance Win32_Process -Filter "name like 'pythonw%'" | Where-Object { $cl = $_.CommandLine; $script | Where-Object { $cl -like "*worker\$_*" } } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-Start-Sleep -Seconds 3
-foreach ($t in $tasks) { if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Start-ScheduledTask -TaskName $t } }
-if ((Test-Path $aiPython) -and (Test-Path $aiWorker)) { Start-Process -FilePath $aiPython -ArgumentList "`"$aiWorker`"" -WorkingDirectory (Split-Path $aiWorker) }
+# 4 and 5. restart, then check; refused means automatic rollback to the old token
+$sizes = Get-LogSizes
+Restart-Workers
 Say "4. workers restarted"
-
-# 5. did they come back, and was the token accepted?
-$deadline = (Get-Date).AddMinutes(3)
-do {
-    Start-Sleep -Seconds 15
-    $running = @(Get-CimInstance Win32_Process -Filter "name like 'pythonw%'" | Where-Object { $cl = $_.CommandLine; $script | Where-Object { $cl -like "*worker\$_*" } })
-    $refused = @($logs | Where-Object { (Test-Path $_) -and (Get-Item $_).LastWriteTime -ge $since } |
-                 ForEach-Object { Get-Content $_ -Tail 200 } | Where-Object { $_ -match '\b401\b|Unauthorized|refused this worker.s token' })
-} while ((Get-Date) -lt $deadline -and $running.Count -lt 3 -and $refused.Count -eq 0)
-Say "5. worker processes running: $($running.Count) of 3"
-if ($refused.Count) {
-    Write-Host "  The server REFUSED the new token (401 in the worker logs). Restore: Copy-Item '$backup' '$env_file' and run this step again." -ForegroundColor Red
+if (-not (Wait-Workers $sizes)) {
+    Write-Host "  The new token was refused. Rolling back to the old one ($backup)..." -ForegroundColor Red
+    Copy-Item $backup $env_file -Force
+    $sizes = Get-LogSizes
+    Restart-Workers
+    [void](Wait-Workers $sizes)
+    Write-Host "  Rolled back. Check the new worker in Admin is enabled and its token was copied whole, then run -Apply again." -ForegroundColor Red
     exit 1
 }
 Write-Host "Done. In Admin: check the new worker is online, then disable and delete the old one. Backup: $backup" -ForegroundColor Green
+Write-Host "If anything misbehaves before you disable the old worker: run this script with -Rollback." -ForegroundColor Green

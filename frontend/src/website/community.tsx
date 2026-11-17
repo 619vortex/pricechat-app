@@ -323,10 +323,26 @@ const OWNER = {
 const MARKER = /\[OWNER: [^\]]+\]/g;
 
 /**
- * Owner, 2026-11-17: never publish a placeholder. A fact not yet filled in is left out of the sentence (or the sentence goes), so the
- * page says only what is true; OWNER_MARKERS and docs/hardening/LEGAL.md list what is still missing.
+ * Owner, 2026-11-17: never publish a "[OWNER: …]" placeholder, never invent a fact, and never present "the Price Chat team" as the
+ * trader's legal identity. A fact not yet given is said plainly to be not yet published, and the page opens with a notice naming
+ * every missing item (MissingOwnerFacts). OWNER_MARKERS and docs/hardening/LEGAL.md list what is still missing.
  */
 const CONTACT = "message us on Telegram or X (see Contact)";
+const UNPUBLISHED_ID = "its operator, whose legal name and postal address are not yet published (see the notice at the top of this page)";
+
+/** What each missing owner fact is, in plain words, for the notice at the top of the page. */
+const OWNER_LABEL: Record<keyof typeof OWNER, string> = {
+  entity: "the legal name of the business that sells Kiwi VPN",
+  address: "its postal address",
+  email: "a business email address",
+  company: "its company registration number (if it has one)",
+  vat: "its VAT number (if it is VAT-registered)",
+  law: "the governing law",
+  courts: "the courts for disputes",
+  tax: "whether the $9.99 price includes VAT or sales tax",
+  taxRecords: "how long tax law requires payment records to be kept",
+  transfers: "the legal safeguard for data transfers outside the EU and the UK",
+};
 export function withoutOwnerGaps(text: string): string {
   if (!MARKER.test(text)) return text;
   MARKER.lastIndex = 0;
@@ -336,15 +352,22 @@ export function withoutOwnerGaps(text: string): string {
   if (open("company") || open("vat")) t = t.replace(new RegExp(` \\(company number ${m("company")}, VAT number ${m("vat")}\\)`), "");
   if (open("address")) t = t.replace(new RegExp(`, ${m("address")},`, "g"), "").replace(new RegExp(`, ${m("address")}`, "g"), "");
   if (open("entity")) {
-    t = t.replace(new RegExp(`^${m("entity")}`), "The Price Chat team").replace(new RegExp(m("entity"), "g"), "the Price Chat team");
+    t = t.replace(new RegExp(`^${m("entity")}`), `Kiwi VPN's operator, whose legal name and postal address are not yet published (see the notice at the top of this page),`)
+      .replace(new RegExp(m("entity"), "g"), UNPUBLISHED_ID);
+    t = t.replace(/\(see the notice at the top of this page\) “we”/, "(see the notice at the top of this page), “we”");  // the address took the comma
   }
   if (open("email")) {
     t = t.replace(new RegExp(`[Ww]rite to ${m("email")}, or message us on Telegram or X \\(see Contact\\)`, "g"), (w) => (w[0] === "W" ? "Message us on Telegram or X (see Contact)" : CONTACT))
       .replace(new RegExp(`[Ww]rite to ${m("email")}`, "g"), (w) => (w[0] === "W" ? "Message us on Telegram or X (see Contact)" : CONTACT))
       .replace(new RegExp(`Contact: ${m("email")}\\.`), "Contact: Telegram or X (see Contact).");
   }
-  for (const k of ["tax", "taxRecords"] as const) if (open(k)) t = t.replace(new RegExp(` \\(${m(k)}\\)`, "g"), "");
-  if (open("transfers")) t = t.replace(new RegExp(` For those transfers we rely on ${m("transfers")}\\.`), "");
+  if (open("tax")) t = t.replace(new RegExp(` \\(${m("tax")}\\)`, "g"), " (whether this includes VAT or sales tax is not yet published)");
+  if (open("taxRecords")) t = t.replace(new RegExp(` \\(${m("taxRecords")}\\)`, "g"), " (the exact period is not yet published)");
+  if (open("transfers")) t = t.replace(new RegExp(` For those transfers we rely on ${m("transfers")}\\.`), " The safeguard we rely on for those transfers is not yet published.");
+  if (open("law") || open("courts")) {
+    t = t.replace(new RegExp(`These terms are governed by the law of ${m("law")}, and disputes go to the courts of ${m("courts")}\\.`),
+      "The law that governs these terms and the courts for disputes are not yet published (see the notice at the top of this page).");
+  }
   // anything still open: drop the sentence that needs it
   MARKER.lastIndex = 0;
   if (MARKER.test(t)) t = (t.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? []).filter((sentence) => !new RegExp(MARKER.source).test(sentence)).join("");  // no lookbehind (older Safari)
@@ -531,7 +554,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
       ["The short version", ["USDT payments go straight over the blockchain and we can't reverse them, so we normally put things right by correcting your time. Use your free trial first: it's there so you can check Kiwi VPN works for you before you pay. If you live in the EU or the UK, you can also cancel within 14 days (below)."]],
       ["Right to cancel", [
         "If you live in the EU or the UK, the law gives you 14 days from the day you pay to cancel a purchase of Kiwi VPN time, without giving a reason.",
-        `Your time starts as soon as your payment is confirmed, because you ask for that at checkout by ticking this box: “${START_NOW_TEXT}” So if you cancel within the 14 days, we refund the part of that payment for the time you haven't used yet, at that payment's rate. Once all the time you paid for has been used, it can't be cancelled.`,
+        `Your time starts as soon as your payment is confirmed, because you ask for that at checkout by ticking this box: “${START_NOW_TEXT}” So if you cancel within the 14 days, we refund the part of that payment for the time you haven't used yet, at that payment's rate. Once all the time you paid for has been used, it can't be cancelled. If we have no record that you ticked that box for the payment, we refund the whole payment.`,
         `To cancel, write to ${OWNER.email} within the 14 days, with your receipt number (it starts with KV-) and a USDT address on the network you paid with for the refund. One sentence is enough, for example: “I cancel my Kiwi VPN purchase, receipt KV-000123, paid on 1 December 2026.” For an anonymous key, we'll ask you privately to show the key is yours.`,
         "We refund within 14 days of receiving your cancellation, in USDT on the network you paid with, and we pay the network fee for it. Your access to the refunded time ends when we refund.",
       ]],
@@ -654,10 +677,27 @@ function LegalText({ text }: { text: string }) {
   );
 }
 
+/** The owner facts this page still lacks, named plainly: a legal page never hides that the trader's identification is incomplete. */
+export function missingOwnerFacts(kind: LegalKind): string[] {
+  const text = LEGAL[kind].sections.flatMap(([, ps]) => ps).join(" ");
+  return (Object.keys(OWNER) as (keyof typeof OWNER)[]).filter((k) => OWNER[k].startsWith("[OWNER:") && text.includes(OWNER[k])).map((k) => OWNER_LABEL[k]);
+}
+
+function MissingOwnerFacts({ kind }: { kind: LegalKind }) {
+  const missing = missingOwnerFacts(kind);
+  if (!missing.length) return null;
+  return (
+    <div className="site-draft" role="note">
+      <p><strong>Not yet published.</strong> This page doesn't yet give all the details the law requires about the business behind Kiwi VPN. Still missing:</p>
+      <ul>{missing.map((m) => <li key={m}>{m}</li>)}</ul>
+      <p>We won't take public payments for Kiwi VPN until they're published here.</p>
+    </div>
+  );
+}
+
 export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
-  const open = false;  // a missing owner fact is left out of the text (withoutOwnerGaps), never shown as a placeholder
   useEffect(() => {  // /vpn/refunds#right-to-cancel from the checkout: the page renders after the browser looked for the anchor
     const id = typeof location !== "undefined" ? location.hash.slice(1) : "";
     if (id) document.getElementById(id)?.scrollIntoView?.();
@@ -666,7 +706,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
     <SitePage {...pageHead(LEGAL_PATH[kind])}>
       <article className="site-legal site-reveal">
         {page.updated ? (
-          open && <p className="site-draft" role="note">Being finalised: the highlighted details are still to be filled in.</p>
+          <MissingOwnerFacts kind={kind} />
         ) : (
           <p className="site-draft" role="note">
             {page.note ?? "Draft: this page has not had final legal review yet."}
