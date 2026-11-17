@@ -125,7 +125,9 @@ NOT_A_TOPIC = re.compile(r"\b(what happened in|from the archives|week in review|
                          # more" topped Trending at 74.0). "Black Friday sales slump" and "Apple cuts iPhone prices in China" stay news.
                          r"|\b(?:takes|knocks|save|saves|get|gets) [$€£]\d[\d,.]*\s?off\b|[$€£]\d[\d,.]*\s?off\b|\bdeals? (?:on|of the day)\b|\bbest\b.{0,40}\bdeals?\b"
                          r"|\b(?:black friday|cyber monday|prime day|boxing day)\b.{0,40}\b(?:deals?|sale|discounts?|offers?|bargains?)\b(?!.{0,20}\b(?:slump|fall|record|spending|retailers|sales data)\b)"
-                         r"|\blowest price ever\b|\bdrops? to (?:its )?(?:lowest|[$€£]\d)", re.I)
+                         r"|\blowest price ever\b|\bdrops? to (?:its )?(?:lowest|[$€£]\d)"
+                         # opinion framing: "The biggest entertainment event of the year isn't a movie: it's ..." (production 2026-11-17)
+                         r"|\bisn['’]t (?:a|an|the|just)\b.{0,40}[—–:-]\s*it['’]s\b|\bthe (?:biggest|best|most) [\w ]{0,30} of the year\b", re.I)
 
 
 def topical(title: str) -> bool:
