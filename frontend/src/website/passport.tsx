@@ -23,6 +23,7 @@ import { XFeedSection } from "./xfeed";
 import { VipStatus } from "./crew";
 import { VpnStatus } from "./vpn";
 import { desktopSignInToResume } from "./vpnDesktop";
+import { vpnReturnToResume } from "./vpnConfig";
 import { RankRewards, useRewards } from "./rewards";
 import "./rewards.css";
 
@@ -46,10 +47,11 @@ function ago(iso: string | null | undefined): string {
 /** A connection that came back with an error (?error=…&code=…&platform=…): shown on that account's row. */
 type LinkError = { platform: string; message: string; code: string } | null;
 
-/** Every sign-in ends here. If this tab was signing in to the Kiwi VPN app, it goes back to finish that, before the Passport loads. */
+/** Every sign-in ends here. If this tab was signing in to the Kiwi VPN app, it goes back to finish that, before the Passport loads.
+ *  If it signed in from the Kiwi VPN page (/join?next=/vpn), a fresh sign-in (?welcome=…) goes back there, once. */
 export function ProfilePage() {
   const [leaving] = useState(() => {
-    const page = desktopSignInToResume();
+    const page = desktopSignInToResume() ?? (param("welcome") ? vpnReturnToResume() : null);
     if (page) location.replace(page);
     return !!page;
   });

@@ -11,6 +11,7 @@ import {
 } from "./members";
 import { RankKiwi } from "./RankKiwi";
 import { InviteModal, useReferrals } from "./invite";
+import { rememberVpnReturn, vpnReturnPage } from "./vpnConfig";
 import { LoginPanel } from "./emailLogin";
 import { ConnectButton, PIcon, TelegramButton } from "./socialButtons";
 
@@ -49,6 +50,10 @@ export function JoinPage() {
   const [providers, setProviders] = useState<Providers | null>(null);
   const [invited, setInvited] = useState<{ welcome_xp: number } | null>(null);
   const error = param("error");
+  const [next] = useState(() => vpnReturnPage(param("next")));  // /join?next=/vpn: signing in from Kiwi VPN comes back to it (vpnConfig.ts)
+  useEffect(() => {
+    if (next) rememberVpnReturn(next);
+  }, [next]);
   useEffect(() => {
     void memberApi<Providers>("/members/auth/providers").then(setProviders).catch(() => setProviders(null));
   }, []);
@@ -60,8 +65,8 @@ export function JoinPage() {
     }).then((r) => r.valid && !r.signed_in && setInvited({ welcome_xp: r.welcome_xp ?? 0 })).catch(() => undefined);
   }, [code]);
   useEffect(() => {
-    if (member) location.replace("/passport");
-  }, [member]);
+    if (member) location.replace(next ?? "/passport");  // already signed in: straight back to Kiwi VPN when that's where they came from
+  }, [member, next]);
   const emailOn = providers ? !!providers.email?.available : null;
   return (
     <SitePage {...pageHead("join")}>
