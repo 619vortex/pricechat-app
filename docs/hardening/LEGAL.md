@@ -49,21 +49,31 @@ text (or with an empty clause where it says "remove"), run the frontend tests, a
 
 ## Handling a cancellation (Admin)
 
-Refund the unused part in NOWPayments, then Admin › Kiwi VPN › Payments › Record refund. Record refund takes back the payment's
-**whole** time. That's right when it's the only or the latest payment. If later paid time is queued after it, credit the used part
-back by hand (Credit by hand) so the later payment's time isn't cut.
+Since 2026-11-17 the Admin action does what `/vpn/refunds` says (`billing.refund_quote` / `refund_by_hand`, tests in
+`backend/tests/test_vpn_refunds.py`):
+
+1. Admin › Kiwi VPN › Payments › **Record refund** first shows the quote (nothing changes yet): days paid, days unused, their value
+   at that payment's own rate, whether the start-now box was ticked, and the 14-day deadline.
+2. Choose **cancellation** (within 14 days: the unused part, we pay the network fee; the **whole payment** if there's no start-now
+   consent on record) or **other** (a fault on our side or closing the service: the unused part, less fees). After 14 days only
+   "other" is possible.
+3. Send the money yourself (NOWPayments or the wallet). Then enter the USD amount actually sent: it can't be more than the policy
+   allows. Only that payment's unused days end; used days and later payments' days are untouched.
+4. It's recorded once: a second click, a second admin, or NOWPayments' own "refunded" message afterwards changes nothing. Each
+   refund leaves an audit row (`vpn_payment_refund`). No money moves from the app.
 
 ## Deploy
 
 Backend and frontend together (the backend refuses a payment without `start_now`; the old website doesn't send it, and payments are
 in test mode, so the gap only affects the owner's own test). `railway up` from the worktree, then Vercel. No migration. SEO heads unchanged.
 
-## Owner checklist (2026-11-17: placeholders are never published)
+## Owner checklist (2026-11-17: no placeholders, no stand-in identity)
 
-Since 2026-11-17 a missing fact is left out of the published text (`withoutOwnerGaps` in `frontend/src/website/community.tsx`):
-the pages name "the Price Chat team" and send people to Telegram/X until these are filled in. Fill each in the `OWNER` map
-(same file), run `npx vitest run src/website`, deploy. Public payments (`VPN_PAYMENTS_PUBLIC`) stay off until all are done and a
-lawyer has read the pages.
+No "[OWNER: …]" placeholder is published, nothing is invented, and "the Price Chat team" is never offered as the trader's legal
+identity. Each Kiwi VPN page that still lacks facts opens with a "Not yet published" notice naming every missing item, and the text
+says plainly what isn't published yet (`withoutOwnerGaps` and `MissingOwnerFacts` in `frontend/src/website/community.tsx`).
+Fill each in the `OWNER` map (same file), run `npx vitest run src/website`, deploy: the notice disappears by itself once all are
+filled. Public payments (`VPN_PAYMENTS_PUBLIC`) stay off until all are done and a lawyer has read the pages.
 
 1. Legal entity or trader name
 2. Postal address

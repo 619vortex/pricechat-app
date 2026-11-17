@@ -57,8 +57,8 @@ Whether it is the **right** secret is only proven by step 5.
    `railway logs` from `C:\AI\price-chat\backend`, search for `vpn: NOWPayments webhook`.
 6. **Compare with NOWPayments.** The dashboard shows the payment `finished` with the same amount; Admin › VPN › Payments shows it
    credited with the same USD amount and days.
-7. **Optional refund drill.** Refund it in the NOWPayments dashboard, then Admin › VPN › payment › Record refund. All of that
-   payment's days are taken off the account (`refund_by_hand` takes back the whole payment, not part of it).
+7. **Optional refund drill.** Admin › VPN › payment › Record refund shows the quote first (unused days and their value). Send that
+   amount back yourself, then record it with the amount actually sent: only the unused days end (LEGAL.md, "Handling a cancellation").
 8. **Switch payments off again** (or leave them in test mode). A payment already started still gets credited.
 
 ## Going public (later, owner's decision)
