@@ -120,7 +120,12 @@ NOT_A_TOPIC = re.compile(r"\b(what happened in|from the archives|week in review|
                          # first-person and behind-the-scenes features (2026-11-16 production: "'It is not unusual to go 48 hours with little sleep':
                          # what it's like to cover a Cop climate summit" led the COP31 topic and went out as trend post 152)
                          r"|\bwhat it(?:['’]s| is| was) like\b|\ba day in the life\b|\bbehind the scenes\b|\blife (?:as|inside) an?\b|\bdiary\b|"
-                         r"\bfirst[- ]person\b|\bi (?:spent|tried|covered|went|lived)\b|\bmy (?:week|day|year|life) (?:as|in|at|with)\b|\bpostcard from\b", re.I)
+                         r"\bfirst[- ]person\b|\bi (?:spent|tried|covered|went|lived)\b|\bmy (?:week|day|year|life) (?:as|in|at|with)\b|\bpostcard from\b"
+                         # shopping deals are not news (production 2026-11-17 08:23: "PlayStation Black Friday sale takes $100 off PS VR2 and
+                         # more" topped Trending at 74.0). "Black Friday sales slump" and "Apple cuts iPhone prices in China" stay news.
+                         r"|\b(?:takes|knocks|save|saves|get|gets) [$€£]\d[\d,.]*\s?off\b|[$€£]\d[\d,.]*\s?off\b|\bdeals? (?:on|of the day)\b|\bbest\b.{0,40}\bdeals?\b"
+                         r"|\b(?:black friday|cyber monday|prime day|boxing day)\b.{0,40}\b(?:deals?|sale|discounts?|offers?|bargains?)\b(?!.{0,20}\b(?:slump|fall|record|spending|retailers|sales data)\b)"
+                         r"|\blowest price ever\b|\bdrops? to (?:its )?(?:lowest|[$€£]\d)", re.I)
 
 
 def topical(title: str) -> bool:

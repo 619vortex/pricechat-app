@@ -202,3 +202,15 @@ def test_an_explainer_led_topic_gets_no_incident_boost() -> None:
     _, parts = rank.score(c, NOW)
     assert not parts["incident"]["major"]
     assert parts["impact"] < 13.5 and parts["surprise"] < 6
+
+
+def test_shopping_deals_are_not_topics_but_retail_news_is() -> None:
+    """Production 2026-11-17 08:23: "PlayStation Black Friday sale takes $100 off PS VR2 and more" topped Trending at 74.0."""
+    from app.trending import sources
+
+    for deal in ["PlayStation Black Friday sale takes $100 off PS VR2 and more", "Best Black Friday deals on AirPods",
+                 "Amazon Black Friday deal: Kindle drops to $80", "Save $200 off the Galaxy S26 this week"]:
+        assert not sources.topical(deal), deal
+    for news in ["Black Friday sales slump as shoppers pull back", "Apple cuts iPhone 17 price in China by 10%",
+                 "Retailers brace for record Black Friday spending", "Bitcoin drops 8% to $66,000"]:
+        assert sources.topical(news), news
