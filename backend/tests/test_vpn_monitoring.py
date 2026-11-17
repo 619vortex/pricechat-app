@@ -44,13 +44,16 @@ def test_bandwidth_alerts_once_at_80_and_once_at_100_percent_each_month(db: Sess
     dev = vpn.create_device(db, member_at(db, "egg", "u1"), "pc", s.id)[0]
     now = utcnow()
     run = lambda: asyncio.run(alerts.check_vpn_servers(db, settings=SETTINGS, transport=tg.transport, now=now))  # noqa: E731
+    # the last BANDWIDTH message: from mid-month on, the same check may also send the separate "traffic forecast" (pace) alert
+    # after it, so tg.sent[-1] would depend on the day of the month
+    last = lambda: [m["text"] for m in tg.sent if "server bandwidth" in m["text"]][-1]  # noqa: E731
     _use(db, dev, 500, now)
     assert run()["vpn_traffic"] == 0
     _use(db, dev, 810, now)
-    assert run()["vpn_traffic"] == 1 and "at 80%" in tg.sent[-1]["text"] and "810 GB of 1000 GB" in tg.sent[-1]["text"]
+    assert run()["vpn_traffic"] == 1 and "at 80%" in last() and "810 GB of 1000 GB" in last()
     assert run()["vpn_traffic"] == 0  # not again
     _use(db, dev, 1001, now)
-    assert run()["vpn_traffic"] == 1 and "billed" in tg.sent[-1]["text"]
+    assert run()["vpn_traffic"] == 1 and "billed" in last()
     assert run()["vpn_traffic"] == 0
     vpn.update_server(db, s.id, {"traffic_included_gb": 0})  # off
     _use(db, dev, 5000, now)
