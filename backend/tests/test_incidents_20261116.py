@@ -413,3 +413,9 @@ def test_rumours_and_explainers_stay_out_of_the_incident_panel(db: Session) -> N
     assert not (s.state or {}).get("incidents")
     assert incidents.detect("Will there be a blackout this week?National Grid update as rumours shared online") is None or \
         not incidents.detect("Will there be a blackout this week?National Grid update as rumours shared online").major
+
+
+def test_a_feature_about_an_outage_is_not_the_outage() -> None:
+    """Production 2026-11-17 05:19: a New York Times feature days after the Microsoft outage was recorded as a major incident."""
+    inc = incidents.detect("The Chaos and Unexpected Joys of a 19-Hour Global Email Outage")
+    assert inc is None or not inc.major

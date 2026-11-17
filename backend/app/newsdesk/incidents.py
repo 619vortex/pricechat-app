@@ -110,7 +110,9 @@ AFTERMATH = _rx(r"\b(what (?:we know|to know|caused|happened)|explain\w*|why (?:
                 r"modernization|moderni[sz]e|aging|ageing|tiger team|head off another|prevent another|after (?:friday|thursday|monday|tuesday|wednesday|saturday|sunday)(?:'s|’s)? |"
                 r"after last week|highlights?|shows? (?:dependence|how)|vulnerabilit\w+|fragile|questions? (?:remain|raised)|theor(?:y|ies)|"
                 r"so (?:they|he|she|we) |bought a|buys? a|drove|drives? \d+|road trip|stranded passengers? share|key test|"
-                r"who is|what is|inside |opinion|analysis|could everything|wonder|cost of|bill for|lawsuits? over|compensation)\b")
+                r"who is|what is|inside |opinion|analysis|could everything|wonder|cost of|bill for|lawsuits? over|compensation|"
+                # production 2026-11-17: "The Chaos and Unexpected Joys of a 19-Hour Global Email Outage" (a feature, days later)
+                r"joys?|the chaos (?:and|of)|surviv\w+|learned|life without|\d+-hour (?:global )?(?:email |internet )?outage)\b")
 # reassurance and denials are not the incident ("U.S. Bank systems are not directly impacted")
 REASSURE = _rx(r"\b(not (?:directly )?(?:impacted|affected)|unaffected|no (?:outage|disruption|impact)|working normally|operating normally|denies (?:outage|any)|"
                # "Coinbase says 99% of customer crypto is offline and out of hackers' reach": cold storage, not an outage
