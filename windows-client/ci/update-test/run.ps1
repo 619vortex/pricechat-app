@@ -3,7 +3,8 @@
 #   keys, the "test" channel, host kiwi-update.test and the throwaway certificate pinned at build time), serve test manifests from a
 #   local HTTPS server, check every refusal, then update to this build's 2.2.0 (signed with the pinned throwaway certificate) and
 #   check the service, the kept tunnel folder, the protected state and the kill switch afterwards.
-# Nothing here touches pricechat.live or any real key. The runner is thrown away afterwards.
+# Nothing here touches any real key, nor pricechat.live (except step 7 once the owner's public keys are in the build: one GET of the
+# public manifest). The runner is thrown away afterwards.
 #   powershell -File run.ps1 -Build <public build artifact> -UpTest <update-test artifact> -Tools <test tools> [-Report file]
 param([Parameter(Mandatory)] [string]$Build, [Parameter(Mandatory)] [string]$UpTest, [Parameter(Mandatory)] [string]$Tools, [string]$Report = "update-report.json")
 $ErrorActionPreference = "Stop"
@@ -179,9 +180,18 @@ $null = Ask disconnect
 $back = Wait-Until 15 { Online }
 Row "after the update: Disconnect gives the internet back" ([bool]$back) ""
 
-# --- 7. the public build itself refuses every manifest until the owner's keys are in ------------------------------------------
+# --- 7. the public build's own keys ----------------------------------------------------------------------------------------------
+# Without the owner's keys (PRODUCTION_KEYS all zero in update.rs) it refuses every manifest and says so. With them it is a real
+# build: it asks pricechat.live's manifest (404 until the first publish: "Couldn't check"), so only check that the keys are active
+# and nothing failed. A row pinned to "no keys" would turn CI red the day the owner pastes them.
 $s = Ask check
-Row "the public 2.2.0 build has no manifest keys yet and offers nothing" ($s.update.state -eq "unknown" -and "$($s.update.error)" -like "*aren't set up*") "state $($s.update.state), says: $($s.update.error)"
+$updateRs = Get-Content (Join-Path $Here "..\..\service\src\update.rs") -Raw
+$prodKeys = [regex]::Match($updateRs, 'pub const PRODUCTION_KEYS: &\[Key\] = &\[(?s:.*?)\];').Value
+if ($prodKeys -and $prodKeys -notmatch '\[0; 32\]') {
+    Row "the public 2.2.0 build has the owner's manifest keys" ("$($s.update.error)" -notlike "*aren't set up*" -and $s.update.state -ne "failed") "state $($s.update.state), says: $($s.update.error)"
+} else {
+    Row "the public 2.2.0 build has no manifest keys yet and offers nothing" ($s.update.state -eq "unknown" -and "$($s.update.error)" -like "*aren't set up*") "state $($s.update.state), says: $($s.update.error)"
+}
 
 Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
 Get-Content "$Site\requests.log" -ErrorAction SilentlyContinue | Select-Object -Last 40

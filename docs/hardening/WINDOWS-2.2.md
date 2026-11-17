@@ -60,8 +60,10 @@ Exact test counts (final run):
 1. **Generate the update keys offline** on the main PC: `powershell -ExecutionPolicy Bypass -File windows-client\tools\new-update-key.ps1`.
    Paste the two printed public-key lines into `PRODUCTION_KEYS` (`windows-client/service/src/update.rs`) and commit. Back up
    k1.pem/k2.pem offline (password manager + encrypted USB), then delete them from the PC.
-2. **Create the `kiwi-publish` environment** in 619vortex/KIWIVPN (deployment branches: main only); secret `KIWI_MANIFEST_KEY` =
-   the text of k1.pem. k2 never goes online.
+2. **Keep k1 offline (changed 2026-11-17, feat/kiwi-sec).** Don't create `kiwi-publish` / `KIWI_MANIFEST_KEY` yet: the "Publish
+   update" workflow that would use it doesn't exist, required reviewers need GitHub Pro on a private repo, and this PC's deploy key
+   can push to KIWIVPN `main`, so a workflow edit could read any environment secret. Sign each manifest on the main PC instead
+   (Release steps 3). Revisit when the publish workflow is built and the environment can require the owner's approval.
 3. **Record the certificate's SHA-256** from a signed build (Get-AuthenticodeSignature ... SignerCertificate, SHA-256 of RawData)
    and add it to the pin (`Pin { sha1, sha256: Some(..) }`) if wanted.
 4. **Signed build**: merge to main, sync to KIWIVPN main (sync-ci-repo.ps1), run the workflow by hand with `sign` ticked, check
@@ -74,7 +76,12 @@ Exact test counts (final run):
 2. Publish the signed 2.2.0 installer by hand as today at `downloads/KiwiVPN-Setup.exe` (2.1 users install it once).
 3. For later releases: `node windows-client/tools/sign-update-manifest.mjs --key k1.pem --key-id k1 --installer <signed exe>
    --version 2.2.1 --seq <next> --rollout 100` → upload `stable.json` and `KiwiVPN-2.2.1-Setup.exe` to
-   `public/downloads/kiwi/windows/`, deploy; raise `--rollout` (new `seq`) over days. Re-sign at least every 14 days (expiry).
+   `public/downloads/kiwi/windows/`, deploy; raise `--rollout` (new `seq`) over days. `--rollout` is basis points: 100 = 1 %,
+   10000 = everyone. Re-sign at least every 14 days (expiry; a lapsed manifest only means nothing is offered). Since 2026-11-17 the
+   tool refuses a key that isn't `PRODUCTION_KEYS`' entry for `--key-id`, or placeholder keys (tests: `node --test
+   windows-client/tools/sign-update-manifest.test.mjs`).
+   Certificate renewal (current one ends 2027-11-09): installs trust only the pinned thumbprint, so publish a manifest with the new
+   certificate in `pin_add` (signed by k1) BEFORE shipping an installer signed with the new certificate.
 4. Confirm Vercel serves `/downloads/kiwi/windows/*` with 200 and no redirect (the service refuses redirects).
 
 ## Rollback
@@ -99,3 +106,19 @@ generate the keys before the 2.2.0 signed build.
 - Recovery when an installer dies midway (`kiwivpn-service recover`, scheduled tasks) is implemented but not exercised in CI.
 - Boot-time WFP filters are best effort (the result is logged); a real reboot can't be tested on a CI runner.
 - Signed server list is verified but not enforced on connect.
+
+## Re-verified 2026-11-17 (feat/kiwi-sec)
+
+- Live `https://pricechat.live/downloads/KiwiVPN-Setup.exe`: 3,771,632 bytes, SHA-256 `660c2d5b…387668c3` (= `WINDOWS_BETA`),
+  ProductVersion 2.1.0, Authenticode Valid, signer `0C24831B…3559` (Avigad Saadia, until 2027-11-09), timestamped.
+  `/downloads/kiwi/windows/stable.json` 404 (no manifest published, as expected).
+- KIWIVPN (read-only API): `main` a1d5997 (2.1.0, run 42802154197 success); `kiwi-22` 900aca4 = source 0f706ad, the same
+  windows-client/ as this branch, **never run** (last run 43685983005 on 4fa06b6: build, upgrade, update-test success, kill-switch
+  "cancelled" = the runner artefact above, e2e skipped). Environments: `kiwi-build`, `windows-signing` (branch policy only);
+  no `kiwi-publish`.
+- Fixed here (Rust and run.ps1 not compiled/run locally: CI only): pasting the real keys would have turned CI red twice:
+  `update.rs` test `placeholder_production_keys_refuse_everything` asserted PRODUCTION_KEYS are zero, and update-test row 7
+  required "aren't set up". Both now follow whichever keys the source holds; new test
+  `production_keys_are_both_placeholders_or_both_real` guards the paste. `sign-update-manifest.mjs` refuses a key that isn't
+  PRODUCTION_KEYS' `--key-id` (or placeholders) and gained `--pin-add` / `--revoke`, which the design needs for certificate
+  renewal and key rotation but the tool couldn't write (8 node tests).

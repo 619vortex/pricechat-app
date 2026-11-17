@@ -226,3 +226,19 @@ https://partner.microsoft.com/dashboard/microsoftedge (no API tool here; manual 
 LISTING.md. Edge assigns its own id at first upload: add `chrome-extension://<edge id>` to `VPN_EXTENSION_ORIGINS`, or
 sign-in from that install is refused. Edge is Chromium, so the `levelOfControl` checks and session storage work the same;
 the e2e harness takes `msedge.exe` as its browser argument if you want to run it there.
+
+## 12. Re-verified 2026-11-17 (feat/kiwi-sec)
+
+- Store (CWS update check for `jeadaadhacdikcbahliklcaaeaddeloa`): still serves **1.0.0** (CRX sha256 `d5d433ba…`). Nothing uploaded since.
+- `python vpn-extension/build.py` from this branch's source rebuilds `kiwi-vpn-chrome-1.0.5.zip` byte for byte:
+  sha256 `da6e0e83ad28b6d4b1927dd4d5df807ac049177c0d2244654c4a9c1bc9e4e1a9` = `store/releases/1.0.5.json` = the ZIP in
+  D:/pc-wt/kiwi-ext-105. `vpn-extension/` here is identical to feat/kiwi-ext-105.
+- Tests: `node --test vpn-extension/lib.test.js vpn-extension/store/cws.test.mjs` 27/27; browser e2e
+  (`node vpn-extension/e2e/run.mjs <venv python> %LOCALAPPDATA%\ms-playwright\chromium-1243\chrome-win64\chrome.exe <shots>`) 48/48.
+- Production: `chrome-extension://jeadaadhacdikcbahliklcaaeaddeloa` gets 401 "Please sign in" on `/api/members/vpn/browser` (allowed),
+  an unknown ID 403; `/vpn/privacy` already carries the 1.0.5 wording (password in memory only); still has the "Draft" banner.
+- Website `STORE_LINKS.chrome` = `https://chromewebstore.google.com/detail/jeadaadhacdikcbahliklcaaeaddeloa` (unchanged; no edit needed
+  for an update of the same item). Testers' ZIP `frontend/public/downloads/kiwi-vpn-extension.zip` rebuilt to 1.0.5 on this branch
+  (was 1.0.3), so running build.py in the release checkout leaves no diff.
+- Release tool (feat/kiwi-cws-release ca59dcc) is merged. Blockers are all owner-side: `vpn-extension/store/cws.json` `publisherId` is
+  empty and `%APPDATA%\KiwiVPN\cws-service-account.dpapi` does not exist (setup steps 1-8 in section 7 not done).

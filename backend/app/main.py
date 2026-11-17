@@ -392,6 +392,12 @@ def create_app(
 
     from app.observability import ErrorWindow, RequestObserver
 
+    from app.security.headers import SecurityHeaders
+
+    # nosniff / frame / referrer (+ HSTS in production) on every response, also the ones that reach api.pricechat.live directly,
+    # never through Vercel's header rules; outside admin_guard and CORS, so their 401/403/429 answers carry them too
+    app.add_middleware(SecurityHeaders, hsts=app_settings.is_production)
+
     # outermost (added last): one log line + X-Request-ID per request, and the 5xx window the watchdog alerts on
     app.state.http_errors = ErrorWindow()
     app.add_middleware(RequestObserver, window=app.state.http_errors)

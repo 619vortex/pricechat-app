@@ -771,13 +771,36 @@ pub(crate) mod tests {
         assert!(!trusted_keys().iter().any(|k| TEST_KEYS.iter().any(|t| t.public == k.public)), "no test key in a public build");
     }
 
+    /// What PRODUCTION_KEYS holds until the owner pastes k1 and k2. A local copy, so these tests keep passing (and keep checking
+    /// the placeholder rule) once the real keys are in: a test pinned to PRODUCTION_KEYS being zero would turn CI red at that moment.
+    const PLACEHOLDER_KEYS: &[Key] = &[Key { id: "k1", public: [0; 32] }, Key { id: "k2", public: [0; 32] }];
+
     #[test]
     fn placeholder_production_keys_refuse_everything() {
-        assert!(!keys_configured(PRODUCTION_KEYS), "until the owner generates them");
+        assert!(!keys_configured(PLACEHOLDER_KEYS));
         assert!(keys_configured(TEST_KEYS));
         let m = signed(&manifest("2.2.1"));
         let as_k1 = String::from_utf8(m).unwrap().replace("\"t1\"", "\"k1\"");
-        assert_eq!(open_envelope(as_k1.as_bytes(), UPDATE_PREFIX, PRODUCTION_KEYS, &[]).unwrap_err(), Refused::KeyNotSet);
+        assert_eq!(open_envelope(as_k1.as_bytes(), UPDATE_PREFIX, PLACEHOLDER_KEYS, &[]).unwrap_err(), Refused::KeyNotSet);
+        if !keys_configured(PRODUCTION_KEYS) {
+            assert_eq!(open_envelope(as_k1.as_bytes(), UPDATE_PREFIX, PRODUCTION_KEYS, &[]).unwrap_err(), Refused::KeyNotSet);
+        }
+    }
+
+    /// Guards the owner's paste (tools/new-update-key.ps1 prints both lines): k1 then k2, both set or neither, real Ed25519
+    /// points, different from each other and from the test keys.
+    #[test]
+    fn production_keys_are_both_placeholders_or_both_real() {
+        assert_eq!(PRODUCTION_KEYS.iter().map(|k| k.id).collect::<Vec<_>>(), vec!["k1", "k2"]);
+        let set = PRODUCTION_KEYS.iter().filter(|k| k.public != [0; 32]).count();
+        assert!(set == 0 || set == PRODUCTION_KEYS.len(), "paste k1 and k2 together");
+        if set > 0 {
+            for k in PRODUCTION_KEYS {
+                assert!(VerifyingKey::from_bytes(&k.public).is_ok(), "{} isn't an Ed25519 public key", k.id);
+                assert!(!TEST_KEYS.iter().any(|t| t.public == k.public), "{} is a TEST key", k.id);
+            }
+            assert_ne!(PRODUCTION_KEYS[0].public, PRODUCTION_KEYS[1].public, "k1 and k2 must be different keys");
+        }
     }
 
     #[test]

@@ -23,7 +23,8 @@ def _bip39() -> frozenset[str]:
     try:
         text = resources.files("eth_account.hdaccount").joinpath("wordlist/english.txt").read_text(encoding="utf-8")
         return frozenset(w.strip() for w in text.split() if w.strip())
-    except (FileNotFoundError, ModuleNotFoundError, OSError):
+    except (FileNotFoundError, ImportError, OSError):  # ImportError, not only ModuleNotFoundError: a blocked or broken native
+        # dependency of eth_account (bitarray) raised out of this logging filter and failed the caller's log line
         return frozenset()
 
 

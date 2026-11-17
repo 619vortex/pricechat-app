@@ -12,7 +12,8 @@ useDefault = true
 description = "Triaged false positives: test fixtures, public keys and published contract addresses"
 paths = [
   # WireGuard test keys in Windows client tests/examples
-  '''^windows-client/service/(examples|tests)/(guard_check|fake_service)\.rs$''',
+  # (update_client: TEST-NET-1 tunnel config, the same throwaway keys as guard_check; triaged 2026-11-17)
+  '''^windows-client/service/(examples|tests)/(guard_check|fake_service|update_client)\.rs$''',
   '''^windows-client/client/src/tune\.rs$''',
   # iOS / Android unit-test fixtures (generated throwaway keys)
   '''^ios-client/Packages/KiwiCore/Tests/''',
@@ -22,7 +23,8 @@ paths = [
   # Hyperliquid token IDs in a recorded public API response
   '''^fundarb/tests/fixtures/hl_spot_meta_tokens\.json$''',
   # Backend/frontend tests with dummy values (eth-account docs keys, fake Telegram hash, fake OAuth signature)
-  '''^backend/tests/(test_client_ip|fakes|test_market_wallets|test_x_social)\.py$''',
+  # (test_vpn_hardening: the dummy PROXY_SHARED_SECRET "edge-secret-for-tests-..."; triaged 2026-11-17)
+  '''^backend/tests/(test_client_ip|fakes|test_market_wallets|test_x_social|test_vpn_hardening)\.py$''',
   '''^frontend/src/pages/pokemon/marketplace/marketplace\.test\.tsx$''',
   # Tether's published USDT contract addresses
   '''^backend/app/market/payments\.py$''',
