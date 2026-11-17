@@ -38,10 +38,11 @@ REDDIT_PUBLIC = "https://www.reddit.com/r/{sub}/hot.json?limit={n}&raw_json=1"
 REDDIT_OAUTH = "https://oauth.reddit.com/r/{sub}/hot?limit={n}&raw_json=1"
 REDDIT_TOKEN = "https://www.reddit.com/api/v1/access_token"
 FAA_STATUS = "https://nasstatus.faa.gov/api/airport-status-information"
-NAMES = {"news": "News Desk feeds", "google": "Google Trends", "reddit": "Reddit", "x_trends": "X trends", "x_accounts": "X major accounts", "faa": "FAA airport status"}
+NAMES = {"news": "News Desk feeds", "google": "Google Trends", "reddit": "Reddit", "x_trends": "X trends", "x_accounts": "X major accounts", "faa": "FAA airport status",
+         "status": "Official status pages"}
 # minutes between two reads of a source (the scan itself runs every job_trending_seconds)
 # Google's RSS is free (every 5 min since 2026-11-17: an outage trends within minutes; 288 requests a day per country); X reads are paid
-INTERVAL = {"news": 0, "google": 5, "reddit": 15, "x_trends": 60, "x_accounts": 60, "faa": 5}
+INTERVAL = {"news": 0, "google": 5, "reddit": 15, "x_trends": 60, "x_accounts": 60, "faa": 5, "status": 5}
 # outlets whose reporting may back a factual claim (plus every News Desk feed's own name)
 RELIABLE_OUTLETS = {"reuters", "associated press", "ap news", "ap", "bloomberg", "financial times", "ft", "wall street journal", "wsj",
                     "the wall street journal", "cnbc", "bbc", "bbc news", "the guardian", "new york times", "the new york times", "npr",
@@ -70,6 +71,7 @@ DEFAULT_SOURCES: dict[str, dict[str, Any]] = {
     "x_trends": {"on": False, "woeid": 1},  # $0.010 a request on X's pay-per-use: off until the owner turns it on
     "x_accounts": {"on": False, "accounts": DEFAULT_ACCOUNTS, "max_posts": 20},
     "faa": {"on": True, "min_airports": 5},
+    "status": {"on": True},  # app/trending/status_feeds: providers' own status pages, free, official
 }
 
 Item = dict[str, Any]

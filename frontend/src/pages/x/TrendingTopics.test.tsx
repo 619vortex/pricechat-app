@@ -144,3 +144,18 @@ describe("IncidentsCard", () => {
     expect(screen.getByText(/Dropped by the News Desk/)).toBeTruthy();
   });
 });
+
+describe("LedgerCard", () => {
+  afterEach(cleanup);
+  it("shows each event's detection, verification and publication latency", async () => {
+    const { LedgerCard } = await import("./TrendingTopics");
+    render(<LedgerCard ledger={{ events: 1, measured_live: 1, published: 1, detect: { median: 13, max: 13, n: 1 }, verify: { median: 19, max: 19, n: 1 }, publish: { median: 24, max: 24, n: 1 },
+      rows: [{ topic_id: 1, title: "Cloudflare outage takes down thousands of websites", kind: "cloud, email or app outage", first_report: "2026-11-17T05:41:00+00:00", first_source: null,
+        detected: "2026-11-17T05:54:00+00:00", verified: "2026-11-17T06:00:00+00:00", crossed: null, published: "2026-11-17T06:05:00+00:00", via: "trend post 9 (published)",
+        peak_score: 80, status: "published", reason: "", backfilled: false, latency_min: { detect: 13, verify: 19, publish: 24, detect_to_publish: 11 } }] }} />);
+    expect(screen.getByText(/Production latency \(1 significant events, 1 measured live\)/)).toBeTruthy();
+    expect(screen.getByText("+13 min")).toBeTruthy();
+    expect(screen.getByText("+24 min")).toBeTruthy();
+    expect(screen.getByText("trend post 9 (published)")).toBeTruthy();
+  });
+});

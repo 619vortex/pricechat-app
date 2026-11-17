@@ -46,7 +46,7 @@ ENTITIES: dict[str, dict[str, re.Pattern[str]]] = {
     "payments": {
         "Zelle": _rx(r"\bzelle\b"), "Venmo": _rx(r"\bvenmo\b"), "PayPal": _rx(r"\bpaypal\b"), "Cash App": _rx(r"\bcash app\b"),
         "Visa": _rx(r"\bvisa(?= (?:card|cards|payments?|network|outage|down|systems?)\b)|\bvisa's\b"), "Mastercard": _rx(r"\bmastercard\b"),
-        "American Express": _rx(r"\bamerican express\b|\bamex\b"), "Stripe": _rx(r"\bstripe\b"), "Square": _rx(r"\bsquare (?:outage|payments?|down)\b"),
+        "American Express": _rx(r"\bamerican express\b|\bamex\b"), "Stripe": _rx(r"\bstripe\b"), "Square": _rx(r"\bsquare (?:outage|payments?|down|confirms)\b"),
         "Fedwire": _rx(r"\bfedwire\b"), "SWIFT": _rx(r"\bswift (?:network|payments?|system|messaging)\b"), "Plaid": _rx(r"\bplaid\b"),
         "Apple Pay": _rx(r"\bapple pay\b"), "Google Pay": _rx(r"\bgoogle pay\b"),
     },
@@ -56,6 +56,8 @@ ENTITIES: dict[str, dict[str, re.Pattern[str]]] = {
         "Coinbase": _rx(r"\bcoinbase\b"), "Binance": _rx(r"\bbinance\b"), "Kraken": _rx(r"\bkraken\b"), "Robinhood": _rx(r"\brobinhood\b"),
         "Charles Schwab": _rx(r"\bschwab\b"), "Fidelity": _rx(r"\bfidelity\b"), "Interactive Brokers": _rx(r"\binteractive brokers\b"),
         "Bybit": _rx(r"\bbybit\b"), "OKX": _rx(r"\bokx\b"), "Hyperliquid": _rx(r"\bhyperliquid\b"),
+        "Gemini": _rx(r"\bgemini(?: exchange)?(?= confirms| exchange| outage| users| customers| trading)"), "Crypto.com": _rx(r"\bcrypto\.com\b"),
+        "Bitstamp": _rx(r"\bbitstamp\b"),
     },
     "aviation": {
         "FAA": _rx(r"\bfaa(?:'s|’s)?\b|\bfederal aviation administration\b"), "air traffic control": _rx(r"\bair traffic control\w*\b|\bair traffic controllers?\b"),
@@ -71,6 +73,7 @@ ENTITIES: dict[str, dict[str, re.Pattern[str]]] = {
         "Cloudflare": _rx(r"\bcloudflare\b"), "CrowdStrike": _rx(r"\bcrowdstrike\b"), "Oracle": _rx(r"\boracle cloud\b"), "Salesforce": _rx(r"\bsalesforce\b|\bslack\b"),
         "GitHub": _rx(r"\bgithub\b"), "Akamai": _rx(r"\bakamai\b"), "Fastly": _rx(r"\bfastly\b"), "Apple": _rx(r"\bicloud\b|\bapple (?:services|outage)\b"),
         "Meta": _rx(r"\b(?:facebook|instagram|whatsapp)\b"), "X": _rx(r"\bx \(formerly twitter\)|\btwitter\b"), "OpenAI": _rx(r"\bchatgpt\b|\bopenai\b"), "Zoom": _rx(r"\bzoom\b"),
+        "DigitalOcean": _rx(r"\bdigitalocean\b"), "Twilio": _rx(r"\btwilio\b"),
     },
     "telecom": {
         "AT&T": _rx(r"\bat&t\b|\bat&amp;t\b"), "Verizon": _rx(r"\bverizon\b"), "T-Mobile": _rx(r"\bt-mobile\b"), "Comcast": _rx(r"\bcomcast\b|\bxfinity\b"),

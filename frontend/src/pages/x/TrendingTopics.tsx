@@ -36,7 +36,13 @@ export type Trending = { settings: TrendSettings; last_run: (Record<string, unkn
   latency?: { event_to_publish: LatencyStat; detect_to_publish: LatencyStat; written_to_publish: LatencyStat; recent: Latency[] };
   writer: "model" | "rules"; x: { configured: boolean; can_write: boolean; status: string; last_ok: Record<string, unknown> | null; last_error: { at: string; message: string } | null };
   cost: { per_post_usd: number; x_trends_per_request_usd: number; x_post_read_usd: number };
-  incidents?: Incident[]; missed?: Missed[] };
+  incidents?: Incident[]; missed?: Missed[]; ledger?: Ledger };
+/** Production latency of significant events (peak at the automatic line, or a major incident), measured from our own data. */
+export type LedgerRow = { topic_id: number; title: string; kind: string; first_report: string | null; first_source: string | null; detected: string | null;
+  verified: string | null; verified_note?: string; crossed: string | null; published: string | null; via: string | null; peak_score: number; status: string; reason: string;
+  backfilled: boolean; latency_min: { detect: number | null; verify: number | null; publish: number | null; detect_to_publish: number | null } };
+type LedgerStat = { median: number; max: number; n: number } | null;
+export type Ledger = { events: number; measured_live: number; published: number; detect: LedgerStat; verify: LedgerStat; publish: LedgerStat; rows: LedgerRow[] };
 /** A major infrastructure incident Trending saw (banking, payments, exchanges, groundings, cloud, cyber): when, how it scored, what happened. */
 export type Incident = { topic_id: number; title: string; category: string; kind: string; label: string; entities: string[]; major: boolean; verified: boolean;
   evidence: string; event_time: string; first_detected: string; detect_lag_min: number | null; score: number; peak_score: number; outlets: number; status: string;
@@ -46,7 +52,7 @@ export type Missed = { story: string; date: string; event_time: string | null; e
   first_in_feeds_note: string; score: number | null; stage: string; reason: string; now: string };
 
 const CATEGORY: Record<string, string> = { crypto: "Crypto", stocks: "Stocks", markets: "Markets", geopolitics: "Geopolitics", technology: "Technology", world: "World events" };
-const SOURCE: Record<string, string> = { news: "News", google: "Google Trends", faa: "FAA airport status", reddit: "Reddit", x_trends: "X trends", x_accounts: "X accounts" };
+const SOURCE: Record<string, string> = { news: "News", google: "Google Trends", status: "Official status pages", faa: "FAA airport status", reddit: "Reddit", x_trends: "X trends", x_accounts: "X accounts" };
 const HEALTH_TONE: Record<string, Tone> = { ok: "good", error: "bad", unavailable: "warn", off: "neutral", idle: "info" };
 const STATUS_TONE: Record<string, Tone> = { pending: "info", queued: "info", held: "warn", dry_run: "neutral", published: "good", failed: "bad", uncertain: "warn", rejected: "neutral", expired: "neutral" };
 const utc = (iso: string | null | undefined): string => (iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : "-");
@@ -79,6 +85,33 @@ export function IncidentsCard({ incidents, missed }: { incidents: Incident[]; mi
               <td><Badge tone="warn">{m.stage}</Badge><div className="small">{m.reason}</div></td>
               <td className="small">{m.now}</td>
             </tr>))}</tbody></table></>}
+    </Card>
+  );
+}
+
+const plus = (n: number | null | undefined): string => (n === null || n === undefined ? "-" : `+${minutes(n)}`);
+
+/** Admin › Trending › Production latency: each significant event's first report, detection, verification and publication. */
+export function LedgerCard({ ledger }: { ledger: Ledger }) {
+  return (
+    <Card title={`Production latency (${ledger.events} significant events, ${ledger.measured_live} measured live)`}>
+      <div className="stats">
+        <Stat label="Report → detected (median)" value={minutes(ledger.detect?.median)} hint={`worst ${minutes(ledger.detect?.max)} · ${ledger.detect?.n ?? 0} events`} />
+        <Stat label="Report → verified (median)" value={minutes(ledger.verify?.median)} hint={`worst ${minutes(ledger.verify?.max)}`} />
+        <Stat label="Report → published (median)" value={minutes(ledger.publish?.median)} hint={`${ledger.published} of ${ledger.events} published`} />
+      </div>
+      {ledger.rows.length === 0 ? <Empty>No significant event yet since the ledger started.</Empty> : (
+        <table className="table small"><thead><tr><th>Event</th><th>First report</th><th>Detected</th><th>Verified</th><th>Published</th><th>Outcome</th></tr></thead>
+          <tbody>{ledger.rows.map((r) => (
+            <tr key={r.topic_id}>
+              <td><strong>{r.title}</strong><div className="small muted">{r.kind} · peak {r.peak_score.toFixed(0)}{r.backfilled ? " · from before the ledger" : ""}</div></td>
+              <td>{utc(r.first_report)}</td>
+              <td>{plus(r.latency_min.detect)}</td>
+              <td>{r.verified ? plus(r.latency_min.verify) : (r.verified_note ?? "-")}</td>
+              <td>{r.published ? <>{plus(r.latency_min.publish)}<div className="small muted">{r.via}</div></> : "-"}</td>
+              <td><Badge tone={STATUS_TONE[r.status] ?? "neutral"}>{r.status}</Badge><div className="small">{r.reason}</div></td>
+            </tr>))}</tbody></table>)}
+      <p className="small muted">Minutes from the first report (the earliest publication, or an official status page's start time). Medians count only events measured live.</p>
     </Card>
   );
 }
@@ -248,6 +281,7 @@ export function TrendingTopics() {
         <p className="small muted">Measured on each trend post (sent or recorded in dry run). Event = the first report of the story; first seen = our first scan that read it. Scans run every 5 minutes.</p>
       </Card>}
 
+      {data.ledger && <LedgerCard ledger={data.ledger} />}
       <IncidentsCard incidents={data.incidents ?? []} missed={data.missed ?? []} />
 
       <Card title={`Trending now (${data.topics.length})`}>

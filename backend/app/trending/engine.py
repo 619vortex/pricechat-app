@@ -18,7 +18,7 @@ from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.trending import TtPost, TtSettings, TtSignal, TtTopic
 from app.newsdesk import checks
-from app.trending import coordinate, gates, learning, postmortem, rank, sensitive, sources, writer
+from app.trending import coordinate, gates, learning, postmortem, rank, sensitive, sources, status_feeds, writer
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,8 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
                 items, problem, meta = await sources.reddit(client, o, settings)
             elif name == "faa":
                 items, problem, meta = await sources.faa(client, o)
+            elif name == "status":
+                items, problem, meta = await status_feeds.read(client, now)
             else:
                 items, problem, meta = await sources.x_source(name, db, settings, runtime, o)
         except Exception as e:  # noqa: BLE001 - one source's bug never stops the others
@@ -711,6 +713,113 @@ def watch_incidents(db: Session, s: TtSettings, topics: list[TtTopic], now: date
     return lines
 
 
+# --- the latency ledger (owner, 2026-11-17: "for the next 10 significant events record event time, first source publication, first
+# detection, verification time, publication time or rejection reason; measure real detection and publication latency") ---------------
+# A significant event: a topic that reached the automatic line (peak >= hot_score) or a major incident. Every time is measured from our
+# own data: first_report = the earliest publication of anything in the topic (an official status page's start time when it has one),
+# first_source = the earliest reliable outlet's publication, detected = our first scan that read it, verified = the first scan that saw
+# enough evidence (an incident: incidents.verified; otherwise two independent outlets or an official source), published = the post's
+# time on X (or dry run), or the News Desk post that covered it, else the reason it never went out.
+LEDGER_KEEP = timedelta(days=7)
+LEDGER_MAX = 60
+TERMINAL = ("published", "dry_run", "uncertain", "expired", "rejected", "failed")
+
+
+def _mins(a: Any, b: Any) -> int | None:
+    try:
+        x = _aware(datetime.fromisoformat(str(a)))
+        y = _aware(datetime.fromisoformat(str(b)))
+    except (TypeError, ValueError):
+        return None
+    return int((y - x).total_seconds() // 60) if x and y else None  # type: ignore[operator]
+
+
+def _covered_by_desk(db: Session, reason: str) -> dict[str, Any] | None:
+    from app.models.newsdesk import NdPost
+
+    m = re.match(r"covered by the News Desk \(post (\d+)", reason or "")
+    if not m:
+        return None
+    p = db.get(NdPost, int(m.group(1)))
+    if p is None:
+        return None
+    return {"post": p.id, "status": p.status, "at": _iso(_aware(p.published_at)) if p.published_at else None}
+
+
+def watch_ledger(db: Session, s: TtSettings, topics: list[TtTopic], now: datetime) -> list[str]:
+    state = dict(s.state or {})
+    started = state.get("ledger_started") or now.isoformat()
+    book: dict[str, dict[str, Any]] = {str(e.get("topic_id")): e for e in state.get("ledger") or [] if isinstance(e, dict)}
+    pool = {t.id: t for t in topics}
+    for t in db.scalars(select(TtTopic).where(TtTopic.last_seen >= now - timedelta(hours=72), TtTopic.peak_score >= s.hot_score)):
+        pool.setdefault(t.id, t)
+    for k in list(book):  # keep following every entry until it is final
+        tid = int(k)
+        if tid not in pool and (t := db.get(TtTopic, tid)) is not None:
+            pool[tid] = t
+    rows = [t for t in pool.values() if (t.peak_score or 0) >= s.hot_score or ((t.parts or {}).get("incident") or {}).get("major") or str(t.id) in book]
+    posts: dict[int, TtPost] = {}
+    if rows:
+        for p in db.scalars(select(TtPost).where(TtPost.topic_id.in_([t.id for t in rows])).order_by(TtPost.id)):
+            posts[p.topic_id] = p
+    lines = []
+    for t in rows:
+        pa = t.parts or {}
+        tl = pa.get("timeline") or {}
+        inc = pa.get("incident") or {}
+        key = str(t.id)
+        old = book.get(key) or {}
+        p = posts.get(t.id)
+        status, reason = decision_of(t, p, s)
+        verified_now = bool(inc.get("verified")) if inc else bool(tl.get("verified"))
+        first_detected = _iso(_aware(t.first_seen)) or now.isoformat()
+        backfilled = old.get("backfilled", _mins(first_detected, started) is not None and (_mins(first_detected, started) or 0) > 10)
+        e = {"topic_id": t.id, "title": t.title[:200], "category": t.category, "kind": inc.get("label") or t.category,
+             "entities": inc.get("entities") or [], "first_report": old.get("first_report") or tl.get("first_report") or tl.get("event_time"),
+             "first_source": old.get("first_source") or tl.get("event_time"), "detected": old.get("detected") or first_detected,
+             "verified": old.get("verified") or (now.isoformat() if verified_now and not backfilled else None),
+             "crossed": old.get("crossed") or (now.isoformat() if (t.score or 0) >= s.hot_score and not backfilled else None),
+             "peak_score": max(float(old.get("peak_score") or 0), float(t.peak_score or 0)), "score": t.score, "outlets": tl.get("outlets", 0),
+             "status": status, "reason": reason[:240], "published": old.get("published"), "via": old.get("via"), "backfilled": backfilled,
+             "updated": now.isoformat()}
+        if e["verified"] is None and backfilled and verified_now:
+            e["verified_note"] = "verified before the ledger started"
+        if p is not None and p.status in ("published", "dry_run", "uncertain") and p.published_at:
+            e["published"], e["via"] = _iso(_aware(p.published_at)), f"trend post {p.id} ({p.status})"
+        elif (desk := _covered_by_desk(db, reason)) is not None and desk.get("at"):
+            e["published"], e["via"] = desk["at"], f"News Desk post {desk['post']} ({desk['status']})"
+        base = e["first_report"]
+        e["latency_min"] = {"detect": _mins(base, e["detected"]), "verify": _mins(base, e["verified"]) if e["verified"] else None,
+                            "publish": _mins(base, e["published"]) if e["published"] else None,
+                            "detect_to_publish": _mins(e["detected"], e["published"]) if e["published"] else None}
+        sig_old = (old.get("status"), old.get("reason"), old.get("verified"), old.get("published"))
+        if sig_old != (e["status"], e["reason"], e["verified"], e["published"]):
+            lt = e["latency_min"]
+            lines.append(f"trending ledger: topic {t.id} [{e['kind']}] \"{_safe(t.title, 70)}\" report {str(base or '')[5:16]}Z"
+                         f" | detected +{lt['detect']}m | verified {('+' + str(lt['verify']) + 'm') if lt['verify'] is not None else '-'}"
+                         f" | published {('+' + str(lt['publish']) + 'm via ' + str(e['via'])) if lt['publish'] is not None else '-'}"
+                         f" | peak {e['peak_score']:g} | {status}" + (f" ({_safe(reason, 80)})" if reason else "") + (" [backfilled]" if backfilled else ""))
+        book[key] = e
+    keep = [e for e in book.values() if _mins(e.get("updated"), now.isoformat()) is not None and (_mins(e.get("updated"), now.isoformat()) or 0) <= LEDGER_KEEP.total_seconds() / 60]
+    keep.sort(key=lambda e: str(e.get("first_report") or e.get("detected") or ""), reverse=True)
+    state["ledger"], state["ledger_started"] = keep[:LEDGER_MAX], started
+    s.state = state
+    db.commit()
+    return lines
+
+
+def ledger_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Medians over the entries measured live (not backfilled)."""
+    live = [r for r in rows if not r.get("backfilled")]
+
+    def stat(k: str) -> dict[str, int] | None:
+        vals = sorted(v for r in live if isinstance(v := (r.get("latency_min") or {}).get(k), int))
+        return {"median": vals[len(vals) // 2], "max": vals[-1], "n": len(vals)} if vals else None
+
+    return {"events": len(rows), "measured_live": len(live), "detect": stat("detect"), "verify": stat("verify"), "publish": stat("publish"),
+            "published": sum(1 for r in rows if r.get("published")), "rows": rows}
+
+
 def scan_log_lines(db: Session, s: TtSettings, read: dict[str, Any], topics: list[TtTopic], made: int, published: str | None,
                    decision: dict[str, Any], now: datetime) -> list[str]:
     """One summary line, one line per top-5 topic, and the publish decision."""
@@ -806,6 +915,11 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
             logger.info(line)
     except Exception:  # noqa: BLE001 - the incident record never breaks a scan
         logger.exception("trending: incident watch failed")
+    try:
+        for line in watch_ledger(db, s, topics, now):
+            logger.info(line)
+    except Exception:  # noqa: BLE001 - the ledger never breaks a scan
+        logger.exception("trending: ledger failed")
     out.update({"stored": read["stored"], "topics": len(topics), "suggested": made, "published": published, "alerts": alerts_sent})
     _note(s, "last_run", {"at": now.isoformat(), **out})
     db.commit()
@@ -957,6 +1071,6 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
             "topics": [topic_out(t, posts.get(t.id)) for t in topics], "queue": rows("pending", "queued"), "held": rows("held", limit=20),
             "published": rows("published", "dry_run", "uncertain", "failed", limit=30), "coordination": coordinate.summary(db, s, now),
             "learning": learning.report(db, now), "latency": latency_summary(state.get("latency") or []),
-            "incidents": state.get("incidents") or [], "missed": postmortem.MISSED, "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "rules",
+            "incidents": state.get("incidents") or [], "missed": postmortem.MISSED, "ledger": ledger_summary(state.get("ledger") or []), "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "rules",
             "x": {"configured": creds.configured, "can_write": creds.user_context, "status": xstate.status, "last_ok": state.get("x_last_ok"), "last_error": state.get("x_last_error")},
             "cost": {"per_post_usd": float(settings.x_write_cost_estimate_usd), "x_trends_per_request_usd": 0.010, "x_post_read_usd": 0.005}}

@@ -659,7 +659,11 @@ def score(c: Cluster, now: datetime, weights: dict[str, float] | None = None) ->
         total = min(total, STALE_CAP)  # yesterday's story is not today's news, however much it still trends
     span_h = max(0.25, min(2.0, (now - event_time).total_seconds() / 3600))
     items_2h = sum(1 for s in sig if _seen(s) >= now - timedelta(hours=2))
+    official = [s for s in sig if s.reliable and s.extra.get("official")]
+    first_report = min([_seen(s) for s in sig] + [_seen(s) for s in official])
+    verified = len(_outlets(sig)) >= 2 or bool(official)
     timeline = {"event_time": event_time.isoformat(), "first_seen": first_seen.isoformat(), "last_update": last_update.isoformat(),
+                "first_report": first_report.isoformat(), "verified": verified,
                 "source_count": len(_outlets(sig)) + len(types - {"news"}), "outlets": len(_outlets(sig)), "outlets_1h": g.get("outlets_1h", 0),
                 "items_per_hour": round(items_2h / span_h, 1), "developing": developing, "new_outlets_2h": new_outlets}
     parts = {"velocity": round(momentum, 1), "freshness": round(freshness, 1), "impact": round(impact, 1), "surprise": round(surprise, 1),
