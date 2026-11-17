@@ -57,3 +57,24 @@ def test_a_header_a_route_sets_itself_is_kept() -> None:
         r = c.get("/")
     assert r.headers.get_list("x-frame-options") == ["DENY"]
     assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_a_blocked_wordlist_dependency_never_breaks_logging(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The secret-redaction log filter loads the BIP-39 list from eth_account. If that import fails with a plain ImportError (a DLL
+    blocked by Application Control, a broken wheel), the filter must fall back, not raise into whatever was being logged."""
+    import importlib.resources
+    import logging
+
+    from app.security import redact
+
+    def blocked(name):  # type: ignore[no-untyped-def]
+        raise ImportError("DLL load failed while importing _bitarray")
+
+    monkeypatch.setattr(importlib.resources, "files", blocked)
+    redact._bip39.cache_clear()
+    try:
+        assert redact.has_phrase("abandon " * 12) is False
+        record = logging.LogRecord("t", logging.WARNING, __file__, 1, "token sk-%s", ("x",), None)
+        assert redact.SecretRedactor().filter(record)
+    finally:
+        redact._bip39.cache_clear()
