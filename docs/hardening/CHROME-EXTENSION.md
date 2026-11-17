@@ -146,39 +146,81 @@ picker, Kiwi look). They frame real popup captures from a test run against the s
 is a documentation address. Upload them in the dashboard (the API doesn't carry listing images): the store still shows
 the 1.0.0-era images.
 
-## 7. What the owner does
+## 7. Owner submission checklist (1.0.5)
 
-### One-time setup (about 10 minutes, from RELEASING.md)
+Only you run these, from the repository root of the merged checkout, in your own terminal. Agents never run `upload`,
+`submit` or `go-live`, and `submit`/`go-live` refuse to run without a real terminal.
 
-1. Google Cloud project `kiwi-vpn-release`: https://console.cloud.google.com/projectcreate
-2. Enable the Chrome Web Store API: https://console.cloud.google.com/apis/library/chromewebstore.googleapis.com
-3. Service account `kiwi-cws-release` with **no roles**: https://console.cloud.google.com/iam-admin/serviceaccounts
-4. Keys > Add key > JSON (downloads a file).
-5. Store it encrypted for your Windows user (deletes the plaintext):
-   `node vpn-extension/store/release.mjs setup-key "%USERPROFILE%\Downloads\<the file>.json"`
-   (A DPAPI-encrypted key already exists at `%APPDATA%\KiwiVPN\cws-service-account.dpapi`; redo this only if it's not
-   the right account.)
-6. Developer Dashboard > Account > Service accounts: add the printed email (one per publisher).
-7. Developer Dashboard > Publisher > Settings: copy the **publisher ID** into `vpn-extension/store/cws.json` as
-   `"publisherId"` (it's empty today, so `status`/`upload` can't talk to the store API yet).
-8. Check: `node vpn-extension/store/release.mjs status`
+**A. One-time setup (about 10 minutes; RELEASING.md has the details)**
 
-### This release (from the repo root, after merging this branch)
+- [ ] Google Cloud project, e.g. `kiwi-vpn-release`: https://console.cloud.google.com/projectcreate
+- [ ] Enable the **Chrome Web Store API** in it: https://console.cloud.google.com/apis/library/chromewebstore.googleapis.com
+- [ ] IAM > Service accounts > create `kiwi-cws-release` with **no roles**; Keys > Add key > JSON (downloads one file).
+- [ ] Store it encrypted for your Windows user (the plaintext file is deleted):
+      `node vpn-extension/store/release.mjs setup-key "%USERPROFILE%\Downloads\<the file>.json"`
+      It prints the service account's email. (Today `%APPDATA%\KiwiVPN\cws-service-account.dpapi` doesn't exist.)
+- [ ] Chrome Web Store Developer Dashboard > Account > **Service accounts**: add that email.
+- [ ] Dashboard > Publisher > Settings: copy the **publisher ID** into `vpn-extension/store/cws.json` as `"publisherId": "<id>"`
+      (empty today), commit it. It's an identifier, not a secret.
+- [ ] `node vpn-extension/store/release.mjs status` shows "live 1.0.0" and no submitted version.
+
+**B. Just before submitting**
+
+- [ ] The package is the tested one: `python vpn-extension/build.py`, then
+      `Get-FileHash vpn-extension\store\dist\kiwi-vpn-chrome-1.0.5.zip` = `DA6E0E83AD28B6D4…C9E4E1A9` (= `store/releases/1.0.5.json`).
+      `upload`/`submit` refuse any other bytes anyway.
+- [ ] Helsinki 1 is online with the browser badge in Admin (the reviewer needs one browser server).
+- [ ] Decide on the reviewer account (C below). If you use it, `https://pricechat.live/vpn/reviewer` loads and the sign-in works.
+- [ ] Decide on the "Draft" banner on /vpn/privacy (section 9: medium-low rejection risk; 1.0.0 passed with it).
+
+**C. Upload and submit**
 
 ```
 node vpn-extension/store/release.mjs status
-node vpn-extension/store/release.mjs prepare            # only if anything changed since the record; else skip
-node vpn-extension/store/release.mjs upload 1.0.5       # uploads the exact tested ZIP as a draft; does not submit
-! node vpn-extension/store/release.mjs submit 1.0.5     # you, at a terminal: type  submit 1.0.5 <first 8 of sha256>
-node vpn-extension/store/release.mjs status             # wait for "approved" / staged
-! node vpn-extension/store/release.mjs go-live 1.0.5    # you, at a terminal: type  go-live 1.0.5 <first 8 of sha256>
+node vpn-extension/store/release.mjs upload 1.0.5       # the exact tested ZIP becomes the store DRAFT; nothing is submitted
 ```
 
-The first 8 of the SHA-256 for this build: `da6e0e83`. The `!` prefix runs the command in your own terminal from
-Claude Code; without a real terminal `submit` and `go-live` refuse.
+Then fill the dashboard by hand (D), and only then, at your own terminal:
 
-In the dashboard (not the API): paste the updated description and the `storage` justification from LISTING.md, upload
-the regenerated screenshots, and check the Privacy tab answers above.
+```
+node vpn-extension/store/release.mjs submit 1.0.5       # type exactly:  submit 1.0.5 da6e0e83
+node vpn-extension/store/release.mjs status             # later: "approved" / staged; nothing reaches users yet
+node vpn-extension/store/release.mjs go-live 1.0.5      # after approval, type:  go-live 1.0.5 da6e0e83
+```
+
+`submit` needs `upload` first (it refuses otherwise) and submits **staged**: approval doesn't publish; `go-live` does. While
+in review, the dashboard can cancel the submission. Version numbers can't be reused.
+
+**D. Dashboard fields the API doesn't carry (fill before `submit`)**
+
+- [ ] **Store listing**: paste the description from `store/LISTING.md`; category Privacy & Security (or closest); language
+      English; screenshots `store/assets/screenshot-1..4-*-1280x800.png`; small promo tile `promo-small-440x280.png`; marquee
+      `promo-marquee-1400x560.png` (optional); homepage https://pricechat.live/vpn; support URL; mature content off. Name,
+      summary and the 128 px icon come from the package.
+- [ ] **Privacy practices**: single purpose; one justification per permission (`proxy`, `webRequest`, `webRequestAuthProvider`,
+      `privacy`, `storage`, host access `<all_urls>`), all from LISTING.md; remote code **No**; data usage ticks
+      (authentication information, web history, website content, location if it includes IP address: yes; the rest: no);
+      the three certifications; privacy policy URL **https://pricechat.live/vpn/privacy**.
+- [ ] **Test instructions** for the reviewer (below).
+
+**Reviewer test instructions.** Kiwi Passport sign-in has no password (Google, Telegram or an emailed code), so a reviewer
+can't sign in to an ordinary account. Two choices:
+
+1. *Reviewer account (recommended: lets the reviewer connect).* Run `python vpn-extension/store/reviewer_account.py
+   <a reviewer email>` yourself: it sets `VPN_REVIEWER_*` on Railway `api` (valid 30 days, one browser login, Helsinki 1
+   only, no admin rights), puts the password on your clipboard only, then redeploy `api`. Paste LISTING.md "Reviewer
+   access" steps 1-4 with that email and password into the test instructions. Remove the variables after approval.
+2. *No account.* Paste this:
+
+   > Kiwi VPN needs a Kiwi Passport (Price Chat account), and Passport sign-in uses Google, Telegram or a one-time email
+   > code, with no password, so we can't give you shared credentials. Without an account you can check: the extension
+   > installs with no page scripts and no remote code; clicking the icon shows "Sign in to connect" and its Sign in button
+   > opens https://pricechat.live/join; "What isn't covered" explains the limits; with the switch off the browser's own
+   > connection is unchanged. Connecting requires an account with Kiwi VPN access (a free 30-day trial is started on
+   > https://pricechat.live/vpn after signing in with your own Google account). After connecting, https://api.ipify.org
+   > shows the server's address, and pressing the switch again restores the normal connection.
+
+   Reviewers often reject an extension they can't fully exercise ("not functional"), so option 1 is safer.
 
 ## 8. What changed since 1.0.0 (the live version)
 
@@ -242,3 +284,27 @@ the e2e harness takes `msedge.exe` as its browser argument if you want to run it
   (was 1.0.3), so running build.py in the release checkout leaves no diff.
 - Release tool (feat/kiwi-cws-release ca59dcc) is merged. Blockers are all owner-side: `vpn-extension/store/cws.json` `publisherId` is
   empty and `%APPDATA%\KiwiVPN\cws-service-account.dpapi` does not exist (setup steps 1-8 in section 7 not done).
+
+## 13. Submission prep re-verified 2026-11-17 (feat/kiwi-release-rc)
+
+- `python vpn-extension/build.py` on this branch: `kiwi-vpn-chrome-1.0.5.zip` and `kiwi-vpn-edge-1.0.5.zip` are both
+  sha256 `da6e0e83ad28b6d4b1927dd4d5df807ac049177c0d2244654c4a9c1bc9e4e1a9`, 30,579 bytes = `store/releases/1.0.5.json` = the
+  ZIP in D:/pc-wt/kiwi-ext-105 (built 2026-11-14 11:35). The testers' ZIP in `frontend/public/downloads` came out unchanged.
+- In the ZIP: the 10 expected files at the top level, each byte-identical to the source; manifest version 1.0.5, **no `key`**,
+  permissions `proxy, storage, webRequest, webRequestAuthProvider, privacy` + host `<all_urls>` (same as live 1.0.0), no content
+  scripts, no CSP override; the only network targets are pricechat.live's account API, the proxy check address and each
+  server's `/kiwi-ping`, and nothing is evaluated or imported from outside the package (remote code = none).
+- Every permission has its LISTING.md justification; the data-use answers match /vpn/privacy (community.tsx `vpnprivacy`:
+  session cookie + proxy login, sites and content in transit only, IP seen by servers and hosting logs, no ads/analytics,
+  Limited Use statement). Listing text has no "no logs", "military grade" or "100% anonymous" claim (it says it doesn't
+  guarantee complete anonymity). Icons 16/32/48/128 and assets 1280x800 x4, 440x280, 1400x560, 300x300 are the right sizes.
+- Tests here: `node --test vpn-extension/lib.test.js vpn-extension/store/cws.test.mjs` 27/27; browser e2e on the source
+  (`node vpn-extension/e2e/run.mjs <backend venv python> <playwright chromium-1243> <shots>`) 48/48, one run, no retry. The
+  store-ID run on the ZIP wasn't repeated (it downloads the live CRX from Google); the ZIP's files equal the source byte for byte.
+- **For the owner to decide (not changed, since it would change the tested package):** the popup's footnote says "We don't
+  log the sites you visit." (popup.js). The privacy page deliberately avoids "We don't log" (its test forbids the phrase; owner
+  2026-11-15) and says "We don't keep a history of the websites or addresses you visit". The code backs the narrower meaning
+  (the proxy logs no addresses), but DNS lookups go to Hetzner's resolvers, which the policy names. To align, change it to
+  "We don't keep a history of the sites you visit." and run `prepare` again (new SHA-256, new confirmation code).
+- Small wording difference, policy over-discloses: /vpn/privacy says incognito isn't covered; the popup and listing say it isn't
+  unless allowed in incognito (true: settings in the regular scope apply to incognito only when the extension is allowed there).
