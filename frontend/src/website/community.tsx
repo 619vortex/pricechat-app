@@ -322,6 +322,36 @@ const OWNER = {
 } as const;
 const MARKER = /\[OWNER: [^\]]+\]/g;
 
+/**
+ * Owner, 2026-11-17: never publish a placeholder. A fact not yet filled in is left out of the sentence (or the sentence goes), so the
+ * page says only what is true; OWNER_MARKERS and docs/hardening/LEGAL.md list what is still missing.
+ */
+const CONTACT = "message us on Telegram or X (see Contact)";
+export function withoutOwnerGaps(text: string): string {
+  if (!MARKER.test(text)) return text;
+  MARKER.lastIndex = 0;
+  const m = (k: keyof typeof OWNER) => OWNER[k].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const open = (k: keyof typeof OWNER) => OWNER[k].startsWith("[OWNER:");
+  let t = text;
+  if (open("company") || open("vat")) t = t.replace(new RegExp(` \\(company number ${m("company")}, VAT number ${m("vat")}\\)`), "");
+  if (open("address")) t = t.replace(new RegExp(`, ${m("address")},`, "g"), "").replace(new RegExp(`, ${m("address")}`, "g"), "");
+  if (open("entity")) {
+    t = t.replace(new RegExp(`^${m("entity")}`), "The Price Chat team").replace(new RegExp(m("entity"), "g"), "the Price Chat team");
+  }
+  if (open("email")) {
+    t = t.replace(new RegExp(`[Ww]rite to ${m("email")}, or message us on Telegram or X \\(see Contact\\)`, "g"), (w) => (w[0] === "W" ? "Message us on Telegram or X (see Contact)" : CONTACT))
+      .replace(new RegExp(`[Ww]rite to ${m("email")}`, "g"), (w) => (w[0] === "W" ? "Message us on Telegram or X (see Contact)" : CONTACT))
+      .replace(new RegExp(`Contact: ${m("email")}\\.`), "Contact: Telegram or X (see Contact).");
+  }
+  for (const k of ["tax", "taxRecords"] as const) if (open(k)) t = t.replace(new RegExp(` \\(${m(k)}\\)`, "g"), "");
+  if (open("transfers")) t = t.replace(new RegExp(` For those transfers we rely on ${m("transfers")}\\.`), "");
+  // anything still open: drop the sentence that needs it
+  MARKER.lastIndex = 0;
+  if (MARKER.test(t)) t = (t.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? []).filter((sentence) => !new RegExp(MARKER.source).test(sentence)).join("");  // no lookbehind (older Safari)
+  MARKER.lastIndex = 0;
+  return t.trim();
+}
+
 /** When the Kiwi VPN pages' text last changed. */
 const VPN_UPDATED = "17 November 2026";
 
@@ -627,7 +657,7 @@ function LegalText({ text }: { text: string }) {
 export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
-  const open = page.sections.some(([, ps]) => ps.some((p) => new RegExp(MARKER.source).test(p)));
+  const open = false;  // a missing owner fact is left out of the text (withoutOwnerGaps), never shown as a placeholder
   useEffect(() => {  // /vpn/refunds#right-to-cancel from the checkout: the page renders after the browser looked for the anchor
     const id = typeof location !== "undefined" ? location.hash.slice(1) : "";
     if (id) document.getElementById(id)?.scrollIntoView?.();
@@ -647,7 +677,7 @@ export function LegalPage({ kind }: { kind: LegalKind }) {
         {page.sections.map(([heading, paras]) => (
           <section key={heading} id={slug(heading)}>
             <h2 className="site-legal-h">{heading}</h2>
-            {paras.map((t) => (
+            {paras.map(withoutOwnerGaps).filter(Boolean).map((t) => (
               <p key={t} className="site-body">
                 <LegalText text={t} />
               </p>

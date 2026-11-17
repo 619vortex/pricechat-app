@@ -57,3 +57,21 @@ back by hand (Credit by hand) so the later payment's time isn't cut.
 
 Backend and frontend together (the backend refuses a payment without `start_now`; the old website doesn't send it, and payments are
 in test mode, so the gap only affects the owner's own test). `railway up` from the worktree, then Vercel. No migration. SEO heads unchanged.
+
+## Owner checklist (2026-11-17: placeholders are never published)
+
+Since 2026-11-17 a missing fact is left out of the published text (`withoutOwnerGaps` in `frontend/src/website/community.tsx`):
+the pages name "the Price Chat team" and send people to Telegram/X until these are filled in. Fill each in the `OWNER` map
+(same file), run `npx vitest run src/website`, deploy. Public payments (`VPN_PAYMENTS_PUBLIC`) stay off until all are done and a
+lawyer has read the pages.
+
+1. Legal entity or trader name
+2. Postal address
+3. Business email for Kiwi VPN (a monitored mailbox)
+4. Company registration number (or "none")
+5. VAT number (or "not VAT-registered")
+6. Governing-law country
+7. Courts with jurisdiction
+8. Whether $9.99 includes VAT/sales tax
+9. How long tax law requires payment records to be kept
+10. Safeguard for transfers outside the EU/UK (e.g. Standard Contractual Clauses)

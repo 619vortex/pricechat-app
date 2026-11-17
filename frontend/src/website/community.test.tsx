@@ -357,7 +357,7 @@ describe("legal pages", () => {
     expect(terms).toMatch(/Nothing renews or charges by itself/);
     expect(terms).toMatch(/added after any paid time or free trial/);
     expect(terms).toMatch(/Last updated \d+ \w+ 20\d\d/);
-    expect(screen.getByRole("note").textContent).toMatch(/Being finalised/);  // not a draft: only the owner's facts are missing
+    expect(screen.queryByRole("note")).toBeNull();  // in force; a missing owner fact is left out, never shown (owner 2026-11-17)
     expect(terms).not.toMatch(/Stripe|credit card|Draft/i);
     cleanup();
     const refunds = (await show(<LegalPage kind="vpnrefunds" />)).container.textContent!;
@@ -365,7 +365,7 @@ describe("legal pages", () => {
     expect(refunds).toMatch(/Check now/);
     expect(refunds).toMatch(/KV-/);
     expect(refunds).toMatch(/rights the law gives you/);
-    expect(screen.getByRole("note").textContent).toMatch(/Being finalised/);
+    expect(screen.queryByRole("note")).toBeNull();
   });
 
   it("Kiwi VPN terms name the provider, age, liability, law and the right to cancel, with every unknown fact a visible owner marker", async () => {
@@ -379,11 +379,11 @@ describe("legal pages", () => {
     expect(terms).toMatch(/doesn't allow us to limit/);
     expect(terms).toMatch(/mandatory consumer laws of the country where you live/);
     expect(terms).toMatch(/within 14 days of paying/);
-    // the owner's facts are highlighted, never guessed
-    const marks = [...container.querySelectorAll("mark.site-owner-marker")].map((m) => m.textContent);
-    for (const m of ["[OWNER: legal entity or trader name]", "[OWNER: postal address]", "[OWNER: business email for Kiwi VPN]", "[OWNER: governing-law country]",
-                     "[OWNER: courts with jurisdiction]", "[OWNER: whether the price includes VAT or other sales tax]"])
-      expect(marks).toContain(m);
+    // owner 2026-11-17: no placeholder is ever published; an owner fact not filled in is left out of the text
+    expect(container.querySelector("mark.site-owner-marker")).toBeNull();
+    expect(terms).not.toMatch(/\[OWNER|company number|VAT number|governed by the law of/);
+    expect(terms).toMatch(/Kiwi VPN is a Price Chat service provided by the Price Chat team/);
+    expect(terms).toMatch(/message us on Telegram or X \(see Contact\)/i);
     expect(terms).not.toMatch(/Avigad|Dubai|@pricechat\.live/);  // no business fact filled in by guesswork
     // site paths are links
     expect(container.querySelector('a[href="/vpn/refunds"]')).toBeTruthy();
@@ -400,7 +400,8 @@ describe("legal pages", () => {
     expect(section.textContent).toMatch(/the time you haven't used yet/);
     expect(section.textContent).toMatch(/we pay the network fee/);
     expect(section.textContent).toMatch(/KV-000123/);
-    expect(section.querySelector("mark.site-owner-marker")!.textContent).toBe("[OWNER: business email for Kiwi VPN]");
+    expect(section.querySelector("mark.site-owner-marker")).toBeNull();
+    expect(section.textContent).toMatch(/To cancel, message us on Telegram or X \(see Contact\) within the 14 days/);
   });
 
   it("Kiwi VPN privacy names who resolves DNS and what the servers and hosts hold, with no absolute no-logs claim", async () => {
@@ -441,9 +442,10 @@ describe("legal pages", () => {
     expect(privacy).toMatch(/copy of your data.*corrected or deleted.*portable/);
     expect(privacy).toMatch(/within one month/);
     expect(privacy).toMatch(/data protection authority/);
-    const marks = [...container.querySelectorAll("mark.site-owner-marker")].map((m) => m.textContent);
-    expect(marks).toContain("[OWNER: how long tax law requires payment records to be kept]");
-    expect(marks).toContain("[OWNER: legal entity or trader name]");
+    expect(container.querySelector("mark.site-owner-marker")).toBeNull();
+    expect(privacy).not.toMatch(/\[OWNER|For those transfers we rely on/);
+    expect(privacy).toMatch(/for as long as tax and accounting law requires\./);
+    expect(privacy).toMatch(/The Price Chat team decides how the personal data/);
   });
 
   it("Kiwi VPN acceptable use is in force, covering abuse, P2P, suspension, reporting and visibility", async () => {
@@ -501,5 +503,15 @@ describe("rank art", () => {
     expect(container.querySelector(".rk-overlay")!.getAttribute("src")).toBe("/brand/ranks/warrior.png");
     rerender(<RankKiwi art={art("gold") as never} />);
     expect(container.querySelector(".rk-gold .rk-kiwi")!.getAttribute("src")).toBe("/brand/kiwi.webp");
+  });
+});
+
+describe("legal pages publish no placeholders (owner, 2026-11-17)", () => {
+  afterEach(cleanup);
+  it.each(["privacy", "vpnprivacy", "vpnterms", "vpnrefunds", "vpnaup", "terms", "disclaimer", "contact"] as const)("%s", async (kind) => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const text = (await show(<LegalPage kind={kind} />)).container.textContent!;
+    expect(text).not.toMatch(/\[OWNER|OWNER:|Being finalised/);
+    expect(text).not.toMatch(/ ,|\(\s*\)|\s\./);  // no holes left where a fact was taken out
   });
 });
