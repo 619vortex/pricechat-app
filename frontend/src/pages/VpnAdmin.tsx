@@ -9,7 +9,7 @@ import "./VpnAdmin.css";
 /* Kiwi VPN (OWNER ONLY): who can use it, whether it costs anything, devices made here, the WireGuard servers, customers and payments.
    An anonymous customer is only a number here. Each server runs vpn-node's agent; the backend talks to it over HTTPS with a pinned certificate and a bearer token. */
 
-export type VpnSettings = { enabled: boolean; payments_enabled: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number } & Partial<TrialGuards>;
+export type VpnSettings = { enabled: boolean; payments_enabled: boolean; /** false: payments' test mode, only the owner (signed in to Admin) and testers can pay (VPN_PAYMENTS_PUBLIC on the server) */ payments_public?: boolean; trial_enabled?: boolean; max_devices: number; /** per member per month, 0 = unlimited */ monthly_cap_gb: number } & Partial<TrialGuards>;
 /** Free-trial abuse guards and the opt-in sync rules (backend app/vpn/trial_guard.py, docs/hardening/TRIAL-AND-LIMITS.md). Numbers: 0 = that check off. */
 export type TrialGuards = {
   trial_guard_mode: "off" | "monitor" | "enforce";
@@ -53,6 +53,7 @@ function Controls({ s, canCharge, onSaved }: { s: VpnSettings; canCharge: boolea
     catch (e) { setErr(errText(e)); } finally { setBusy(false); }
   }
   const free = !s.payments_enabled;
+  const testPay = s.payments_public === false;  // payments' test mode until VPN_PAYMENTS_PUBLIC is set on the server
   return (
     <div className="stack">
       <div className="vpna-controls">
@@ -79,13 +80,16 @@ function Controls({ s, canCharge, onSaved }: { s: VpnSettings; canCharge: boolea
         </section>
         <section className={`vpna-control${s.payments_enabled ? " is-on" : ""}`}>
           <span className="vpna-control-label">Payments</span>
-          <span className="vpna-control-state">{free ? (s.trial_enabled ? "Off · trial only" : "Off · free") : "On · $9.99 for 30 days"}</span>
+          <span className="vpna-control-state">{free ? (s.trial_enabled ? "Off · trial only" : "Off · free") : testPay ? "On · test: only you and testers" : "On · $9.99 for 30 days"}</span>
           <label className="toggle" title={free ? "Off" : "On"}>
             <input type="checkbox" aria-label="Payments on" checked={s.payments_enabled} disabled={busy || (free && !canCharge)} onChange={(e) => void flip({ payments_enabled: e.target.checked }, e.target.checked
-              ? "Turn payments on? Anyone without paid time loses access within 5 minutes (their devices are kept for 30 days). Devices you made here stay free. Payments are real money."
+              ? testPay
+                ? "Turn payments on in test mode? Only you (signed in to Admin in this browser) and named testers see a way to pay. Nothing changes for anyone else. Payments are real money."
+                : "Turn payments on? Anyone without paid time loses access within 5 minutes (their devices are kept for 30 days). Devices you made here stay free. Payments are real money."
               : "Turn payments off? Kiwi VPN becomes free and everyone's devices switch back on within 5 minutes. A payment already started still gets credited.")} /><span />
           </label>
           <p>{free ? (canCharge ? "Nobody is asked to pay and no payment option is shown. Turn on when you're ready to charge." : "Nobody is asked to pay. Add the NOWPayments keys on the server to allow turning this on.")
+            : testPay ? "Test mode: only you and testers can pay, at /vpn. Everyone else sees no way to pay, as when payments are off. Opening payments to everyone needs VPN_PAYMENTS_PUBLIC=true on the server, after the first real payment is verified."
             : "Members need paid time to connect. Any amount buys its share of 30 days."}</p>
         </section>
       </div>

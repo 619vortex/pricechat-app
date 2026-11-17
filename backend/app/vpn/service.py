@@ -24,6 +24,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config.settings import get_settings
 from app.db.base import utcnow
 from app.members import notify
 from app.members.catalog import ensure_catalog
@@ -97,7 +98,7 @@ def settings(db: Session) -> VpnSettings:
 
 
 def settings_out(s: VpnSettings) -> dict[str, Any]:
-    return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "trial_enabled": s.trial_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb,
+    return {"enabled": s.enabled, "payments_enabled": s.payments_enabled, "payments_public": payments_public(), "trial_enabled": s.trial_enabled, "max_devices": s.max_devices, "monthly_cap_gb": s.monthly_cap_gb,
             "trial_one_per_identity": s.trial_one_per_identity, "trial_min_account_age_hours": s.trial_min_account_age_hours, "trial_min_xp": s.trial_min_xp,
             "trial_per_ip_day": s.trial_per_ip_day, "trial_per_network_day": s.trial_per_network_day, "sync_enforce_limits": s.sync_enforce_limits,
             "count_pc_once": s.count_pc_once, "trial_guard_mode": s.trial_guard_mode}
@@ -174,8 +175,26 @@ def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime 
 
 
 def is_free(s: VpnSettings) -> bool:
-    """Free for every member: only with both payments and the trial switched off in Admin."""
-    return not s.payments_enabled and not s.trial_enabled
+    """Free for every member: only with both payments and the trial switched off in Admin. Payments in test mode (VPN_PAYMENTS_PUBLIC
+    unset) count as off here, so switching them on to test changes nothing for anyone else."""
+    return not (s.payments_enabled and payments_public()) and not s.trial_enabled
+
+
+def payments_public() -> bool:
+    """False until the owner sets VPN_PAYMENTS_PUBLIC on the server: payments switched on in Admin are then a test that only the
+    owner (signed in to Admin) and named testers can use, so the first real payment is verified before anyone else can pay."""
+    return bool(getattr(get_settings(), "vpn_payments_public", False))
+
+
+def payments_test_mode(s: VpnSettings) -> bool:
+    return s.payments_enabled and not payments_public()
+
+
+def can_pay(s: VpnSettings, acct: VpnAccount | None = None, preview: bool = False) -> bool:
+    """May this person start a payment? Webhooks and vpn.reconcile credit money that arrives whatever this says."""
+    if not s.payments_enabled:
+        return False
+    return payments_public() or preview or (acct is not None and acct.status == "active" and (acct.is_owner or is_tester(acct)))
 
 
 def no_access_reason(db: Session, acct: VpnAccount) -> str:
@@ -184,7 +203,7 @@ def no_access_reason(db: Session, acct: VpnAccount) -> str:
         member = _member_of(db, acct)
         why = _trial_guards(db, member, s) if member is not None and s.trial_guard_mode == "enforce" else []
         return why[0][1] if why else START_TRIAL
-    if not s.payments_enabled:
+    if not can_pay(s, acct):
         return PAID_UNAVAILABLE
     return TIME_ENDED if acct.paid_until is not None else TRIAL_ENDED if acct.trial_started_at is not None else NOT_SUBSCRIBED
 
@@ -520,12 +539,17 @@ def _v6_pool(value: str) -> str:
 
 
 def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
-    payments = settings(db).payments_enabled
+    s = settings(db)
+    acct = account_of(db, who)
+    payments = can_pay(s, acct, preview)  # payments' test mode: only the owner and testers see a way to pay
+    test_payments = payments and payments_test_mode(s)
     db.commit()  # the first call seeds the settings row
     bill = billing.options() if payments else None  # may ask the provider: before anything here can hold a write transaction
     s = settings(db)
     acct = account_of(db, who)
     ok, reason = eligibility(db, acct, preview)
+    if payments and reason == PAID_UNAVAILABLE:  # the owner testing payments: they can pay, so say where
+        reason = TIME_ENDED if acct.paid_until is not None else TRIAL_ENDED if acct.trial_started_at is not None else NOT_SUBSCRIBED
     counts = _device_counts(db)
     servers = [v for v in db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)) if sees(acct, v)]
     review = _reviewing(db, acct)
@@ -536,7 +560,7 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     state_of = health.member_health(db, servers)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
     open_here = s.enabled or preview or review or is_tester(acct)
-    out = {"enabled": open_here, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
+    out = {"enabled": open_here, "test_mode": preview and not s.enabled, "payments": payments, "payments_test": test_payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "live_load": _load(v, live.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best,
                         "browser": bool(v.proxy_host), "proxy_host": v.proxy_host or None, "health": state_of.get(v.id, "ok")} for v in servers],
@@ -1254,7 +1278,7 @@ def due_reminders(db: Session, now: datetime | None = None) -> list[dict[str, An
         stage = 0 if left <= timedelta(0) else 1 if left <= timedelta(days=1) else 3
         if _aware(acct.reminded_until) == until and acct.reminder_stage is not None and acct.reminder_stage <= stage:
             continue
-        title, body = _reminder_text(kind, stage, until, s.payments_enabled)
+        title, body = _reminder_text(kind, stage, until, can_pay(s, acct))
         notify.notify(db, member.id, "vpn_expiry", title, body, {"until": until.isoformat(), "stage": stage})
         acct.reminded_until, acct.reminder_stage = until, stage
         if member.email:
