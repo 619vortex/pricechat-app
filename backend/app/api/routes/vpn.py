@@ -55,10 +55,14 @@ def _open_or_preview(db: DbSession, request: Request) -> None:
         raise HTTPException(403, service.CLOSED)
 
 
-def _payments_on(db: DbSession) -> None:
-    """Nobody starts a payment while payments are off. Webhooks still credit an invoice from before they were turned off."""
-    if not service.settings(db).payments_enabled:
+def _payments_on(db: DbSession, request: Request, acct: VpnAccount | None = None) -> None:
+    """Nobody starts a payment while payments are off, and while they're in test mode (VPN_PAYMENTS_PUBLIC unset) only the owner
+    signed in to Admin and named testers can. Webhooks still credit an invoice from before they were turned off."""
+    s = service.settings(db)
+    if not s.payments_enabled:
         raise HTTPException(403, "Payments are off right now.")
+    if not service.can_pay(s, acct, _preview(db, request)):
+        raise HTTPException(403, "Payments aren't open yet.")
 
 
 # --- member -------------------------------------------------------------------------------------------------------
@@ -250,7 +254,8 @@ def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]
 def public_info(request: Request, db: DbSession) -> dict[str, Any]:
     """For a signed-out visitor: is it open, is it free, and how can they pay."""
     s = service.settings(db)
-    enabled, payments, preview = s.enabled, s.payments_enabled, _preview(db, request)
+    preview = _preview(db, request)
+    enabled, payments = s.enabled, service.can_pay(s, None, preview)  # payments' test mode: a signed-out visitor sees none
     db.commit()
     trial = (enabled or preview) and s.trial_enabled
     free = service.is_free(s)
@@ -260,8 +265,8 @@ def public_info(request: Request, db: DbSession) -> dict[str, Any]:
 @router.post("/members/vpn/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
 def member_usdt(payload: UsdtInput, request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, Any]:
     _open_or_preview(db, request)
-    _payments_on(db)
     acct = service.account_of(db, _require(db, pc_session))
+    _payments_on(db, request, acct)
     db.commit()
     return _usdt(db, acct, payload)
 
@@ -270,8 +275,8 @@ def member_usdt(payload: UsdtInput, request: Request, db: DbSession, pc_session:
 def member_card(request: Request, db: DbSession, pc_session: SessionToken = None) -> dict[str, str]:
     """Off: billing.CARD_SUBSCRIPTIONS. Kiwi VPN is paid in USDT and renewed by hand."""
     _open_or_preview(db, request)
-    _payments_on(db)
     acct = service.account_of(db, _require(db, pc_session))
+    _payments_on(db, request, acct)
     db.commit()
     try:
         return {"url": billing.start_card(db, acct)}
@@ -338,7 +343,7 @@ def anon_create(request: Request, db: DbSession) -> dict[str, str]:
     """A new key. Shown this once: there is no way to recover it. Only while paying: free access goes with a Passport, so one person can't take every slot on a server.
     The rate limit is charged only once a key would really be made (audit M1: refusals don't drain the shared bucket)."""
     _open_or_preview(db, request)
-    if not service.settings(db).payments_enabled:
+    if not service.can_pay(service.settings(db), None, _preview(db, request)):  # off, or in test mode for anyone but the owner
         raise HTTPException(403, "New keys are off while payments are off. Sign in with a Passport instead.")
     _too_many(rate_limit.retry_after("vpn_new", request), "Too many requests. Please slow down.")
     return {"key": billing.new_anonymous(db)[1]}
@@ -381,7 +386,7 @@ def anon_device_delete(device_id: int, db: DbSession, acct: VpnAccount = Depends
 @router.post("/members/vpn/anon/usdt", dependencies=[Depends(rate_limit.limit("vpn_pay"))])
 def anon_usdt(payload: UsdtInput, request: Request, db: DbSession, acct: VpnAccount = Depends(_anon)) -> dict[str, Any]:
     _open_or_preview(db, request)
-    _payments_on(db)
+    _payments_on(db, request, acct)
     return _usdt(db, acct, payload)
 
 

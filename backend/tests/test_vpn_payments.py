@@ -158,7 +158,7 @@ def test_a_browser_login_follows_the_same_rules(client: TestClient, db: Session,
     with pytest.raises(vpn.VpnError):
         vpn.create_browser(db, acct, server.id)
     billing.start_usdt(db, acct, 9.99, "solana")
-    billing._credit(acct, payment(db), 9.99, utcnow())
+    billing._credit(db, acct, payment(db), 9.99, utcnow())
     db.commit()
     name = vpn.create_browser(db, acct, server.id)["username"]
     assert name in proxy.users
@@ -251,7 +251,7 @@ def test_a_trial_already_over_adds_nothing(db: Session, fake: Any, keys: None) -
     acct.trial_ends_at = utcnow() - dt.timedelta(days=3)
     db.commit()
     billing.start_usdt(db, acct, 9.99, "solana")
-    billing._credit(acct, payment(db), 9.99, utcnow())
+    billing._credit(db, acct, payment(db), 9.99, utcnow())
     assert days_left(acct) == pytest.approx(30, abs=0.01)
 
 
@@ -431,7 +431,7 @@ def test_a_part_payment_short_of_its_invoice_keeps_being_checked_for_a_while(db:
     acct, _ = billing.new_anonymous(db)
     billing.start_usdt(db, acct, 9.99, "solana")
     pay = payment(db)
-    billing._credit(acct, pay, 4.0, utcnow())
+    billing._credit(db, acct, pay, 4.0, utcnow())
     db.commit()
     now = utcnow()
     provider.answer = {"payment_status": "finished", "actually_paid": 9.99, "pay_currency": USDT, "order_id": pay.order_ref}

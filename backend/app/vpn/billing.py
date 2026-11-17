@@ -27,7 +27,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
@@ -55,6 +55,10 @@ NOWPAYMENTS = "https://api.nowpayments.io/v1"
 STRIPE = "https://api.stripe.com/v1"
 STRIPE_TOLERANCE_S = 300
 transport: httpx.BaseTransport | None = None  # tests only
+# What this process has seen from NOWPayments since it started, for Admin (totals) and the first real payment's check
+# (docs/hardening/FIRST-PAYMENT.md). Counts and times only: no payment, address or account.
+ipn: dict[str, Any] = {"signed": 0, "bad_signature": 0, "last_signed_at": None, "last_bad_signature_at": None, "last_form": None,
+                       "credited_by_webhook": 0, "credited_by_check": 0}
 
 
 class BillingError(ValueError):
@@ -144,17 +148,37 @@ def by_key(db: Session, key: str | None) -> VpnAccount | None:
 # --- crediting ---------------------------------------------------------------------------------------------------------
 
 
-def _credit(acct: VpnAccount, pay: VpnPayment, paid_usd: float, now: datetime) -> None:
-    """Add the time this payment hasn't been credited yet: a repeated or growing webhook never pays twice."""
-    delta = round(paid_usd - pay.paid_usd, 6)
-    if delta <= 0:
-        return
-    extra = seconds_for(delta)
+def _claim(db: Session, pay: VpnPayment, paid_usd: float) -> float | None:
+    """Move this payment's credited amount from what was read to `paid_usd` in one conditional UPDATE, and return the amount before
+    (None: nothing left to credit). The webhook, vpn.reconcile and Check now can read the same row at the same moment; only one
+    of them can move it, and the other re-reads it and credits only what is still missing, so money is never credited twice."""
+    db.flush()  # this session's own pending changes first: a refresh below must not throw them away
+    for _ in range(5):
+        before = pay.paid_usd
+        if round(paid_usd - before, 6) <= 0:
+            return None
+        moved = db.execute(update(VpnPayment).where(VpnPayment.id == pay.id, VpnPayment.paid_usd == before)
+                           .values(paid_usd=paid_usd).execution_options(synchronize_session=False)).rowcount
+        if moved:
+            return before
+        db.refresh(pay)
+    raise BillingError("The payment is busy. Try again in a moment.", 503)
+
+
+def _credit(db: Session, acct: VpnAccount, pay: VpnPayment, paid_usd: float, now: datetime) -> int:
+    """Add the time this payment hasn't been credited yet, and return the seconds added: a repeated, growing or simultaneous report
+    never pays twice."""
+    before = _claim(db, pay, paid_usd)
+    if before is None:
+        return 0
+    db.refresh(acct, with_for_update=True)  # its latest paid time: another payment may have just added some
+    extra = seconds_for(round(paid_usd - before, 6))
     # Added after whatever's left, a free trial included: paying early never costs anyone a day they already had
     trial = _aware(acct.trial_ends_at)
     start = max(now, _aware(acct.paid_until) or now, trial if trial is not None and trial > now else now)
     acct.paid_until = start + timedelta(seconds=extra)
     pay.paid_usd, pay.seconds, pay.status, pay.credited_at = paid_usd, pay.seconds + extra, "credited", now
+    return extra
 
 
 def _http() -> httpx.Client:
@@ -230,23 +254,54 @@ def _sorted_json(value: Any, number: Callable[[str], str], only: set[str] | None
     return json.dumps(value, ensure_ascii=False)
 
 
-def _np_signed_forms(raw: bytes) -> list[bytes]:
-    """Every form of this body the provider may have signed. Only someone holding the IPN secret can match any of them, so accepting
-    each is safe, and refusing a genuine one would lose a customer's payment. Sources disagree on the exact form: only a real payment can show which it is."""
+def _np_named_forms(raw: bytes) -> list[tuple[str, bytes]]:
+    """Every form of this body the provider may have signed, each with a name for the log. Only someone holding the IPN secret can
+    match any of them, so accepting each is safe, and refusing a genuine one would lose a customer's payment. Sources disagree on the
+    exact form: the first real payment's log line ("signed form ...") shows which one NOWPayments uses."""
     data = json.loads(raw, parse_float=_Number, parse_int=_Number)
-    forms = [raw]
-    for number in (str, _as_javascript, _as_python):
-        forms.append(_sorted_json(data, number).encode())
+    forms = [("raw", raw)]
+    for label, number in (("text", str), ("javascript", _as_javascript), ("python", _as_python)):
+        forms.append((f"sorted-{label}", _sorted_json(data, number).encode()))
         if isinstance(data, dict):
-            forms.append(_sorted_json(data, number, set(data)).encode())
-    return list(dict.fromkeys(forms))
+            forms.append((f"sorted-top-keys-{label}", _sorted_json(data, number, set(data)).encode()))
+    seen: dict[bytes, str] = {}
+    for name, form in forms:
+        seen.setdefault(form, name)
+    return [(name, form) for form, name in seen.items()]
+
+
+def _np_signed_forms(raw: bytes) -> list[bytes]:
+    return [form for _, form in _np_named_forms(raw)]
+
+
+def _np_signature_form(raw: bytes, signature: str | None, secret: str) -> str | None:
+    """The name of the form the signature matches, or None."""
+    if not signature:
+        return None
+    given = signature.strip().lower()
+    for name, form in _np_named_forms(raw):
+        if hmac.compare_digest(hmac.new(secret.encode(), form, hashlib.sha512).hexdigest(), given):
+            return name
+    return None
 
 
 def _np_signature_ok(raw: bytes, signature: str | None, secret: str) -> bool:
-    if not signature:
-        return False
-    given = signature.strip().lower()
-    return any(hmac.compare_digest(hmac.new(secret.encode(), form, hashlib.sha512).hexdigest(), given) for form in _np_signed_forms(raw))
+    return _np_signature_form(raw, signature, secret) is not None
+
+
+def _set_status(db: Session, pay: VpnPayment, expect: str, status: str, note: str | None = None) -> None:
+    """Change the status only if it's still what was read: a report read before another one credited this payment must not mark a
+    credited payment failed or expired."""
+    values: dict[str, Any] = {"status": status} if note is None else {"status": status, "note": note}
+    db.flush()
+    if db.execute(update(VpnPayment).where(VpnPayment.id == pay.id, VpnPayment.status == expect).values(**values)
+                  .execution_options(synchronize_session=False)).rowcount:
+        pay.status = status
+        if note is not None:
+            pay.note = note
+        db.flush()
+    else:
+        db.refresh(pay)
 
 
 def _apply_np(db: Session, pay: VpnPayment, status: str, actually_paid: Any, currency: Any, now: datetime) -> tuple[str, int | None]:
@@ -263,7 +318,7 @@ def _apply_np(db: Session, pay: VpnPayment, status: str, actually_paid: Any, cur
     if status == "wrong_asset_confirmed" or (money_arrived and str(currency).lower() != NETWORKS.get(pay.network or "", ("",))[0]):
         logger.warning("vpn: payment %s came in an unexpected currency", pay.id)
         if pay.status == "pending":
-            pay.status, pay.note = "review", "Arrived in an unexpected currency. Check it in NOWPayments."
+            _set_status(db, pay, "pending", "review", "Arrived in an unexpected currency. Check it in NOWPayments.")
         return "ignored", None
     acct = db.get(VpnAccount, pay.account_id)
     if money_arrived and acct is not None:
@@ -275,13 +330,12 @@ def _apply_np(db: Session, pay: VpnPayment, status: str, actually_paid: Any, cur
             raise BillingError("Bad request.", 400)
         # USDT isn't exactly $1: the invoice's own rate, so paying what it asked for buys exactly what it promised
         paid = round(coins * pay.amount_usd / pay.pay_amount, 2) if pay.pay_amount else coins
-        before = pay.seconds
-        _credit(acct, pay, min(paid, MAX_USD * 2), now)
-        return status, acct.id if pay.seconds > before else None
+        added = _credit(db, acct, pay, min(paid, MAX_USD * 2), now)
+        return status, acct.id if added > 0 else None
     if status == "refunded":
         _take_back(acct, pay)
     elif status in ("failed", "expired", "cancelled") and pay.status == "pending":
-        pay.status = "failed" if status == "cancelled" else status
+        _set_status(db, pay, "pending", "failed" if status == "cancelled" else status)
     return status, None
 
 
@@ -297,23 +351,35 @@ def nowpayments_webhook(db: Session, raw: bytes, signature: str | None, now: dat
     if not secret:
         raise BillingError("Not configured.", 503)
     try:
-        signed = _np_signature_ok(raw, signature, secret)
+        form = _np_signature_form(raw, signature, secret)
         data = json.loads(raw)
     except (ValueError, RecursionError):  # RecursionError: deeply nested JSON (audit I4) is a bad request, not a 500
         raise BillingError("Bad request.", 400) from None
-    if not signed:
+    now = now or utcnow()
+    if form is None:
+        ipn["bad_signature"] += 1
+        ipn["last_bad_signature_at"] = now.isoformat()
+        # Most likely NOWPAYMENTS_IPN_SECRET on the server isn't the IPN secret in the NOWPayments dashboard. vpn.reconcile still
+        # credits payments by asking the provider, so nobody loses money, but this must be fixed (docs/hardening/FIRST-PAYMENT.md).
+        logger.warning("vpn: NOWPayments webhook refused: bad or missing signature")
         raise BillingError("Bad signature.", 401)
+    ipn["signed"] += 1
+    ipn["last_signed_at"], ipn["last_form"] = now.isoformat(), form
     if not isinstance(data, dict):
         raise BillingError("Bad request.", 400)
-    now = now or utcnow()
     pay = db.scalar(select(VpnPayment).where(VpnPayment.order_ref == str(data.get("order_id"))).with_for_update())
     if pay is None:  # not ours
         return "ignored", None
     payment_id = str(data.get("payment_id") or "")
     if payment_id and pay.provider_ref and payment_id != pay.provider_ref:
         pay = _repeat_deposit(db, pay, payment_id)  # more money sent to the same address: the provider gives it its own id
+    seconds = pay.seconds
     status, credited = _apply_np(db, pay, str(data.get("payment_status")), data.get("actually_paid"), data.get("pay_currency"), now)
     db.commit()
+    if credited is not None:
+        ipn["credited_by_webhook"] += 1
+    logger.info("vpn: NOWPayments webhook (signed form %s) for payment %s: provider says %s, now %s, credited %+d s",
+                form, pay.id, str(data.get("payment_status"))[:20], pay.status, pay.seconds - seconds)
     return status, credited
 
 
@@ -359,8 +425,13 @@ def check_payment(db: Session, pay: VpnPayment, now: datetime | None = None) -> 
         logger.warning("vpn: the provider's record for payment %s names another order", pay_id)
         db.commit()
         return pay.status, None
+    seconds = pay.seconds
     _, credited = _apply_np(db, pay, str(out.get("payment_status")), out.get("actually_paid"), out.get("pay_currency"), now)
     db.commit()
+    if credited is not None:
+        ipn["credited_by_check"] += 1
+    logger.info("vpn: asked NOWPayments about payment %s: provider says %s, now %s, credited %+d s",
+                pay.id, str(out.get("payment_status"))[:20], pay.status, pay.seconds - seconds)
     return pay.status, credited
 
 
@@ -412,7 +483,7 @@ def credit_by_hand(db: Session, pay: VpnPayment, usd: float, reason: str, acct: 
     if usd <= pay.paid_usd:
         raise BillingError(f"This payment has already been credited ${pay.paid_usd:.2f}.", 409)
     pay.account_id = target.id
-    _credit(target, pay, round(usd, 2), now or utcnow())
+    _credit(db, target, pay, round(usd, 2), now or utcnow())
     pay.note = f"Credited by hand: {reason}"[:200]
     logger.info("vpn: payment %s credited by hand", pay.id)
     db.commit()
@@ -546,4 +617,4 @@ def totals(db: Session, now: datetime | None = None) -> dict[str, Any]:
     revenue = db.scalar(select(func.coalesce(func.sum(VpnPayment.paid_usd), 0.0)).where(VpnPayment.credited_at >= now - timedelta(days=30)))
     return {"paying": int(db.scalar(select(func.count()).select_from(VpnAccount).where(VpnAccount.paid_until > now)) or 0),
             "anonymous": int(db.scalar(select(func.count()).select_from(VpnAccount).where(VpnAccount.key_hash.is_not(None))) or 0),
-            "revenue_30d_usd": round(float(revenue or 0), 2), "usdt": _usdt_on(), "card": CARD_SUBSCRIPTIONS and _card_on()}
+            "revenue_30d_usd": round(float(revenue or 0), 2), "usdt": _usdt_on(), "card": CARD_SUBSCRIPTIONS and _card_on(), "ipn": dict(ipn)}

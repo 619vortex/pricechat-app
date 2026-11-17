@@ -274,7 +274,7 @@ def test_admin_routes(client: TestClient, db: Session, fake: FakeNode) -> None:
     assert row.cert_sha256 == FP and TOKEN not in row.agent_token_enc and vpn.agent_token(row) == TOKEN
     assert row.public_key == fake.server_key and row.address == "10.66.0.1/16"
     o = client.get("/api/vpn/admin/overview").json()
-    assert o["settings"] == {"enabled": False, "payments_enabled": False, "trial_enabled": True, "max_devices": 3, "monthly_cap_gb": 0,
+    assert o["settings"] == {"enabled": False, "payments_enabled": False, "payments_public": True, "trial_enabled": True, "max_devices": 3, "monthly_cap_gb": 0,
                              "trial_one_per_identity": True, "trial_min_account_age_hours": 24, "trial_min_xp": 0, "trial_per_ip_day": 3,
                              "trial_per_network_day": 10, "sync_enforce_limits": False, "count_pc_once": False,
                              "trial_guard_mode": "monitor"} and "ranks" not in o

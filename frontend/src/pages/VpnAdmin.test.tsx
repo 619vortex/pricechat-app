@@ -70,6 +70,23 @@ describe("VPN admin: access, payments, customers and blocking", () => {
     expect(container.textContent).toMatch(/On · \$9\.99 for 30 days/);
   });
 
+  it("in payments' test mode says only the owner and testers can pay, before and after", async () => {
+    let s = overview({ billing: CAN_PAY, settings: { enabled: true, payments_enabled: false, payments_public: false, max_devices: 3, monthly_cap_gb: 0 } });
+    const seen: string[] = [];
+    vi.stubGlobal("confirm", (m: string) => { seen.push(m); return true; });
+    serve((key, body) => {
+      if (key === "PUT /api/vpn/admin/settings") { s = { ...s, settings: { ...s.settings, ...JSON.parse(body!) } }; return [200, s.settings]; }
+      return [200, s];
+    });
+    const { container } = render(<VpnAdminPage />);
+    await flush();
+    fireEvent.click(screen.getByLabelText("Payments on"));
+    await flush();
+    expect(seen[0]).toMatch(/test mode.*Only you.*and named testers.*Nothing changes for anyone else/);
+    expect(container.textContent).toMatch(/On · test: only you and testers/);
+    expect(container.textContent).toMatch(/VPN_PAYMENTS_PUBLIC=true on the server, after the first real payment is verified/);
+  });
+
   it("won't let payments be switched on with no way to take one", async () => {
     serve(() => [200, overview({ billing: { ...CAN_PAY, usdt: false } })]);
     const { container } = render(<VpnAdminPage />);

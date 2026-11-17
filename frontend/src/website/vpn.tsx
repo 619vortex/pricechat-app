@@ -28,7 +28,7 @@ export interface VpnUsage { month: string; used_bytes: number; cap_bytes: number
 export interface VpnBilling { price_usd: number; period_days: number; min_usd: number; max_usd: number; usdt: boolean; card: boolean; networks: { key: string; name: string; min_usd?: number }[] }
 export type VpnPlanKind = "tester" | "trial" | "royal" | "paid" | "expired" | "not_activated" | "free" | "owner" | "granted" | "blocked" | "closed";
 export interface VpnPlan { kind: VpnPlanKind; until: string | null; days_left: number | null }
-export interface VpnState { enabled: boolean; test_mode?: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling | null;
+export interface VpnState { enabled: boolean; test_mode?: boolean; /** payments' test mode: billing is shown only because this is the owner or a tester */ payments_test?: boolean; eligible: boolean; reason: string | null; max_devices: number; paid_until?: string | null; anonymous?: boolean; has_card?: boolean; billing?: VpnBilling | null;
   servers: VpnServer[]; devices: VpnDevice[]; usage: VpnUsage; plan?: VpnPlan; royal?: boolean; trial?: { available: boolean; days: number } }
 /** Real figures from the server. uptime stays null until real monitoring exists. */
 export interface VpnStats { active_users: number; countries: number; online_servers: number; uptime: number | null;
@@ -124,6 +124,11 @@ function TestModeNote({ paid }: { paid: boolean }) {
   return <p className="vpn-testmode" role="status"><b>Test mode</b> Kiwi VPN is closed to everyone else. You see this because you're signed in to Admin.{paid ? " Payments here are real." : ""}</p>;
 }
 
+/** Payments' test mode: the VPN is open, but only the owner (signed in to Admin) and testers are offered a way to pay. */
+function PaymentsTestNote() {
+  return <p className="vpn-testmode" role="status"><b>Payments test</b> Only you and testers can pay right now. Everyone else sees no way to pay. Payments here are real.</p>;
+}
+
 function Gate({ error, status }: { error: string; status: number }) {
   return (
     <div className="vpn-gate">
@@ -150,7 +155,7 @@ export function VpnPage() {
     <SitePage {...pageHead("vpn")}>
       <div className="vpn">
         <Hero state={state} servers={list ?? []} onStarted={setState} />
-        {state && "test_mode" in state && state.test_mode && <TestModeNote paid={paid} />}
+        {state && "test_mode" in state && state.test_mode ? <TestModeNote paid={paid} /> : member?.payments_test && <PaymentsTestNote />}
         {fresh && <KeyOnce k={fresh} onDone={() => { setKey(fresh); setFresh(null); }} />}
         {state && "error" in state && <Gate error={state.error} status={state.status} />}
         {!free && <Plans state={state} onStarted={setState} />}

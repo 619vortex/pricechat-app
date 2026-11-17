@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     nowpayments_ipn_secret: SecretStr | None = None
     stripe_secret_key: SecretStr | None = None
     stripe_webhook_secret: SecretStr | None = None
+    # Off (the default): payments switched on in Admin reach only the owner (signed in to Admin) and named testers, so the first
+    # real payment can be verified end to end before anyone else can pay (docs/hardening/FIRST-PAYMENT.md). The owner sets
+    # VPN_PAYMENTS_PUBLIC=true on Railway only after that.
+    vpn_payments_public: bool = False
     # The website's chat bubble: a read-only preview of the PUBLIC Telegram group (first names only). Off = no bubble.
     website_chat_enabled: bool = True
     # Pokémon Portfolio. Photos: a PRIVATE S3-compatible bucket (Railway bucket: endpoint, region, key id, secret, name).

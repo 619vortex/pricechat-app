@@ -63,6 +63,10 @@ isolation, but existing customers on Helsinki would have to move servers, and yo
 
 ## 3. Real payment test (owner's wallet, ~$11 on Tron or ~$5 on Solana)
 
+> 2026-11-17: superseded by docs/hardening/FIRST-PAYMENT.md. Before feat/kiwi-release-prep, "test mode" below only existed while
+> Kiwi VPN was closed; with the VPN open to the public (as now) the payments switch offered payment to everyone. That branch adds
+> a real payments test mode (`VPN_PAYMENTS_PUBLIC`, off by default) and the webhook checks step 3 relies on.
+
 NOWPayments is configured on Railway (API key and IPN secret set; Stripe off). Steps:
 1. Admin › System › VPN: payments ON in **test mode** (only the owner and testers are offered payment).
 2. On /vpn signed in as the owner: Add time → USDT on Solana (lowest minimum) → pay the exact amount shown.

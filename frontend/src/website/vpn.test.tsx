@@ -579,6 +579,18 @@ describe("Paying and anonymous keys", () => {
     expect(document.body.textContent).toMatch(/Test mode.*closed to everyone else.*Payments here are real/);
   });
 
+  it("labels payments' test mode while the VPN is open, and only then", async () => {
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ payments_test: true, billing: BILL })] });
+    render(<VpnPage />);
+    await settle();
+    expect(document.body.textContent).toMatch(/Payments test.*Only you and testers can pay.*Payments here are real/);
+    cleanup();
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: BILL })] });
+    render(<VpnPage />);
+    await settle();
+    expect(document.body.textContent).not.toMatch(/Payments test/);
+  });
+
   it("refuses an amount outside the limits before asking the server", async () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [200, state({ billing: BILL, anonymous: false })] });
     render(<VpnPage />);

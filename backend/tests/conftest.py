@@ -405,6 +405,17 @@ def _newsdesk_plan(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.fixture(autouse=True)
+def _vpn_payments_public(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: the Kiwi VPN tests written before payments' test mode (VPN_PAYMENTS_PUBLIC, default off in production) are about
+    payments open to everyone. tests/test_vpn_payments_test_mode.py tests the default itself."""
+    if request.module.__name__.endswith("test_vpn_payments_test_mode"):
+        return
+    from app.config.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "vpn_payments_public", True, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _classic_post_style(monkeypatch: pytest.MonkeyPatch) -> None:
     """TEST FIXTURE: the News Desk's older tests are about the classic layout (still Admin's rollback); the clean style's own tests
     (test_newsdesk_clean*.py) set network.DEFAULT_STYLE = "clean"."""
