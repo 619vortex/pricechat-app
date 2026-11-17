@@ -98,7 +98,8 @@ DISRUPTION = _rx(
     r"system(?:s|wide)? (?:failure|outage|issues?|problems?|glitch|crash|went dark)|systemwide|technical (?:issues?|problems?|glitch|outage|failure|difficulties)|"
     r"glitch(?:es)?|software bug|it (?:failure|outage|meltdown)|meltdown|"
     r"ground stops?|grounds? (?:all |its )?(?:flights|planes|jets|fleet)|grounded|flights? (?:halted|suspended|grounded|cancell?ed)|halt(?:s|ed)? (?:all )?(?:flights|departures|trading)|"
-    r"trading halt(?:ed)?|halts? trading|cyber ?attacks?|ransomware|data breach|breached|hacked|hackers?|malware attack|ddos|"
+    r"trading halt(?:ed)?|halts? trading|cyber ?attacks?|ransomware|data breach|breached|hacked|"
+    r"hackers? (?:steal|stole|drain|drained|breach|breached|hit|attack|attacked|target|targeted)\w*|malware attack|ddos|"
     r"can(?:'|’)?t (?:access|log ?in|move|get to|use|pay)|cannot (?:access|log ?in)|unable to (?:access|log ?in|pay|make|withdraw|use)|locked out|"
     r"(?:login|log-in|log in|payment|transaction|deposit)s? (?:issues?|problems?|failures?|delays?)|"
     r"went dark|offline|crash(?:es|ed)?)\b")
@@ -132,7 +133,8 @@ LABEL = {"banking": "banking outage", "payments": "payment disruption", "exchang
          "cloud": "cloud, email or app outage", "telecom": "telecom outage", "power": "power failure", "cyber": "cyberattack"}
 # the flights themselves stopped: aviation, whoever else the headline names ("Tech issue grounds all US flights day after global Microsoft outage")
 AVIATION_EVENT = _rx(r"\b(ground stops?|grounds? (?:all |its )?(?:us |u\.s\. )?(?:flights|planes|jets|fleet)|flights? (?:halted|suspended|grounded)|halt(?:s|ed)? (?:all )?(?:flights|departures))\b")
-CYBER = _rx(r"\b(cyber ?attacks?|ransomware|data breach|breached|hacked|hackers?|malware attack|ddos)\b")
+# "hacker" alone is not an attack: "Binance Hacker-Linked Wallets Move Nearly 75,000 ETH" (production 2026-11-17 09:13) is old funds moving
+CYBER = _rx(r"\b(cyber ?attacks?|ransomware|data breach|breached|hacked|hackers? (?:steal|stole|drain|drained|breach|breached|hit|attack|attacked|target|targeted)\w*|malware attack|ddos)\b")
 
 
 @dataclass
