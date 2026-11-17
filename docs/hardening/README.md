@@ -69,6 +69,12 @@ named testers), crediting exactly once under simultaneous webhook/reconcile repo
 No migration. Owner runbook: FIRST-PAYMENT.md. Until it's deployed, don't switch payments on: production's VPN is open, so the
 old switch would offer payment to everyone.
 
+## Legal pages and checkout consent (2026-11-17, feat/kiwi-legal)
+
+Release text for /vpn/terms, /vpn/refunds, /vpn/privacy and /vpn/acceptable-use (in force), the EU/UK 14-day right to cancel with a
+required checkout box recorded per payment (member audit log, no migration), and sign-in from Kiwi VPN returning to it. Ten business
+facts are visible `[OWNER: …]` marks to fill in before deploying: LEGAL.md.
+
 ## Urgency ranking
 
 1. Owner alert chat set and tested (works on today's production: the test endpoint is already live).
