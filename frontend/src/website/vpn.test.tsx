@@ -550,10 +550,22 @@ describe("Paying and anonymous keys", () => {
     const amount = screen.getByLabelText(/Amount/);
     fireEvent.change(amount, { target: { value: "5" } });
     expect(document.body.textContent).toMatch(/Buys about 15\.0 days/);
-    fireEvent.click(screen.getByRole("button", { name: "Pay with USDT" }));
+    // EU/UK right to cancel: no payment until the customer asks for the time to start now, never ticked for them
+    const pay = screen.getByRole("button", { name: "Pay with USDT" }) as HTMLButtonElement;
+    const startNow = screen.getByRole("checkbox", { name: /Start my Kiwi VPN time as soon as my payment is confirmed/ }) as HTMLInputElement;
+    expect(startNow.checked).toBe(false);
+    expect(pay.disabled).toBe(true);
+    expect(startNow.closest("label")!.textContent).toMatch(/if I cancel within 14 days, I get back only the part of my payment for time I haven't used/);
+    expect(screen.getByRole("link", { name: "Your right to cancel" }).getAttribute("href")).toBe("/vpn/refunds#right-to-cancel");
+    fireEvent.click(pay);
+    await settle();
+    expect(sent).toBeUndefined();
+    fireEvent.click(startNow);
+    expect(pay.disabled).toBe(false);
+    fireEvent.click(pay);
     await settle();
     expect((sent!.headers as Record<string, string>)["X-Kiwi-Key"]).toBe("KIWI-TEST");
-    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "solana" });
+    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "solana", start_now: true });
     expect(screen.getByText("TAddr1")).toBeTruthy();
     expect(document.body.textContent).toMatch(/Send exactly 5 USDT on USDT on Solana/);
   });

@@ -956,6 +956,10 @@ function KeyOnce({ k, onDone }: { k: string; onDone: () => void }) {
 
 type Invoice = { network_name: string; address: string; amount: number; amount_usd: number; expires_at: string | null; days: number };
 
+/** The checkout box (EU/UK 14-day right to cancel). The server refuses a payment without it and records it with the payment
+ *  (backend billing.START_NOW_CONSENT names this wording's version: change both together). /vpn/refunds explains it in full. */
+export const START_NOW = "Start my Kiwi VPN time as soon as my payment is confirmed. I understand that if I cancel within 14 days, I get back only the part of my payment for time I haven't used, and that I can't cancel once all the time I paid for has been used.";
+
 /** Time left, and buying more. Any amount buys its share of $9.99 for 30 days. */
 function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const call = useContext(CallCtx);
@@ -965,6 +969,7 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [startNow, setStartNow] = useState(false);  // never ticked for the customer
   const [startOpen] = useState(!s.eligible);
   useEffect(() => {  // the time appears by itself once the network confirms the payment
     if (!invoice) return;
@@ -980,8 +985,9 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const active = until !== null && until.getTime() > Date.now();
   async function usdt(e: React.FormEvent) {
     e.preventDefault();
+    if (!startNow) return;
     setBusy(true); setErr(null);
-    try { setInvoice(await call<Invoice>("/usdt", { method: "POST", body: JSON.stringify({ amount_usd: usd, network }) })); }
+    try { setInvoice(await call<Invoice>("/usdt", { method: "POST", body: JSON.stringify({ amount_usd: usd, network, start_now: true }) })); }
     catch (e2) { setErr(vpnError(e2)); } finally { setBusy(false); }
   }
   async function go(path: string) {
@@ -1014,7 +1020,9 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
             <select className="site-input" value={network} onChange={(e) => setNetwork(e.target.value)}>
               {b.networks.map((n) => <option key={n.key} value={n.key}>{n.name}{n.min_usd && n.min_usd > b.min_usd ? ` (min $${n.min_usd})` : ""}</option>)}
             </select></label>
-          <button className="site-button" type="submit" disabled={busy || !okAmount}>{busy ? "Creating…" : "Pay with USDT"}</button>
+          <label className="vpn-check vpn-startnow"><input type="checkbox" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} /> {START_NOW}{" "}
+            <a href="/vpn/refunds#right-to-cancel">Your right to cancel</a> · <a href="/vpn/terms">Kiwi VPN terms</a></label>
+          <button className="site-button" type="submit" disabled={busy || !okAmount || !startNow}>{busy ? "Creating…" : "Pay with USDT"}</button>
         </form>
       ))}
       {err && <p className="site-error" role="alert">{err}</p>}

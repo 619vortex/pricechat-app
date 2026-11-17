@@ -29,7 +29,7 @@ def test_free_means_no_time_needed_and_no_payment_route(client: TestClient, db: 
     c = signed_in(client, db, member_at(db, "egg", "free", paid=False))
     view = c.get("/api/members/vpn").json()
     assert view["eligible"] is True and view["reason"] is None and view["payments"] is False and view["billing"] is None
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code == 403
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}).status_code == 403
     assert c.post("/api/members/vpn/card").status_code == 403
     assert c.post("/api/members/vpn/devices", json={"name": "phone", "server_id": server.id}).status_code == 201
     assert not SENT and db.scalars(select(VpnPayment)).all() == []  # the provider was never called
@@ -70,7 +70,7 @@ def test_switching_payments_on_and_off(client: TestClient, db: Session, fake: An
     vpn.sync_all(db)
     db.refresh(dev)
     assert dev.public_key not in fake.peers and db.get(VpnDevice, dev.id) is not None
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 5, "network": "solana"}).status_code == 200
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 5, "network": "solana", "start_now": True}).status_code == 200
 
     # an invoice from while payments were on still pays out after they're off
     order = db.scalars(select(VpnPayment)).one().order_ref

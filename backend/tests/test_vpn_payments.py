@@ -136,7 +136,7 @@ def test_the_whole_life_of_a_customer(client: TestClient, db: Session, fake: Any
     assert vpn.qualifies(db, m)[0] is False
     assert c.get(f"/api/members/vpn/devices/{dev_id}/peer").status_code == 403
     # pays: the device is back straight away, with no sync and no new setup
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code == 200
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}).status_code == 200
     assert c.get("/api/members/vpn").json()["eligible"] is False  # not until the money arrives
     assert key not in fake.peers
     assert ipn(c, payment(db).order_ref, "finished", 9.99, USDT).status_code == 200
@@ -234,7 +234,7 @@ def test_paying_during_a_trial_keeps_every_trial_day_and_a_refund_goes_back_to_t
     m = member_at(db, "egg", "early", paid=False)
     c = signed_in(client, db, m)
     c.post("/api/members/vpn/trial")
-    c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"})
+    c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True})
     order = payment(db).order_ref
     ipn(c, order, "finished", 9.99, USDT)
     acct_id = vpn.account_of(db, m).id
@@ -322,7 +322,7 @@ def test_a_blocked_account_or_banned_member_cant_start_a_payment(client: TestCli
     open_vpn(db)
     anon, key = billing.new_anonymous(db)
     vpn.set_blocked(db, anon.id, True)
-    pay = {"amount_usd": 9.99, "network": "solana"}
+    pay = {"amount_usd": 9.99, "network": "solana", "start_now": True}
     assert client.post("/api/members/vpn/anon/usdt", json=pay, headers={"x-kiwi-key": key}).status_code == 403
     m = member_at(db, "egg", "blocked", paid=False)
     c = signed_in(client, db, m)
@@ -344,7 +344,7 @@ def test_a_member_banned_after_signing_in_cant_start_a_payment(client: TestClien
     assert acct.status == "active"
     m.status = "banned"
     db.commit()
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code in (401, 403)
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}).status_code in (401, 403)
     assert db.scalars(select(VpnPayment)).all() == [] and not SENT
 
 
@@ -499,7 +499,7 @@ def test_recovery_routes_are_for_admin_and_for_the_payments_owner_only(client: T
     open_vpn(db)
     buyer = member_at(db, "egg", "buyer", paid=False)
     c = signed_in(client, db, buyer)
-    c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"})
+    c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True})
     pay = payment(db)
     pay_id, order = pay.id, pay.order_ref
     other_key = client.post("/api/members/vpn/anon").json()["key"]
@@ -533,7 +533,7 @@ def test_history_shows_your_own_payments_with_the_address_only_while_waiting(cli
     key = client.post("/api/members/vpn/anon").json()["key"]
     head = {"x-kiwi-key": key}
     assert client.get("/api/members/vpn/anon/payments", headers=head).json()["items"] == []
-    client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana"}, headers=head)
+    client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}, headers=head)
     row = client.get("/api/members/vpn/anon/payments", headers=head).json()["items"][0]
     assert row["status"] == "pending" and row["address"] == "TAddr" and row["amount"] == 9.99 and row["can_check"] is True and row["receipt"].startswith("KV-")
     assert row["network_name"] == "USDT on Solana"
@@ -543,7 +543,7 @@ def test_history_shows_your_own_payments_with_the_address_only_while_waiting(cli
     assert not {"order_ref", "provider_ref", "account_id", "note"} & set(row)
     # an attempt the provider never accepted charged nothing, so it isn't listed
     monkeypatch.setattr(billing, "transport", httpx.MockTransport(lambda r: httpx.Response(500) if r.method == "POST" else httpx.Response(200, json={"fiat_equivalent": 0.5})))
-    assert client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana"}, headers=head).status_code == 502
+    assert client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}, headers=head).status_code == 502
     assert len(client.get("/api/members/vpn/anon/payments", headers=head).json()["items"]) == 1
 
 

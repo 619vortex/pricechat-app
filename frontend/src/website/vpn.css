@@ -311,6 +311,8 @@
 .vpn-key { display: block; padding: 12px; border-radius: 10px; background: rgba(0, 0, 0, .35); box-shadow: inset 0 0 0 1px var(--vpn-line); font: 700 14px/1.5 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; user-select: all; }
 .vpn-keyonce, .vpn-invoice { display: grid; gap: 12px; align-items: start; }
 .vpn-check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.vpn-startnow { display: block; line-height: 1.5; }
+.vpn-startnow input { margin-right: 8px; vertical-align: -2px; }
 .vpn-fine { font-size: 12.500px; line-height: 1.5; }
 .vpn-expiring { margin: 6px 0 0; color: #ffcf5a; font-weight: 600; }
 .vpn-payments { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; min-width: 0; }

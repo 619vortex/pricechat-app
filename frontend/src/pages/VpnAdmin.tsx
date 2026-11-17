@@ -423,7 +423,7 @@ type AdminBrowser = { id: number; server: string; last_active: string | null; rx
 type AdminDevice = { id: number; name: string; server: string; ip: string; last_handshake: string | null; rx_bytes: number; tx_bytes: number };
 export type VpnCustomer = { tester_until?: string | null; id: number; owner?: boolean; anonymous: boolean; label: string; state: "active" | "lapsed" | "blocked"; paid_until: string | null; lapsed_at: string | null;
   has_card: boolean; payments: number; paid_usd: number; devices: AdminDevice[]; browsers?: AdminBrowser[] };
-export type VpnPaymentRow = { note?: string | null; can_check?: boolean; id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
+export type VpnPaymentRow = { note?: string | null; can_check?: boolean; /** the checkout's start-now box was ticked (EU/UK right to cancel) */ start_now?: boolean; id: number; provider: string; network: string | null; amount_usd: number; paid_usd: number; status: string; days: number;
   created_at: string | null; credited_at: string | null; account: string | null };
 const CONNECTED_MS = 10 * 60_000;  // the sync reads handshakes every 5 minutes
 const STATE_TONE = { active: "good", lapsed: "warn", blocked: "bad" } as const;
@@ -571,7 +571,7 @@ function Payments({ on }: { on: boolean }) {
             {r.data.items.map((p) => (
               <tr key={p.id}>
                 <td>{day(p.created_at)}</td>
-                <td>{p.account ?? <span className="muted small">unlinked after 7 days</span>}</td>
+                <td>{p.account ?? <span className="muted small">unlinked after 7 days</span>}{p.provider !== "stripe" && p.start_now === false && <div className="muted small" title="No record that the customer ticked the start-now box at checkout: treat a cancellation within 14 days as a full refund">no start-now consent</div>}</td>
                 <td>{p.provider === "stripe" ? "card" : p.network ? `USDT ${p.network}` : p.provider}</td>
                 <td>${p.amount_usd.toFixed(2)}</td>
                 <td>${p.paid_usd.toFixed(2)}</td>
