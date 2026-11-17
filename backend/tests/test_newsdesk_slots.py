@@ -280,3 +280,20 @@ async def test_a_stale_or_broken_feed_is_flagged_and_never_stops_the_others(db: 
         out = await engine.collect(db, desk, client, now)
     assert out["feed_problems"]["https://old.test/rss"].startswith("stale") and out["feed_problems"]["https://down.test/rss"] == "HTTP 503"
     assert out["new_stories"] == 1 and out["feed_health"]["https://good.test/rss"]["new"] == 1
+
+
+@pytest.mark.asyncio
+async def test_an_outage_reported_five_hours_ago_does_not_take_a_slot(db: Session) -> None:
+    """Production 2026-11-17 08:00 UTC (12:00 Dubai): "United Airlines says 'widespread' system outage resolved" took the slot 304 min after
+    its first report, hours after the outage had ended. An outage is news while it happens, not at a later slot."""
+    verified(db, "United Airlines says widespread system outage resolved", now=SLOT, hours=5)
+    await decide(db, SLOT + timedelta(minutes=1))
+    out = released(db)
+    assert not any("United" in (e.title or "") for e in out), [(e.title, e.topic, e.slot, (e.facts or {}).get("importance"), int(events._age(e, SLOT + timedelta(minutes=1))), e.why) for e in out]
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_outage_still_takes_the_slot(db: Session) -> None:
+    verified(db, "United Airlines says widespread system outage grounds flights nationwide", now=SLOT, hours=1)
+    await decide(db, SLOT + timedelta(minutes=1))
+    assert any("United" in (e.title or "") for e in released(db))

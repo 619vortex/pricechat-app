@@ -95,6 +95,7 @@ class Policy:
 # the wire style's breaking lane (owner, 2026-11-14: "publish meaningful breaking updates quickly ... a sane rate limit so breaking can't
 # flood the channel"): at most 3 a day and 2 in any six hours, 90 minutes from any other post, never 45 minutes before a slot
 WIRE_BREAKING_PER_DAY = 3
+INCIDENT_SLOT_MAX_MIN = 180  # an infrastructure incident takes a regular slot only within 3 h of its first report
 WIRE_BREAKING_PER_6H = 2
 
 
@@ -766,6 +767,15 @@ def _offer_liquidations(db: Session, recent: list[NdEvent], now: datetime, adj: 
 # --- release -------------------------------------------------------------------------------------------------------
 
 
+def _outage_story(ev: NdEvent) -> bool:
+    """An infrastructure outage (app/newsdesk/incidents), whichever path admitted it (importance, or the chaos filter's "failure" topic). An
+    exchange's halt that is still in force stays news for longer (withdrawals frozen); a resolved one does not."""
+    from app.newsdesk import incidents
+
+    inc = incidents.detect(ev.title or "")
+    return inc is not None and (inc.kind != "exchange" or inc.resolved)
+
+
 def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
     """At most one event per pass. The best candidate that fits the plan goes; the others say why they wait."""
     out = list(db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.released_at >= now - timedelta(hours=24))))
@@ -917,6 +927,11 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
         if _age(ev, now) > 24 * 60 / max(1, len(p.slot_hours)) and ev.kind == "news" and not (ev.facts or {}).get("importance") \
                 and (ev.topic or "") not in IMPORTANT_TOPICS and editorial.significance(ev.title or "", ev.summary or "") is None:
             ev.why = "held past one slot interval, but no longer reads as important"  # the recheck before a held story goes
+            continue
+        if ev.kind in ("news", "update") and _age(ev, now) > INCIDENT_SLOT_MAX_MIN and _outage_story(ev):
+            # production 2026-11-17 08:00 UTC slot: "United Airlines says 'widespread' system outage resolved" went out 304 min after its
+            # first report, hours after the outage ended. An outage is news while it happens (the breaking lane, Trending), not slots later
+            ev.why = f"an infrastructure incident first reported {int(_age(ev, now))} min ago: news while it happens, not at a later slot"
             continue
         if ev.kind == "market" and ev.virality < p.market_bar:
             ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot"
