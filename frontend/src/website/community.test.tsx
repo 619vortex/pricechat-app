@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { JoinPage, LeaderboardPage, LegalPage } from "./community";
+import { JoinPage, LeaderboardPage, LegalPage, OWNER_MARKERS } from "./community";
+import { START_NOW } from "./vpn";
 import { ProfilePage } from "./passport";
 import { Website } from "./Website";
 import { RankKiwi } from "./RankKiwi";
@@ -349,21 +350,57 @@ describe("legal pages", () => {
     }
   });
 
-  it("states Kiwi VPN's price, manual renewal and refund rules, marked as drafts", async () => {
+  it("states Kiwi VPN's price, manual renewal and refund rules, in force with the owner's facts still marked", async () => {
     serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
     const terms = (await show(<LegalPage kind="vpnterms" />)).container.textContent!;
-    expect(terms).toMatch(/\$9\.99 for 30 days/);
+    expect(terms).toMatch(/\$9\.99 \(US dollars\) for 30 days/);
     expect(terms).toMatch(/Nothing renews or charges by itself/);
     expect(terms).toMatch(/added after any paid time or free trial/);
-    expect(screen.getByRole("note").textContent).toContain("Draft");
-    expect(terms).not.toMatch(/Stripe|credit card/i);
+    expect(terms).toMatch(/Last updated \d+ \w+ 20\d\d/);
+    expect(screen.getByRole("note").textContent).toMatch(/Being finalised/);  // not a draft: only the owner's facts are missing
+    expect(terms).not.toMatch(/Stripe|credit card|Draft/i);
     cleanup();
     const refunds = (await show(<LegalPage kind="vpnrefunds" />)).container.textContent!;
     expect(refunds).toMatch(/can't reverse them/);
     expect(refunds).toMatch(/Check now/);
     expect(refunds).toMatch(/KV-/);
     expect(refunds).toMatch(/rights the law gives you/);
-    expect(screen.getByRole("note").textContent).toContain("Draft");
+    expect(screen.getByRole("note").textContent).toMatch(/Being finalised/);
+  });
+
+  it("Kiwi VPN terms name the provider, age, liability, law and the right to cancel, with every unknown fact a visible owner marker", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const { container } = await show(<LegalPage kind="vpnterms" />);
+    const terms = container.textContent!;
+    for (const h of ["Who provides Kiwi VPN", "Who can use it", "Your right to cancel (EU and UK)", "Ending", "Our liability", "Law and disputes"])
+      expect(screen.getByRole("heading", { name: h })).toBeTruthy();
+    expect(terms).toMatch(/18 or over, or the age of majority where you live/);
+    expect(terms).toMatch(/legal where you are/);
+    expect(terms).toMatch(/doesn't allow us to limit/);
+    expect(terms).toMatch(/mandatory consumer laws of the country where you live/);
+    expect(terms).toMatch(/within 14 days of paying/);
+    // the owner's facts are highlighted, never guessed
+    const marks = [...container.querySelectorAll("mark.site-owner-marker")].map((m) => m.textContent);
+    for (const m of ["[OWNER: legal entity or trader name]", "[OWNER: postal address]", "[OWNER: business email for Kiwi VPN]", "[OWNER: governing-law country]",
+                     "[OWNER: courts with jurisdiction]", "[OWNER: whether the price includes VAT or other sales tax]"])
+      expect(marks).toContain(m);
+    expect(terms).not.toMatch(/Avigad|Dubai|@pricechat\.live/);  // no business fact filled in by guesswork
+    // site paths are links
+    expect(container.querySelector('a[href="/vpn/refunds"]')).toBeTruthy();
+    expect(container.querySelector('a[href="/vpn/acceptable-use"]')).toBeTruthy();
+  });
+
+  it("the refund policy explains the 14-day right to cancel, quotes the checkout box word for word, and has its anchor", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const { container } = await show(<LegalPage kind="vpnrefunds" />);
+    const section = container.querySelector("section#right-to-cancel")!;
+    expect(section).toBeTruthy();
+    expect(section.textContent).toContain(START_NOW);  // the exact words the customer ticks (vpn.tsx)
+    expect(section.textContent).toMatch(/14 days from the day you pay/);
+    expect(section.textContent).toMatch(/the time you haven't used yet/);
+    expect(section.textContent).toMatch(/we pay the network fee/);
+    expect(section.textContent).toMatch(/KV-000123/);
+    expect(section.querySelector("mark.site-owner-marker")!.textContent).toBe("[OWNER: business email for Kiwi VPN]");
   });
 
   it("Kiwi VPN privacy names who resolves DNS and what the servers and hosts hold, with no absolute no-logs claim", async () => {
@@ -383,10 +420,39 @@ describe("legal pages", () => {
     expect(privacy).not.toMatch(/We don't log|don't record the sites|your DNS lookups or the content|zero[- ]logs?|no[- ]logs/i);
   });
 
-  it("Kiwi VPN acceptable use is a clearly marked draft covering abuse, P2P, suspension, reporting and visibility", async () => {
+  it("Kiwi VPN privacy names the controller, legal bases, processors, retention from the code and how to use your rights", async () => {
+    serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
+    const { container } = await show(<LegalPage kind="vpnprivacy" />);
+    const privacy = container.textContent!;
+    for (const h of ["Who is responsible for your data", "Why we use it", "Who else is involved", "How long we keep it", "Your rights", "Children"])
+      expect(screen.getByRole("heading", { name: h })).toBeTruthy();
+    expect(privacy).toMatch(/needed for our contract with you/);
+    expect(privacy).toMatch(/legitimate interest/);
+    expect(privacy).toMatch(/legal obligations under tax and accounting law/);
+    for (const who of ["Hetzner", "Railway", "Vercel", "NOWPayments", "Resend", "Cloudflare", "Telegram"]) expect(privacy).toContain(who);
+    // retention, as the code does it
+    expect(privacy).toMatch(/removed after 30 days/);  // service.KEEP_LAPSED
+    expect(privacy).toMatch(/settled and at least 7 days old/);  // billing.SCRUB_AFTER
+    expect(privacy).toMatch(/check records: 30 days/);  // trial_guard.SIGNAL_DAYS
+    expect(privacy).toMatch(/counted in memory only, for 24 hours/);
+    expect(privacy).toMatch(/nearest 5 minutes/);  // service.ACTIVITY_STEP
+    expect(privacy).toMatch(/never the address itself/);
+    expect(privacy).toMatch(/ticked the box at checkout/);
+    expect(privacy).toMatch(/copy of your data.*corrected or deleted.*portable/);
+    expect(privacy).toMatch(/within one month/);
+    expect(privacy).toMatch(/data protection authority/);
+    const marks = [...container.querySelectorAll("mark.site-owner-marker")].map((m) => m.textContent);
+    expect(marks).toContain("[OWNER: how long tax law requires payment records to be kept]");
+    expect(marks).toContain("[OWNER: legal entity or trader name]");
+  });
+
+  it("Kiwi VPN acceptable use is in force, covering abuse, P2P, suspension, reporting and visibility", async () => {
     serve({ "/api/members/session": { signed_in: false, member: null }, "/api/website/home": home });
     const aup = (await show(<LegalPage kind="vpnaup" />)).container.textContent!;
-    expect(screen.getByRole("note").textContent).toMatch(/Draft for review: this policy isn't in force yet/);
+    expect(screen.queryByRole("note")).toBeNull();  // no draft banner, and no owner facts missing
+    expect(aup).not.toMatch(/Draft|isn't in force/);
+    expect(aup).toMatch(/part of the Kiwi VPN terms/);
+    expect(aup).toMatch(/Last updated/);
     expect(document.title).toBe("Kiwi VPN Acceptable Use · Price Chat");
     for (const h of ["Not allowed", "File sharing (P2P)", "What we can and can't see", "Abuse reports and suspension", "Reporting abuse"])
       expect(screen.getByRole("heading", { name: h })).toBeTruthy();
@@ -402,7 +468,21 @@ describe("legal pages", () => {
     cleanup();
     const terms = (await show(<LegalPage kind="vpnterms" />)).container.textContent!;
     expect(terms).toContain("/vpn/acceptable-use");
-    expect(screen.getByRole("note").textContent).toBe("Draft: this page has not had final legal review yet.");
+    cleanup();
+    await show(<LegalPage kind="terms" />);
+    expect(screen.getByRole("note").textContent).toBe("Draft: this page has not had final legal review yet.");  // the community pages keep theirs
+  });
+
+  it("lists every owner fact still missing and where it shows, so nothing ships with a gap unnoticed", () => {
+    const markers = OWNER_MARKERS.map((m) => m.marker);
+    expect(markers).toEqual([
+      "[OWNER: legal entity or trader name]", "[OWNER: postal address]", "[OWNER: business email for Kiwi VPN]",
+      "[OWNER: company registration number, or remove if there is none]", "[OWNER: VAT number, or remove if not VAT-registered]",
+      "[OWNER: governing-law country]", "[OWNER: courts with jurisdiction]", "[OWNER: whether the price includes VAT or other sales tax]",
+      "[OWNER: how long tax law requires payment records to be kept]", "[OWNER: safeguard relied on for transfers outside the EU/UK, e.g. Standard Contractual Clauses]",
+    ]);
+    for (const m of OWNER_MARKERS) expect(m.pages.length).toBeGreaterThan(0);  // each one is on a page
+    expect(OWNER_MARKERS.find((m) => m.marker.includes("business email"))!.pages).toEqual(["/vpn/privacy", "/vpn/terms", "/vpn/refunds"]);
   });
 });
 

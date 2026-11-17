@@ -1007,6 +1007,8 @@ a:hover .site-worth-subject { background-size: 100% 1.5px; }
 .site-legal-h { font-size: 13px; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase; color: var(--site-green); margin-bottom: 12px; }
 .site-draft { display: inline-block; padding: 6px 12px; border: 1px dashed rgba(255, 200, 70, 0.6); border-radius: 4px; color: #ffd27a; font-size: 13px; }
 .site-legal-links { display: flex; gap: 24px; }
+.site-legal-updated { margin: -20px 0 32px; font-size: 13px; }
+.site-owner-marker { background: rgba(255, 200, 70, 0.22); color: #ffd27a; border: 1px dashed rgba(255, 200, 70, 0.7); border-radius: 3px; padding: 0 4px; font-weight: 700; }
 
 .site-footer-social { margin-left: auto; }
 

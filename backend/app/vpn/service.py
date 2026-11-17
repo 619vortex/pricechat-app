@@ -1100,7 +1100,8 @@ def admin_payments(db: Session, limit: int = 50) -> list[dict[str, Any]]:
     rows = db.execute(select(VpnPayment, VpnAccount).join(VpnAccount, VpnAccount.id == VpnPayment.account_id, isouter=True)
                       .order_by(VpnPayment.id.desc()).limit(limit)).all()
     people = dict(db.execute(select(Member.id, Member.username).where(Member.id.in_([a.member_id for _, a in rows if a is not None and a.member_id]))).all())
-    return [{"id": p.id, "provider": p.provider, "network": p.network, "amount_usd": p.amount_usd, "paid_usd": p.paid_usd, "status": p.status,
+    consented = billing.start_now_ids(db, [p.id for p, _ in rows])  # the checkout's start-now box (EU/UK right to cancel)
+    return [{"id": p.id, "start_now": p.id in consented, "provider": p.provider, "network": p.network, "amount_usd": p.amount_usd, "paid_usd": p.paid_usd, "status": p.status,
              "days": round(p.seconds / 86400, 1), "created_at": _iso(p.created_at), "credited_at": _iso(p.credited_at), "note": p.note, "can_check": bool(p.provider_ref) and p.status in billing.UNFINISHED,
              "account": None if a is None else (people.get(a.member_id, "(member gone)") if a.member_id else f"Anonymous #{a.id}")} for p, a in rows]
 

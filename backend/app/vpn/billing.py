@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
 from app.db.base import utcnow
+from app.models.members import MemberAuditLog
 from app.models.vpn import VpnAccount, VpnPayment
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,11 @@ def _http() -> httpx.Client:
 # --- USDT (NOWPayments) ------------------------------------------------------------------------------------------------
 
 
-def start_usdt(db: Session, acct: VpnAccount, amount_usd: float, network: str) -> dict[str, Any]:
+def start_usdt(db: Session, acct: VpnAccount, amount_usd: float, network: str, start_now: bool = False) -> dict[str, Any]:
+    """`start_now`: the customer ticked the checkout box asking for their time to start as soon as the payment is confirmed (the
+    EU/UK 14-day right to cancel, /vpn/refunds). It's recorded with the payment as a member audit row (START_NOW_CONSENT), in the
+    same commit that creates the payment, so every payment the website started carries its proof. No migration: the audit table
+    already exists and keeps its rows when a member is deleted (member_id set to NULL)."""
     key, ipn = _secret("nowpayments_api_key"), _secret("nowpayments_ipn_secret")
     if not (key and ipn):
         raise BillingError("USDT payments aren't open yet.", 503)
@@ -204,6 +209,9 @@ def start_usdt(db: Session, acct: VpnAccount, amount_usd: float, network: str) -
     amount_usd = round(amount_usd, 2)
     pay = VpnPayment(account_id=acct.id, provider="nowpayments", order_ref=secrets.token_urlsafe(18), network=network, amount_usd=amount_usd)
     db.add(pay)
+    if start_now:
+        db.flush()  # the payment's id, for the consent record
+        record_start_now(db, acct, pay)
     db.commit()  # no database transaction waits on the provider
     body = {"price_amount": amount_usd, "price_currency": "usd", "pay_currency": NETWORKS[network][0], "order_id": pay.order_ref,
             "order_description": "Kiwi VPN time", "ipn_callback_url": f"{get_settings().members_public_url}/api/members/vpn/webhooks/nowpayments"}
@@ -221,6 +229,28 @@ def start_usdt(db: Session, acct: VpnAccount, amount_usd: float, network: str) -
     db.commit()
     return {"id": pay.id, "network": network, "network_name": NETWORKS[network][1], "address": pay.pay_address, "amount": pay.pay_amount, "amount_usd": amount_usd,
             "expires_at": out.get("expiration_estimate_date"), "days": round(seconds_for(amount_usd) / 86400, 1)}
+
+
+# The checkout box's wording, by version: what the customer agreed to is the text in the website's AddTime form (vpn.tsx START_NOW)
+# on the date named here. Change the version whenever that wording changes.
+START_NOW_CONSENT = "start-now/2026-11-17"
+CONSENT_ACTION = "vpn_payment_consent"
+
+
+def record_start_now(db: Session, acct: VpnAccount, pay: VpnPayment) -> None:
+    """Proof that this payment's customer asked for their time to start at once and acknowledged what that means for their
+    right to cancel. A member's row names the member; an anonymous key's names only the payment (no key, address or amount)."""
+    db.add(MemberAuditLog(member_id=acct.member_id, actor="member" if acct.member_id is not None else "anonymous", action=CONSENT_ACTION,
+                          details={"payment_id": pay.id, "receipt": f"KV-{pay.id:06d}", "consent": START_NOW_CONSENT}))
+
+
+def start_now_ids(db: Session, payment_ids: list[int]) -> set[int]:
+    """For Admin: which of these payments' customers ticked the start-now box (one audit row per payment the website started)."""
+    if not payment_ids:
+        return set()
+    wanted = set(payment_ids)
+    rows = db.scalars(select(MemberAuditLog.details).where(MemberAuditLog.action == CONSENT_ACTION)).all()
+    return {d["payment_id"] for d in rows if isinstance(d, dict) and d.get("payment_id") in wanted}
 
 
 class _Number(str):

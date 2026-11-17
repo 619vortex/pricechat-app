@@ -4,7 +4,7 @@ import { SitePage } from "./community";
 import { reducedMotion } from "./motion";
 import { pageHead } from "./seo";
 import { site } from "./websiteData";
-import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, hostedDownload, saveConfig, storeLink, visitorBrowser, visitorOs } from "./vpnConfig";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, hostedDownload, saveConfig, signInFor, storeLink, visitorBrowser, visitorOs } from "./vpnConfig";
 import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
@@ -129,11 +129,11 @@ function PaymentsTestNote() {
   return <p className="vpn-testmode" role="status"><b>Payments test</b> Only you and testers can pay right now. Everyone else sees no way to pay. Payments here are real.</p>;
 }
 
-function Gate({ error, status }: { error: string; status: number }) {
+function Gate({ error, status, back = "/vpn" }: { error: string; status: number; back?: "/vpn" | "/vpn/devices" }) {
   return (
     <div className="vpn-gate">
       <p>{error}</p>
-      <a className="site-button" href={status === 401 ? "/join" : "/passport"}>{status === 401 ? "Sign in" : "Back to your Passport"}</a>
+      <a className="site-button" href={status === 401 ? signInFor(back) : "/passport"}>{status === 401 ? "Sign in" : "Back to your Passport"}</a>
     </div>
   );
 }
@@ -217,12 +217,12 @@ export function VpnDevicesPage() {
         </header>
         {state && "test_mode" in state && state.test_mode && <TestModeNote paid={paid} />}
         {!state ? <MySkeleton />
-          : "error" in state ? <Gate error={state.error} status={state.status} />
+          : "error" in state ? <Gate error={state.error} status={state.status} back="/vpn/devices" />
           : !state.enabled ? <Soon />
           : "visitor" in state ? (
             <section className="vpn-card vpn-start" aria-labelledby="vpn-devs-in">
               <h2 id="vpn-devs-in">Sign in to see your devices</h2>
-              <a className="site-button" href="/join">Sign in</a>
+              <a className="site-button" href={signInFor("/vpn/devices")}>Sign in</a>
               <details className="vpn-havekey">
                 <summary>I have a key</summary>
                 <form className="vpn-form" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) setKey(typed.trim()); }}>
@@ -309,7 +309,7 @@ function Hero({ state, servers, onStarted }: { state: Loaded | null; servers: Ma
   const trialLabel = `Start Free Trial — ${member?.trial?.days ?? 30} Days`;
   const billing = open && state && "billing" in state ? state.billing : null;
   const primary = member?.trial?.available ? <button className="site-button is-go" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : trialLabel}</button>
-    : visitor?.trial && open ? <a className="site-button is-go" href="/join">{trialLabel}</a>
+    : visitor?.trial && open ? <a className="site-button is-go" href={signInFor("/vpn")}>{trialLabel}</a>
     : billing && member && !member.eligible ? <button className="site-button is-go" onClick={() => reveal("vpn-time")}>Add Time</button>
     : null;
   const closed = !!state && !open && !("error" in state);
@@ -686,7 +686,7 @@ function Plans({ state, onStarted }: { state: Loaded | null; onStarted: (s: VpnS
   const price = billing?.price_usd ?? PLAN.price_usd;
   const period = billing?.period_days ?? PLAN.period_days;
   const trial = member?.trial?.available ? <button className="site-button is-ghost" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : `Start Free Trial — ${days} Days`}</button>
-    : visitor?.trial && open ? <a className="site-button is-ghost" href="/join">Sign in to start</a>
+    : visitor?.trial && open ? <a className="site-button is-ghost" href={signInFor("/vpn")}>Sign in to start</a>
     : plan?.kind === "trial" ? <span className="vpn-plan-note is-on"><Tick />Active · {daysLeft(plan.days_left)}</span>
     : member ? <span className="vpn-plan-note">Not available on this account</span>
     : <span className="vpn-plan-note">Opens with Kiwi VPN</span>;
@@ -752,14 +752,25 @@ function RoyalKiwi({ member }: { member: VpnState | null }) {
   );
 }
 
+/** The FAQ's "Is there an app?", from what the Downloads section really offers: the browser extension counts once its store listing is set. */
+export function appsAnswer(open: boolean): string {
+  const chrome = !!storeLink("chrome", STORE_LINKS.chrome), edge = !!storeLink("edge", STORE_LINKS.edge);
+  const browser = chrome && edge ? "The browser extension is available for Chrome and Edge." : chrome ? "The browser extension is available for Chrome." : edge ? "The browser extension is available for Edge." : "";
+  if (!WINDOWS_BETA.href)
+    return `Not yet. A native Windows app is our first, and it's in development.${open ? " Until then, manual setup connects any device with the free WireGuard app." : ""} ${browser || "Browser extensions appear here once each store approves them."}`;
+  const missing = [...(ANDROID_BETA.href ? [] : ["Android"]), "iPhone", "Mac", ...(chrome || edge ? [] : ["browser"])];
+  const notYet = `${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]} versions aren't available yet.`;
+  return ["A Windows app is available as a public beta. It's code signed, so it installs on a PC with Smart App Control turned on, and it has an optional kill switch in Settings.",
+    ANDROID_BETA.href ? "An Android release candidate is available too, for testing: real-device VPN routing and sign-in testing are still pending." : "",
+    browser, notYet].filter(Boolean).join(" ");
+}
+
 function Faq({ member, free, paid, open }: { member: VpnState | null; free: boolean; paid: boolean; open: boolean }) {
   const items: [string, React.ReactNode][] = [
     ["What's the difference between the device and browser versions?", "A browser extension sends only that browser's traffic through Kiwi VPN. Other apps keep your normal connection. A device connection covers every app on the device."],
     ["Do you keep logs?", <>We don't keep a history of the websites you visit or the content of your traffic. Your DNS lookups are answered by the server's own resolver or passed to a public one, and that one sees the names you look up: Cloudflare (1.1.1.1) for WireGuard devices on some servers, and the hosting provider's resolvers for the browser extension. We do keep your account, your devices' names and public keys, how much data each one used this month and when it last connected. Our <a href="/vpn/privacy">privacy page</a> lists all of it, including ordinary server and hosting logs.</>],
     ["Will a VPN make me anonymous?", "No VPN can promise that. Kiwi VPN hides your address from the sites you visit, but they can still recognise you through accounts and cookies, and your traffic does pass through our server."],
-    ["Is there a Kiwi VPN app?", WINDOWS_BETA.href
-      ? `A Windows app is available as a public beta. It's code signed, so it installs on a PC with Smart App Control turned on, and it has an optional kill switch in Settings. ${ANDROID_BETA.href ? "An Android release candidate is available too, for testing: real-device VPN routing and sign-in testing are still pending. iPhone, Mac and browser versions aren't available yet." : "Android, iPhone, Mac and browser versions aren't available yet."}`
-      : `Not yet. A native Windows app is our first, and it's in development.${open ? " Until then, manual setup connects any device with the free WireGuard app." : ""} Browser extensions appear here once each store approves them.`],
+    ["Is there a Kiwi VPN app?", appsAnswer(open)],
     ["Do I have to set up each device myself?", `With the apps, no: signing in will set the device up.${open ? " Manual setup is there for anything else, under My Devices." : ""}`],
     ...(member ? [["How many devices can I use?", `Your account can have ${member.max_devices} ${member.max_devices === 1 ? "device" : "devices"} at a time. Delete one to add another.`] as [string, React.ReactNode]] : []),
     ...(!free ? [["What happens when my time runs out?", `Your devices are switched off and kept for 30 days.${paid ? " Add time and they switch back on within 5 minutes." : ""} Nothing renews or charges by itself.`] as [string, React.ReactNode]] : []),
@@ -891,7 +902,7 @@ function FreeStart({ onKey, trial = false }: { onKey: (k: string) => void; trial
         <li><b>{trial ? "Start your free trial" : "Add a device"}</b><span>{trial ? "30 days, then add a device." : "Name it and pick a server."}</span></li>
         <li><b>Scan and switch on</b><span>In the free WireGuard app.</span></li>
       </ol>
-      <a className="site-button" href="/join">Sign in to start</a>
+      <a className="site-button" href={signInFor("/vpn")}>Sign in to start</a>
       <details className="vpn-havekey">
         <summary>I have a key</summary>
         <form className="vpn-form" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) onKey(typed.trim()); }}>
@@ -919,7 +930,7 @@ function Choose({ billing, onKey, onFresh }: { billing: VpnBilling; onKey: (k: s
       <section className="vpn-card" aria-labelledby="vpn-passport">
         <h2 id="vpn-passport">With a Passport</h2>
         <p className="site-muted">Sign in with your email. Pay by {billing.card ? "card or USDT" : "USDT"}, and recover your account if you lose a device.</p>
-        <a className="site-button" href="/join">Sign in</a>
+        <a className="site-button" href={signInFor("/vpn")}>Sign in</a>
       </section>
       <section className="vpn-card" aria-labelledby="vpn-anon">
         <h2 id="vpn-anon">Anonymous, with USDT</h2>
@@ -956,6 +967,10 @@ function KeyOnce({ k, onDone }: { k: string; onDone: () => void }) {
 
 type Invoice = { network_name: string; address: string; amount: number; amount_usd: number; expires_at: string | null; days: number };
 
+/** The checkout box (EU/UK 14-day right to cancel). The server refuses a payment without it and records it with the payment
+ *  (backend billing.START_NOW_CONSENT names this wording's version: change both together). /vpn/refunds explains it in full. */
+export const START_NOW = "Start my Kiwi VPN time as soon as my payment is confirmed. I understand that if I cancel within 14 days, I get back only the part of my payment for time I haven't used, and that I can't cancel once all the time I paid for has been used.";
+
 /** Time left, and buying more. Any amount buys its share of $9.99 for 30 days. */
 function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const call = useContext(CallCtx);
@@ -965,6 +980,7 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [startNow, setStartNow] = useState(false);  // never ticked for the customer
   const [startOpen] = useState(!s.eligible);
   useEffect(() => {  // the time appears by itself once the network confirms the payment
     if (!invoice) return;
@@ -980,8 +996,9 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
   const active = until !== null && until.getTime() > Date.now();
   async function usdt(e: React.FormEvent) {
     e.preventDefault();
+    if (!startNow) return;
     setBusy(true); setErr(null);
-    try { setInvoice(await call<Invoice>("/usdt", { method: "POST", body: JSON.stringify({ amount_usd: usd, network }) })); }
+    try { setInvoice(await call<Invoice>("/usdt", { method: "POST", body: JSON.stringify({ amount_usd: usd, network, start_now: true }) })); }
     catch (e2) { setErr(vpnError(e2)); } finally { setBusy(false); }
   }
   async function go(path: string) {
@@ -1014,7 +1031,9 @@ function AddTime({ s, reload }: { s: VpnState; reload: () => Promise<void> }) {
             <select className="site-input" value={network} onChange={(e) => setNetwork(e.target.value)}>
               {b.networks.map((n) => <option key={n.key} value={n.key}>{n.name}{n.min_usd && n.min_usd > b.min_usd ? ` (min $${n.min_usd})` : ""}</option>)}
             </select></label>
-          <button className="site-button" type="submit" disabled={busy || !okAmount}>{busy ? "Creating…" : "Pay with USDT"}</button>
+          <label className="vpn-check vpn-startnow"><input type="checkbox" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} /> {START_NOW}{" "}
+            <a href="/vpn/refunds#right-to-cancel">Your right to cancel</a> · <a href="/vpn/terms">Kiwi VPN terms</a></label>
+          <button className="site-button" type="submit" disabled={busy || !okAmount || !startNow}>{busy ? "Creating…" : "Pay with USDT"}</button>
         </form>
       ))}
       {err && <p className="site-error" role="alert">{err}</p>}

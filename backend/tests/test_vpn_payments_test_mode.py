@@ -23,7 +23,7 @@ from app.vpn import billing, service as vpn
 from tests.test_vpn import add_server, fake, member_at, open_vpn, signed_in  # noqa: F401
 from tests.test_vpn_billing import IPN, SENT, days_left, ipn, keys  # noqa: F401
 
-PAY = {"amount_usd": 9.99, "network": "solana"}
+PAY = {"amount_usd": 9.99, "network": "solana", "start_now": True}
 
 
 def owner_cookie(c: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

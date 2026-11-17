@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
-import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, hostedDownload, storeLink, visitorBrowser, visitorOs } from "./vpnConfig";
+import { Downloads, VpnDevicesPage, VpnPage, VpnReviewerPage, ago, appsAnswer, bytes, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
+import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, hostedDownload, rememberVpnReturn, signInFor, storeLink, visitorBrowser, visitorOs, vpnReturnToResume } from "./vpnConfig";
+import { JoinPage } from "./community";
+import { refreshSession } from "./members";
+import { ProfilePage } from "./passport";
 
 import { Flag, drawMap, place, placeLine } from "./vpnMap";
 
@@ -109,7 +112,7 @@ describe("Free while payments are off", () => {
     const { container } = render(<VpnPage />);
     await settle();
     expect(screen.getByText("Free while we test")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Sign in to start" }).getAttribute("href")).toBe("/join");
+    expect(screen.getByRole("link", { name: "Sign in to start" }).getAttribute("href")).toBe("/join?next=/vpn");
     expect(screen.queryByRole("heading", { name: "Anonymous, with USDT" })).toBeNull();
     expect(outsideRoyal(container)).not.toMatch(money);
   });
@@ -525,7 +528,7 @@ describe("Paying and anonymous keys", () => {
     serve(SIGNED_OUT);
     render(<VpnPage />);
     await settle();
-    expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/join");
+    expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/join?next=/vpn");
     expect(screen.getByRole("heading", { name: "Anonymous, with USDT" })).toBeTruthy();
     expect(document.body.textContent).toMatch(/Lose it and your time is gone: nobody can recover it/);
   });
@@ -550,10 +553,22 @@ describe("Paying and anonymous keys", () => {
     const amount = screen.getByLabelText(/Amount/);
     fireEvent.change(amount, { target: { value: "5" } });
     expect(document.body.textContent).toMatch(/Buys about 15\.0 days/);
-    fireEvent.click(screen.getByRole("button", { name: "Pay with USDT" }));
+    // EU/UK right to cancel: no payment until the customer asks for the time to start now, never ticked for them
+    const pay = screen.getByRole("button", { name: "Pay with USDT" }) as HTMLButtonElement;
+    const startNow = screen.getByRole("checkbox", { name: /Start my Kiwi VPN time as soon as my payment is confirmed/ }) as HTMLInputElement;
+    expect(startNow.checked).toBe(false);
+    expect(pay.disabled).toBe(true);
+    expect(startNow.closest("label")!.textContent).toMatch(/if I cancel within 14 days, I get back only the part of my payment for time I haven't used/);
+    expect(screen.getByRole("link", { name: "Your right to cancel" }).getAttribute("href")).toBe("/vpn/refunds#right-to-cancel");
+    fireEvent.click(pay);
+    await settle();
+    expect(sent).toBeUndefined();
+    fireEvent.click(startNow);
+    expect(pay.disabled).toBe(false);
+    fireEvent.click(pay);
     await settle();
     expect((sent!.headers as Record<string, string>)["X-Kiwi-Key"]).toBe("KIWI-TEST");
-    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "solana" });
+    expect(JSON.parse(String(sent!.body))).toEqual({ amount_usd: 5, network: "solana", start_now: true });
     expect(screen.getByText("TAddr1")).toBeTruthy();
     expect(document.body.textContent).toMatch(/Send exactly 5 USDT on USDT on Solana/);
   });
@@ -629,7 +644,7 @@ describe("Kiwi VPN page", () => {
     render(<VpnPage />);
     await settle();
     expect(screen.getByText("Sign in first.")).toBeTruthy();
-    expect(screen.getByText("Sign in").getAttribute("href")).toBe("/join");
+    expect(screen.getByText("Sign in").getAttribute("href")).toBe("/join?next=/vpn");
   });
 
   it("lists servers with flag, online dot and load", async () => {
@@ -883,7 +898,7 @@ describe("The redesigned page", () => {
     serve({ "/api/website/home": [200, HOME], "GET /api/members/vpn": [401, { detail: "x" }], "GET /api/members/vpn/public": [200, { enabled: true, trial: true, billing: null }] });
     render(<VpnPage />);
     await settle();
-    expect(screen.getByRole("link", { name: "Start Free Trial — 30 Days" }).getAttribute("href")).toBe("/join");
+    expect(screen.getByRole("link", { name: "Start Free Trial — 30 Days" }).getAttribute("href")).toBe("/join?next=/vpn");
   });
 
   it("opens the time section from the plan's button", async () => {
@@ -1057,7 +1072,7 @@ describe("The redesigned page", () => {
             "GET /api/members/vpn/anon": [200, state({ anonymous: true, billing: BILL })] });
     const { container } = render(<VpnDevicesPage />);
     await settle();
-    expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/join");
+    expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe("/join?next=/vpn/devices");
     expect(container.querySelector("#vpn-manual")).toBeTruthy();
     expect(container.querySelector("#vpn-manual .vpn-form")).toBeNull();
     fireEvent.change(screen.getByPlaceholderText("KIWI-XXXX-…"), { target: { value: "KIWI-TEST" } });
@@ -1197,5 +1212,73 @@ describe("helpers", () => {
     expect(pickServer([s(4, true, 0.2), s(3, true, 0.2)])).toBe(3);  // a tie: the lowest id
     expect(pickServer([s(5, false, 0)])).toBe(5);
     expect(pickServer([])).toBe(0);
+  });
+});
+
+describe("Onboarding: signing in from Kiwi VPN comes back to Kiwi VPN", () => {
+  beforeEach(() => { sessionStorage.clear(); refreshSession(); });
+
+  it("only the Kiwi VPN pages are ever a destination, once, and not after half an hour", () => {
+    expect(signInFor("/vpn")).toBe("/join?next=/vpn");
+    for (const bad of ["https://evil.example", "//evil.example", "/vpn/../passport", "/vpnx", "/passport", "", null, "javascript:alert(1)"])
+      expect(rememberVpnReturn(bad as string | null, 1000), String(bad)).toBe(false);
+    expect(vpnReturnToResume(1000)).toBeNull();
+    expect(rememberVpnReturn("/vpn/devices", 1000)).toBe(true);
+    expect(vpnReturnToResume(2000)).toBe("/vpn/devices");
+    expect(vpnReturnToResume(2000)).toBeNull();  // once
+    rememberVpnReturn("/vpn", 1000);
+    expect(vpnReturnToResume(1000 + 30 * 60 * 1000 + 1)).toBeNull();
+    sessionStorage.setItem("kiwi-vpn-after-sign-in", JSON.stringify({ page: "https://evil.example", at: 1000 }));
+    expect(vpnReturnToResume(2000)).toBeNull();  // what's stored is checked again
+  });
+
+  it("the join page remembers /vpn, and the Passport sends a fresh sign-in back there (never a plain visit)", async () => {
+    const replace = vi.fn();
+    vi.stubGlobal("location", { ...window.location, replace, assign: vi.fn(), search: "?next=/vpn", hostname: "example.test", pathname: "/join" });
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/session": [200, { signed_in: false, member: null }],
+            "GET /api/members/auth/providers": [200, { telegram: { available: false }, x: { available: false }, google: { available: false }, email: { available: false } }] });
+    render(<JoinPage />);
+    await settle();
+    expect(replace).not.toHaveBeenCalled();
+    cleanup();
+    // a plain visit to the Passport later in this tab: stays there, and keeps the return for the sign-in
+    vi.stubGlobal("location", { ...window.location, replace, search: "", hostname: "example.test", pathname: "/passport" });
+    render(<ProfilePage />);
+    expect(replace).not.toHaveBeenCalledWith("/vpn");
+    cleanup();
+    // back from Google: straight to Kiwi VPN
+    vi.stubGlobal("location", { ...window.location, replace, search: "?welcome=google", hostname: "example.test", pathname: "/passport" });
+    render(<ProfilePage />);
+    expect(replace).toHaveBeenCalledWith("/vpn");
+  });
+
+  it("a member already signed in who follows a Kiwi VPN sign-in link goes straight back", async () => {
+    const replace = vi.fn();
+    vi.stubGlobal("location", { ...window.location, replace, assign: vi.fn(), search: "?next=/vpn/devices", hostname: "example.test", pathname: "/join" });
+    serve({ "/api/website/home": [200, HOME], "GET /api/members/session": [200, { signed_in: true, member: { id: "m1", username: "kiwi", xp: 0, unread: 0,
+              rank: { name: "Egg", key: "egg", art: { treatment: "egg", overlay: null, placeholder: null, slot: null } } } }],
+            "GET /api/members/auth/providers": [200, { telegram: { available: false }, x: { available: false }, google: { available: false }, email: { available: false } }] });
+    render(<JoinPage />);
+    await settle();
+    expect(replace).toHaveBeenCalledWith("/vpn/devices");
+  });
+});
+
+describe("The FAQ's app answer follows what's really offered", () => {
+  const windows = { ...WINDOWS_BETA };
+  afterEach(() => { Object.assign(STORE_LINKS, SHIPPED); Object.assign(WINDOWS_BETA, windows); });
+
+  it("names the browser extension once its store listing is set, and doesn't call it unavailable", () => {
+    Object.assign(WINDOWS_BETA, { href: "", version: "", sha256: "" });
+    Object.assign(STORE_LINKS, { chrome: FAKE_CHROME, edge: "" });
+    expect(appsAnswer(true)).toMatch(/Not yet\..*The browser extension is available for Chrome\.$/);
+    Object.assign(WINDOWS_BETA, { href: "/downloads/KiwiVPN-Setup.exe", version: "2.1.0", sha256: "ABC123" });
+    const a = appsAnswer(true);
+    expect(a).toMatch(/The browser extension is available for Chrome\./);
+    expect(a).not.toMatch(/browser versions aren't available/);
+    Object.assign(STORE_LINKS, { chrome: "", edge: "" });
+    expect(appsAnswer(true)).toMatch(/and browser versions aren't available yet/);
+    Object.assign(STORE_LINKS, { chrome: FAKE_CHROME, edge: FAKE_EDGE });
+    expect(appsAnswer(true)).toMatch(/available for Chrome and Edge/);
   });
 });

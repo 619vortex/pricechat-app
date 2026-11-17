@@ -88,7 +88,7 @@ def test_anonymous_key_buys_time_with_no_identity_anywhere(client: TestClient, d
     assert client.post("/api/members/vpn/anon/devices", json={"name": "phone", "server_id": server.id}, headers=head).status_code == 403  # no time yet
     # a lower-case key with odd spacing still works: it's typed by people
     assert client.get("/api/members/vpn/anon", headers={"x-kiwi-key": " " + key.lower()}).status_code == 200
-    pay = client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "solana"}, headers=head)
+    pay = client.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "solana", "start_now": True}, headers=head)
     assert pay.status_code == 200 and pay.json()["address"] == "TAddr" and pay.json()["days"] == pytest.approx(15, abs=0.1)
     sent = json.loads(SENT[-1].content)
     assert sent["pay_currency"] == "usdtsol" and sent["order_description"] == "Kiwi VPN time" and len(sent["order_id"]) >= 20  # a random reference, not the account
@@ -220,7 +220,7 @@ def test_a_passport_can_pay_usdt_too(client: TestClient, db: Session, fake: Any,
     open_vpn(db)
     m = member_at(db, "egg", "usdt", paid=False)
     c = signed_in(client, db, m)
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "ethereum"}).status_code == 200
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "ethereum", "start_now": True}).status_code == 200
     assert ipn(c, db.scalars(select(VpnPayment)).one().order_ref, "finished", 9.99, "usdterc20").status_code == 200
     body = c.get("/api/members/vpn").json()
     assert body["eligible"] is True and body["anonymous"] is False and body["paid_until"]
@@ -297,19 +297,19 @@ def test_closed_means_nobody_buys_except_the_owner_testing(client: TestClient, d
     assert client.post("/api/members/vpn/anon").status_code == 403
     m = member_at(db, "legend", "buyer", paid=False)
     c = signed_in(client, db, m)
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code == 403
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}).status_code == 403
     assert c.post("/api/members/vpn/card").status_code == 403
     assert c.get("/api/members/vpn").json()["enabled"] is False
     existing, key = billing.new_anonymous(db)  # a key from before it closed can't start a payment either
     head = {"x-kiwi-key": key}
-    assert c.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana"}, headers=head).status_code == 403
+    assert c.post("/api/members/vpn/anon/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}, headers=head).status_code == 403
     assert not SENT and db.scalars(select(VpnPayment)).all() == []  # the provider was never called
     existing.paid_until = utcnow() + dt.timedelta(days=30)
     db.commit()
     assert c.post("/api/members/vpn/anon/devices", json={"name": "x", "server_id": server.id}, headers=head).status_code == 403
     # a made-up Admin cookie opens nothing
     c.cookies.set(admin_auth.COOKIE, "not-a-session")
-    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana"}).status_code == 403
+    assert c.post("/api/members/vpn/usdt", json={"amount_usd": 9.99, "network": "solana", "start_now": True}).status_code == 403
     c.cookies.delete(admin_auth.COOKIE)
     # the owner's real Admin session: the whole flow works, labelled as a test, and it's still closed to everyone else
     monkeypatch.setattr(admin_auth, "current", lambda _db, token: object() if token == "owner" else None)
@@ -319,7 +319,7 @@ def test_closed_means_nobody_buys_except_the_owner_testing(client: TestClient, d
     head = {"x-kiwi-key": fresh}
     view = c.get("/api/members/vpn/anon", headers=head).json()
     assert view["test_mode"] is True and view["enabled"] is True and view["eligible"] is False  # no time yet: test mode doesn't give any
-    assert c.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "solana"}, headers=head).status_code == 200
+    assert c.post("/api/members/vpn/anon/usdt", json={"amount_usd": 5, "network": "solana", "start_now": True}, headers=head).status_code == 200
     order = db.scalars(select(VpnPayment)).one().order_ref
     assert ipn(c, order, "finished", 5, "usdtsol").status_code == 200
     r = c.post("/api/members/vpn/anon/devices", json={"name": "phone", "server_id": server.id}, headers=head)

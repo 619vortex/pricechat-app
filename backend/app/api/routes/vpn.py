@@ -239,13 +239,21 @@ def send_support(payload: SupportInput, background: BackgroundTasks, db: DbSessi
 class UsdtInput(StrictInput):
     amount_usd: float = Field(gt=0, le=100000)
     network: str = Field(min_length=1, max_length=16)
+    # The checkout box: start my time as soon as the payment is confirmed, and I understand what that means for my 14-day right to
+    # cancel (EU/UK consumer law; /vpn/refunds). No payment starts without it, and it's recorded with the payment (billing.record_start_now).
+    start_now: bool = False
+
+
+START_NOW_NEEDED = "Tick the box to start your Kiwi VPN time as soon as your payment is confirmed. It explains your right to cancel."
 
 
 def _usdt(db: DbSession, acct: VpnAccount, payload: UsdtInput) -> dict[str, Any]:
     if service.access(db, acct) == "blocked":  # a blocked account, or a banned member: it couldn't use what it paid for
         raise HTTPException(403, "This account can't use Kiwi VPN, so it can't be charged.")
+    if not payload.start_now:
+        raise HTTPException(400, START_NOW_NEEDED, headers={"X-Kiwi-Reason": "start_now"})
     try:
-        return billing.start_usdt(db, acct, payload.amount_usd, payload.network)
+        return billing.start_usdt(db, acct, payload.amount_usd, payload.network, start_now=True)
     except BillingError as e:
         raise _fail(e) from e
 
