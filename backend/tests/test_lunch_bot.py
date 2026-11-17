@@ -202,7 +202,11 @@ async def _measure(db: Session, f: Fake) -> int:
         return await lunch.measure_graduations(db, c, NOW)
 
 
-def test_the_public_page_shows_paper_results_and_the_assumptions(client: TestClient, db: Session) -> None:
+def test_the_public_page_shows_paper_results_and_the_assumptions(client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.api.routes import arbitrage
+
+    # the page reads "now" from the clock; the bot ran at the test's fixed NOW, so the last-7-days list was empty a week after it
+    monkeypatch.setattr(arbitrage, "utcnow", lambda: NOW + timedelta(seconds=60))
     f = Fake()
     f.launches = [launch("hot")]
     f.accounts = {"curve-hot": grown(0.3)}

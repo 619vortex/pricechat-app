@@ -326,6 +326,7 @@ def test_startup_self_check(caplog: Any, monkeypatch: Any) -> None:
         assert observability.startup_self_check(Settings(scheduler_only_jobs=""), names, db) == [] or observability.DPAPI is False
         db.add(VpnServer(name="nl-1", agent_url="https://1.2.3.4:8443", agent_token_enc="x", cert_sha256="0" * 64, dns=[]))
         db.commit()
+        caplog.clear()  # without DPAPI (Linux) the first check above already warned about APP_ENCRYPTION_KEY
         monkeypatch.setattr(observability, "DPAPI", False)
         problems = observability.startup_self_check(Settings(scheduler_only_jobs="pokemon.,system.", app_encryption_key=None), names, db)
     text = "; ".join(problems)

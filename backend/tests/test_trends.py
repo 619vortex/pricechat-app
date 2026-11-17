@@ -24,8 +24,8 @@ def item(title: str, source: str, hours_ago: float = 1.0) -> dict[str, Any]:
     return {"title": title, "source": source, "link": f"https://example.test/{abs(hash((title, source)))}", "at": NOW - timedelta(hours=hours_ago)}
 
 
-def day_row(db: Session, days_ago: int, term: str, docs: int, label: str | None = None, kind: str = "headline", **kw: Any) -> None:
-    db.add(BmTrendDay(day=(NOW - timedelta(days=days_ago)).date().isoformat(), term=term, label=label or term.capitalize(), kind=kind, docs=docs,
+def day_row(db: Session, days_ago: int, term: str, docs: int, label: str | None = None, kind: str = "headline", now: datetime = NOW, **kw: Any) -> None:
+    db.add(BmTrendDay(day=(now - timedelta(days=days_ago)).date().isoformat(), term=term, label=label or term.capitalize(), kind=kind, docs=docs,
                       sources=kw.get("sources", ["CNBC", "Financial Times"]),
                       examples=kw.get("examples", [{"title": f"{label or term} headline", "source": "CNBC", "url": "https://example.test/a", "at": None}])))
 
@@ -185,9 +185,11 @@ def test_refresh_saves_todays_counts_and_keeps_them_when_every_source_is_down(db
 
 
 def test_trends_api_lists_and_makes_a_video_once(client: TestClient, db: Session) -> None:
-    day_row(db, 0, "genius act", 5, label="GENIUS Act", sources=["CNBC", "CoinDesk", "Financial Times"],
+    # the API reads the real clock and lists the last week's scans: rows dated today, not at the fixed NOW (stale after 7 days)
+    today = datetime.now(timezone.utc)
+    day_row(db, 0, "genius act", 5, label="GENIUS Act", sources=["CNBC", "CoinDesk", "Financial Times"], now=today,
             examples=[{"title": "GENIUS Act rule lands", "source": "CNBC", "url": "https://example.test/1", "at": None}])
-    day_row(db, 0, "thin", 2)
+    day_row(db, 0, "thin", 2, now=today)
     db.commit()
     body = client.get(f"{P}/trends").json()
     assert body["trends"][0]["label"] == "GENIUS Act" and body["category_on"] is True and "CNBC" in body["outlets"]

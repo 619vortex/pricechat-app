@@ -2,6 +2,7 @@
 streaming responses, sign-in rate limits, and inputs that used to turn into 500s (inf prices, odd digits, huge ids)."""
 
 import io
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -237,9 +238,12 @@ def test_kitchen_streams_are_capped_per_member(client: TestClient, db: Session) 
     assert client.get(url).status_code == 200
     for s in held[1:]:
         tradingbot._stream_release(mid, s)
-    tradingbot._streams[mid] = [0.0] * 3  # slots that were never released expire after the stream's lifetime
-    assert client.get(url).status_code == 200
-    tradingbot._streams.clear()
+    # slots that were never released expire after the stream's lifetime (monotonic time: 0.0 isn't "long ago" on a fresh machine)
+    tradingbot._streams[mid] = [time.monotonic() - tradingbot._STREAM_TTL - 1] * 3
+    try:
+        assert client.get(url).status_code == 200
+    finally:
+        tradingbot._streams.clear()
 
 
 def test_public_signal_chart_is_rate_limited(client: TestClient) -> None:
