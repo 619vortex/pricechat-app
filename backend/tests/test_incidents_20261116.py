@@ -419,3 +419,10 @@ def test_a_feature_about_an_outage_is_not_the_outage() -> None:
     """Production 2026-11-17 05:19: a New York Times feature days after the Microsoft outage was recorded as a major incident."""
     inc = incidents.detect("The Chaos and Unexpected Joys of a 19-Hour Global Email Outage")
     assert inc is None or not inc.major
+
+
+def test_hacker_linked_wallets_moving_is_not_a_cyberattack() -> None:
+    """Production 2026-11-17 09:13 (the ledger's first live entry): old hack funds moving is not an attack on Binance."""
+    assert incidents.detect("Binance Hacker-Linked Wallets Move Nearly 75,000 ETH") is None
+    inc = incidents.detect("Hackers drain $40 million from Coinbase hot wallet")
+    assert inc is not None and inc.kind == "cyber" and "Coinbase" in inc.entities
