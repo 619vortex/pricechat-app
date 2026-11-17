@@ -294,12 +294,37 @@ export function LeaderboardPage() {
   );
 }
 
-// --- legal (draft) ----------------------------------------------------------------------------------------------
+// --- legal -----------------------------------------------------------------------------------------------------
 
 type LegalKind = "privacy" | "vpnprivacy" | "vpnterms" | "vpnrefunds" | "vpnaup" | "terms" | "disclaimer" | "contact";
 
-/** `note` replaces the standard draft banner for a page that needs a stronger one (the acceptable-use draft isn't in force yet). */
-const LEGAL: Record<LegalKind, { title: string; description: string; note?: string; sections: [string, string[]][] }> = {
+/**
+ * Business facts only the owner can give. Each renders as a highlighted "[OWNER: …]" on the page, and the Kiwi VPN pages that
+ * carry one say so in their note, so none can go live unnoticed. Fill a fact in by replacing its value here with the real text
+ * (every page uses it), then run the tests: OWNER_MARKERS lists what's still open. Never guess one.
+ */
+const OWNER = {
+  entity: "[OWNER: legal entity or trader name]",
+  address: "[OWNER: postal address]",
+  email: "[OWNER: business email for Kiwi VPN]",
+  company: "[OWNER: company registration number, or remove if there is none]",
+  vat: "[OWNER: VAT number, or remove if not VAT-registered]",
+  law: "[OWNER: governing-law country]",
+  courts: "[OWNER: courts with jurisdiction]",
+  tax: "[OWNER: whether the price includes VAT or other sales tax]",
+  taxRecords: "[OWNER: how long tax law requires payment records to be kept]",
+  transfers: "[OWNER: safeguard relied on for transfers outside the EU/UK, e.g. Standard Contractual Clauses]",
+} as const;
+const MARKER = /\[OWNER: [^\]]+\]/g;
+
+/** When the Kiwi VPN pages' text last changed. */
+const VPN_UPDATED = "17 November 2026";
+
+/** The checkout box, word for word (vpn.tsx START_NOW): the refund page quotes it. */
+const START_NOW_TEXT = "Start my Kiwi VPN time as soon as my payment is confirmed. I understand that if I cancel within 14 days, I get back only the part of my payment for time I haven't used, and that I can't cancel once all the time I paid for has been used.";
+
+/** `note` replaces the standard draft banner. `updated`: a page in force, with the date its text last changed (no draft banner). */
+const LEGAL: Record<LegalKind, { title: string; description: string; note?: string; updated?: string; sections: [string, string[]][] }> = {
   privacy: {
     title: "Privacy",
     description: "How Price Chat handles member data, connected accounts and Kiwi XP.",
@@ -326,23 +351,38 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "Hide yourself from the public leaderboard.",
         "Delete your Price Chat account. This removes your account, connected accounts, XP history and badges. We keep only an audit note that an account was deleted, and a one-way fingerprint of each connected account so one-time rewards can't be claimed twice. Neither identifies you.",
       ]],
+      ["Kiwi VPN", ["If you use Kiwi VPN, its own privacy page (/vpn/privacy) explains what it keeps, who provides it and how to use your data rights."]],
       ["Questions", ["Message us on Telegram or X (see Contact)."]],
     ],
   },
   vpnprivacy: {
     title: "Kiwi VPN privacy",
     description: "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions.",
+    updated: VPN_UPDATED,
     sections: [
       ["The short version", [
         "Kiwi VPN is run by Price Chat. It carries your traffic so websites see our server's address instead of yours. We don't keep a history of the sites you visit, and we don't sell your data or use it for advertising. Some things do pass through other companies, such as your DNS lookups: this page names them.",
+      ]],
+      ["Who is responsible for your data", [
+        `${OWNER.entity}, ${OWNER.address}, decides how the personal data on this page is used (the “controller”, “we” on this page). For privacy questions and requests, write to ${OWNER.email}.`,
+        "Your Kiwi Passport itself (your Price Chat account, connected accounts and XP) is covered by the Price Chat privacy page (/privacy).",
       ]],
       ["What we keep", [
         "Your account: your Kiwi Passport member id, or a one-way fingerprint of your key if you use an anonymous key. Your Price Chat privacy page covers the Passport itself.",
         "For each browser using the extension: a random login for one server. We keep only a one-way fingerprint of its password, and the password itself is kept only in your browser's memory while it runs. After the browser restarts, the extension makes a new login with your Price Chat sign-in and the old one is removed.",
         "For each WireGuard device: the name you gave it, its public key and the private address we assigned it. Its private key is created on our server, handed to you once in its config, and not stored.",
         "Usage: how many bytes each login or device used this month, and when it was last active (for a WireGuard device, the time of its last handshake with the server). We use this to show you your usage, apply any monthly limit and keep the service fair.",
-        "If payments are switched on and you pay: the amount, date, network and status of each payment, and the address and provider reference it used. Payment providers handle the payment itself. For an anonymous key, the link between a payment and your key, and its address and reference, are removed once the payment is settled and at least 7 days old, and the amount and date stay for our accounts.",
+        "If payments are switched on and you pay: the amount, date, network and status of each payment, and the address and provider reference it used, and a record that you ticked the box at checkout asking for your time to start straight away. Payment providers handle the payment itself. For an anonymous key, the link between a payment and your key, and its address and reference, are removed once the payment is settled and at least 7 days old, and the amount and date stay for our accounts.",
         "If your paid time or free trial is ending and you use a Kiwi Passport: a reminder in your notifications, and by email if your Passport has an email address. An anonymous key has no way to be reached, so only the Kiwi VPN page shows it.",
+        "If you start a free trial: a one-way fingerprint (a salted hash) of each sign-in identity on your Passport, such as your verified email address and your linked Google, X or Telegram accounts, so that one person can't take a second free trial with another account. We can't turn a fingerprint back into the address or account, but we can check whether a given one has already had a trial.",
+        "When a free trial starts, our abuse checks may record which check would have refused it, and for the checks on networks, a fingerprint of the network it came from (a salted hash of the first three parts of an IPv4 address, or the first 48 bits of an IPv6 address), never the address itself. How many trials started from an address is counted in memory only, for 24 hours.",
+        "If you send a bug report or feedback from the Kiwi VPN app: your message, the app version and the app's diagnostics. Keys and other secrets are removed before anything is stored.",
+      ]],
+      ["Why we use it", [
+        "To provide Kiwi VPN to you (your account, devices and logins, usage, payments, reminders and support): it's needed for our contract with you.",
+        "To keep the service secure and fair (usage limits, the free-trial fingerprints and checks, server and hosting logs, and handling abuse): our legitimate interest in protecting the service and the people who use it. You can object to this (see Your rights).",
+        "To keep payment records: our legal obligations under tax and accounting law.",
+        "We don't make decisions about you by automated means that have legal or similarly significant effects. Our trial checks can turn down a free trial automatically: if that happens and you think it's wrong, contact us and a person will look at it.",
       ]],
       ["What we don't keep", [
         "We don't keep a history of the websites or addresses you visit or of the content of your traffic, and we don't keep a per-connection history of your use.",
@@ -369,22 +409,47 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "It's a beta: it's code signed and has an optional kill switch in Settings. If something doesn't work, tell us here.",
       ]],
       ["Who else is involved", [
-        "Our service runs on Hetzner (VPN servers), Railway (accounts and the service's data) and Vercel (this website). DNS lookups that a server doesn't answer itself go to Cloudflare or Hetzner, as described above. These companies provide infrastructure for us; we don't send them your data for their own use.",
+        "These companies provide infrastructure for us and handle your data only to do that, not for their own use:",
+        "Hetzner (Germany): our VPN servers, and on some servers the DNS resolvers the browser extension uses. Railway: our accounts service and its database. Vercel: this website, which passes account requests on to our service. NOWPayments: USDT payments; it receives the amount, the network and a random order reference, never your name, email address or Passport. Resend: our reminder emails, if your Passport has an email address. Telegram: tells the Price Chat team that a support report has arrived, with your username but not your message.",
+        "DNS lookups that a server doesn't answer itself go to Cloudflare or Hetzner, as described above, under their own privacy policies.",
+        `Some of these companies are based in, or process data in, countries outside the EU and the UK, including the United States. For those transfers we rely on ${OWNER.transfers}.`,
         "We'd only share data beyond this if the law requires it, and we can only share what's listed above.",
       ]],
-      ["How long, and your controls", [
-        "In the extension, Remove this browser deletes its login straight away. Under My Devices you can delete any device.",
-        "If your access ends, your devices are switched off and removed after 30 days. Deleting your Price Chat account removes your Kiwi VPN account, devices and browser logins with it.",
+      ["How long we keep it", [
+        "Your Kiwi VPN account, devices and browser logins: until you delete them or your Price Chat account. In the extension, Remove this browser deletes its login straight away. Under My Devices you can delete any device. If your access ends, your devices are switched off and removed after 30 days.",
+        "Usage: only this month's total for each device and login, replaced at the start of each month. When each was last active is kept to the nearest 5 minutes.",
+        `Payment records, with the checkout record: for as long as tax and accounting law requires (${OWNER.taxRecords}). For an anonymous key, the link to the key, the payment address and the provider's reference go once the payment is settled and at least 7 days old. If you delete your Price Chat account, your payments are no longer linked to you, but the payment record itself is kept for our accounts.`,
+        "Free-trial fingerprints: with no end date, also after you delete your account, since stopping a second free trial is their only purpose. Free-trial check records: 30 days.",
+        "Support reports: until you delete your Price Chat account.",
+        "Deleting your Price Chat account removes your Kiwi VPN account, devices, browser logins and support reports with it.",
       ]],
-      ["Changes and questions", ["We'll update this page if any of this changes. To ask about it, message us on Telegram or X (see Contact)."]],
+      ["Your rights", [
+        "Data protection law, such as the GDPR and the UK GDPR, lets you ask for a copy of your data, have it corrected or deleted, restrict or object to how we use it, and get the data you gave us in a portable form.",
+        `You can do much of this yourself: delete devices under My Devices, remove a browser in the extension, and delete your whole Price Chat account from your Kiwi Passport. For anything else, write to ${OWNER.email}. We'll answer within one month.`,
+        "For an anonymous key we can only find your data with the key, so we'll ask you to show it's yours privately. Never post your key in a public message.",
+        "You can also complain to the data protection authority in the country where you live or work.",
+      ]],
+      ["Children", ["Kiwi VPN is for people aged 18 or over, and we don't knowingly keep data about anyone younger."]],
+      ["Changes and questions", [`We'll update this page and its date if any of this changes. To ask about it, write to ${OWNER.email}, or message us on Telegram or X (see Contact).`]],
     ],
   },
   vpnterms: {
     title: "Kiwi VPN terms",
     description: "What you get with Kiwi VPN, what it costs, how renewal works and when access ends.",
+    updated: VPN_UPDATED,
     sections: [
+      ["Who provides Kiwi VPN", [
+        `Kiwi VPN is a Price Chat service provided by ${OWNER.entity}, ${OWNER.address} (company number ${OWNER.company}, VAT number ${OWNER.vat}), “we” in these terms. Contact: ${OWNER.email}.`,
+        "These terms, the refund policy (/vpn/refunds) and the acceptable use policy (/vpn/acceptable-use) are the agreement between you and us for Kiwi VPN. The privacy page (/vpn/privacy) explains what we keep.",
+        `For quick help, message the Price Chat team on Telegram or X (see Contact). For payments, cancellations and complaints, write to ${OWNER.email} with your receipt number (it starts with KV-), so there's a record.`,
+      ]],
+      ["Who can use it", [
+        "You must be 18 or over, or the age of majority where you live if that's higher, to use Kiwi VPN or pay for it.",
+        "You're responsible for checking that using a VPN is legal where you are, and for how you use it.",
+      ]],
       ["The plan", [
-        "Kiwi VPN costs $9.99 for 30 days, paid in USDT on Ethereum, Tron or Solana through NOWPayments. Any amount within the limits shown buys its share of that time, so $5 buys about 15 days. Each network has its own minimum, shown before you pay, and network fees are yours.",
+        `Kiwi VPN costs $9.99 (US dollars) for 30 days, paid in USDT on Ethereum, Tron or Solana through NOWPayments (${OWNER.tax}). Any amount within the limits shown buys its share of that time, so $5 buys about 15 days. You can add between $5 and $500 at a time; each network has its own minimum, shown before you pay, and network fees are yours.`,
+        "It gives you access to Kiwi VPN's servers through our apps, the browser extension and manual WireGuard setup, for as many devices and with any monthly data allowance shown for your account on the Kiwi VPN page.",
         "Royal Kiwis and above get Kiwi VPN free for as long as they hold that rank. A Kiwi Passport account can use one free 30-day trial. Opening extra accounts to get more trials isn't allowed, and we may remove access gained that way.",
       ]],
       ["Renewal: only when you choose", [
@@ -392,48 +457,74 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
       ]],
       ["When your time starts and ends", [
         "Paid time starts when your payment is confirmed, and it's added after any paid time or free trial you have left, so paying early doesn't cost you any days. The time we credit follows what actually arrives.",
+        "At checkout you ask us to start your time as soon as the payment is confirmed, by ticking a box. That affects your right to cancel: see below.",
         "When your time runs out, your devices are switched off within a few minutes and kept for 30 days. Add time in those 30 days and they come back on by themselves. After that they're removed, and you can add new ones.",
+      ]],
+      ["Your right to cancel (EU and UK)", [
+        "If you live in the EU or the UK, you can cancel a purchase of Kiwi VPN time within 14 days of paying. Because your time starts straight away, you get back the part of that payment for the time you haven't used. The refund policy (/vpn/refunds) explains how.",
       ]],
       ["Anonymous keys", ["If you pay with an anonymous key, the key is the only thing that identifies your account. We can't recover a lost key, and any time on it is lost with it. Keep it safe."]],
       ["Paying correctly", ["Send the exact amount shown, on the network shown, to the address shown. Coins sent on another network or in another currency may be lost, and we may not be able to recover them."]],
       ["Using the service", [
         "Don't use Kiwi VPN for anything illegal, or for spam, attacks on other systems, or to get around a service's rules on unauthorised access. We may suspend or remove access that puts the service or others at risk, and blocked accounts can't buy more time. The acceptable use policy at /vpn/acceptable-use lists the rules in full.",
         "Kiwi VPN is provided as is. We don't promise it will always be available, and no VPN makes you fully anonymous or secure. Our privacy page lists what we keep. Our apps have their own limits, which their download pages explain.",
+        "We may add, change or retire servers, locations and features. If a change makes Kiwi VPN materially worse for you, you can end your purchase and we'll refund the paid time you haven't used.",
+      ]],
+      ["Ending", [
+        "You can stop at any time: delete your devices, or your whole Price Chat account. Paid time you don't use isn't refunded, except as the refund policy says.",
+        "We may suspend or end your access if you seriously or repeatedly break these terms or the acceptable use policy. Where we can, we'll tell you why first.",
+      ]],
+      ["Our liability", [
+        "Nothing in these terms limits any liability that the law doesn't allow us to limit, such as for death or personal injury caused by negligence, or for fraud, or takes away your legal rights as a consumer.",
+        "Apart from that, we're not liable for losses we couldn't reasonably have foreseen, for business losses, or for losses caused by your own devices, software or use of the service. Our total liability to you for Kiwi VPN is limited to what you paid us for it in the 12 months before the claim.",
+      ]],
+      ["Law and disputes", [
+        `These terms are governed by the law of ${OWNER.law}, and disputes go to the courts of ${OWNER.courts}.`,
+        "If you're a consumer living in the EU or the UK, you also keep the protection of the mandatory consumer laws of the country where you live, and you can bring a claim in your local courts.",
+        `If something goes wrong, please write to ${OWNER.email} first: most problems can be put right quickly.`,
       ]],
       ["Refunds", ["See the refund policy at /vpn/refunds."]],
-      ["Changes", ["If the price or these terms change, we'll say so on the Kiwi VPN page before you pay. Time you've already paid for stays at the price you paid."]],
-      ["Questions", ["Message us on Telegram or X (see Contact)."]],
+      ["Changes", ["If the price or these terms change, we'll say so on the Kiwi VPN page before you pay, and this page will show the new date. Time you've already paid for stays at the price you paid."]],
+      ["Questions", [`Write to ${OWNER.email}, or message us on Telegram or X (see Contact).`]],
     ],
   },
   vpnrefunds: {
     title: "Kiwi VPN refund policy",
     description: "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong.",
+    updated: VPN_UPDATED,
     sections: [
-      ["The short version", ["USDT payments go straight over the blockchain and we can't reverse them, so we normally put things right by correcting your time. Use your free trial first: it's there so you can check Kiwi VPN works for you before you pay."]],
+      ["The short version", ["USDT payments go straight over the blockchain and we can't reverse them, so we normally put things right by correcting your time. Use your free trial first: it's there so you can check Kiwi VPN works for you before you pay. If you live in the EU or the UK, you can also cancel within 14 days (below)."]],
+      ["Right to cancel", [
+        "If you live in the EU or the UK, the law gives you 14 days from the day you pay to cancel a purchase of Kiwi VPN time, without giving a reason.",
+        `Your time starts as soon as your payment is confirmed, because you ask for that at checkout by ticking this box: “${START_NOW_TEXT}” So if you cancel within the 14 days, we refund the part of that payment for the time you haven't used yet, at that payment's rate. Once all the time you paid for has been used, it can't be cancelled.`,
+        `To cancel, write to ${OWNER.email} within the 14 days, with your receipt number (it starts with KV-) and a USDT address on the network you paid with for the refund. One sentence is enough, for example: “I cancel my Kiwi VPN purchase, receipt KV-000123, paid on 1 December 2026.” For an anonymous key, we'll ask you privately to show the key is yours.`,
+        "We refund within 14 days of receiving your cancellation, in USDT on the network you paid with, and we pay the network fee for it. Your access to the refunded time ends when we refund.",
+      ]],
       ["If a payment goes wrong", [
         "Your time hasn't appeared: most payments are credited a few minutes after the network confirms them. Open Payment history on the Kiwi VPN page and press Check now. If it still doesn't appear, contact us with the receipt number (it starts with KV-) and we'll look into it.",
         "You paid twice, or paid too much: everything that arrives counts as time, so you won't lose it. If you'd rather have an extra payment back, contact us.",
         "You paid too little: you get time for what arrived, and you can send the rest or start a new payment.",
       ]],
-      ["When we'll refund", [
+      ["Other refunds", [
         "If you paid and we couldn't provide Kiwi VPN to you, because of a fault on our side that we couldn't fix, contact us within 14 days of the payment, and we'll refund the time you haven't used.",
         "If we close the service, we'll refund the paid time left on your account where we can reach you, which means we may not be able to for an anonymous key.",
-        "A refund goes back in USDT to an address you give us, less the network and processing fees, at the amount of USDT that payment's unused time is worth. The time refunded comes off your account.",
+        "These refunds go back in USDT to an address you give us, less the network and processing fees, at the amount of USDT that payment's unused time is worth. The time refunded comes off your account.",
       ]],
       ["When we won't", [
-        "Time you've already used, a change of mind after a trial you could have used first, coins sent on the wrong network or in the wrong currency that can't be recovered, lost anonymous keys, and accounts blocked for breaking our terms.",
+        "Apart from the right to cancel above: time you've already used, a change of mind after a trial you could have used first, coins sent on the wrong network or in the wrong currency that can't be recovered, lost anonymous keys, and accounts blocked for breaking our terms.",
       ]],
       ["Your legal rights", ["Nothing here takes away any rights the law gives you where you live."]],
-      ["Asking for help", ["Message us on Telegram or X (see Contact) with your receipt number. Never send us your anonymous key in a public message."]],
+      ["Asking for help", [`Write to ${OWNER.email}, or message us on Telegram or X (see Contact), with your receipt number. Never send us your anonymous key in a public message.`]],
     ],
   },
   vpnaup: {
     title: "Kiwi VPN acceptable use",
     description: "What you can't use Kiwi VPN for, what happens after an abuse report, and what we can and can't see.",
-    note: "Draft for review: this policy isn't in force yet and may change before it is.",
+    updated: VPN_UPDATED,
     sections: [
       ["The short version", [
         "Kiwi VPN is for private, everyday browsing. Many people share each server and its address, so one person's abuse can get that address blocked for everyone. Don't use Kiwi VPN for anything below.",
+        "This policy is part of the Kiwi VPN terms (/vpn/terms) and applies to everyone who uses Kiwi VPN, on any device, the browser extension or an anonymous key.",
       ]],
       ["Not allowed", [
         "Anything illegal where you are or where the server is.",
@@ -455,10 +546,10 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "If your account is suspended, we'll tell you in your Kiwi Passport notifications where we can. Time lost to a suspension for breaking these rules isn't refunded (see /vpn/refunds). If you think we got it wrong, contact us and we'll look again.",
       ]],
       ["Reporting abuse", [
-        "We're still setting up a dedicated abuse address. Until it's ready, report abuse coming from a Kiwi VPN server through our support channels: message the Price Chat team on Telegram or X (see Contact). Kiwi VPN members can also use Support in the Kiwi VPN app.",
+        "We're still setting up a dedicated abuse address. Until it's ready, report abuse coming from a Kiwi VPN server through our support channels: message the Price Chat team on Telegram or X (see Contact), or write to the contact address in the Kiwi VPN terms. Kiwi VPN members can also use Support in the Kiwi VPN app.",
         "Please include the server's address, the time with its time zone, and what happened.",
       ]],
-      ["Changes", ["We'll update this page if these rules change. The Kiwi VPN terms (/vpn/terms) and privacy page (/vpn/privacy) still apply."]],
+      ["Changes", ["We'll update this page and its date if these rules change. The Kiwi VPN terms (/vpn/terms) and privacy page (/vpn/privacy) still apply."]],
     ],
   },
   terms: {
@@ -496,6 +587,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "The fastest way to reach the team is the Price Chat Telegram, or a message to @pricechat on X.",
         "For privacy requests (for example, deleting your data), you can also delete your account yourself from your Kiwi Passport at any time.",
       ]],
+      ["Kiwi VPN", ["For Kiwi VPN payments, cancellations, complaints and privacy requests, use the contact address in the Kiwi VPN terms (/vpn/terms), with your receipt number if you have one."]],
     ],
   },
 };
@@ -505,22 +597,54 @@ const LEGAL_PATH = {
   terms: "terms", disclaimer: "disclaimer", contact: "contact",
 } as const satisfies Record<LegalKind, string>;
 
+/** Every owner fact a legal page still waits for, with the pages showing it: empty once the owner has filled them all in. */
+export const OWNER_MARKERS: { marker: string; pages: string[] }[] = Object.values(OWNER).filter((v) => v.startsWith("[OWNER:")).map((marker) => ({
+  marker,
+  pages: (Object.keys(LEGAL) as LegalKind[]).filter((k) => LEGAL[k].sections.some(([, ps]) => ps.some((p) => p.includes(marker)))).map((k) => `/${LEGAL_PATH[k]}`),
+}));
+
+function slug(heading: string): string {
+  return heading.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** A paragraph's text with owner markers highlighted and site paths such as /vpn/refunds turned into links. */
+const PIECES = /(\[OWNER: [^\]]+\]|\/(?:vpn\/[a-z-]+|privacy|terms|contact)\b)/;  // no lookbehind: older Safari can't parse one
+function LegalText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(PIECES).map((part, i) => (i % 2 === 0 ? part
+        : part.startsWith("[OWNER:") ? <mark key={i} className="site-owner-marker">{part}</mark>
+        : <a key={i} className="site-link" href={part}>{part}</a>))}
+    </>
+  );
+}
+
 export function LegalPage({ kind }: { kind: LegalKind }) {
   const page = LEGAL[kind];
   const home = useStored<HomeData>("/api/website/home");
+  const open = page.sections.some(([, ps]) => ps.some((p) => new RegExp(MARKER.source).test(p)));
+  useEffect(() => {  // /vpn/refunds#right-to-cancel from the checkout: the page renders after the browser looked for the anchor
+    const id = typeof location !== "undefined" ? location.hash.slice(1) : "";
+    if (id) document.getElementById(id)?.scrollIntoView?.();
+  }, [kind]);
   return (
     <SitePage {...pageHead(LEGAL_PATH[kind])}>
       <article className="site-legal site-reveal">
-        <p className="site-draft" role="note">
-          {page.note ?? "Draft: this page has not had final legal review yet."}
-        </p>
+        {page.updated ? (
+          open && <p className="site-draft" role="note">Being finalised: the highlighted details are still to be filled in.</p>
+        ) : (
+          <p className="site-draft" role="note">
+            {page.note ?? "Draft: this page has not had final legal review yet."}
+          </p>
+        )}
         <h1 className="site-display site-h1">{page.title}</h1>
+        {page.updated && <p className="site-muted site-legal-updated">Last updated {page.updated}</p>}
         {page.sections.map(([heading, paras]) => (
-          <section key={heading}>
+          <section key={heading} id={slug(heading)}>
             <h2 className="site-legal-h">{heading}</h2>
             {paras.map((t) => (
               <p key={t} className="site-body">
-                {t}
+                <LegalText text={t} />
               </p>
             ))}
           </section>
