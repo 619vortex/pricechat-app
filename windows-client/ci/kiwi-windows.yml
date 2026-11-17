@@ -90,6 +90,16 @@ jobs:
           cache: npm
           cache-dependency-path: windows-client/app/package-lock.json
 
+      # Before anything is built or any secret is touched: a SIGNED build must carry the owner's real update keys (k1/k2 public
+      # halves in service/src/update.rs), never the all-zero placeholders or the test keys. Unsigned builds only get a warning.
+      - name: Update keys (a signed build needs the owner's real k1/k2)
+        run: |
+          node --test ci\release-keys.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "The update keys check's own tests failed" }
+          $Extra = @(); if ($env:SIGN -eq "yes") { $Extra = @("--require-real") }
+          node ci\release-keys.mjs --source service\src\update.rs @Extra
+          if ($LASTEXITCODE -ne 0) { throw "Update keys check failed: nothing will be signed" }
+
       - name: Rust
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
@@ -185,7 +195,11 @@ jobs:
             if ($text.Contains($marker)) { throw "The public service contains the TEST update build's '$marker': it was built with --features update-test" }
           }
           if (-not $text.Contains("pricechat.live")) { throw "The public service doesn't name its update host" }
-          "Release check: no update-test feature in the public service" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          # the compiled bytes: no TEST key; in a signed build, both real production keys from update.rs
+          $Extra = @(); if ($env:SIGN -eq "yes") { $Extra = @("--require-real") }
+          node ci\release-keys.mjs --source service\src\update.rs --binary "$env:CARGO_TARGET_DIR\release\kiwivpn-service.exe" @Extra
+          if ($LASTEXITCODE -ne 0) { throw "The compiled service's update keys are wrong: nothing will be signed" }
+          "Release check: no update-test feature in the public service; update keys checked in the compiled service" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Signing tool (SSL.com CodeSignTool, SHA-256 checked)
         if: env.SIGN == 'yes'
@@ -273,11 +287,12 @@ jobs:
           Get-ChildItem $Nsis | Select-Object -First 5 Name
 
       - name: Installer
+        # the eSigner secrets reach this step (and the Tauri build it runs) only in a signed run
         env:
-          ES_USERNAME: ${{ secrets.ES_USERNAME }}
-          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
-          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
-          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          ES_USERNAME: ${{ env.SIGN == 'yes' && secrets.ES_USERNAME || '' }}
+          ES_PASSWORD: ${{ env.SIGN == 'yes' && secrets.ES_PASSWORD || '' }}
+          ES_CREDENTIAL_ID: ${{ env.SIGN == 'yes' && secrets.ES_CREDENTIAL_ID || '' }}
+          ES_TOTP_SECRET: ${{ env.SIGN == 'yes' && secrets.ES_TOTP_SECRET || '' }}
           KIWI_SIGNER_THUMBPRINT: ${{ vars.KIWI_SIGNER_THUMBPRINT }}
         run: |
           $ErrorActionPreference = "Stop"

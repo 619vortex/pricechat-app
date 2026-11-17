@@ -68,7 +68,7 @@ function view(s) {
     el("div", { class: "stats" },
       el("span", {}, el("b", {}, bytes(used?.used_bytes ?? 0)), used?.cap_bytes ? ` of ${bytes(used.cap_bytes)} this month` : " this month"),
       s.exitIp && s.on && s.conflict?.kind !== "proxy" ? el("span", {}, "IP ", el("b", {}, s.exitIp)) : null),
-    el("p", { class: "note" }, "Covers this browser only; the Kiwi VPN apps cover your whole device. We don't log the sites you visit."),
+    el("p", { class: "note" }, "Covers this browser only; the Kiwi VPN apps cover your whole device. What we keep: pricechat.live/vpn/privacy."),
     help(),
     el("button", { class: "link", onclick: () => { if (confirm("Switch off and remove this browser from your account?")) void act("forget"); } }, "Remove this browser"),
   ];

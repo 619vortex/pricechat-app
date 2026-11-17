@@ -56,44 +56,101 @@ Exact test counts (final run):
 - kill-switch job: 19 service checks (6 new strict ones) and 22 raw filter checks (new: L12 port 80, L14 DoT, strict persistence/removal). The boot-time set was added (62 or 66 filters).
 - update-test job: 35 checks: 4 setup; 14 manifest refusals or "nothing offered" (bad signature, unknown key, expired, future, channel, product, other host, plain http, lower version, same version, paused, 0% rollout, replayed seq, redirect); 5 installer refusals (hash mismatch, truncated, longer, unsigned, unpinned signer); 3 folder and offer checks; 7 checks after the update (service 2.2.0, committed, no pending, recovery tasks gone, repair copy kept, tunnels\ kept, one Apps entry); 2 kill switch checks after the update; 1 check that the public build has no keys.
 
-## Owner actions
+## Owner release procedure (2.2.0 signed), in this order
 
-1. **Generate the update keys offline** on the main PC: `powershell -ExecutionPolicy Bypass -File windows-client\tools\new-update-key.ps1`.
-   Paste the two printed public-key lines into `PRODUCTION_KEYS` (`windows-client/service/src/update.rs`) and commit. Back up
-   k1.pem/k2.pem offline (password manager + encrypted USB), then delete them from the PC.
-2. **Keep k1 offline (changed 2026-11-17, feat/kiwi-sec).** Don't create `kiwi-publish` / `KIWI_MANIFEST_KEY` yet: the "Publish
-   update" workflow that would use it doesn't exist, required reviewers need GitHub Pro on a private repo, and this PC's deploy key
-   can push to KIWIVPN `main`, so a workflow edit could read any environment secret. Sign each manifest on the main PC instead
-   (Release steps 3). Revisit when the publish workflow is built and the environment can require the owner's approval.
-3. **Record the certificate's SHA-256** from a signed build (Get-AuthenticodeSignature ... SignerCertificate, SHA-256 of RawData)
-   and add it to the pin (`Pin { sha1, sha256: Some(..) }`) if wanted.
-4. **Signed build**: merge to main, sync to KIWIVPN main (sync-ci-repo.ps1), run the workflow by hand with `sign` ticked, check
-   the artifact on the main PC (ci-fetch.ps1, main-pc-check.ps1) as in SIGNING.md.
-5. Decide whether to tick `run_e2e` for the release run (one real-account run; it uses the shared device rate limit).
+Only the owner does these steps, on the main PC, by hand. An agent never generates, sees or handles k1/k2 or the eSigner secrets,
+and never pushes to KIWIVPN `main`. Keep Smart App Control on throughout.
 
-## Release steps
+**A. Make the update keys (offline, once)**
 
-1. Owner actions 1-4 (the keys must be in the build that ships, or 2.2 can never auto-update).
-2. Publish the signed 2.2.0 installer by hand as today at `downloads/KiwiVPN-Setup.exe` (2.1 users install it once).
-3. For later releases: `node windows-client/tools/sign-update-manifest.mjs --key k1.pem --key-id k1 --installer <signed exe>
-   --version 2.2.1 --seq <next> --rollout 100` → upload `stable.json` and `KiwiVPN-2.2.1-Setup.exe` to
-   `public/downloads/kiwi/windows/`, deploy; raise `--rollout` (new `seq`) over days. `--rollout` is basis points: 100 = 1 %,
-   10000 = everyone. Re-sign at least every 14 days (expiry; a lapsed manifest only means nothing is offered). Since 2026-11-17 the
-   tool refuses a key that isn't `PRODUCTION_KEYS`' entry for `--key-id`, or placeholder keys (tests: `node --test
-   windows-client/tools/sign-update-manifest.test.mjs`).
-   Certificate renewal (current one ends 2027-11-09): installs trust only the pinned thumbprint, so publish a manifest with the new
-   certificate in `pin_add` (signed by k1) BEFORE shipping an installer signed with the new certificate.
-4. Confirm Vercel serves `/downloads/kiwi/windows/*` with 200 and no redirect (the service refuses redirects).
+1. Unplug the network if you like (nothing below needs it). In PowerShell, from the repository root:
+   `powershell -ExecutionPolicy Bypass -File windows-client\tools\new-update-key.ps1`
+   It makes `%USERPROFILE%\kiwi-update-keys-<date>\k1.pem` and `k2.pem` (only your user can read the folder) and prints a
+   `pub const PRODUCTION_KEYS: &[Key] = &[ ... ];` block with two `Key { id: "k1"/"k2", public: hex32("<64 hex>") }` lines.
+   These are **public** keys. Never paste the .pem files or their contents anywhere (chat, GitHub, the repository).
+2. **Back up the private keys before anything else**: copy `k1.pem` and `k2.pem` into the password manager (as two secure notes)
+   AND onto an encrypted USB stick (e.g. a 7-Zip AES-256 archive, passphrase kept apart from the stick). Check both copies open.
+   k2 is the spare that only ever replaces k1; if both are lost, every 2.2 install must be updated by hand once more.
+3. Delete the `kiwi-update-keys-<date>` folder from the PC (Shift+Delete) and empty any copy the backup tool left behind.
 
-## Rollback
+**B. Put the public keys in the source**
 
-- A bad release already offered: republish the manifest with `--paused` (new `seq`); installs that haven't started stop. No
-  downgrade path by design: ship a fixed higher version.
-- A bad 2.2 build before any auto-update: keep serving 2.1.0 at `downloads/KiwiVPN-Setup.exe`; installs of 2.2 can be replaced by
-  hand (the NSIS installer refuses a silent downgrade; a manual one works).
+4. In `windows-client/service/src/update.rs`, replace the one line
+   `pub const PRODUCTION_KEYS: &[Key] = &[Key { id: "k1", public: [0; 32] }, Key { id: "k2", public: [0; 32] }];`
+   with the printed block (k1 first, then k2). Change nothing else.
+5. Check the paste: `node windows-client/ci/release-keys.mjs --source windows-client/service/src/update.rs --require-real`
+   must end `real k1/k2 (public keys), signed build: OK`.
+6. Commit on the branch being released ("Kiwi 2.2: production update keys k1/k2 (public)") and merge it to `main` as usual.
+
+**C. Signed build**
+
+7. With `main` checked out (clean) in the worktree: `powershell -ExecutionPolicy Bypass -File windows-client\sync-ci-repo.ps1`.
+   It pushes the exported `windows-client/` and the workflow to KIWIVPN `main` (it refuses uncommitted files and any `.pem`).
+8. At once: GitHub > 619vortex/KIWIVPN > Actions > **Kiwi VPN Windows** > Run workflow > branch `main` > tick **sign**
+   (tick `run_e2e` only if you want one real-account run; it uses the shared device rate limit) > Run. Starting it right away
+   lets the concurrency group cancel the push run. Only `619vortex` on `main` gets the `windows-signing` secrets.
+   The build fails before signing anything if `PRODUCTION_KEYS` are placeholders or test keys, or if the compiled service doesn't
+   carry the k1/k2 bytes ("Update keys" and "Release check" steps).
+9. Wait for green: build (incl. the update keys checks), upgrade, kill-switch (41/41; a "cancelled" badge is the known runner
+   artefact, read the step results). `update-test` is skipped on signed runs; it ran on the unsigned run of the same source.
+
+**D. Check the signed installer on the main PC (nothing is installed by these checks)**
+
+10. `powershell -ExecutionPolicy Bypass -File windows-client\ci-fetch.ps1` downloads `KiwiVPN-2.2.0-<sha>-signed-Setup.exe` and
+    checks its SHA-256 against the run's `.sha256`.
+11. Signature, by hand:
+    ```powershell
+    $f = "C:\AI\pc-wt\kiwi-release\ci\<sha>\KiwiVPN-2.2.0-<sha>-signed-Setup.exe"
+    $s = Get-AuthenticodeSignature $f
+    $s.Status                                   # Valid
+    $s.SignerCertificate.Thumbprint             # 0C24831BCE28841DC6C31BCFB326C0624A283559
+    $s.SignerCertificate.Subject                # CN=Avigad Saadia, ...
+    [bool]$s.TimeStamperCertificate             # True
+    (Get-Item $f).VersionInfo.ProductVersion    # 2.2.0
+    (Get-FileHash $f -Algorithm SHA256).Hash    # = the .sha256 file and the run summary
+    ```
+    then `powershell -ExecutionPolicy Bypass -File windows-client\ci\main-pc-check.ps1 -Installer $f` (all PASS).
+12. Optional: record the certificate's SHA-256 for a stronger pin later:
+    `[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($s.SignerCertificate.RawData)) -replace '-'`.
+
+**E. Publish 2.2.0 (manual download; 2.1 has no updater)**
+
+13. Copy the checked file to `frontend/public/downloads/KiwiVPN-Setup.exe`, set `WINDOWS_BETA` in
+    `frontend/src/website/vpnConfig.ts` to version `2.2.0` and its SHA-256 (a test ties the two), commit, deploy the website.
+14. `node windows-client/check-download-live.mjs <SHA-256>` must pass, and `Get-AuthenticodeSignature` on a fresh download from
+    https://pricechat.live/downloads/KiwiVPN-Setup.exe shows the same Valid / thumbprint as step 11.
+
+**F. Later releases (2.2.1+): the signed update manifest**
+
+15. Build and check the signed installer as in C-D. Plug in the USB stick and, on the main PC:
+    `node windows-client/tools/sign-update-manifest.mjs --key <USB>\k1.pem --key-id k1 --installer <signed exe> --version 2.2.1 --seq <last + 1> --rollout 100 --out stable.json`
+    (`--rollout` is basis points: 100 = 1 %, 10000 = everyone). It refuses a key that isn't `PRODUCTION_KEYS`' k1, or placeholders.
+16. Verify before upload (no key needed):
+    `node windows-client/tools/sign-update-manifest.mjs --verify stable.json --installer <signed exe>` must end `PASS`.
+    Unplug the USB stick.
+17. Put `stable.json` and the installer, renamed `KiwiVPN-2.2.1-Setup.exe`, in `frontend/public/downloads/kiwi/windows/`, commit,
+    deploy. Then download both from `https://pricechat.live/downloads/kiwi/windows/` and run step 16 on the downloaded copies;
+    both URLs must answer 200 with no redirect (the service refuses redirects).
+18. Widen the rollout over days by re-signing with a new `--seq` and higher `--rollout`; re-sign at least every 14 days (expired
+    manifests only mean nothing is offered). Certificate renewal (current one ends 2027-11-09): first publish a manifest with
+    `--pin-add <new SHA-1>`, only then ship installers signed with the new certificate. If k1 leaks: sign with k2 and `--revoke k1`.
+
+**G. Rollback**
+
+- Before or after publishing 2.2.0, website: Vercel > promote the previous production deployment (serves 2.1.0, SHA-256
+  `660C2D5B…387668C3`), or revert the download commit and redeploy. People who installed 2.2.0 keep it; a manual 2.1.0 install
+  over it works (the NSIS installer refuses only a silent downgrade).
+- A bad update already offered by a manifest: re-sign it with `--paused` and a new `--seq`, verify (step 16), deploy; installs that
+  haven't started stop. There is no downgrade path by design: ship a fixed higher version.
+- Wrong keys pasted (not yet released): revert the key commit, regenerate (A), repeat B-D. Once a build with keys is public, those
+  keys are the only ones its installs trust: never lose the backups.
 - A PC stuck offline by the strict kill switch: Disconnect in the app, or as administrator
   `"C:\Program Files\KiwiVPN\kiwivpn-service.exe" unblock` (works with the service stopped), or uninstall.
 - Code: revert the `feat/kiwi-windows-22` merge; nothing else depends on it.
+
+Not yet: don't create a `kiwi-publish` environment or a `KIWI_MANIFEST_KEY` secret. The "Publish update" workflow doesn't exist,
+required reviewers need GitHub Pro on a private repo, and this PC's deploy key can push to KIWIVPN `main`, so a workflow edit could
+read any environment secret. k1 stays offline; k2 goes nowhere online, ever.
 
 ## Bootstrap limit
 
@@ -123,3 +180,18 @@ generate the keys before the 2.2.0 signed build.
   `production_keys_are_both_placeholders_or_both_real` guards the paste. `sign-update-manifest.mjs` refuses a key that isn't
   PRODUCTION_KEYS' `--key-id` (or placeholders) and gained `--pin-add` / `--revoke`, which the design needs for certificate
   renewal and key rotation but the tool couldn't write (8 node tests).
+
+## Release preparation 2026-11-17 (feat/kiwi-release-rc)
+
+- New CI gate `windows-client/ci/release-keys.mjs` (+ 7 node tests, also run in CI): the build job fails BEFORE any signing step
+  when `sign` is ticked and `PRODUCTION_KEYS` are the placeholders, a test key, half-pasted, duplicated or filler; after the release
+  build it also checks the compiled `kiwivpn-service.exe`: no TEST key bytes (every build), both k1/k2 bytes present (signed builds).
+  Before this, a signed 2.2.0 with placeholder keys would have built green (the Rust test accepts "both placeholders").
+- `sign-update-manifest.mjs --verify <stable.json> [--installer <exe>]` checks a manifest as an install would, no key needed
+  (2 new tests; 10 in that file).
+- Log hygiene on the sign path: the eSigner secrets reach the Installer (Tauri) step only in signed runs; `sign.ps1` and
+  `check-certificate.ps1` mask the trimmed secret values (`::add-mask::`); `sign.ps1` redacts them from CodeSignTool output and
+  turns tracing off. Audit: no `set -x` / `Set-PSDebug -Trace`, no secret echoed, artifact names are version + commit, and the
+  uploaded folders (out/, tools/, uptest/, reports) hold no secret. Residual: in a signed run the Tauri build (npm/cargo build
+  scripts) inherits the secrets in its environment, because Tauri runs `sign.ps1` as a child process.
+- Rust and the workflow were not compiled or run here (Smart App Control; owner's rule): CI only.

@@ -7,6 +7,7 @@
 //        --installer KiwiVPN-2.2.1-<sha>-signed-Setup.exe --version 2.2.1 --seq 43 [--channel stable] [--rollout 10000]
 //        [--notes "..."] [--security] [--min 2.2.0] [--paused] [--days 14] [--out stable.json] [--keys-from <update.rs>]
 //        [--pin-add <sha1>[:<sha256>]] [--revoke k1]
+//   node windows-client/tools/sign-update-manifest.mjs --verify stable.json [--installer <exe>]   (no key needed)
 //
 // The installer is published as KiwiVPN-<version>-Setup.exe (versioned name, never overwritten); the manifest names that URL.
 // The private key is read, used and dropped; it is never printed or written anywhere.
@@ -33,6 +34,48 @@ function args(list) {
 
 const die = (m) => { console.error(m); process.exit(1); };
 const o = args(process.argv.slice(2));
+
+// --verify <stable.json> [--installer <exe>] [--keys-from <update.rs>]: checks a manifest the way an install would (signature by
+// PRODUCTION_KEYS, product, dates, URL) and, with --installer, that it names exactly that file. Needs no private key: run it on
+// the file you are about to upload AND on the copy the website serves.
+if (o.verify) {
+  const keysFrom = o["keys-from"] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "service", "src", "update.rs");
+  const block = /pub const PRODUCTION_KEYS: &\[Key\] = &\[([\s\S]*?)\];/.exec(fs.readFileSync(keysFrom, "utf8"))?.[1];
+  if (block === undefined) die(`PRODUCTION_KEYS wasn't found in ${keysFrom}`);
+  let env;
+  try { env = JSON.parse(fs.readFileSync(o.verify, "utf8")); } catch { die(`FAIL: ${o.verify} isn't a manifest (JSON envelope)`); }
+  if (!env || typeof env.key_id !== "string" || typeof env.payload !== "string" || typeof env.sig !== "string" || Object.keys(env).length !== 3) die("FAIL: not a { key_id, payload, sig } envelope");
+  if (!/^k[0-9]{1,2}$/.test(env.key_id)) die(`FAIL: signed by "${env.key_id}", not a production key id`);
+  const entry = new RegExp(`Key \\{ id: "${env.key_id}", public: (?:hex32\\("([0-9a-f]{64})"\\)|\\[0; 32\\]) \\}`).exec(block);
+  if (!entry) die(`FAIL: signed by ${env.key_id}, which isn't in PRODUCTION_KEYS (${keysFrom})`);
+  if (!entry[1]) die(`FAIL: PRODUCTION_KEYS' ${env.key_id} is the all-zero placeholder: no install accepts anything`);
+  const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(entry[1], "hex")]);
+  const payloadBytes = Buffer.from(env.payload, "base64");
+  const sigBytes = Buffer.from(env.sig, "base64");
+  const good = sigBytes.length === 64 && crypto.verify(null, Buffer.concat([Buffer.from(PREFIX), payloadBytes]), crypto.createPublicKey({ key: spki, format: "der", type: "spki" }), sigBytes);
+  if (!good) die(`FAIL: the signature doesn't verify with PRODUCTION_KEYS' ${env.key_id}`);
+  const m = JSON.parse(payloadBytes);
+  const r = m.release ?? {};
+  const t = (s) => (/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(s ?? "") ? Date.parse(s) : NaN);
+  const problems = [];
+  if (m.product !== "kiwivpn-windows") problems.push(`product ${m.product}`);
+  if (!(t(m.expires_at) > Date.now())) problems.push(`expired or bad expires_at (${m.expires_at}): installs offer nothing`);
+  if (!(t(m.signed_at) <= Date.now() + 86400e3)) problems.push(`signed_at ${m.signed_at} is in the future`);
+  if (!(t(m.expires_at) - t(m.signed_at) <= 30 * 86400e3)) problems.push("valid for more than 30 days (installs refuse it)");
+  if (r.url !== `${HOST}KiwiVPN-${r.version}-Setup.exe`) problems.push(`url ${r.url} isn't ${HOST}KiwiVPN-${r.version}-Setup.exe`);
+  if (o.installer) {
+    const bytes = fs.readFileSync(o.installer);
+    const sha = crypto.createHash("sha256").update(bytes).digest("hex").toUpperCase();
+    if (bytes.length !== r.size) problems.push(`the installer is ${bytes.length} bytes, the manifest says ${r.size}`);
+    if (sha !== String(r.sha256).toUpperCase()) problems.push(`the installer's SHA-256 is ${sha}, the manifest says ${r.sha256}`);
+  }
+  console.log(`signature OK (${env.key_id}); ${m.channel} ${r.version}, seq ${m.seq}, rollout ${r.rollout_bp / 100}%${r.paused ? ", PAUSED" : ""}, expires ${m.expires_at}`);
+  console.log(`names ${r.url}, ${r.size} bytes, SHA-256 ${r.sha256}${o.installer ? `; compared with ${path.basename(o.installer)}` : "; no --installer given, not compared"}`);
+  if (problems.length) die(`FAIL: ${problems.join("; ")}`);
+  console.log("PASS");
+  process.exit(0);
+}
+
 for (const need of ["key", "key-id", "installer", "version", "seq"]) if (!o[need]) die(`--${need} is required`);
 if (!/^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(o.version)) die("--version must be plain major.minor.patch");
 if (o.min && !/^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(o.min)) die("--min must be plain major.minor.patch");
