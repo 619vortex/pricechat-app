@@ -668,8 +668,9 @@ def watch_incidents(db: Session, s: TtSettings, topics: list[TtTopic], now: date
     """Record every incident topic (parts.incident) in state["incidents"]: when it happened, when we first saw it, its score and peak, and
     what happened to it (posted, queued, held and why, below the line). One log line whenever an incident's status changes."""
     state = dict(s.state or {})
-    book: dict[str, dict[str, Any]] = {str(e.get("topic_id")): e for e in state.get("incidents") or [] if isinstance(e, dict)}
-    rows = [t for t in topics if (t.parts or {}).get("incident")]
+    book: dict[str, dict[str, Any]] = {str(e.get("topic_id")): e for e in state.get("incidents") or [] if isinstance(e, dict) and e.get("major")}
+    # major incidents only (production 2026-11-17 05:14: "Did The Simpsons predict a mass power outage?" and blackout-rumour pieces are not incidents)
+    rows = [t for t in topics if ((t.parts or {}).get("incident") or {}).get("major")]
     posts: dict[int, TtPost] = {}
     if rows:
         for p in db.scalars(select(TtPost).where(TtPost.topic_id.in_([t.id for t in rows])).order_by(TtPost.id)):

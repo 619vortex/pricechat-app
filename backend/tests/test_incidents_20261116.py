@@ -398,3 +398,18 @@ def test_from_the_feeds_alone_the_bank_outage_is_detected_at_once_and_crosses_wh
 def test_cold_storage_reassurance_is_not_an_incident() -> None:
     """tests/test_newsdesk_telegram: "offline" and "hackers" in a reassurance headline are not a cyberattack or an outage."""
     assert incidents.detect("Coinbase says 99% of customer crypto is offline and out of hackers' reach") is None
+
+
+def test_rumours_and_explainers_stay_out_of_the_incident_panel(db: Session) -> None:
+    """Production 2026-11-17 05:14, the first scan on the new code: blackout-rumour pieces were listed as incidents."""
+    now = utcnow()
+    s = engine.settings_row(db)
+    t = TtTopic(key="t:rumour", title="Will there be a blackout this week?National Grid update as rumours shared online", category="technology", status="active",
+                score=10.5, peak_score=41.5, signal_ids=[], sources=[], metrics={}, first_seen=now, last_seen=now,
+                parts={"incident": {"kind": "power", "label": "power failure", "entities": [], "major": False, "verified": False, "evidence": "hedged"}})
+    db.add(t)
+    db.commit()
+    assert engine.watch_incidents(db, s, [t], now) == []
+    assert not (s.state or {}).get("incidents")
+    assert incidents.detect("Will there be a blackout this week?National Grid update as rumours shared online") is None or \
+        not incidents.detect("Will there be a blackout this week?National Grid update as rumours shared online").major
