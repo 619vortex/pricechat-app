@@ -115,3 +115,40 @@ test("the repository's own update.rs is read by default", () => {
   assert.equal(r.status, 1);  // a throwaway key is never the real k1, and today's source still holds placeholders
   assert.match(r.stderr, /placeholder|isn't PRODUCTION_KEYS' k1/);
 });
+
+function verify(manifest, keysFrom, more = []) {
+  return spawnSync(process.execPath, [TOOL, "--verify", manifest, "--keys-from", keysFrom, ...more], { encoding: "utf8" });
+}
+
+test("--verify passes a good manifest with its installer, without any private key", () => {
+  const rs = updateRs("verify", k1.pub, k2.pub);
+  const s = sign(k1.file, rs);
+  assert.equal(s.status, 0, s.stderr);
+  const r = verify(s.out, rs, ["--installer", installer]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /signature OK \(k1\)[\s\S]*PASS/);
+});
+
+test("--verify fails a tampered payload, a foreign signer, another installer and placeholder keys", () => {
+  const rs = updateRs("verify2", k1.pub, k2.pub);
+  const s = sign(k1.file, rs);
+  const env = JSON.parse(fs.readFileSync(s.out, "utf8"));
+  const p = payloadOf(s.out);
+  p.release.rollout_bp = 10000;
+  p.seq = 2;
+  const tampered = path.join(dir, "tampered.json");
+  fs.writeFileSync(tampered, JSON.stringify({ ...env, payload: Buffer.from(JSON.stringify(p)).toString("base64") }));
+  assert.match(verify(tampered, rs).stderr, /signature doesn't verify/);
+  const asK2 = path.join(dir, "as-k2.json");
+  fs.writeFileSync(asK2, JSON.stringify({ ...env, key_id: "k2" }));
+  assert.match(verify(asK2, rs).stderr, /signature doesn't verify with PRODUCTION_KEYS' k2/);
+  const foreign = sign(other.file, updateRs("foreign", other.pub, k2.pub));
+  assert.equal(verify(foreign.out, rs).status, 1, "signed by a key the builds don't hold");
+  const otherExe = path.join(dir, "other-Setup.exe");
+  fs.writeFileSync(otherExe, crypto.randomBytes(1024 * 1024 + 7));
+  assert.match(verify(s.out, rs, ["--installer", otherExe]).stderr, /SHA-256/);
+  assert.match(verify(s.out, updateRs("zero2", null, null)).stderr, /placeholder/);
+  const unsigned = path.join(dir, "unsigned.json");
+  fs.writeFileSync(unsigned, JSON.stringify({ key_id: "k1", payload: env.payload }));
+  assert.equal(verify(unsigned, rs).status, 1);
+});

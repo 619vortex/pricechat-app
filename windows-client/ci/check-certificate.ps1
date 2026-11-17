@@ -15,7 +15,7 @@ if ($missing.Count -eq 4) { throw "No eSigner secrets yet: add them to the windo
 # credential ID or 2FA secret in the wrong format. Surrounding whitespace is removed before use (here and in sign.ps1).
 foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET") {
   $raw = [Environment]::GetEnvironmentVariable($v)
-  if ($raw -and $raw -ne $raw.Trim()) { Write-Host "NOTE $v had spaces or a line break around it (removed)"; [Environment]::SetEnvironmentVariable($v, $raw.Trim()) }
+  if ($raw -and $raw -ne $raw.Trim()) { Write-Host "::add-mask::$($raw.Trim())"; Write-Host "NOTE $v had spaces or a line break around it (removed)"; [Environment]::SetEnvironmentVariable($v, $raw.Trim()) }
 }
 $u = $env:ES_USERNAME; $p = $env:ES_PASSWORD; $c = $env:ES_CREDENTIAL_ID; $t = $env:ES_TOTP_SECRET
 Say ($u -notmatch "@") "ES_USERNAME is an SSL.com username, not an email address$(if ($u -match '@') { ': it contains @. eSigner signs in with the account USERNAME (SSL.com > Account > Username), not the email' })"

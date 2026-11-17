@@ -17,8 +17,14 @@ $ErrorActionPreference = "Stop"
 foreach ($v in "ES_USERNAME", "ES_PASSWORD", "ES_CREDENTIAL_ID", "ES_TOTP_SECRET", "CODESIGNTOOL_DIR") {
   $raw = [Environment]::GetEnvironmentVariable($v)
   if (-not $raw) { throw "sign.ps1: $v isn't set (signing runs only in the windows-signing environment)" }
-  if ($raw -ne $raw.Trim()) { [Environment]::SetEnvironmentVariable($v, $raw.Trim()) } # pasted spaces or line breaks
+  if ($raw -ne $raw.Trim()) {
+    # pasted spaces or line breaks. GitHub masks the secret as stored; mask the trimmed value too, so it can't show either
+    if ($v -ne "CODESIGNTOOL_DIR" -and $env:GITHUB_ACTIONS) { Write-Host "::add-mask::$($raw.Trim())" }
+    [Environment]::SetEnvironmentVariable($v, $raw.Trim())
+  }
 }
+# Never trace this script: Set-PSDebug -Trace would print the CodeSignTool arguments below, credentials included
+Set-PSDebug -Off
 $File = (Resolve-Path $Path).Path
 # makensis hands over the uninstaller as nstXXXX.tmp (!uninstfinalize), and CodeSignTool only signs known extensions: sign an .exe
 # copy, then put it back in place.
@@ -46,6 +52,8 @@ foreach ($try in 1..3) {
   } finally { Pop-Location }
   # its output is about the file, never the credentials; trimmed to the lines that matter
   $said = ($out -split "`r?`n" | Where-Object { $_ -match "(?i)sign|error|fail|success|code" } | Select-Object -First 6) -join " | "
+  # belt and braces on top of GitHub's masking: should CodeSignTool ever echo an argument, the credential never reaches the log
+  foreach ($s in $env:ES_USERNAME, $env:ES_PASSWORD, $env:ES_CREDENTIAL_ID, $env:ES_TOTP_SECRET) { if ($s) { $said = $said.Replace($s, "***") } }
   $sig = Get-AuthenticodeSignature $File
   if ($code -eq 0 -and $sig.Status -eq "Valid") { $ok = $true; break }
   Write-Host "sign.ps1: $Name not signed on try $try (exit $code, signature $($sig.Status)): $said"
