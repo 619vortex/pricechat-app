@@ -124,3 +124,23 @@ describe("Trending Topics", () => {
     expect(screen.getByRole("button", { name: "Release stop" })).toBeTruthy();
   });
 });
+
+/** The incident watch and the audited misses (owner, 2026-11-17): first detection, score and why each did or didn't go out. */
+describe("IncidentsCard", () => {
+  afterEach(cleanup);
+  it("shows an incident's first detection, score, evidence and outcome, and the audited misses", async () => {
+    const { IncidentsCard } = await import("./TrendingTopics");
+    render(<IncidentsCard incidents={[{ topic_id: 1, title: "United Airlines experiencing a widespread system outage, airline says", category: "technology", kind: "aviation",
+      label: "aviation disruption", entities: ["United Airlines"], major: true, verified: true, evidence: "the affected company's own statement", event_time: "2026-11-16T22:10:00+00:00",
+      first_detected: "2026-11-16T22:39:14+00:00", detect_lag_min: 29, score: 78.5, peak_score: 78.8, outlets: 4, status: "queued", reason: "Trending's daily limit reached (3/3 in 24 h)",
+      why: "", post_id: 5, posted_at: null, first_line_at: null, updated: "2026-11-16T23:00:00+00:00" }]}
+      missed={[{ story: "JPMorgan Chase outage", date: "2026-11-16", event_time: "2026-11-16T14:53:00+00:00", event_note: "Downdetector", first_detected: null,
+        first_in_feeds: "2026-11-16T18:51:34+00:00", first_in_feeds_note: "Fox Business", score: null, stage: "never discovered", reason: "Dropped by the News Desk before it was stored", now: "Stored as an incident" }]} />);
+    expect(screen.getByText(/United Airlines experiencing/)).toBeTruthy();
+    expect(screen.getByText(/first seen 2026-11-16 22:39 UTC \(\+29 min\)/)).toBeTruthy();
+    expect(screen.getByText("verified")).toBeTruthy();
+    expect(screen.getByText(/daily limit reached/)).toBeTruthy();
+    expect(screen.getByText("never")).toBeTruthy();
+    expect(screen.getByText(/Dropped by the News Desk/)).toBeTruthy();
+  });
+});

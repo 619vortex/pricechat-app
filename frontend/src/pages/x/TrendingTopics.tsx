@@ -35,12 +35,54 @@ export type Trending = { settings: TrendSettings; last_run: (Record<string, unkn
     per_category?: Record<string, { posts: number; impressions: number; likes: number; reposts: number; replies: number; rate: number }> };
   latency?: { event_to_publish: LatencyStat; detect_to_publish: LatencyStat; written_to_publish: LatencyStat; recent: Latency[] };
   writer: "model" | "rules"; x: { configured: boolean; can_write: boolean; status: string; last_ok: Record<string, unknown> | null; last_error: { at: string; message: string } | null };
-  cost: { per_post_usd: number; x_trends_per_request_usd: number; x_post_read_usd: number } };
+  cost: { per_post_usd: number; x_trends_per_request_usd: number; x_post_read_usd: number };
+  incidents?: Incident[]; missed?: Missed[] };
+/** A major infrastructure incident Trending saw (banking, payments, exchanges, groundings, cloud, cyber): when, how it scored, what happened. */
+export type Incident = { topic_id: number; title: string; category: string; kind: string; label: string; entities: string[]; major: boolean; verified: boolean;
+  evidence: string; event_time: string; first_detected: string; detect_lag_min: number | null; score: number; peak_score: number; outlets: number; status: string;
+  reason: string; why: string; post_id: number | null; posted_at: string | null; first_line_at: string | null; updated: string };
+/** An audited miss from before the incident watch existed. */
+export type Missed = { story: string; date: string; event_time: string | null; event_note: string; first_detected: string | null; first_in_feeds: string | null;
+  first_in_feeds_note: string; score: number | null; stage: string; reason: string; now: string };
 
 const CATEGORY: Record<string, string> = { crypto: "Crypto", stocks: "Stocks", markets: "Markets", geopolitics: "Geopolitics", technology: "Technology", world: "World events" };
-const SOURCE: Record<string, string> = { news: "News", google: "Google Trends", reddit: "Reddit", x_trends: "X trends", x_accounts: "X accounts" };
+const SOURCE: Record<string, string> = { news: "News", google: "Google Trends", faa: "FAA airport status", reddit: "Reddit", x_trends: "X trends", x_accounts: "X accounts" };
 const HEALTH_TONE: Record<string, Tone> = { ok: "good", error: "bad", unavailable: "warn", off: "neutral", idle: "info" };
 const STATUS_TONE: Record<string, Tone> = { pending: "info", queued: "info", held: "warn", dry_run: "neutral", published: "good", failed: "bad", uncertain: "warn", rejected: "neutral", expired: "neutral" };
+const utc = (iso: string | null | undefined): string => (iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : "-");
+
+/** Admin › Trending › Major incidents: every incident topic with its first detection, score and the reason it did or didn't go out,
+ *  then the audited misses (owner, 2026-11-17). */
+export function IncidentsCard({ incidents, missed }: { incidents: Incident[]; missed: Missed[] }) {
+  return (
+    <Card title={`Major incidents (${incidents.length} in 72 h)`}>
+      {incidents.length === 0 ? <Empty>No banking, payment, exchange, aviation, cloud or cyber incident in the last 72 hours.</Empty> : (
+        <table className="table small"><thead><tr><th>Incident</th><th>Event / first seen</th><th>Score</th><th>Evidence</th><th>Outcome</th></tr></thead>
+          <tbody>{incidents.map((e) => (
+            <tr key={e.topic_id}>
+              <td><strong>{e.title}</strong><div className="small muted">{e.label}{e.entities.length ? ` · ${e.entities.join(", ")}` : " · sector-wide"}</div></td>
+              <td>{utc(e.event_time)}<div className="small muted">first seen {utc(e.first_detected)}{e.detect_lag_min !== null ? ` (+${minutes(e.detect_lag_min)})` : ""}</div></td>
+              <td>{e.score.toFixed(0)}<div className="small muted">peak {e.peak_score.toFixed(0)}</div></td>
+              <td><Badge tone={e.verified ? "good" : "warn"}>{e.verified ? "verified" : "unverified"}</Badge><div className="small muted">{e.evidence} · {e.outlets} outlet{e.outlets === 1 ? "" : "s"}</div></td>
+              <td><Badge tone={STATUS_TONE[e.status] ?? "neutral"}>{e.status}</Badge><div className="small">{e.reason}</div>{e.posted_at && <div className="small muted">sent {utc(e.posted_at)}</div>}</td>
+            </tr>))}</tbody></table>)}
+      <p className="small muted">A verified major incident (two outlets, the company's own statement, or an official source such as the FAA) may go out beyond the daily limit, at most 2 more in 24 hours and 60 minutes after the last trend post. An unverified one waits for approval.</p>
+      {missed.length > 0 && <>
+        <h4>Audited misses</h4>
+        <table className="table small"><thead><tr><th>Story</th><th>Event</th><th>First detected</th><th>Score</th><th>Why it was missed</th><th>Now</th></tr></thead>
+          <tbody>{missed.map((m) => (
+            <tr key={m.story}>
+              <td><strong>{m.story}</strong><div className="small muted">{m.date}</div></td>
+              <td>{utc(m.event_time)}<div className="small muted">{m.event_note}</div></td>
+              <td>{m.first_detected ? utc(m.first_detected) : <Badge tone="bad">never</Badge>}<div className="small muted">in our feeds {utc(m.first_in_feeds)}: {m.first_in_feeds_note}</div></td>
+              <td>{m.score ?? "-"}</td>
+              <td><Badge tone="warn">{m.stage}</Badge><div className="small">{m.reason}</div></td>
+              <td className="small">{m.now}</td>
+            </tr>))}</tbody></table></>}
+    </Card>
+  );
+}
+
 const PARTS: [keyof Topic["parts"], string, number][] = [["velocity", "Momentum", 30], ["freshness", "Freshness", 25], ["impact", "Market impact", 15], ["surprise", "Surprise", 10],
   ["relevance", "Relevance", 10], ["engagement", "Engagement", 10]];
 
@@ -205,6 +247,8 @@ export function TrendingTopics() {
         </div>
         <p className="small muted">Measured on each trend post (sent or recorded in dry run). Event = the first report of the story; first seen = our first scan that read it. Scans run every 5 minutes.</p>
       </Card>}
+
+      <IncidentsCard incidents={data.incidents ?? []} missed={data.missed ?? []} />
 
       <Card title={`Trending now (${data.topics.length})`}>
         {data.topics.length === 0 ? <Empty>No topics yet: the first scan runs a few minutes after start, or press Scan now.</Empty> : (

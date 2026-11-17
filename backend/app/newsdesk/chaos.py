@@ -91,6 +91,13 @@ def topic_of(title: str) -> tuple[int, str]:
     return shock, topic
 
 
+def _major_incident(title: str) -> bool:
+    from app.newsdesk import incidents
+
+    inc = incidents.detect(title)
+    return inc is not None and inc.major
+
+
 def rejected(story: Any) -> str | None:
     """Why a story isn't for either platform, whatever the evidence."""
     from app.newsdesk.telegram import SPAM
@@ -112,7 +119,7 @@ def rejected(story: Any) -> str | None:
         return f"no news in it: '{EMPTY.search(title).group(0)}'"
     if SPAM.search(f"{title} {summary}"):
         return "promotional"
-    if REASSURE.search(title):
+    if REASSURE.search(title) and not _major_incident(title):  # "Chase app offline for thousands" is the outage, not "cold storage offline"
         return "reassurance, not news"
     why = brief.boring(title)
     if why:

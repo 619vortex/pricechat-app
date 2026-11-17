@@ -37,6 +37,7 @@ class Web:
         self.reddit: dict[str, list[dict[str, Any]]] = {}
         self.x_trends: list[dict[str, Any]] = []
         self.status: dict[str, int] = {}
+        self.faa_xml = ""
         self.calls: list[str] = []
         self.posted: list[bytes] = []
 
@@ -47,6 +48,10 @@ class Web:
             return httpx.Response(self.status[host], json={"title": "Forbidden" if self.status[host] == 403 else "error", "detail": "test"})
         if host == "trends.google.com":
             return httpx.Response(200, text=google_rss(self.google))
+        if host == "nasstatus.faa.gov":  # the FAA's airport status: a quiet day (one weather ground stop) unless a test sets faa_xml
+            return httpx.Response(200, text=self.faa_xml or "<AIRPORT_STATUS_INFORMATION><Update_Time>Sun Nov 15 10:00:00 2026 GMT</Update_Time>"
+                                  "<Delay_type><Name>Ground Stop Programs</Name><Ground_Stop_List><Program><ARPT>SFO</ARPT><Reason>low ceilings</Reason>"
+                                  "</Program></Ground_Stop_List></Delay_type></AIRPORT_STATUS_INFORMATION>")
         if host in ("www.reddit.com", "oauth.reddit.com"):
             sub = path.split("/")[2]
             return httpx.Response(200, json=reddit_listing(self.reddit.get(sub, []), self.now))

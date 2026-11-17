@@ -844,7 +844,7 @@ async def test_each_scan_logs_sources_topics_top_five_and_the_decision_with_no_s
     hack_story(db, web)
     with caplog.at_level(logging.INFO, logger="app.trending.engine"):
         await tick(db, web)
-        await tick(db, web, NOW + timedelta(minutes=5))  # Google is read every 10 minutes
+        await tick(db, web, NOW + timedelta(minutes=3))  # Google is read every 5 minutes (since 2026-11-17; was 10)
     lines = [r.getMessage() for r in caplog.records if r.name == "app.trending.engine"]
     startup = [x for x in lines if x.startswith("trending startup:")]
     assert len(startup) == 1  # once per process (per deploy)

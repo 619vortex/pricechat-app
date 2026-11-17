@@ -18,7 +18,7 @@ from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.trending import TtPost, TtSettings, TtSignal, TtTopic
 from app.newsdesk import checks
-from app.trending import coordinate, gates, learning, rank, sensitive, sources, writer
+from app.trending import coordinate, gates, learning, postmortem, rank, sensitive, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,8 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
                 items, problem, meta = await sources.google(client, o, feed_outlets)
             elif name == "reddit":
                 items, problem, meta = await sources.reddit(client, o, settings)
+            elif name == "faa":
+                items, problem, meta = await sources.faa(client, o)
             else:
                 items, problem, meta = await sources.x_source(name, db, settings, runtime, o)
         except Exception as e:  # noqa: BLE001 - one source's bug never stops the others
@@ -331,6 +333,10 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
     g = (topic.parts or {}).get("growth") or {}
     if not g.get("measured"):
         return False, "no measured growth (scans, Google Trends, engagement): approval only"
+    inc = (topic.parts or {}).get("incident") or {}
+    if inc.get("major") and not inc.get("verified"):
+        # owner, 2026-11-17: detect early, publish only on sufficient evidence (two outlets, the company's own word, or an official source)
+        return False, f"a major incident not yet verified ({inc.get('evidence')}): approval only"
     if b is not None and (why := sensitive.auto_problem(b.sensitive, text=text, outlets=b.outlets)):
         return False, why
     return True, None
@@ -391,13 +397,21 @@ def expire(db: Session, now: datetime) -> int:
     return int(n or 0) + int(n2 or 0)
 
 
+def incident_post(db: Session, post: TtPost) -> bool:
+    """A verified major incident (app/newsdesk/incidents): it may use the incident allowance (coordinate.INCIDENT_EXTRA_PER_DAY)."""
+    topic = db.get(TtTopic, post.topic_id) if post.topic_id else None
+    inc = ((topic.parts or {}).get("incident") or {}) if topic is not None else {}
+    return bool(inc.get("major") and inc.get("verified"))
+
+
 def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> str | None:
     """Why this queued post can't go out now, or None."""
     if (why := coordinate.desk_blocked(db, now, s)) is not None:
         return why
-    if (why := coordinate.cap_problem(db, s, now)) is not None:
+    incident = incident_post(db, post)
+    if (why := coordinate.cap_problem(db, s, now, incident=incident)) is not None:
         return why
-    if (why := coordinate.spacing_problem(db, s, now)) is not None:
+    if (why := coordinate.spacing_problem(db, s, now, incident=incident)) is not None:
         return why
     titles = [str(x.get("title") or "") for x in post.sources or []]
     if (why := coordinate.newsdesk_conflict(db, titles, now)) is not None:
@@ -630,6 +644,72 @@ def startup_line(db: Session, s: TtSettings, settings: Settings) -> str:
             f"x_live={coordinate.x_live(db, s)} stop={'on' if s.kill_switch else 'off'} sources={on} writer={'model' if _model_writer(settings) else 'rules'}")
 
 
+# --- major incidents: what Admin shows about each one (owner, 2026-11-17: "show why major stories were missed") ---------------------
+INCIDENT_KEEP = timedelta(hours=72)
+INCIDENT_MAX = 60
+
+
+def decision_of(t: TtTopic, p: TtPost | None, s: TtSettings) -> tuple[str, str]:
+    """(status, reason) for a topic: its tweet's status and why, or why it has no tweet."""
+    pa = t.parts or {}
+    if p is None:
+        if t.score < s.suggest_score:
+            return "no tweet", f"scores {t.score:g}, below the suggestion line ({s.suggest_score:g})"
+        if pa.get("skip"):
+            return "no tweet", str(pa["skip"])
+        return "no tweet", "over this scan's limit of new suggestions"
+    why = p.hold_reason if p.status == "held" else p.note
+    if p.status == "pending" and not why:
+        why = f"waiting for approval (below the automatic line {s.hot_score:g})" if t.score < s.hot_score else "waiting for approval"
+    return p.status, str(why or "")
+
+
+def watch_incidents(db: Session, s: TtSettings, topics: list[TtTopic], now: datetime) -> list[str]:
+    """Record every incident topic (parts.incident) in state["incidents"]: when it happened, when we first saw it, its score and peak, and
+    what happened to it (posted, queued, held and why, below the line). One log line whenever an incident's status changes."""
+    state = dict(s.state or {})
+    book: dict[str, dict[str, Any]] = {str(e.get("topic_id")): e for e in state.get("incidents") or [] if isinstance(e, dict)}
+    rows = [t for t in topics if (t.parts or {}).get("incident")]
+    posts: dict[int, TtPost] = {}
+    if rows:
+        for p in db.scalars(select(TtPost).where(TtPost.topic_id.in_([t.id for t in rows])).order_by(TtPost.id)):
+            posts[p.topic_id] = p
+    lines = []
+    for t in rows:
+        pa = t.parts or {}
+        inc = pa["incident"]
+        tl = pa.get("timeline") or {}
+        status, reason = decision_of(t, posts.get(t.id), s)
+        key = str(t.id)
+        old = book.get(key) or {}
+        first = _aware(t.first_seen) or now
+        event = tl.get("event_time") or first.isoformat()
+        try:
+            lag = int((first - _aware(datetime.fromisoformat(event))).total_seconds() // 60)  # type: ignore[operator]
+        except (TypeError, ValueError):
+            lag = None
+        p = posts.get(t.id)
+        entry = {"topic_id": t.id, "title": t.title[:200], "category": t.category, "kind": inc.get("kind"), "label": inc.get("label"),
+                 "entities": inc.get("entities") or [], "major": bool(inc.get("major")), "verified": bool(inc.get("verified")), "evidence": inc.get("evidence"),
+                 "event_time": event, "first_detected": old.get("first_detected") or first.isoformat(), "detect_lag_min": old.get("detect_lag_min", lag),
+                 "score": t.score, "peak_score": max(float(old.get("peak_score") or 0), float(t.peak_score or 0), float(t.score or 0)),
+                 "outlets": tl.get("outlets", 0), "status": status, "reason": reason[:240], "why": str(pa.get("why") or "")[:300],
+                 "post_id": p.id if p else None, "posted_at": _iso(p.published_at) if p and p.published_at else old.get("posted_at"),
+                 "first_line_at": old.get("first_line_at") or (now.isoformat() if t.score >= s.hot_score else None),
+                 "updated": now.isoformat()}
+        if (old.get("status"), old.get("reason")) != (status, entry["reason"]):
+            lines.append(f"trending incident: [{inc.get('label')}] \"{_safe(t.title, 80)}\" event {str(event)[11:16]} UTC, first seen "
+                         f"{entry['first_detected'][11:16]} UTC (+{lag if lag is not None else '?'} min), score {t.score:g} (peak {entry['peak_score']:g}), "
+                         f"{'verified' if entry['verified'] else 'unverified'} ({_safe(inc.get('evidence'), 60)}) | {status}" + (f" ({_safe(reason, 90)})" if reason else ""))
+        book[key] = entry
+    keep = [e for e in book.values() if _aware(datetime.fromisoformat(str(e.get("updated")))) >= now - INCIDENT_KEEP]  # type: ignore[operator]
+    keep.sort(key=lambda e: str(e.get("first_detected") or ""), reverse=True)
+    state["incidents"] = keep[:INCIDENT_MAX]
+    s.state = state
+    db.commit()
+    return lines
+
+
 def scan_log_lines(db: Session, s: TtSettings, read: dict[str, Any], topics: list[TtTopic], made: int, published: str | None,
                    decision: dict[str, Any], now: datetime) -> list[str]:
     """One summary line, one line per top-5 topic, and the publish decision."""
@@ -720,6 +800,11 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
     published = await publish_due(db, s, settings, runtime, agent_id, now, decision=decision) if automatic(s) or _any_approved(db) else None
     alerts_sent = await check_health(db, s, settings, now)
     db.refresh(s)
+    try:
+        for line in watch_incidents(db, s, topics, now):
+            logger.info(line)
+    except Exception:  # noqa: BLE001 - the incident record never breaks a scan
+        logger.exception("trending: incident watch failed")
     out.update({"stored": read["stored"], "topics": len(topics), "suggested": made, "published": published, "alerts": alerts_sent})
     _note(s, "last_run", {"at": now.isoformat(), **out})
     db.commit()
@@ -870,6 +955,7 @@ def overview(db: Session, settings: Settings) -> dict[str, Any]:
     return {"settings": settings_out(s), "last_run": state.get("last_run"), "health": state.get("health") or {}, "usage": state.get("usage") or {},
             "topics": [topic_out(t, posts.get(t.id)) for t in topics], "queue": rows("pending", "queued"), "held": rows("held", limit=20),
             "published": rows("published", "dry_run", "uncertain", "failed", limit=30), "coordination": coordinate.summary(db, s, now),
-            "learning": learning.report(db, now), "latency": latency_summary(state.get("latency") or []), "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "rules",
+            "learning": learning.report(db, now), "latency": latency_summary(state.get("latency") or []),
+            "incidents": state.get("incidents") or [], "missed": postmortem.MISSED, "writer": "model" if credentials.resolve("anthropic_api_key", settings) and settings.newsdesk_model else "rules",
             "x": {"configured": creds.configured, "can_write": creds.user_context, "status": xstate.status, "last_ok": state.get("x_last_ok"), "last_error": state.get("x_last_error")},
             "cost": {"per_post_usd": float(settings.x_write_cost_estimate_usd), "x_trends_per_request_usd": 0.010, "x_post_read_usd": 0.005}}

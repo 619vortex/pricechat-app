@@ -72,7 +72,23 @@ def classify(title: str, summary: str = "", hint: str | None = None) -> tuple[st
             best, strength = cat, s
     if _vetoed(title, summary, strength):
         return None, 0.0  # a match, a league, a player, a celebrity: not this account's beat, whatever else the headlines mention
+    inc = incident_of(title)
+    if inc is not None and (best is None or best == "world" or inc.major):
+        # owner, 2026-11-17: "Major U.S. banks report widespread service outages" had no category ("outages" is not "outage") and was
+        # dropped; a major incident is filed where its consequences land: money (markets) or the systems everyone uses (technology)
+        cat = "markets" if inc.financial else "technology"
+        return cat, max(strength if best == cat else 0.0, INCIDENT_STRENGTH if inc.major else 1.5)
     return best, strength
+
+
+INCIDENT_STRENGTH = 3.0
+
+
+def incident_of(text: str) -> Any:
+    """The infrastructure incident a headline (or a topic's joined headlines) tells, or None (app/newsdesk/incidents)."""
+    from app.newsdesk import incidents
+
+    return incidents.detect(text)
 
 
 def _strict_strength(text: str, desk_cat: str) -> float:
@@ -290,7 +306,15 @@ def _joins(s: Sig, seed: Sig) -> bool:
         if _query_tokens(other):
             return q == _query_tokens(other) and len(q) >= 2
         return len(q) >= 2 and q <= checks.tokens(other.title)
-    return related(seed.title, s.title)
+    # the same incident at the same company, or two sector-wide reports of it ("Customers report service outages at major US banks" /
+    # "Major U.S. banks report widespread service outages"); never a different company's outage (app/newsdesk/incidents.same_incident)
+    return related(seed.title, s.title) or _same_incident(seed.title, s.title)
+
+
+def _same_incident(a: str, b: str) -> bool:
+    from app.newsdesk import incidents
+
+    return incidents.same_incident(a, b)
 
 
 def _split_google_units(units: dict[str, list[Sig]]) -> None:
@@ -392,7 +416,12 @@ BURST_OUTLETS = 3  # independent reliable outlets first publishing it within the
 MAINSTREAM = {"reuters", "bloomberg", "associated press", "ap", "ap news", "cnbc", "financial times", "ft", "wall street journal", "wsj", "bbc",
               "bbc news", "new york times", "the new york times", "the guardian", "al jazeera", "axios", "politico", "cnn", "nbc news", "cbs news",
               "abc news", "dw", "sky news", "nikkei asia", "the washington post", "washington post", "marketwatch", "yahoo finance", "fortune",
-              "forbes", "business insider", "the economist", "barron's", "npr", "france 24", "le monde", "abc australia", "the hill"}
+              "forbes", "business insider", "the economist", "barron's", "npr", "france 24", "le monde", "abc australia", "the hill",
+              "usa today", "newsweek", "the independent", "fox business", "fox news", "los angeles times", "the telegraph", "time"}
+# a major incident (app/newsdesk/incidents) is breaking news when TWO independent credible outlets report it within the hour: outages are
+# reported first by a few outlets and widely only hours later (2026-11-16: Fox Business 18:51, CNBC 22:14, BBC 00:18 on the bank outages)
+INCIDENT_BURST_OUTLETS = 2
+INCIDENT_SEARCH_BONUS = 0.25
 NICHE_FACTOR = 0.6
 TIERS = ((1_000_000, 1.0), (500_000, 0.9), (200_000, 0.75), (100_000, 0.65), (50_000, 0.55), (20_000, 0.45), (5_000, 0.35), (1_000, 0.25))
 
@@ -448,6 +477,8 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
     engagement); a burst of publications adds velocity but is not evidence on its own."""
     sig = c.signals
     out: dict[str, Any] = {"evidence": [], "notes": []}
+    inc = cluster_incident(c)
+    burst_need = INCIDENT_BURST_OUTLETS if inc is not None and inc.major else BURST_OUTLETS
     first_obs = min(s.first_seen for s in sig)
     observed = now - first_obs
     out["observed_min"] = int(observed.total_seconds() // 60)
@@ -475,6 +506,11 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
             out["google_minutes"] = int((now - pts[0][0]).total_seconds() // 60)
         up = tier(g_to) > tier(g_from)
         v_google = min(1.0, tier(g_to) + (0.25 if up else 0.0))
+        if inc is not None and inc.major and g_to >= 5_000 and _names_affected(str(t.extra.get("query") or ""), inc):
+            # people searching for the very service that failed ("chase", "united airlines", "outlook down") measure how many it hit
+            # (2026-11-16: Google's "chase" trend at 10K+ during JPMorgan Chase's outage was attached to a local police-chase story)
+            v_google = min(1.0, v_google + INCIDENT_SEARCH_BONUS)
+            out["notes"].append("searches for the affected service")
         if g_to >= 5_000:  # on Google's trending-now list (rising searches, Google's own measure) with real traffic
             out["evidence"].append("google")
             out["notes"].append(f"Google {short(g_from)} -> {short(g_to)}" if up else f"Google {short(g_to)}")
@@ -503,12 +539,12 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
     two = [k for k, t in firsts.items() if t >= now - timedelta(hours=2)]
     out["outlets_1h"], out["outlets_2h"] = len(hour), len(two)
     v_post = 0.0
-    if len(hour) >= BURST_OUTLETS and len(hour) * 2 >= len(firsts):
-        v_post = min(1.0, len(hour) / BURST_OUTLETS)
+    if len(hour) >= burst_need and len(hour) * 2 >= len(firsts):
+        v_post = min(1.0, len(hour) / burst_need)
         out["evidence"].append("burst")
         out["notes"].append(f"{len(hour)} outlets broke it in the last hour")
-    elif len(two) >= BURST_OUTLETS and len(two) * 3 >= len(firsts) * 2:  # two thirds new: acceleration, not steady coverage
-        v_post = min(1.0, len(two) / 4)
+    elif len(two) >= burst_need and len(two) * 3 >= len(firsts) * 2:  # two thirds new: acceleration, not steady coverage
+        v_post = min(1.0, len(two) / (4 if burst_need == BURST_OUTLETS else 3))
         out["evidence"].append("burst")
         out["notes"].append(f"{len(two)} outlets broke it in the last 2 h")
     mainstream = any(outlet_key(s.outlet) in {outlet_key(m) for m in MAINSTREAM} for s in sig if s.reliable and s.outlet)
@@ -603,6 +639,13 @@ def score(c: Cluster, now: datetime, weights: dict[str, float] | None = None) ->
     surprise = 10 * min(1.0, sur_w / 3 + (0.4 if big >= 10 else 0.0))
 
     relevance = 10 * RELEVANCE.get(c.category, 0.4) * (0.6 + 0.4 * min(1.0, c.strength / 3))
+    inc = cluster_incident(c)
+    if inc is not None and inc.major:
+        # a bank, a payment network, an exchange, the airspace or the country's email failing moves markets and reaches everyone: market
+        # impact and surprise as a hack or an exchange halt would earn (production 2026-11-16: United's outage scored impact 3, surprise 0)
+        impact = max(impact, 15 * (0.9 if inc.financial or inc.systemic else 0.75))
+        surprise = max(surprise, 10 * (0.6 if not inc.resolved else 0.4))
+        imp_hits = list(dict.fromkeys([inc.label] + imp_hits))
 
     mult = weights.get(f"cat:{c.category}", 1.0)
     src_w = [weights.get(f"src:{t}", 1.0) for t in types]
@@ -623,9 +666,44 @@ def score(c: Cluster, now: datetime, weights: dict[str, float] | None = None) ->
              "relevance": round(relevance, 1), "engagement": round(engagement, 1), "learned": round(mult, 3), "recent_2h": g["recent_2h"],
              "prior_6h": g["prior_6h"], "sources": sorted(types), "outlets": sorted(outlets), "age_hours": round(age, 1), "stale": stale,
              "impact_words": imp_hits[:4], "surprise_words": sur_hits[:4], "timeline": timeline, "exception": c.exception,
+             "incident": incident_out(c, inc),
              "growth": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in g.items()}}
     parts["why"] = why(parts, round(total, 1))
     return round(total, 1), parts
+
+
+def cluster_incident(c: Cluster) -> Any:
+    """The incident a topic tells, read from its lead (a reliable headline first): the strongest plain telling among its reliable items."""
+    from app.newsdesk import incidents
+
+    pool = c.reliable or c.signals
+    found = [i for i in (incidents.detect(s.title) for s in [c.lead, *pool[:8]]) if i is not None]
+    if not found:
+        return None
+    return max(found, key=lambda i: (i.major, bool(i.entities), i.scope, not i.resolved))
+
+
+def _names_affected(query: str, inc: Any) -> bool:
+    """A search term that names the failed service or the failure itself ("chase", "chase down", "united airlines", "outlook outage")."""
+    q = checks.tokens(query) | set(re.findall(r"[a-z]+", query.lower()))
+    if not q:
+        return False
+    names = set()
+    for e in inc.entities:
+        names |= set(re.findall(r"[a-z]+", e.lower()))
+    return bool(q & (names - {"bank", "of", "the", "air", "lines"})) or bool(q & {"outage", "outages", "down", "grounded", "ground", "stop"})
+
+
+def incident_out(c: Cluster, inc: Any) -> dict[str, Any] | None:
+    """What Admin shows about an incident topic: what it is, and whether the evidence allows it to go out automatically."""
+    if inc is None:
+        return None
+    from app.newsdesk import incidents
+
+    reliable = [(s.outlet, s.title) for s in c.signals if s.reliable]
+    official = any(s.extra.get("official") for s in c.signals if s.reliable)
+    ok, because = incidents.verified(reliable, official=official)
+    return {**inc.out(), "verified": ok, "evidence": because}
 
 
 def why(parts: dict[str, Any], total: float) -> str:
@@ -643,6 +721,9 @@ def why(parts: dict[str, Any], total: float) -> str:
         bits.append("no measured growth (approval only)")
     if parts.get("exception"):
         bits.append(f"off-beat but exceptional ({parts['exception']})")
+    if parts.get("incident"):
+        inc = parts["incident"]
+        bits.append(f"incident: {inc.get('why')}" + ("" if inc.get("verified") else f" (unverified: {inc.get('evidence')})"))
     if parts.get("impact_words"):
         bits.append("market impact: " + ", ".join(parts["impact_words"][:3]))
     if parts.get("surprise_words"):

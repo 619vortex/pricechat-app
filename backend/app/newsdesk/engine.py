@@ -20,7 +20,7 @@ from app.connectors.x import XRuntime
 from app.connectors.x.errors import XAuthError, XCreditsError, XError, XForbiddenError, XRateLimitError, XUnavailableError
 from app.db.base import utcnow
 from app.models.newsdesk import NdEvent, NdPost, NdSettings, NdStory
-from app.newsdesk import brief, chaos, checks, engagement, events, moves, sources, writer
+from app.newsdesk import brief, chaos, checks, engagement, events, incidents, moves, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     """New stories from every feed. Each is stored on its own: a link already in the table (a feed recycling a URL, such as a
     daily round-up, or a story stored a week ago) is skipped, never allowed to roll back everyone else's (2026-11-08 outage)."""
     fresh, problems = 0, {}
+    incident_stored: list[str] = []
     db.query(NdStory).filter(NdStory.created_at < now - timedelta(days=7)).delete(synchronize_session=False)
     db.commit()  # the purge on its own, before any insert
     seen = set(db.scalars(select(NdStory.link)))  # every stored link (the table keeps a week), not just the last few days
@@ -125,8 +126,15 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
             if checks.NOT_NEWS.search(title) or checks.is_explainer(title):
                 continue
             category, strength = classify(title, it.get("summary", ""), feed.get("category"))
+            inc = incidents.detect(title)
+            if category is None and inc is not None:
+                # owner, 2026-11-17: the Microsoft 365 outage, the FAA's nationwide ground stop and JPMorgan Chase's outage were dropped
+                # right here (no market keyword), so neither lane ever saw them. A major infrastructure incident is stored on its own merit.
+                category, strength = incidents.desk_category(inc), (2.5 if inc.major else 1.0)
             if category is None:
                 continue
+            if inc is not None:
+                incident_stored.append(f"{feed['name']}: [{inc.why()}] {title[:120]}")
             try:
                 with db.begin_nested():  # one story's conflict (e.g. the other lane stored it a moment ago) skips that story only
                     db.add(NdStory(link=it["link"], title=title[:300], summary=(it.get("summary") or "")[:800], source=feed["name"],
@@ -137,6 +145,8 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
                 logger.info("newsdesk: %s already stored, skipped", it["link"][:120])
         health[feed["url"]]["new"] = fresh - before
     db.commit()
+    for line in incident_stored[:10]:  # production evidence: when an incident story first reached the desk (Admin › Trending shows the rest)
+        logger.info("newsdesk: incident story stored: %s", line)
     if problems:
         logger.info("newsdesk: feed problems: %s", "; ".join(f"{health[u]['name']}: {p}" for u, p in problems.items()))
     return {"new_stories": fresh, "feed_problems": problems, "feed_health": health}

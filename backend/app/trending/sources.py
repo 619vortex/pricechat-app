@@ -9,6 +9,9 @@
 - x_trends: X API v2 trends by WOEID ($0.010 a request on pay-per-use; off by default: a new cost the owner turns on). A plan without it answers 403: shown as "not available on your
   X plan" and not asked again for a day.
 - x_accounts: recent posts from major financial accounts through X's recent search ($0.005 per post read). Off by default (cost).
+- faa: the FAA's own airport status (https://nasstatus.faa.gov/api/airport-status-information, public XML, no key). Ground stops at many
+  airports at once, or for an equipment or system failure, are an official, minute-by-minute signal of a grounding (owner, 2026-11-17:
+  the 2026-11-13 nationwide ground stop was missed). Official: it may back a factual claim about the ground stops it lists, nothing more.
 
 Every fetcher returns (items, problem, meta). An item is a plain dict; nothing here writes to the database.
 """
@@ -34,16 +37,29 @@ GOOGLE_RSS = "https://trends.google.com/trending/rss?geo={geo}"
 REDDIT_PUBLIC = "https://www.reddit.com/r/{sub}/hot.json?limit={n}&raw_json=1"
 REDDIT_OAUTH = "https://oauth.reddit.com/r/{sub}/hot?limit={n}&raw_json=1"
 REDDIT_TOKEN = "https://www.reddit.com/api/v1/access_token"
-NAMES = {"news": "News Desk feeds", "google": "Google Trends", "reddit": "Reddit", "x_trends": "X trends", "x_accounts": "X major accounts"}
+FAA_STATUS = "https://nasstatus.faa.gov/api/airport-status-information"
+NAMES = {"news": "News Desk feeds", "google": "Google Trends", "reddit": "Reddit", "x_trends": "X trends", "x_accounts": "X major accounts", "faa": "FAA airport status"}
 # minutes between two reads of a source (the scan itself runs every job_trending_seconds)
-INTERVAL = {"news": 0, "google": 10, "reddit": 15, "x_trends": 60, "x_accounts": 60}  # Google's RSS is free; X reads are paid
+# Google's RSS is free (every 5 min since 2026-11-17: an outage trends within minutes; 288 requests a day per country); X reads are paid
+INTERVAL = {"news": 0, "google": 5, "reddit": 15, "x_trends": 60, "x_accounts": 60, "faa": 5}
 # outlets whose reporting may back a factual claim (plus every News Desk feed's own name)
 RELIABLE_OUTLETS = {"reuters", "associated press", "ap news", "ap", "bloomberg", "financial times", "ft", "wall street journal", "wsj",
                     "the wall street journal", "cnbc", "bbc", "bbc news", "the guardian", "new york times", "the new york times", "npr",
                     "al jazeera", "marketwatch", "barron's", "fortune", "forbes", "the economist", "axios", "politico", "cnn", "abc news",
                     "cbs news", "nbc news", "the washington post", "washington post", "yahoo finance", "coindesk", "the block", "decrypt",
                     "cointelegraph", "theblock", "techcrunch", "the verge", "wired", "ars technica", "nikkei asia", "south china morning post",
-                    "federal reserve", "sec", "ecb", "white house", "dw", "france 24", "sky news", "the hill", "business insider", "investopedia"}
+                    "federal reserve", "sec", "ecb", "white house", "dw", "france 24", "sky news", "the hill", "business insider", "investopedia",
+                    # national outlets that report outages and groundings first (2026-11-17 audit: Google linked the bank and airline
+                    # outages to them while the topic waited, "No reliable source backs this topic yet")
+                    "usa today", "newsweek", "the independent", "fox business", "fox news", "los angeles times", "la times", "the telegraph",
+                    "time", "the times", "engadget", "zdnet", "techradar", "bleepingcomputer", "the record", "cyberscoop", "upi",
+                    "faa", "federal aviation administration"}
+# outlets trusted to report that a service is DOWN (an outage, a grounding), not for anything else: their live outage coverage is
+# reliable, their other headlines aren't vetted here. Only a headline app/newsdesk/incidents reads as a major incident counts as reliable.
+INCIDENT_OUTLETS = {"yahoo", "yahoo news", "tom's guide", "the points guy", "simple flying", "aviation week", "flightglobal", "the detroit news",
+                    "detroit free press", "the seattle times", "chicago tribune", "the boston globe", "the dallas morning news", "houston chronicle",
+                    "san francisco chronicle", "the atlanta journal-constitution", "newsday", "gizmodo", "mashable", "cnet", "pcmag", "the economic times",
+                    "times of india", "hindustan times", "the times of israel", "abc7", "nbc4", "wbal", "wfsb", "azfamily", "fox 5", "ktla", "kare 11"}
 RELIABLE_X = {"reuters", "ap", "business", "cnbc", "ft", "wsj", "bbcbreaking", "markets", "bloombergtv", "reutersbiz"}
 DEFAULT_SUBREDDITS = ["CryptoCurrency", "Bitcoin", "ethereum", "stocks", "investing", "wallstreetbets", "economics", "worldnews", "technology", "geopolitics"]
 DEFAULT_ACCOUNTS = ["Reuters", "business", "CNBC", "WSJ", "FT", "AP", "BBCBreaking", "markets"]
@@ -53,6 +69,7 @@ DEFAULT_SOURCES: dict[str, dict[str, Any]] = {
     "reddit": {"on": True, "public_json": False, "subreddits": DEFAULT_SUBREDDITS, "per_sub": 15},
     "x_trends": {"on": False, "woeid": 1},  # $0.010 a request on X's pay-per-use: off until the owner turns it on
     "x_accounts": {"on": False, "accounts": DEFAULT_ACCOUNTS, "max_posts": 20},
+    "faa": {"on": True, "min_airports": 5},
 }
 
 Item = dict[str, Any]
@@ -63,9 +80,19 @@ def _clean(text: str, n: int = 400) -> str:
     return re.sub(r"\s+", " ", t).strip()[:n]
 
 
-def reliable_outlet(name: str, extra: set[str] | None = None) -> bool:
+def reliable_outlet(name: str, extra: set[str] | None = None, title: str = "") -> bool:
+    """May this outlet back a factual claim? title: an incident outlet counts only for a headline that tells a major incident."""
     n = (name or "").strip().lower()
-    return bool(n) and (n in RELIABLE_OUTLETS or n in (extra or set()))
+    if not n:
+        return False
+    if n in RELIABLE_OUTLETS or n in (extra or set()):
+        return True
+    if title and n in INCIDENT_OUTLETS:
+        from app.newsdesk import incidents
+
+        inc = incidents.detect(title)
+        return inc is not None and inc.major
+    return False
 
 
 def merged(stored: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
@@ -164,7 +191,7 @@ def parse_google(xml_text: str, geo: str, feed_outlets: set[str] | None = None) 
                     "published_at": when, "extra": {"group": group, "approx_traffic": approx, "geo": geo, "query": query}})
         for a in articles[:4]:
             out.append({"source": "google", "external_id": a["url"][:300], "title": a["title"], "summary": "", "url": a["url"], "outlet": a["outlet"],
-                        "reliable": reliable_outlet(a["outlet"], feed_outlets), "engagement": 0.0, "published_at": when,
+                        "reliable": reliable_outlet(a["outlet"], feed_outlets, a["title"]), "engagement": 0.0, "published_at": when,
                         "extra": {"group": group, "kind": "article", "query": query}})
     return out
 
@@ -326,3 +353,54 @@ async def x_source(kind: str, db: Session, settings: Any, runtime: Any, opts: di
         return [], f"{type(e).__name__}: {str(e)[:150]}", meta
     finally:
         await client.aclose()
+
+
+# --- FAA airport status --------------------------------------------------------------------------------------------------
+# Weather ground stops at one or two airports are routine (SFO "low ceilings" most evenings): never an item. An item is a ground stop at
+# min_airports or more at once, or at two or more for an equipment, system, communications or staffing failure. The 2026-11-13 nationwide
+# ground stop ("instability in our radar and our communications") stopped every departure in the country.
+FAA_FAILURE = re.compile(r"\b(equipment|outage|system|systems|communications?|comm|radar|telecommunications?|technical|power|computer|software|staffing|security|"
+                         r"atc zero|national)\b", re.I)
+
+
+def parse_faa(xml_text: str, min_airports: int = 5) -> list[Item]:
+    if len(xml_text) > 2_000_000 or "<!ENTITY" in xml_text:
+        return []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    when = None
+    try:
+        when = datetime.strptime(_text(root, "Update_Time").replace(" GMT", ""), "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    stops: dict[str, str] = {}
+    for prog in root.iter():
+        if _local(prog.tag) == "Program":
+            arpt, reason = _text(prog, "ARPT").upper(), _clean(_text(prog, "Reason"), 80)
+            if re.fullmatch(r"[A-Z0-9]{3,4}", arpt):
+                stops[arpt] = reason
+    failing = {a: r for a, r in stops.items() if FAA_FAILURE.search(r)}
+    if len(stops) < min_airports and len(failing) < 2:
+        return []
+    n = len(stops)
+    reasons = sorted({r.lower() for r in (failing or stops).values() if r})[:2]
+    title = f"FAA status: ground stops at {n} US airports" + (f" ({'; '.join(reasons)})" if reasons else "")
+    day = (when or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+    return [{"source": "faa", "external_id": f"faa:groundstops:{day}", "title": title, "url": "https://nasstatus.faa.gov/", "outlet": "FAA", "reliable": True,
+             "summary": "Airports under a ground stop: " + ", ".join(sorted(stops))[:600], "engagement": float(n), "published_at": when,
+             "extra": {"official": True, "airports": sorted(stops), "failure": bool(failing)}}]
+
+
+async def faa(client: httpx.AsyncClient, opts: dict[str, Any]) -> tuple[list[Item], str | None, dict[str, Any]]:
+    try:
+        r = await client.get(FAA_STATUS, headers={"User-Agent": UA, "Accept": "application/xml"})
+    except httpx.HTTPError as e:
+        return [], f"FAA: {type(e).__name__}", {"requests": 1}
+    if r.status_code != 200:
+        return [], f"FAA: HTTP {r.status_code}", {"requests": 1}
+    if "<AIRPORT_STATUS_INFORMATION" not in r.text[:500]:
+        return [], "FAA: not the airport status document", {"requests": 1}
+    items = parse_faa(r.text, int(opts.get("min_airports") or 5))
+    return items, None, {"requests": 1, "idle": not items}

@@ -19,6 +19,12 @@ from app.models.trending import TtPost, TtSettings
 from app.newsdesk import checks
 
 SENT_LIVE = ("published", "publishing", "uncertain")
+# owner, 2026-11-17: United Airlines' system outage (2026-11-16 22:10 UTC) reached 78.8 with four outlets and sat queued behind "Trending's
+# daily limit reached (3/3 in 24 h)" until it went stale at 03:04 UTC. A VERIFIED major incident (app/newsdesk/incidents: two outlets, the
+# company's own word, or an official source) may go beyond max_per_day by at most this many posts in 24 h, at least INCIDENT_GAP_MINUTES
+# after the last trend post. The shared X cap, the News Desk's spacing and every stop still apply; ordinary topics keep max_per_day.
+INCIDENT_EXTRA_PER_DAY = 2
+INCIDENT_GAP_MINUTES = 60
 WINDOW = timedelta(hours=24)  # the caps
 SAME_STORY_WINDOW = timedelta(hours=48)  # one event, one post across both lanes: yesterday's story is never re-posted
 
@@ -96,9 +102,11 @@ def x_posts_today(db: Session, s: TtSettings, now: datetime) -> dict[str, int]:
     return {"newsdesk": nd, "trending": tt, "total": nd + tt}
 
 
-def cap_problem(db: Session, s: TtSettings, now: datetime) -> str | None:
+def cap_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool = False) -> str | None:
     n = x_posts_today(db, s, now)
-    if n["trending"] >= s.max_per_day:
+    if n["trending"] >= s.max_per_day and not (incident and n["trending"] < s.max_per_day + INCIDENT_EXTRA_PER_DAY):
+        if incident:
+            return f"Trending's daily limit and the incident allowance are used ({n['trending']}/{s.max_per_day}+{INCIDENT_EXTRA_PER_DAY} in 24 h)"
         return f"Trending's daily limit reached ({n['trending']}/{s.max_per_day} in 24 h)"
     if n["total"] >= s.shared_daily_cap:
         return f"the shared X cap is reached ({n['total']}/{s.shared_daily_cap} News Desk + Trending posts in 24 h)"
@@ -116,12 +124,13 @@ def next_slot(db: Session, now: datetime) -> datetime | None:
     return next((t for t in times if t > now), None)
 
 
-def spacing_problem(db: Session, s: TtSettings, now: datetime) -> str | None:
+def spacing_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool = False) -> str | None:
     gap = timedelta(minutes=s.newsdesk_gap_minutes)
     statuses = _sent_statuses(db, s)
     last_tt = _aware(db.scalar(select(func.max(TtPost.published_at)).where(TtPost.status.in_(statuses))), now)
-    if last_tt is not None and now - last_tt < timedelta(minutes=s.gap_minutes):
-        return f"spacing: the last trend post was {int((now - last_tt).total_seconds() // 60)} min ago (gap {s.gap_minutes} min)"
+    tt_gap = min(s.gap_minutes, INCIDENT_GAP_MINUTES) if incident else s.gap_minutes
+    if last_tt is not None and now - last_tt < timedelta(minutes=tt_gap):
+        return f"spacing: the last trend post was {int((now - last_tt).total_seconds() // 60)} min ago (gap {tt_gap} min)"
     last_nd = _aware(db.scalar(select(func.max(NdPost.published_at)).where(NdPost.status.in_(statuses))), now)
     if last_nd is not None and now - last_nd < gap:
         return f"spacing: the News Desk posted {int((now - last_nd).total_seconds() // 60)} min ago"

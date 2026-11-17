@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.newsdesk import brief, checks
+from app.newsdesk import brief, checks, incidents
 
 # --- subjects ------------------------------------------------------------------------------------------------------
 
@@ -462,6 +462,10 @@ def significance(title: str, summary: str = "") -> Significance | None:
         return Significance("macro", 26.0, f"market-wide swing of ${brief._amount_usd(t) / 1e9:,.0f}B")
     if SANCTIONS.search(t) and countries:
         return Significance("geopolitics", 24.0, f"sanctions ({', '.join(sorted(countries))})")
+    inc = incidents.detect(t)
+    if inc is not None and inc.major:
+        # owner, 2026-11-17: banking outages, payment disruptions, exchange failures, groundings, major cloud and cyber incidents
+        return Significance("infrastructure", INFRA_POINTS, f"major {inc.label}: {', '.join(sorted(inc.entities)) or 'sector-wide'}")
     if MEGA.search(t) and CORP_SHOCK.search(t):
         big = CORP_BIG.search(t) is not None
         return Significance("corporate", 28.0 if big else 20.0, f"{MEGA.search(t).group(0)}: {CORP_SHOCK.search(t).group(0).lower()}")
@@ -505,6 +509,8 @@ def corroborating(story: Any, rows: list[Any], hours: float = 12) -> list[Any]:
         if (len(shared) >= 2 or (shared and near >= 0.15)) and checks.same_event(story.title or "", o.title or ""):
             out.append(o)
         elif _same_hard_event(story.title or "", o.title or "") or _same_meeting(story.title or "", o.title or ""):
+            out.append(o)
+        elif incidents.same_incident(story.title or "", o.title or ""):  # "JPMorgan Chase systems recovering ..." / "JPMorgan Chase says ... bug"
             out.append(o)
     return out
 
@@ -556,7 +562,7 @@ def importance_score(sig: Significance, *, evidence: str, outlets: int, outlets_
     Spread counts every outlet carrying it (2.5 each, up to 10): a world story is told over a day, not within three hours."""
     from app.newsdesk import virality
 
-    reach = 12 if sig.kind == "geopolitics" else 12 if MEGA.search(title) or INSTITUTION.search(title) else 10 if assets_in(title) & {"BTC", "ETH", "OIL"} else 6
+    reach = 12 if sig.kind in ("geopolitics", "infrastructure") else 12 if MEGA.search(title) or INSTITUTION.search(title) else 10 if assets_in(title) & {"BTC", "ETH", "OIL"} else 6
     ev = virality.EVIDENCE.get(evidence, 0) + (min(outlets - 1, 2) * 1.5 if evidence == "two outlets" and outlets > 1 else 0)
     parts = {"significance": sig.points, "reach": float(min(15, reach)), "evidence": float(min(15, ev)), "spread": float(min(10, 2.5 * max(outlets, outlets_3h)))}
     tie = consequence(sig, title)
@@ -577,6 +583,10 @@ OIL_REGION = _rx(r"\b(bahrain|qatar|kuwait|uae|united arab emirates|abu dhabi|sa
 US_FORCES = re.compile(r"(?:\bUS\b|\bU\.S\.|\b[Aa]merican\b|\bNATO\b)(?:\W+\w+){0,2}?\W+(?:military |air |naval |army )?(?:bases?|troops|forces|warships?|soldiers|"
                        r"service ?members|personnel|embassy|airbase|destroyers?|carriers?)\b")
 ESCALATION_POINTS = 12.0
+# a major infrastructure incident (app/newsdesk/incidents): JPMorgan Chase's 2026-11-16 outage confirmed by Fox Business and CNBC scores
+# 30 + reach 12 + evidence 13.5 + spread 5 + 12 = 72.5, over the breaking bar (70) while fresh; one outlet never breaks (verified_important)
+INFRA_POINTS = 30.0
+INFRA_CONSEQUENCE = 12.0
 
 
 def consequence(sig: Significance, title: str) -> float:
@@ -587,6 +597,11 @@ def consequence(sig: Significance, title: str) -> float:
         return ESCALATION_POINTS
     if sig.kind == "corporate" and CORP_BIG.search(t) and MEGA.search(t):
         return 6.0
+    if sig.kind == "infrastructure":
+        inc = incidents.detect(t)
+        if inc is not None and inc.major and (inc.financial or inc.systemic):
+            return INFRA_CONSEQUENCE  # money can't move, flights can't leave, the whole country's email is down
+        return INFRA_CONSEQUENCE / 2 if inc is not None and inc.major else 0.0
     return 0.0
 
 
@@ -717,6 +732,11 @@ def breaking_worthy(title: str, topic: str = "", importance: dict[str, Any] | No
         return False, "geopolitics, but no hard event (talk, positions, reactions)"
     if kind == "corporate":
         return (True, "major corporate shock") if CORP_BIG.search(t) else (False, "corporate news, not a shock")
+    if kind == "infrastructure":
+        inc = incidents.detect(t)
+        if inc is None or not inc.major:
+            return False, "an incident, but not the event itself told plainly (aftermath, hedged, or no major company or scale)"
+        return True, f"major {inc.label}"
     if kind in FINANCIAL_KINDS or topic in FINANCIAL_TOPICS:
         return True, "financial or market significance"
     if topic in ("hack", "failure", "scam", "structure", "regulation", "corporate"):
