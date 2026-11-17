@@ -680,6 +680,12 @@ def cluster_incident(c: Cluster) -> Any:
     """The incident a topic tells, read from its lead (a reliable headline first): the strongest plain telling among its reliable items."""
     from app.newsdesk import incidents
 
+    lead = incidents.detect(c.lead.title)
+    if lead is not None and not lead.major:
+        # the topic leads with a feature, explainer or hedged report about an incident: it is that, not the incident (production
+        # 2026-11-17 06:53: "Experts and reporters break down FAA meltdown, explaining what's responsible" scored 78.1 on the incident
+        # boost of another headline in its cluster, four days after the ground stop)
+        return lead
     pool = c.reliable or c.signals
     found = [i for i in (incidents.detect(s.title) for s in [c.lead, *pool[:8]]) if i is not None]
     if not found:
