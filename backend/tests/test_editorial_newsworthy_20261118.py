@@ -269,3 +269,17 @@ def test_a_study_or_pilot_is_not_an_outcome(db: Session) -> None:
     db.add(ev)
     db.commit()
     assert editorial.delivery_gate(db, ev, NOW, "telegram").startswith("not newsworthy")
+
+
+def test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes(db: Session) -> None:
+    """Production 2026-11-18: post 770 ("UK inflation accelerated to 3.6% in October") was queued before the gate and waited only for
+    Trending's daily limit. It is now held at the last moment instead of going out when the limit frees."""
+    from app.trending import engine
+
+    s = engine.settings_row(db)
+    post = TtPost(topic_id=770, category="markets", status="queued", text="UK inflation accelerated to 3.6% in October\n\nVia Reuters", score=77,
+                  source_text="UK inflation accelerated to 3.6% in October", sources=[{"name": "Reuters", "title": "UK inflation accelerated to 3.6% in October"}],
+                  checks=[], metrics={})
+    db.add(post)
+    db.commit()
+    assert (engine.waiting_reason(db, s, post, NOW) or "").startswith("not newsworthy")

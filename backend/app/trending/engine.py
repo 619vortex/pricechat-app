@@ -531,6 +531,13 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     titles = [str(x.get("title") or "") for x in post.sources or []]
     if (why := coordinate.newsdesk_conflict(db, titles, now, fast=fast, topic_id=post.topic_id)) is not None:
         return why
+    # owner, 2026-11-18: a post queued before the newsworthiness gate (or before a rule tightened) is judged again at the last moment
+    from app.newsdesk import newsworthy
+
+    told = [t for t in (titles[:1] + [(post.text or "").split("\n")[0]]) if t]
+    checked = [newsworthy.assess(t, post.source_text or "") for t in told]
+    if checked and all(a.strength == "none" for a in checked):
+        return f"not newsworthy: {checked[0].reason}"
     return None
 
 
