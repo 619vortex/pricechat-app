@@ -1007,11 +1007,12 @@ def _newsworthy(db: Session, ev: NdEvent, label: str, now: datetime) -> tuple[st
                 return f"not published: {rep}", label
         return "", label
     # a release goes to both platforms: it is a repeat when the channel already carried the event (X then skips it on its own if X did)
-    a = newsworthy.judge(db, title, ev.summary or "", now, age_min=_age(ev, now), skip_event=ev.id, platform="telegram")
+    a = newsworthy.judge(db, title, ev.summary or "", now, age_min=_age(ev, now), skip_event=ev.id, platform="telegram", outlets=len(outlets_of(ev)))
     if not a.ok:
         _note_breaking_miss(ev, a.reason, now)
         return f"not published: {a.reason}", label
     ev.facts = {**(ev.facts or {}), "newsworthy": {"why": a.why, "strength": a.strength, "stop_scroll": a.stop_scroll, "parts": a.parts}}
+    logger.info("editorial gate: #%s qualifies (%s): %s | %s", ev.id, a.strength, a.why[:120], title[:100])  # measured in production (owner, 2026-11-18)
     if ev.kind == "update" or not label:
         return "", label
     return "", (label if a.strength == "major" and _age(ev, now) <= 90 else "")

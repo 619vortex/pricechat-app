@@ -283,3 +283,95 @@ def test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes(db: 
     db.add(post)
     db.commit()
     assert (engine.waiting_reason(db, s, post, NOW) or "").startswith("not newsworthy")
+
+
+# --- second round (owner, 2026-11-18): an exceptional-story path, checked on 270 real candidates of 11-15..18 ------------------------------
+# Labels written before the change; scored at event level: important events covered 10/20 -> 20/20, filler posted 22 -> 0, events posted
+# twice 4 -> 0. Held-out day 11-14/15 (labelled blind): important covered 1/2 -> 2/2, filler 2 -> 0.
+
+EXCEPTIONAL_REAL = [  # real candidates the consequence path missed: no figure, but a named institution's decisive act or a systemic failure now
+    ("Estonia to close Russia border after 'sabotage' bid", 7),
+    ("Supreme Court Ends Custodia Bank's Fight for a Fed Master Account", 6),
+    ("Judge Acquits MIT Brothers in $25M Ethereum MEV Case, Ending Prosecution", 3),
+    ("California sues ChatGPT maker OpenAI over rogue hacking incidents", 2),
+    ("EU sanctions Wildberries CEO Tatyana Kim, Russia's richest woman", 3),
+    ("China, Canada agree to further reduce tariffs at APEC summit in Shenzhen", 3),
+    ("Apple outage impacts iCloud, support and App Store for users", 4),
+    ("Outages reported at major US banks including Chase and Bank of America", 2),
+    ("Norway's Equinor detects ongoing cyberattack, oil and gas output unaffected", 2),
+]
+
+
+@pytest.mark.parametrize(("title", "outlets"), EXCEPTIONAL_REAL)
+def test_exceptional_stories_without_a_figure_qualify(title: str, outlets: int) -> None:
+    a = newsworthy.qualify(title, outlets=outlets)
+    assert a.ok and a.strength == "exceptional" and a.why.startswith("exceptional:"), (title, a.reason)
+
+
+EXCEPTIONAL_NOT = [  # real candidates that must stay out: talk, plans, reactions, features, forecasts, off-beat, single-source
+    ("Congress moves to pass tighter AI chip export rules following Nvidia scandal", 3),
+    ("Trump Downplays Microsoft, JPMorgan Outages, Saying 'It's Life'", 2),
+    ("Michiganders react to recent widespread tech outages", 2),
+    ("Chase says transactions back to normal after outage online and at some branches", 2),
+    ("Robert Pattinson Named as the Next James Bond", 5),
+    ("Nvidia board is not considering bringing Jensen Huang back as CEO, sources say", 3),
+    ("Britain's veto could stop the UAE's choice from running the United Nations", 2),
+    ("Japan proposes 'Asian IEA' to manage oil stockpiles", 2),
+    ("In a first, Google detects AI-automated cyberattack", 1),  # one outlet
+    ("Citi and Circle to help World Bank study stablecoin payouts", 3),
+]
+
+
+@pytest.mark.parametrize(("title", "outlets"), EXCEPTIONAL_NOT)
+def test_the_exceptional_path_is_not_a_keyword_shortcut(title: str, outlets: int) -> None:
+    assert not newsworthy.qualify(title, outlets=outlets).ok, title
+
+
+FILLER_THE_FIRST_GATE_LET_THROUGH = [  # real candidates 11-15..18: a number is not a consequence unless it is the subject's market move
+    "Digital finance products used to abuse almost 20% of young women and girls",
+    "MacKenzie Scott gave Jeff Bezos 75% of their Amazon shares, Blue Origin stake",
+    "Asia Is Building 73% of the World's New Nuclear Capacity",
+    "AERO Falls 27% in a Week, Lagging Bitcoin and Ether",
+    "Harvard, Dartmouth keep Bitcoin ETF stakes steady as fund gains 42% in quarter",
+    "Shoe Prices Hit a Record High Amid Inflation and Increased Tariffs",
+    "Wizards' defense collapses in seventh straight loss",
+    "Nvidia shares set for $335 billion swing after earnings, options show",
+    "Michiganders react to recent widespread tech outages",
+    "Ether.fi Token Falls 25%, Doubling Bitcoin's Weekly Loss",
+    "Bitcoin vs the Nasdaq over the past year: −31.1% against +9.9%",
+    "Nvidia: Fiscal 2028 Revenue To Grow 75%",
+    "The Chaos and Unexpected Joys of a 19-Hour Global Email Outage",
+]
+
+
+@pytest.mark.parametrize("title", FILLER_THE_FIRST_GATE_LET_THROUGH)
+def test_figures_that_are_not_consequences_no_longer_pass(title: str) -> None:
+    assert not newsworthy.qualify(title, outlets=2).ok, title
+
+
+def test_one_release_and_one_outage_are_one_event() -> None:
+    same = newsworthy.same_event
+    ev = newsworthy.event_of
+    assert same(ev("Japan's economy unexpectedly contracts for the first time in a year as tariffs bite"),
+                ev("Japan's economy unexpectedly shrinks as inflation squeezes households"))
+    assert not same(ev("UK Payrolls Fell Unexpectedly in October Ahead of Healey Budget"), ev("UK inflation rises to 3.6% as energy prices increase"))
+    assert same(ev("United Airlines experiencing a widespread system outage, airline says"), ev("United Airlines Says It Has a Widespread System Outage: AP"))
+    assert same(ev("Outages reported at major US banks including Chase and Bank of America"), ev("Widespread US bank system glitches plague customers"))
+    assert same(ev("Estonia to close Russia border after 'sabotage' bid"), ev("NATO member Estonia to close Russia border after attempted 'sabotage'"))
+    # one war is not one event: talk about the war doesn't block a strike
+    assert not same(ev("Ukraine, Russia race to build military satellite networks as war rages on"),
+                    ev("Ukrainian drones strike Russia's petrochemical capital in overnight attack"))
+    assert same(ev("Iran targets US military site in Gulf for first time in two months"), ev("Bahrain intercepts Iranian aerial attacks as Tehran says it attacked"))
+
+
+def test_the_bahrain_interception_is_a_state_striking_a_state() -> None:
+    """The first gate rejected it: the side clause "as Tehran says it attacked..." read as a routine statement."""
+    assert newsworthy.assess("Bahrain intercepts Iranian aerial attacks as Tehran says it attacked US targets").ok
+
+
+def test_an_exceptional_story_never_gets_a_breaking_label_or_the_fast_lane(db: Session) -> None:
+    ev = _news(db, "est", "Estonia to close Russia border after 'sabotage' bid", 70, ["Reuters", "BBC", "AP"], age_min=20)
+    why, label = events._newsworthy(db, ev, "⚡ JUST IN", SLOT)
+    assert why == "" and label == "" and ev.facts["newsworthy"]["strength"] == "exceptional"
+    ok, _ = intel.fast_lane("Estonia to close Russia border after 'sabotage' bid", "", [], {"age_hours": 0.2}, {"rumor": False, "score": 80.0, "level": "confirmed"})
+    assert not ok

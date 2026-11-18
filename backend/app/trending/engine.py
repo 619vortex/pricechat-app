@@ -446,7 +446,7 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
     # probe whether Lutnick helped Cantor avoid Nvidia losses" went out on the fast lane with viral 31.
     from app.newsdesk import newsworthy
 
-    nw = newsworthy.assess(getattr(topic, "title", "") or "", b.summary if b is not None else "")
+    nw = newsworthy.qualify(getattr(topic, "title", "") or "", b.summary if b is not None else "", outlets=len(b.outlets) if b is not None else 0)
     if not nw.ok:
         return False, f"not newsworthy: {nw.reason}"
     return True, None
@@ -535,7 +535,7 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     from app.newsdesk import newsworthy
 
     told = [t for t in (titles[:1] + [(post.text or "").split("\n")[0]]) if t]
-    checked = [newsworthy.assess(t, post.source_text or "") for t in told]
+    checked = [newsworthy.qualify(t, post.source_text or "", outlets=len(post.sources or [])) for t in told]
     if checked and all(a.strength == "none" for a in checked):
         return f"not newsworthy: {checked[0].reason}"
     return None
