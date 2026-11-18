@@ -53,7 +53,7 @@ describe("X Intelligence", () => {
 
   it("turns paid reads on only after the price is confirmed", async () => {
     serve();
-    const confirm = vi.fn(() => false);
+    const confirm = vi.fn((_message?: string) => false);
     vi.stubGlobal("confirm", confirm);
     render(<XIntelPage />);
     await settle();
