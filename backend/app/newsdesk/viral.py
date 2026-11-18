@@ -117,9 +117,19 @@ class Plan:
 # --- building the five hooks --------------------------------------------------------------------------------------------------
 
 
+def same_article(ev: Any, r: Any) -> bool:
+    """A row that tells THIS headline (the same report, any outlet), not another development of the same event. Production 2026-11-18,
+    Telegram 191: "FAA signed off on repairs before nationwide ground stop" took "Duffy pitches Senate GOP on $50B for FAA" (a different
+    article's headline, the biggest figure around) as its context: two developments in one post."""
+    head = checks.fingerprint(getattr(ev, "title", "") or "")
+    return checks.similarity(head, checks.fingerprint(getattr(r, "title", "") or "")) >= 0.5
+
+
 def sentences(ev: Any, rows: list[Any] | None) -> list[str]:
+    given = rows
+    rows = [r for r in rows or [] if same_article(ev, r)]  # owner, 2026-11-18: one post = one event; context only from this report
     texts = [getattr(ev, "summary", "") or ""] + [f"{getattr(r, 'title', '')}. {getattr(r, 'summary', '') or ''}" for r in rows or []]
-    if not rows:  # told runs headlines and summaries together without full stops: only when there are no rows to read properly
+    if not given:  # told runs headlines and summaries together without full stops: only when there are no rows to read properly
         texts.append(str((ev.facts or {}).get("told") or ""))
     seen: set[str] = set()
     out = []

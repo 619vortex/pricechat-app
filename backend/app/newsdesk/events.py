@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.newsdesk import NdEvent, NdStory
-from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, moves, quality, sources, virality
+from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, moves, newsworthy, quality, sources, virality
 
 logger = logging.getLogger(__name__)
 
@@ -864,6 +864,11 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
             continue
         risk = bool(f.get("risk"))
         label = brief.UPDATE if ev.kind == "update" else virality.label_for(int(ev.virality), topic=ev.topic, strong=strong, age_minutes=age, risk=risk)
+        nw_why, label = _newsworthy(db, ev, label, now)
+        if nw_why:  # owner, 2026-11-18: better news, not more news
+            ev.why = nw_why
+            continue
+        f = ev.facts or {}  # now with its newsworthiness verdict
         problem = preflight(ev, label, now)
         if problem:  # both platforms must be able to carry it, or neither does: they stay in step
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
@@ -964,6 +969,11 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             continue
         strong = ev.evidence in STRONG
         label = brief.UPDATE if ev.kind == "update" else "" if ev.kind == "data" else virality.label_for(int(ev.virality), topic=ev.topic, strong=strong, age_minutes=age, risk=bool(f.get("risk")))
+        nw_why, label = _newsworthy(db, ev, label, now)
+        if nw_why:  # owner, 2026-11-18: better news, not more news
+            ev.why = nw_why
+            continue
+        f = ev.facts or {}  # now with its newsworthiness verdict
         problem = preflight(ev, label, now)
         if problem:
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
@@ -980,6 +990,31 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
                     ev.evidence, ev.facts["latency"]["event_to_release_min"], ev.facts["latency"]["detect_to_release_min"], ev.headline[:100])
         return ev
     return None
+
+
+STRONG_BYPASS_PER_DAY = 3  # owner, 2026-11-18: strong (not major) stories that may break through the lane's limits in 24 h
+
+
+def _newsworthy(db: Session, ev: NdEvent, label: str, now: datetime) -> tuple[str, str]:
+    """The last editorial question before any release, slot or breaking (owner, 2026-11-18): why should anyone care, and is it new on ANY
+    lane (Telegram, X, Trending, released events)? Returns (why not, or "", the label it may carry). A slot is never filled for its own
+    sake: when nothing passes, the slot stays empty. BREAKING / JUST IN only for a MAJOR consequence within 90 minutes of the first report."""
+    title = ev.title or ev.headline or ""
+    if ev.kind not in ("news", "update"):
+        if ev.kind == "market":
+            rep = newsworthy.repeat_of(title, ev.summary or "", newsworthy.told(db, now, skip_event=ev.id, platform="telegram"), now)
+            if rep:
+                return f"not published: {rep}", label
+        return "", label
+    # a release goes to both platforms: it is a repeat when the channel already carried the event (X then skips it on its own if X did)
+    a = newsworthy.judge(db, title, ev.summary or "", now, age_min=_age(ev, now), skip_event=ev.id, platform="telegram")
+    if not a.ok:
+        _note_breaking_miss(ev, a.reason, now)
+        return f"not published: {a.reason}", label
+    ev.facts = {**(ev.facts or {}), "newsworthy": {"why": a.why, "strength": a.strength, "stop_scroll": a.stop_scroll, "parts": a.parts}}
+    if ev.kind == "update" or not label:
+        return "", label
+    return "", (label if a.strength == "major" and _age(ev, now) <= 90 else "")
 
 
 def verified_major(ev: NdEvent) -> bool:
@@ -1039,7 +1074,17 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     # the 70 bar. Production 2026-11-17 21:30: "US jets strike IRGC missile launch site on Iran's Qeshm Island" (two outlets, 1 min old)
     # was refused "under 90 minutes since the last post" and never posted. Every repeat, diversity, editorial and accuracy check below
     # still applies.
-    majors = {e.id: why for e in fresh if (why := major_breaking(e))}
+    # owner, 2026-11-18: a keyword impact class alone ("Nvidia" + "earnings", "ship" + "Hormuz") never breaks through the lane's limits:
+    # only a story whose stated facts carry a real consequence (newsworthy.assess) does: a MAJOR one always, a strong one (a state striking
+    # another, a market regime, a big theft) at most STRONG_BYPASS_PER_DAY times a day. Production: #686 Nvidia +3% (52) and #695 ADNOC (56)
+    # went out on the keyword alone.
+    bypassed = sum(1 for e in day if (e.facts or {}).get("major") and ((e.facts or {}).get("newsworthy") or {}).get("strength") != "major")
+
+    def breaks_through(e: NdEvent) -> bool:
+        strength = newsworthy.assess(e.title or "", e.summary or "").strength
+        return strength == "major" or (strength == "strong" and bypassed < STRONG_BYPASS_PER_DAY)
+
+    majors = {e.id: why for e in fresh if (why := major_breaking(e)) and breaks_through(e)}
     if closed is not None:
         if not majors:
             return held(closed)
@@ -1082,6 +1127,11 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
                 continue
         f = ev.facts or {}
         label = brief.UPDATE if ev.kind == "update" else virality.label_for(int(ev.virality), topic=ev.topic, strong=True, age_minutes=_age(ev, now), risk=bool(f.get("risk")))
+        nw_why, label = _newsworthy(db, ev, label, now)
+        if nw_why:  # owner, 2026-11-18: better news, not more news
+            ev.why = nw_why
+            continue
+        f = ev.facts or {}  # now with its newsworthiness verdict
         problem = preflight(ev, label, now)
         if problem:
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
@@ -1374,7 +1424,7 @@ def pending(db: Session, platform: str, now: datetime) -> list[NdEvent]:
         limit = POLICY.deliver_market if ev.kind == "market" or (ev.facts or {}).get("symbol") else POLICY.deliver_news
         if platform == "x" and X_FOLLOWS_TELEGRAM and ev.tg_status in ("delivered", "uncertain"):
             limit += X_AFTER_TELEGRAM  # Telegram posted it near the end of its window: X still follows
-        problem = editorial.delivery_gate(db, ev, now)  # the story history and the owner's block, on every platform, every time
+        problem = editorial.delivery_gate(db, ev, now, platform)  # the story history and the owner's block, on every platform, every time
         if problem:
             mark(ev, platform, "skipped", problem)
             logger.info("newsdesk events: %s won't deliver #%s: %s", platform, ev.id, problem)

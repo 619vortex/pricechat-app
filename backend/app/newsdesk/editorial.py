@@ -281,14 +281,28 @@ def covered_before(db: Any, ev: Any, now: datetime, hours: int = 72) -> list[Cov
     return [c for c in coverage(db, now, hours) if c.event_id != ev.id and (at is None or c.at < at)]
 
 
-def delivery_gate(db: Any, ev: Any, now: datetime) -> str:
+def delivery_gate(db: Any, ev: Any, now: datetime, platform: str | None = None) -> str:
     """Asked by each platform before it delivers a released event: "" to go ahead, or why not. The owner's block, and the story history:
     X follows Telegram, but never posts what the history says is a repeat, whatever Telegram did."""
     f = ev.facts or {}
     if (f.get("blocked") or {}).get("on"):
         return f"blocked by the owner{': ' + str(f['blocked'].get('reason')) if f['blocked'].get('reason') else ''}"
     v = repeat_verdict(ev, covered_before(db, ev, now), now)
-    return "" if v.ok else f"repeat: {v.reason}"
+    if not v.ok:
+        return f"repeat: {v.reason}"
+    if getattr(ev, "kind", "") in ("news", "update"):
+        # owner, 2026-11-18: one real-world event is one post across EVERY lane (Telegram, X, Trending, the Terminal), judged by the event
+        # (who, where, what kind), not headline wording; only what went out before this event was released counts
+        from app.newsdesk import newsworthy
+
+        at = ev.released_at if ev.released_at is None or ev.released_at.tzinfo else ev.released_at.replace(tzinfo=now.tzinfo)
+        history = [h for h in newsworthy.told(db, now, skip_event=ev.id, skip_tg=getattr(ev, "tg_post_id", None), skip_x=getattr(ev, "x_post_id", None),
+                                              platform=platform)
+                   if at is None or h.at < at]
+        rep = newsworthy.repeat_of(ev.title or ev.headline or "", ev.summary or "", history, now)
+        if rep:
+            return f"repeat: {rep}"
+    return ""
 
 
 def record_skip(db: Any, now: datetime, entry: dict[str, Any]) -> None:

@@ -221,8 +221,8 @@ async def test_explainers_arent_news(db: Session) -> None:
 async def test_different_headlines_about_one_story_go_out_once(db: Session) -> None:
     now = utcnow()
     web = Web()
-    web.feeds[MAJOR["url"]] = rss([("Binance says fake job interviews used in crypto hack", "https://b.test/1", now - timedelta(minutes=30))])
-    web.feeds[OTHER["url"]] = rss([("North Korea denies being behind the Binance hack", "https://c.test/1", now - timedelta(minutes=20)), ("Nvidia shares plunge after earnings miss on Wall Street", "https://c.test/2", now - timedelta(minutes=10))])
+    web.feeds[MAJOR["url"]] = rss([("Binance says hackers stole $90 million using fake job interviews", "https://b.test/1", now - timedelta(minutes=30))])
+    web.feeds[OTHER["url"]] = rss([("Binance hack: thieves took $90 million through fake job interviews", "https://c.test/1", now - timedelta(minutes=20)), ("Nvidia CEO Jensen Huang resigns after earnings miss on Wall Street", "https://c.test/2", now - timedelta(minutes=10))])
     setup(db, [MAJOR, OTHER], [])
     for minutes in (0, 5, 10):  # one event is released a run
         await run(db, web, now=now + timedelta(minutes=minutes))

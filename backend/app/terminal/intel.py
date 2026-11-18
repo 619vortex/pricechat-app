@@ -357,7 +357,14 @@ def fast_lane(title: str, summary: str, srcs: list[dict[str, Any]] | None, parts
     kind, why = impact_class(title, summary, srcs, parts)
     if kind is None:
         return False, why
-    return True, f"{why}; evidence {ev['level']} ({ev['score']:.0f}); {age_min:.0f} min since first report"
+    # owner, 2026-11-18: a keyword class ("Nvidia" + "probe") is a hint, not a consequence. The fast lane is only for a MAJOR consequence the
+    # story itself states (newsworthy.assess): deaths, a market shock, a state striking a state, a big theft, a nationwide disruption now
+    from app.newsdesk import newsworthy
+
+    nw = newsworthy.assess(title, summary)
+    if nw.strength == "none":
+        return False, f"{why}, but no concrete consequence stated ({nw.reason})"
+    return True, f"{why}; {nw.why}; evidence {ev['level']} ({ev['score']:.0f}); {age_min:.0f} min since first report"
 
 
 # --- hooks ---------------------------------------------------------------------------------------------------------------------------

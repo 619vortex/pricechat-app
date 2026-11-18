@@ -269,7 +269,7 @@ async def publish_now(db: Session, settings: Settings, runtime: Any, agent_id: i
     if post.status == "held":
         raise ValueError(f"Not published: {post.hold_reason or 'a check failed'}. Edit the words until they pass.")
     titles = [str(x.get("title") or "") for x in post.sources or []]
-    if (why := coordinate.newsdesk_conflict(db, titles, now, fast=True)) is not None:
+    if (why := coordinate.newsdesk_conflict(db, titles, now, fast=True, topic_id=t.id)) is not None:
         raise ValueError(f"Not published: {why}.")
     if (n := coordinate.x_posts_today(db, s, now))["total"] >= s.shared_daily_cap:
         raise ValueError(f"Not published: the shared X cap is reached ({n['total']}/{s.shared_daily_cap} in 24 h).")
@@ -600,6 +600,10 @@ async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: st
     for p in db.scalars(select(NdTelegramPost).where(NdTelegramPost.created_at >= now - timedelta(hours=48), NdTelegramPost.status.in_(lane.COUNTED))):
         if any(coordinate.same_story(a, b) for a in titles for b in (p.title, p.headline) if a and b):
             raise ValueError("Not sent: this story is already on the Telegram channel.")
+    from app.newsdesk import newsworthy
+
+    if (rep := newsworthy.repeat_of(t.title, "", newsworthy.told(db, now, platform="telegram", skip_topic=t.id), now)):
+        raise ValueError(f"Not sent: {rep}.")
     post = await draft(db, settings, t, text)
     if post.status == "held":
         raise ValueError(f"Not sent: {post.hold_reason or 'a check failed'}. Edit the words until they pass.")

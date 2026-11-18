@@ -133,7 +133,8 @@ async def test_a_verified_story_is_delivered_once_with_its_sources_and_the_messa
     assert out["sent"] == 144 and len(tg.sent) == 1
     sent = tg.sent[0]
     assert sent["chat"] == CHANNEL_ID and sent["html"] is True and sent["silent"] is True
-    assert "🥝 Price Chat" in sent["text"] and "🔴 ALERT: BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION" in sent["text"]
+    assert "🥝 Price Chat" in sent["text"] and "BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION" in sent["text"]
+    assert "ALERT" not in sent["text"]  # owner, 2026-11-18: no alarm label for a story that isn't major (a $40 million hack is news, not an alert)
     assert TWO in sent["text"] and ONE not in sent["text"]  # the outlet's sentence that only repeats the headline is left out
     assert f'href="{a.link}"' in sent["text"] and f'href="{b.link}"' in sent["text"]
     post = rows(db)[0]
@@ -268,8 +269,8 @@ async def test_one_outlet_with_no_attribution_waits_for_a_second(db: Session) ->
 
 @pytest.mark.parametrize("title", [
     "SEC sues Acme exchange, alleging it misled investors",
-    "Zorbex token rug pull drains $9 million, ZachXBT says",
-    "Acme founder accused of fraud by former partners",
+    "Zorbex token rug pull drains $90 million, ZachXBT says",
+    "Acme founder arrested on fraud charges, police say",
 ])
 async def test_scams_fraud_and_allegations_need_an_official_source_or_two_outlets(db: Session, title: str) -> None:
     now = utcnow()
@@ -477,7 +478,7 @@ async def test_a_run_that_died_mid_send_is_never_resent(db: Session) -> None:
 
 async def test_it_keeps_its_gap_and_its_daily_limit(db: Session) -> None:
     now = utcnow()
-    titles = ["Bybaz exchange says hackers drained $40 million", "Qorvo protocol confirms $12 million exploit", "Tether freezes Tron wallets after theft, company says",
+    titles = ["Bybaz exchange says hackers drained $40 million", "Qorvo protocol confirms $120 million exploit", "Tether freezes Tron wallets after theft, company says",
               "Lumio exchange halts withdrawals after outage, it says", "Vexa lender files for bankruptcy, filing shows"]
     for t in titles:
         verified(db, t, now=now)
@@ -495,8 +496,8 @@ async def test_it_keeps_its_gap_and_its_daily_limit(db: Session) -> None:
 
 
 async def test_at_equal_shock_the_fresher_story_goes_first_and_only_one_at_a_time(db: Session) -> None:
-    verified(db, "Qorvo protocol confirms $12 million exploit", hours=5)
-    verified(db, "Zelto protocol confirms $12 million exploit", hours=1)
+    verified(db, "Qorvo protocol confirms $120 million exploit", hours=5)
+    verified(db, "Zelto protocol confirms $120 million exploit", hours=1)
     tg = Tg()
     await run(db, tg)
     assert len(tg.sent) == 1 and "ZELTO" in tg.sent[0]["text"]
@@ -578,17 +579,17 @@ async def test_a_model_text_that_fails_the_checks_never_goes_out(db: Session, wi
 
 
 async def test_feed_text_cant_break_the_message_or_add_a_link(db: Session) -> None:
-    story(db, "Acme <b>exchange</b> & Bob's fund hacked, Acme says", "The Block", summary=f"{ONE} Tom & Ann <i>said</i> so.")
-    story(db, "Acme <b>exchange</b> & Bob's fund hacked, Acme says today", "Decrypt", summary=TWO)
+    story(db, "Acme <b>exchange</b> & Bob's fund hacked for $60 million, Acme says", "The Block", summary=f"{ONE} Tom & Ann <i>said</i> so.")
+    story(db, "Acme <b>exchange</b> & Bob's fund hacked for $60 million, Acme says today", "Decrypt", summary=TWO)
     tg = Tg()
     await run(db, tg)
     text = tg.sent[0]["text"]
     assert "&lt;B&gt;EXCHANGE&lt;/B&gt; &amp; BOB" in text and "<i>" not in text and "&lt;i&gt;said&lt;/i&gt;" in text
 
-    story(db, "Zorb protocol drained in exploit, team says", "The Block", summary="Visit evil.com to claim now. It was drained overnight.")
-    story(db, "Zorb protocol drained in exploit, team says today", "Decrypt", summary="Visit evil.com to claim now. It was drained overnight.")
+    story(db, "Zorb protocol drained of $30 million in exploit, team says", "The Block", summary="Visit evil.com to claim now. It was drained overnight.")
+    story(db, "Zorb protocol drained of $30 million in exploit, team says today", "Decrypt", summary="Visit evil.com to claim now. It was drained overnight.")
     await run(db, tg, utcnow() + timedelta(hours=2))
-    assert len(tg.sent) == 2 and "evil.com" not in tg.sent[1]["text"] and "ZORB PROTOCOL DRAINED" in tg.sent[1]["text"]  # the bad summary is dropped
+    assert len(tg.sent) == 2 and "evil.com" not in tg.sent[1]["text"] and "ZORB PROTOCOL DRAINED OF $30 MILLION" in tg.sent[1]["text"]  # the bad summary is dropped
 
 
 @pytest.mark.parametrize("text,count", [

@@ -66,9 +66,9 @@ async def test_admin_can_switch_back_to_clean(client: Any, db: Session, live: di
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=30))
     cap = tg.sent[0]["caption"]
-    # clean's own rules: the label the older scorer gave (a score under 80 is JUST IN there), sources · @thepricechat on one line; no real
-    # photo of this story exists in the test, so a text post (2026-11-16: no stand-in photo, no headline card)
-    assert cap.startswith("<b>JUST IN:</b>") and cap.endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')
+    # clean's own rules: sources · @thepricechat on one line; no real photo of this story exists in the test, so a text post (2026-11-16: no
+    # stand-in photo, no headline card). No JUST IN: owner, 2026-11-18, a label only for a MAJOR consequence within 90 minutes of the report
+    assert not cap.startswith("<b>JUST IN:</b>") and cap.endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
     assert ev.facts["visual"]["style"] == "clean" and tg.sent[0]["image"] is None
 

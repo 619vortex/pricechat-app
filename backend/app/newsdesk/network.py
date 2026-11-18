@@ -450,8 +450,11 @@ async def model_copy(settings: Any, ev: Any, rows: list[Any], transport: Any = N
 
 
 def reporting(ev: Any, rows: list[Any] | None) -> str:
-    """The reporting a model writes from: each outlet's headline and summary, and our price data."""
-    told = "\n\n".join(f"{getattr(x, 'source', '')}: {getattr(x, 'title', '')}\n{(getattr(x, 'summary', '') or '')[:700]}" for x in (rows or [])[:3]) \
+    """The reporting a model writes from: each outlet's headline and summary of THIS report (never another development's), and our price data."""
+    from app.newsdesk import viral as _viral
+
+    rows = [x for x in rows or [] if _viral.same_article(ev, x)]
+    told ="\n\n".join(f"{getattr(x, 'source', '')}: {getattr(x, 'title', '')}\n{(getattr(x, 'summary', '') or '')[:700]}" for x in (rows or [])[:3]) \
         or f"{getattr(ev, 'title', '')}\n{getattr(ev, 'summary', '')}"
     f = ev.facts or {}
     if f.get("price_tag") or f.get("price_check"):
@@ -479,6 +482,30 @@ def local_copy(ev: Any) -> Copy | None:
 
 
 async def write(settings: Any, ev: Any, rows: list[Any] | None = None, transport: Any = None, extra: Any = None) -> Copy:
+    """_write, then one post = one event (owner, 2026-11-18): a context sentence that is another article's story is dropped, and the
+    context is at most ONE sentence, kept only when it says why the story matters (a figure or a stated consequence)."""
+    c = await _write(settings, ev, rows, transport, extra)
+    return one_event(c, ev, rows) if getattr(ev, "kind", "") in ("news", "update") else c  # data and market posts are our own measured figures
+
+
+def one_event(c: Copy, ev: Any, rows: list[Any] | None) -> Copy:
+    from app.newsdesk import newsworthy, viral
+
+    others = [getattr(r, "title", "") or "" for r in rows or [] if not viral.same_article(ev, r)]
+    lead = " ".join([getattr(ev, "summary", "") or "", *[f"{getattr(r, 'title', '')}. {getattr(r, 'summary', '') or ''}" for r in rows or [] if viral.same_article(ev, r)]])
+    sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+(?=[A-Z$“\"'])", c.context or "") if s.strip()]
+    keep = [s for s in sents if s not in newsworthy.stray_sentences(c.headline, lead if rows else "", others, [s])]
+    dropped = len(sents) - len(keep)
+    first = next((s for s in keep if newsworthy.matters_sentence(s)), "")
+    if dropped or first != (c.context or "").strip():
+        logger.info("newsdesk network: event %s context trimmed to one event, one sentence (%d other-story sentence(s) dropped)", getattr(ev, "id", None), dropped)
+    c.context = first
+    if c.stakes and newsworthy.stray_sentences(c.headline, "", others, [c.stakes]):
+        c.stakes = ""
+    return c
+
+
+async def _write(settings: Any, ev: Any, rows: list[Any] | None = None, transport: Any = None, extra: Any = None) -> Copy:
     """The words, from the first writer whose draft passes every check: the GPU PC's local model (written with the picture, no API cost,
     fact-checked there by a second pass), then the Anthropic model when a key exists, then the desk's own from the outlets' sentences
     (checked too: a part that fails is dropped)."""

@@ -362,7 +362,7 @@ async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic
         if _fast(topic):
             angle = ("fast:" + angle)[:24]
     fast = _fast(topic)
-    conflict = coordinate.newsdesk_conflict(db, [topic.title] + [x["title"] for x in reliable[:3]], now, fast=fast) if held is None else None
+    conflict = coordinate.newsdesk_conflict(db, [topic.title] + [x["title"] for x in reliable[:3]], now, fast=fast, topic_id=topic.id) if held is None else None
     if conflict:
         held = conflict
     hot, why_not = auto_ok(s, topic, text, b)
@@ -441,6 +441,14 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
         return False, f"a major incident not yet verified ({inc.get('evidence')}): approval only"
     if b is not None and (why := sensitive.auto_problem(b.sensitive, text=text, outlets=b.outlets)):
         return False, why
+    # owner, 2026-11-18: popular is not the same as newsworthy. Nothing goes out on its own without a concrete, source-stated reason to care
+    # (app/newsdesk/newsworthy); momentum, outlet counts and dramatic words never stand in for one. Production: trend post 765 "Democrats
+    # probe whether Lutnick helped Cantor avoid Nvidia losses" went out on the fast lane with viral 31.
+    from app.newsdesk import newsworthy
+
+    nw = newsworthy.assess(getattr(topic, "title", "") or "", b.summary if b is not None else "")
+    if not nw.ok:
+        return False, f"not newsworthy: {nw.reason}"
     return True, None
 
 
@@ -458,7 +466,8 @@ def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool
     if not automatic(s) or not at_line(s, topic):
         return True
     reliable_now = brief_of(topic)[0] is not None
-    desk_clear = coordinate.newsdesk_conflict(db, [topic.title] + [str(x.get("title") or "") for x in (topic.sources or [])[:3] if x.get("reliable")], now) is None
+    desk_clear = coordinate.newsdesk_conflict(db, [topic.title] + [str(x.get("title") or "") for x in (topic.sources or [])[:3] if x.get("reliable")], now,
+                                              topic_id=topic.id) is None
     if all(_replaceable(p, s, reliable_now, desk_clear) for p in earlier):
         for p in earlier:
             if p.status in ("pending", "held"):
@@ -520,7 +529,7 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     if (why := coordinate.spacing_problem(db, s, now, incident=incident, fast=fast)) is not None:
         return why
     titles = [str(x.get("title") or "") for x in post.sources or []]
-    if (why := coordinate.newsdesk_conflict(db, titles, now, fast=fast)) is not None:
+    if (why := coordinate.newsdesk_conflict(db, titles, now, fast=fast, topic_id=post.topic_id)) is not None:
         return why
     return None
 

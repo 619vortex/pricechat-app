@@ -155,7 +155,7 @@ def test_a_held_story_lives_to_six_hours_and_no_longer(db: Session) -> None:
 
 
 def test_the_held_story_takes_the_slot_it_would_have_missed(db: Session) -> None:
-    ev = _news(db, "z", "Ukraine peace talks resume this week in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=5 * 60, peak=67)
+    ev = _news(db, "z", "Russia and Ukraine sign ceasefire agreement in Abu Dhabi", 43, ["CNBC", "Bloomberg", "New York Times"], age_min=5 * 60, peak=67)
     got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
     assert got is not None and got.id == ev.id
 
@@ -323,11 +323,13 @@ def test_routine_controversy_is_recognised(title: str, routine: bool) -> None:
     assert (editorial.routine_controversy(title) is not None) is routine, title
 
 
-def test_a_controversy_loses_the_slot_to_a_market_story_it_outscores(db: Session) -> None:
-    _news(db, "c1", "Defiant Hegseth defends Iran war as he faces impeachment vote", 67, ["Bloomberg", "Financial Times", "The National"], age_min=30)
+def test_neither_a_routine_controversy_nor_a_routine_price_level_fills_a_slot(db: Session) -> None:
+    """Owner, 2026-11-18: "Never publish just because a scheduled slot exists. Silence is better than mediocre content." Before, the Brent
+    story took this slot because it outscored the controversy; neither says why anyone should care, so the slot stays empty."""
+    c1 = _news(db, "c1", "Defiant Hegseth defends Iran war as he faces impeachment vote", 67, ["Bloomberg", "Financial Times", "The National"], age_min=30)
     brent = _news(db, "c2", "Brent falls below $90 a barrel for first time since August", 60, ["CNBC", "The Guardian"], age_min=30, topic="macro")
-    got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
-    assert got is not None and got.id == brent.id
+    assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
+    assert "why should anyone care?" in brent.why and c1.status == "candidate"
 
 
 def test_a_controversy_alone_needs_twelve_more_points(db: Session) -> None:
@@ -336,10 +338,11 @@ def test_a_controversy_alone_needs_twelve_more_points(db: Session) -> None:
     assert "routine political controversy" in ev.why and "under the bar of 56" in ev.why
 
 
-def test_a_big_enough_controversy_still_goes(db: Session) -> None:
-    ev = _news(db, "c4", "Defiant Hegseth defends Iran war as he faces impeachment vote", 70, ["Bloomberg", "Financial Times"], age_min=30)
-    got = events.release(db, SLOT + timedelta(minutes=1), events.policy({}))
-    assert got is not None and got.id == ev.id
+def test_a_controversy_with_no_outcome_never_fills_a_slot_however_it_scores(db: Session) -> None:
+    """Owner, 2026-11-18: multiple credible sources don't make something interesting; routine political statements must not qualify."""
+    ev = _news(db, "c4", "Defiant Hegseth defends Iran war as he faces impeachment vote", 90, ["Bloomberg", "Financial Times", "Reuters"], age_min=30)
+    assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
+    assert ev.status == "candidate" and "not published" in ev.why
 
 
 def test_slot_ranking_puts_todays_news_first(db: Session) -> None:

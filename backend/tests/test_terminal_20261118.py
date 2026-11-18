@@ -136,8 +136,8 @@ def test_usgs_magnitude_and_gdacs_red_are_high_impact() -> None:
 
 
 class _T:
-    def __init__(self, score: float, terminal: dict[str, Any], growth: bool = False) -> None:
-        self.score, self.parts = score, {"terminal": terminal, "growth": {"measured": growth}}
+    def __init__(self, score: float, terminal: dict[str, Any], growth: bool = False, title: str = "Iranian mines hit five ships in Strait of Hormuz") -> None:
+        self.score, self.parts, self.title = score, {"terminal": terminal, "growth": {"measured": growth}}, title
 
 
 def test_auto_ok_fast_lane_skips_the_momentum_line_but_rumours_never_publish(db: Session) -> None:

@@ -66,7 +66,7 @@ def same_story(a: str, b: str) -> bool:
     return checks.same_event(a, b) or checks.similarity(checks.fingerprint(a), checks.fingerprint(b)) >= 0.5
 
 
-def newsdesk_conflict(db: Session, titles: list[str], now: datetime, *, fast: bool = False) -> str | None:
+def newsdesk_conflict(db: Session, titles: list[str], now: datetime, *, fast: bool = False, topic_id: int | None = None) -> str | None:
     """The News Desk already has this story (posted, queued, dry run, or an event released for both platforms) in the last 48 h."""
     since = now - SAME_STORY_WINDOW
     posts = db.scalars(select(NdPost).where(NdPost.created_at >= since, NdPost.status.notin_(("rejected", "expired", "failed"))))
@@ -82,6 +82,12 @@ def newsdesk_conflict(db: Session, titles: list[str], now: datetime, *, fast: bo
             continue  # a fast-lane story doesn't wait for the desk to decide; the desk's X lane then skips it (engine.deliver_x)
         if any(same_story(t, o) for t in titles for o in (e.title, e.headline) if o):
             return f"covered by the News Desk (event {e.id}, {e.status})"
+    # owner, 2026-11-18: the same real-world event already went out on any lane (Telegram, X, a trend post, a released event), judged by the
+    # event (who, where, what kind) rather than the wording, and nothing substantially new has happened since
+    from app.newsdesk import newsworthy
+
+    if titles and titles[0] and (rep := newsworthy.repeat_of(titles[0], "", newsworthy.told(db, now, platform="x", skip_topic=topic_id), now)):
+        return rep
     return None
 
 
