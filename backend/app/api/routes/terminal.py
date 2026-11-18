@@ -7,6 +7,7 @@ from pydantic import Field
 
 from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
+from app.db.base import utcnow
 from app.models.trending import TtTopic
 from app.services.agent_service import get_agent_config
 from app.terminal import feed
@@ -98,3 +99,55 @@ def stop(payload: StopInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
         nd.kill_switch = payload.on
     db.commit()
     return feed.controls(db, engine.settings_row(db))
+
+
+# --- X Intelligence -------------------------------------------------------------------------------------------------------------------
+
+
+@router.get("/x")
+def x_overview(db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    return feed.x_overview(db, runtime.settings)
+
+
+class XSettingsInput(StrictInput):
+    on: bool | None = None
+    confirm_paid: bool = False  # turning paid reads on needs this, sent only after the owner confirmed the price
+    daily_usd: float | None = Field(None, ge=0.1, le=50)
+    max_posts: int | None = Field(None, ge=10, le=100)
+
+
+@router.put("/x/settings")
+def x_settings(payload: XSettingsInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    try:
+        feed.x_settings(db, on=payload.on, confirm_paid=payload.confirm_paid, daily_usd=payload.daily_usd, max_posts=payload.max_posts)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    return feed.x_overview(db, runtime.settings)
+
+
+class WatchEntry(StrictInput):
+    handle: str = Field(min_length=1, max_length=16)
+    group: str = Field(max_length=20)
+    tier: Literal["A", "B", "C"]
+    note: str = Field("", max_length=120)
+
+
+class WatchlistInput(StrictInput):
+    accounts: list[WatchEntry] = Field(max_length=300)
+
+
+@router.put("/x/watchlist")
+def x_watchlist(payload: WatchlistInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    feed.x_settings(db, accounts=[a.model_dump() for a in payload.accounts])
+    return feed.x_overview(db, runtime.settings)
+
+
+@router.post("/x/read")
+async def x_read_now(db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """Read the watchlist now (only when X Intelligence is on: it's paid), then score."""
+    from app.trending import engine as tt, sources as tsources
+
+    if not (tsources.merged(tt.settings_row(db).sources).get("x_accounts") or {}).get("on"):
+        raise HTTPException(409, "X Intelligence is off: reading X accounts is paid. Turn it on first.")
+    await tt.tick(db, runtime.settings, runtime.x, get_agent_config(db).id, utcnow(), only={"x_accounts"})
+    return feed.x_overview(db, runtime.settings)

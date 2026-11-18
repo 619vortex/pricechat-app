@@ -23,6 +23,18 @@ from app.newsdesk import brief, editorial
 from app.trending import rank, sensitive, writer
 
 OFFICIAL_SOURCES = {"faa", "status", "usgs", "gdacs"}
+# an outlet's X account is that outlet, not a second one (@Reuters and the Reuters feed are one report)
+X_ALIASES = {"reuters": "reuters", "reutersbiz": "reuters", "ap": "ap", "afp": "afp", "bbcbreaking": "bbc", "business": "bloomberg", "markets": "bloomberg",
+             "wsj": "wall street journal", "ft": "financial times", "cnbc": "cnbc", "coindesk": "coindesk", "theblock__": "the block"}
+DISPUTE = re.compile(r"\b(denies|denied|deny|false|fake|debunk\w*|fact[- ]check\w*|no evidence|misleading|not true|hoax|refutes?|refuted|"
+                     r"disputes?|disputed|contradict\w*|retract\w*|corrects?|correction)\b", re.I)
+CLAIM_KINDS = {
+    "cover-up": re.compile(r"\b(cover[- ]?up|covered up|hid(?:ing|den)?|secret\w*|classified|leak\w*|whistleblower)\b", re.I),
+    "military incident": re.compile(r"\b(strike|missile|drone|shot down|jets?|warship|troops|explosion|attack\w*|intercept\w*)\b", re.I),
+    "financial scandal": re.compile(r"\b(fraud|ponzi|insolven\w*|bankrupt\w*|embezzl\w*|insider|rug ?pull|exit scam|frozen withdrawals?|halts? withdrawals?)\b", re.I),
+    "government controversy": re.compile(r"\b(resign\w*|impeach\w*|indict\w*|probe|investigat\w*|scandal|corruption|bribe\w*)\b", re.I),
+    "catastrophe": re.compile(r"\b(earthquake|tsunami|crash\w*|killed|dead|deaths|collapse\w*|explosion|wildfire|flood\w*|outage\w*)\b", re.I),
+}
 SOCIAL_SOURCES = {"google", "reddit", "x_trends", "x_accounts", "hn", "gdelt"}
 FAST_EVIDENCE = 55.0
 FAST_MAX_AGE_MIN = 120
@@ -82,6 +94,32 @@ def official(x: dict[str, Any]) -> bool:
     return bool(x.get("reliable")) and (x.get("source") in OFFICIAL_SOURCES or bool(_extra(x).get("official")))
 
 
+def outlet_of(x: dict[str, Any]) -> str:
+    """The reporting organisation behind a source item: an outlet's X account counts as that outlet."""
+    o = str(x.get("outlet") or "")
+    if x.get("source") == "x_accounts":
+        h = o.lstrip("@").lower()
+        return X_ALIASES.get(h, "@" + h)
+    return sensitive.outlet_key(o)
+
+
+X_NAMES = {"reuters": "Reuters", "ap": "AP", "afp": "AFP", "bloomberg": "Bloomberg", "bbc": "BBC", "wall street journal": "WSJ",
+           "financial times": "FT", "cnbc": "CNBC", "coindesk": "CoinDesk", "the block": "The Block"}
+
+
+def x_credit(x: dict[str, Any]) -> str:
+    """How a post is credited in our text: the outlet's name (Reuters), else the account name without the @ (CENTCOM on X)."""
+    o = outlet_of(x)
+    if o in X_NAMES:
+        return X_NAMES[o]
+    handle = str(_extra(x).get("handle") or str(x.get("outlet") or "").lstrip("@"))
+    return f"{handle} on X" if o.startswith("@") else o
+
+
+def x_tier(x: dict[str, Any]) -> str:
+    return str(_extra(x).get("tier") or "C") if x.get("source") == "x_accounts" else ""
+
+
 def lead_of(srcs: list[dict[str, Any]], title: str) -> dict[str, Any]:
     rel = [x for x in srcs if x.get("reliable")]
     return (rel or srcs or [{"title": title, "outlet": "", "source": ""}])[0]
@@ -95,7 +133,7 @@ def evidence(title: str, srcs: list[dict[str, Any]] | None, parts: dict[str, Any
     srcs, parts = _sources(srcs), parts or {}
     reliable = [x for x in srcs if x.get("reliable")]
     offs = [x for x in reliable if official(x)]
-    outlets = sorted({sensitive.outlet_key(x.get("outlet") or "") for x in reliable if not official(x)} - {""})
+    outlets = sorted({outlet_of(x) for x in reliable if not official(x)} - {""})
     main = [o for o in outlets if o in MAINSTREAM_KEYS]
     lead = lead_of(srcs, title)
     lead_title = str(lead.get("title") or title or "")
@@ -111,6 +149,11 @@ def evidence(title: str, srcs: list[dict[str, Any]] | None, parts: dict[str, Any
     if main:
         score += 10
         reasons.append("mainstream: " + ", ".join(main[:3]))
+    # X: tier-B accounts (named investigators, newsrooms) add partial weight; they never verify a story on their own (app/terminal/xintel)
+    xb = sorted({str(x.get("outlet") or "") for x in srcs if x_tier(x) == "B"})
+    if xb:
+        score += min(20.0, 10.0 * len(xb))
+        reasons.append(f"{len(xb)} tier-B X account{'s' if len(xb) != 1 else ''} ({', '.join(xb[:3])}): partial weight")
     inc = parts.get("incident") or {}
     if inc.get("major") and inc.get("verified"):
         score = max(score, 60.0)
@@ -125,9 +168,9 @@ def evidence(title: str, srcs: list[dict[str, Any]] | None, parts: dict[str, Any
         reasons.append(f"speculative wording ({spec.group(0).lower()})")
     rumor = not reliable or bool(hedged)
     if not reliable:
-        social = [x for x in srcs if x.get("source") in SOCIAL_SOURCES]
-        score = min(20.0, 5.0 * len({x.get("source") for x in social}) + 2.0 * min(5, len(social)))
-        reasons.insert(0, "no reliable outlet yet: social or search signals only")
+        social = [x for x in srcs if x.get("source") in SOCIAL_SOURCES or x.get("source") == "x_accounts"]
+        score = min(30.0 if xb else 20.0, 5.0 * len({x.get("source") for x in social}) + 2.0 * min(5, len(social)) + min(20.0, 10.0 * len(xb)))
+        reasons.insert(0, "no reliable outlet yet: social, X or search signals only")
     score = max(0.0, min(100.0, score))
     level = ("confirmed" if score >= 75 and (n >= 2 or offs) else "corroborated" if score >= 55 else "single source" if score >= 30 else "unverified")
     return {"score": round(score, 1), "level": level, "rumor": rumor, "reasons": reasons, "outlets": n, "official": bool(offs),
@@ -167,8 +210,13 @@ def social(srcs: list[dict[str, Any]], parts: dict[str, Any]) -> tuple[float, li
     rc = sum(float(_extra(x).get("comments") or 0) for x in srcs if x.get("source") == "reddit")
     if rc:
         seen.append(f"{int(rc)} Reddit comments")
+    xs = [x for x in srcs if x.get("source") == "x_accounts"]
+    xe = sum(float(x.get("engagement") or 0) for x in xs)
+    xa = len({str(x.get("outlet") or "").lower() for x in xs})
+    if xs:
+        seen.append(f"X: {xa} watched account{'s' if xa != 1 else ''}, {int(xe)} likes/reposts/replies/quotes (X's public counts)")
     v = (0.35 * gt + 0.25 * min(1.0, o1h / 4) + 0.15 * min(1.0, iph / 6) + 0.1 * min(1.0, math.log10(max(hn, 1)) / 3)
-         + 0.1 * min(1.0, gd / 5) + 0.05 * min(1.0, rc / 500))
+         + 0.1 * min(1.0, gd / 5) + 0.05 * min(1.0, rc / 500) + 0.2 * min(1.0, math.log10(max(xe, 1)) / 4) + 0.1 * min(1.0, xa / 4))
     if g.get("google_up") or g.get("burst"):
         v = min(1.0, v + 0.1)
     return min(1.0, v), seen
@@ -218,6 +266,25 @@ def viral(title: str, category: str, srcs: list[dict[str, Any]] | None, parts: d
         drivers = drivers or ["shock"]
     return {"score": round(min(100.0, total), 1), "parts": {k: round(v, 1) for k, v in comp.items()}, "drivers": drivers[:4],
             "measured": measured, "words": (shock + _hits(NOVEL, text))[:5]}
+
+
+def claim_status(title: str, srcs: list[dict[str, Any]] | None, ev: dict[str, Any]) -> dict[str, Any]:
+    """Rumour radar: confirmed (corroborated or better, not hedged), disputed (any source denies, debunks or corrects it), or
+    unsupported; and what kind of claim it is. Shown with the original claims, never published as fact unless confirmed."""
+    srcs = _sources(srcs)
+    texts = [str(x.get("title") or "") for x in srcs] or [title]
+    disputes = [{"outlet": x.get("outlet"), "title": x.get("title"), "url": x.get("url")} for x in srcs if DISPUTE.search(str(x.get("title") or ""))]
+    kinds = [k for k, rx in CLAIM_KINDS.items() if any(rx.search(t) for t in texts)]
+    if disputes:
+        status = "disputed"
+    elif not ev.get("rumor") and ev.get("level") in ("confirmed", "corroborated"):
+        status = "confirmed"
+    elif not ev.get("rumor"):
+        status = "reported"
+    else:
+        status = "unsupported"
+    first = min((x for x in srcs if x.get("at")), key=lambda x: str(x.get("at")), default=srcs[0] if srcs else {"title": title})
+    return {"status": status, "kinds": kinds, "disputes": disputes[:4], "original": {"outlet": first.get("outlet"), "title": first.get("title"), "url": first.get("url"), "at": first.get("at")}}
 
 
 def ahead_of_mainstream(srcs: list[dict[str, Any]] | None, parts: dict[str, Any] | None, ev: dict[str, Any]) -> bool:
@@ -309,8 +376,8 @@ def rule_hooks(title: str, outlet: str, category: str, ev: dict[str, Any], vscor
     if ev["rumor"]:
         src = f" ({outlet})" if outlet else ""
         return [{"kind": "breaking", "text": f"UNCONFIRMED: {h}{src}. Not verified yet."},
-                {"kind": "curiosity", "text": f"Reports circulating: {h}. Price Chat is checking."},
-                {"kind": "bold", "text": f"Unverified, but watch this: {h}{src}."}]
+                {"kind": "viral", "text": f"Unverified, but watch this: {h}{src}."},
+                {"kind": "curiosity", "text": f"Reports circulating: {h}. Price Chat is checking."}]
     breaking = f"BREAKING: {h}{credit}" if ev["level"] in ("confirmed", "corroborated") else f"JUST IN: {h}{credit}"
     # the curiosity line names who or where it is about first; the words stay the headline's own
     known = editorial.names_in(h)
@@ -323,7 +390,7 @@ def rule_hooks(title: str, outlet: str, category: str, ev: dict[str, Any], vscor
         bold = f"{fig}. {h}{credit}."
     else:
         bold = f"{'Huge' if vscore >= 70 else 'Big'}: {h}{credit}."  # intensity only: no claim of market impact the source didn't make
-    return [{"kind": k, "text": with_credit(v, outlet)} for k, v in (("breaking", breaking), ("curiosity", curiosity), ("bold", bold))]
+    return [{"kind": k, "text": with_credit(v, outlet)} for k, v in (("breaking", breaking), ("viral", bold), ("curiosity", curiosity))]
 
 
 def with_credit(text: str, outlet: str) -> str:

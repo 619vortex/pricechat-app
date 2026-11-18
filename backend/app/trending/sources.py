@@ -80,6 +80,12 @@ DEFAULT_SOURCES: dict[str, dict[str, Any]] = {
 from app.terminal import discovery as _discovery  # noqa: E402
 
 DEFAULT_SOURCES.update({k: dict(v) for k, v in _discovery.DEFAULTS.items()})
+# X Intelligence (app/terminal/xintel, 2026-11-18): "x_accounts" is the tiered watchlist, read incrementally; still OFF until the owner pays for reads
+from app.terminal import xintel as _xintel  # noqa: E402
+
+DEFAULT_SOURCES["x_accounts"] = dict(_xintel.DEFAULTS)
+NAMES["x_accounts"] = "X watchlist (X Intelligence)"
+INTERVAL["x_accounts"] = 5
 NAMES.update(_discovery.NAMES)
 INTERVAL.update(_discovery.INTERVAL)
 
@@ -111,6 +117,9 @@ def merged(stored: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     out = {k: dict(v) for k, v in DEFAULT_SOURCES.items()}
     for k, v in (stored or {}).items():
         if k in out and isinstance(v, dict):
+            v = dict(v)
+            if k == "x_accounts" and [str(a).lstrip("@").lower() for a in v.get("accounts") or []] == [a.lower() for a in DEFAULT_ACCOUNTS]:
+                v.pop("accounts")  # the old untiered default list: the tiered X Intelligence watchlist replaces it (an edited list is kept)
             out[k].update(v)
     return out
 

@@ -15,7 +15,8 @@ type Post = { id: number; status: string; text: string; hold_reason: string | nu
 export type Story = { id: number; title: string; category: string; topic_status: string; lane: string; trend_score: number; peak_score: number; viral: Vi | null;
   evidence: Ev | null; rumor: boolean; ahead_of_mainstream: boolean; fast: boolean; fast_why: string | null; breaking_ok: boolean; first_report: string | null;
   detected: string | null; last_update: string | null; age_hours: number | null; stale: string | null; why: string | null;
-  incident: { label?: string; major?: boolean; verified?: boolean; evidence?: string } | null; sources: Link[]; decision: { status: string; reason: string }; post: Post | null };
+  incident: { label?: string; major?: boolean; verified?: boolean; evidence?: string } | null; sources: Link[]; decision: { status: string; reason: string }; post: Post | null;
+  claim?: { status: string; kinds: string[]; disputes: { outlet: string; title: string; url: string }[]; original: { outlet: string; title: string; url: string; at: string | null } } | null };
 type Hook = { kind: string; text: string; writer: string; ok: boolean; reason: string };
 type Detail = Story & { timeline: { at: string | null; seen: string | null; source: string; outlet: string; title: string; url: string; reliable: boolean; official: boolean }[];
   posts: Post[]; hooks: Hook[]; ledger: Record<string, unknown> | null };
@@ -43,6 +44,8 @@ const LANES: { key: string; label: string; tone: Tone; about: string }[] = [
   { key: "rejected", label: "Rejected", tone: "neutral", about: "Dismissed by you or refused" },
 ];
 const LANE = Object.fromEntries(LANES.map((l) => [l.key, l]));
+const CLAIM_TONE: Record<string, Tone> = { confirmed: "good", disputed: "bad", unsupported: "warn" };
+const HOOK_LABEL: Record<string, string> = { breaking: "BREAKING", viral: "VIRAL", curiosity: "CURIOSITY", bold: "VIRAL" };
 const CATS = ["", "crypto", "stocks", "markets", "geopolitics", "technology", "world"];
 const utc = (iso: string | null | undefined) => (iso ? `${iso.slice(5, 10)} ${iso.slice(11, 16)}Z` : "-");
 const mins = (n: number | null | undefined) => (n === null || n === undefined ? "-" : n >= 90 ? `${(n / 60).toFixed(1)} h` : `${n} min`);
@@ -163,7 +166,7 @@ export function TerminalPage() {
   );
 }
 
-function StoryRow({ s, open, onToggle, onChanged }: { s: Story; open: boolean; onToggle: () => void; onChanged: () => void }) {
+export function StoryRow({ s, open, onToggle, onChanged }: { s: Story; open: boolean; onToggle: () => void; onChanged: () => void }) {
   const l = LANE[s.lane] ?? LANE.watch;
   const ev = s.evidence?.score ?? 0;
   const vi = s.viral?.score ?? 0;
@@ -175,6 +178,7 @@ function StoryRow({ s, open, onToggle, onChanged }: { s: Story; open: boolean; o
           {s.fast && <Badge tone="bad">FAST LANE</Badge>}
           {s.rumor && <Badge tone="warn">unverified</Badge>}
           {s.ahead_of_mainstream && <Badge tone="info">ahead of mainstream</Badge>}
+          {s.claim && s.claim.status !== "reported" && <Badge tone={CLAIM_TONE[s.claim.status] ?? "neutral"} title={s.claim.kinds.join(", ")}>{s.claim.status}</Badge>}
           <span className="small muted">{s.category} · first report {utc(s.first_report)} · {s.sources.length} source{s.sources.length === 1 ? "" : "s"}</span>
         </span>
         <span className="pt-story-title">{s.title}</span>
@@ -213,6 +217,8 @@ function StoryDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
             {data.why && <li><strong>Trend score {data.trend_score.toFixed(0)}:</strong> {data.why}</li>}
             {data.viral && <li><strong>Viral {data.viral.score.toFixed(0)}:</strong> {data.viral.drivers.join(", ") || "no strong driver"}{data.viral.measured.length ? ` · measured: ${data.viral.measured.join("; ")}` : " · no social measurement"}</li>}
             {data.evidence && <li><strong>Evidence {data.evidence.score.toFixed(0)} ({data.evidence.level}):</strong> {data.evidence.reasons.join("; ")}</li>}
+            {data.claim && <li><strong>Claim:</strong> {data.claim.status}{data.claim.kinds.length ? ` (${data.claim.kinds.join(", ")})` : ""}; first: {data.claim.original?.url ? <a className="link" href={data.claim.original.url} target="_blank" rel="noreferrer">{data.claim.original.outlet}</a> : data.claim.original?.outlet}
+              {data.claim.disputes.map((d, i) => <div key={i} className="small bad-text">Disputed by {d.outlet}: {d.title}</div>)}</li>}
             <li><strong>Decision:</strong> {data.decision.status}{data.decision.reason ? ` (${data.decision.reason})` : ""}</li>
           </ul>
           {data.viral && <div className="pt-parts">{Object.entries(data.viral.parts).map(([k, v]) => <span key={k} className="pt-chip">{k} {v}</span>)}</div>}
@@ -227,7 +233,7 @@ function StoryDetail({ id, onChanged }: { id: number; onChanged: () => void }) {
           {data.rumor && <p className="small warn-text">Unverified: these can't be published as fact. Wait for a reliable outlet or an official source.</p>}
           <ul className="pt-hooks">{data.hooks.map((h, i) => (
             <li key={i} className={h.ok ? "" : "bad"}>
-              <span className="small muted">{h.kind} · {h.writer}</span>
+              <span className="small muted">{HOOK_LABEL[h.kind] ?? h.kind} · {h.writer}</span>
               <div className="pt-hook-text">{h.text}</div>
               {h.ok ? <button className="btn btn-sm" onClick={() => setText(h.text)} disabled={!!sent}>Use</button> : <span className="small bad-text">Blocked: {h.reason}</span>}
             </li>))}</ul>

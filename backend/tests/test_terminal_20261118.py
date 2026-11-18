@@ -191,7 +191,7 @@ def test_rule_hooks_for_a_verified_story_pass_the_gate_and_rumour_hooks_say_unco
     srcs = [src("Reuters", t), src("BBC", t), src("CNN", t)]
     ev = intel.evidence(t, srcs, FRESH)
     hooks = intel.rule_hooks(t, "Reuters", "geopolitics", ev, 80, None)
-    assert [h["kind"] for h in hooks] == ["breaking", "curiosity", "bold"]
+    assert [h["kind"] for h in hooks] == ["breaking", "viral", "curiosity"]
     assert hooks[0]["text"].startswith("BREAKING:")
     for h in hooks:
         chk = intel.check_hook(h["text"], source_text=t, outlet="Reuters", reliable_count=3, breaking_ok=intel.breaking_allowed(ev))

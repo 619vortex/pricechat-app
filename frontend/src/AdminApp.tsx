@@ -46,6 +46,7 @@ const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ defaul
 const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
 const TelegramTradingPage = lazy(() => import("./pages/TelegramTradingPage").then((m) => ({ default: m.TelegramTradingPage })));
 const TerminalPage = lazy(() => import("./pages/terminal/TerminalPage").then((m) => ({ default: m.TerminalPage })));
+const XIntelPage = lazy(() => import("./pages/terminal/XIntelPage").then((m) => ({ default: m.XIntelPage })));
 const TerminalNewsDesk = lazy(() => import("./pages/x/NewsDesk").then((m) => ({ default: m.NewsDesk })));
 const TerminalTrending = lazy(() => import("./pages/x/TrendingTopics").then((m) => ({ default: m.TrendingTopics })));
 const WorldMonitorPage = lazy(() => import("./pages/WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
@@ -71,6 +72,7 @@ export function AdminApp() {
             <Route path="x" element={<XPage />} />
             <Route path="world-monitor" element={<WorldMonitorPage />} />
             <Route path="terminal" element={<TerminalPage />} />
+            <Route path="terminal/x" element={<XIntelPage />} />
             <Route path="terminal/newsdesk" element={<TerminalNewsDesk />} />
             <Route path="terminal/trending" element={<TerminalTrending />} />
             <Route path="brand-manager/*" element={<BrandManagerPage />} />

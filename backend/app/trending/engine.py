@@ -111,6 +111,11 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
                 items, problem, meta = await status_feeds.read(client, now)
             elif name in discovery.DEFAULTS:
                 items, problem, meta = await discovery.read(name, client, o, now)
+            elif name == "x_accounts":
+                from app.terminal import xintel
+
+                items, problem, meta = await xintel.read(db, s, settings, runtime, o, now)
+                state["x_intel"] = (s.state or {}).get("x_intel") or {}  # the read's since_ids and spend, kept when health is written below
             else:
                 items, problem, meta = await sources.x_source(name, db, settings, runtime, o)
         except Exception as e:  # noqa: BLE001 - one source's bug never stops the others
@@ -213,7 +218,8 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
         topic = next((o for _, o in ranked if o not in touched and same_topic(o, ids, lead.title)), None)
         srcs = [{"source": x.source, "outlet": x.outlet, "title": x.title, "url": x.url, "reliable": x.reliable, "engagement": x.engagement,
                  "summary": (x.summary or "")[:500] if x.reliable else "", "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind", "official", "magnitude",
-                                                                   "alert", "event", "points", "tsunami", "domain", "thread")}}
+                                                                   "alert", "event", "points", "tsunami", "domain", "thread", "tier", "handle",
+                                                                   "group", "post_id", "quoted", "fp", "tags", "metrics")}}
                 # the topic's lead first: the writer leads with sources[0] (2026-11-16: a quote-led feature led trend post 152)
                 for x in sorted(c.signals, key=lambda x: (x is not lead, not x.reliable, rank.quote_led(x.title), -x.engagement))[:12]]
         metrics: dict[str, Any] = {"signals": len(c.signals)}
@@ -260,7 +266,9 @@ def brief_of(topic: TtTopic) -> tuple[writer.Brief | None, list[dict[str, Any]]]
     """The writer's facts, from the topic's reliable items only, plus what our sources measured (topic.parts.growth). None when no
     reliable item backs it."""
     srcs = topic.sources or []
-    reliable = [x for x in srcs if x.get("reliable")]
+    # a news report leads before an X post of it; an X post that leads is credited by its outlet's name, never as an @mention
+    reliable = sorted([x for x in srcs if x.get("reliable")], key=lambda x: x.get("source") == "x_accounts")
+    reliable = [{**x, "outlet": intel.x_credit(x)} if x.get("source") == "x_accounts" else x for x in reliable]
     google = max((x for x in srcs if x.get("source") == "google" and (x.get("extra") or {}).get("query") and not (x.get("extra") or {}).get("kind")),
                  key=lambda x: (x.get("engagement") or 0, (x.get("extra") or {}).get("geo") == "US"), default=None)
     reddit = max((x for x in srcs if x.get("source") == "reddit"), key=lambda x: x.get("engagement") or 0, default=None)
@@ -380,6 +388,7 @@ def terminal_view(topic: TtTopic, lead_summary: str = "") -> dict[str, Any]:
         fast, fast_why = False, f"approval-only subject ({(parts.get('sensitive') or {}).get('label')})"
     old = (parts.get("terminal") or {}) if isinstance(parts.get("terminal"), dict) else {}
     return {"viral": vi, "evidence": ev, "rumor": ev["rumor"], "ahead": intel.ahead_of_mainstream(srcs, parts, ev), "fast": fast, "fast_why": fast_why,
+            "claim": intel.claim_status(topic.title, srcs, ev),
             "breaking_ok": intel.breaking_allowed(ev), "fast_since": old.get("fast_since") or (utcnow().isoformat() if fast else None),
             "hooks": old.get("hooks") if old.get("hooks_for") == topic.title else None, "hooks_for": old.get("hooks_for")}
 
@@ -725,6 +734,18 @@ def _model_writer(settings: Settings) -> bool:
     return bool(credentials.resolve("anthropic_api_key", settings) and getattr(settings, "newsdesk_model", ""))
 
 
+def x_access_line(db: Session, s: TtSettings, settings: Settings) -> str:
+    """Once per deploy: what X access production has (from the connection's last test and measured usage; no request, no secret)."""
+    from app.terminal import feed as terminal_feed
+
+    a = terminal_feed.x_access(db, settings)
+    caps = ",".join(f"{k}={v.get('status')}" for k, v in sorted(a["capabilities"].items())) or "never tested"
+    o = sources.merged(s.sources).get("x_accounts") or {}
+    return (f"x intelligence access: configured={a['configured']} app_only={a['app_only']} user_context={a['user_context']} status={a['status']} "
+            f"account=@{a['account'] or '-'} capabilities[{caps}] usage_month=${a['usage_month'].get('cost', 0)} posts_month={int(a['usage_month'].get('posts', 0))} "
+            f"budget=${a['budget']['daily_usd']}/day ${a['budget']['monthly_usd']}/month watchlist={'on' if o.get('on') else 'off'} accounts={len(o.get('accounts') or [])}")
+
+
 def startup_line(db: Session, s: TtSettings, settings: Settings) -> str:
     """Once per process (per deploy): the effective settings."""
     srcs = sources.merged(s.sources)
@@ -974,6 +995,7 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
         _STARTUP_LOGGED = True
         try:
             logger.info(startup_line(db, s, settings))
+            logger.info(x_access_line(db, s, settings))
         except Exception:  # noqa: BLE001
             logger.exception("trending: startup log failed")
     out: dict[str, Any] = {"mode": s.mode, "automatic": automatic(s), "live": coordinate.x_live(db, s), "stopped": s.kill_switch, "expired": expire(db, now)}

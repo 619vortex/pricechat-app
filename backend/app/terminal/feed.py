@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 WINDOW = timedelta(hours=24)
 LANES = ("breaking", "emerging", "disruption", "rumor", "watch", "published", "rejected")
 ALERT_VIRAL = 75.0  # a rumour this viral is worth a person's look now
+X_ALERT_ACCOUNTS = 3  # a narrative three or more watched X accounts are posting about: a rapidly emerging event
 
 
 def _iso(d: datetime | None) -> str | None:
@@ -61,7 +62,7 @@ def story_out(t: TtTopic, post: TtPost | None, s: TtSettings) -> dict[str, Any]:
     return {"id": t.id, "title": t.title, "category": t.category, "topic_status": t.status, "lane": lane_of(t, term, post),
             "trend_score": t.score, "peak_score": t.peak_score, "viral": term.get("viral"), "evidence": term.get("evidence"),
             "rumor": bool(term.get("rumor")), "ahead_of_mainstream": bool(term.get("ahead")), "fast": bool(term.get("fast")), "fast_why": term.get("fast_why"),
-            "breaking_ok": bool(term.get("breaking_ok")), "first_report": tl.get("first_report") or tl.get("event_time"), "detected": _iso(t.first_seen),
+            "breaking_ok": bool(term.get("breaking_ok")), "claim": term.get("claim"), "first_report": tl.get("first_report") or tl.get("event_time"), "detected": _iso(t.first_seen),
             "last_update": tl.get("last_update"), "age_hours": pa.get("age_hours"), "stale": pa.get("stale"), "why": pa.get("why"),
             "incident": pa.get("incident"), "sensitive": pa.get("sensitive"), "sources": links, "decision": {"status": status, "reason": reason},
             "post": engine.post_out(post) if post is not None else None}
@@ -189,8 +190,8 @@ def story_detail(db: Session, t: TtTopic) -> dict[str, Any]:
 MODEL_HOOKS = """You write three alternative X headlines for a breaking-news account (Price Chat) about ONE story, using ONLY the facts given.
 Return exactly three lines, in this order, each under 200 characters, no hashtags, no emoji, no links:
 1. BREAKING: urgent and plain (start with "BREAKING: " only if VERIFIED is yes, otherwise start with "JUST IN: ").
-2. Curiosity-driven: makes the reader want the detail, without withholding the core fact and without bait like "you won't believe".
-3. Bold: punchy and direct, still strictly factual.
+2. VIRAL: provocative and attention-grabbing, punchy and direct, still strictly factual (no outrage the facts don't carry).
+3. CURIOSITY: makes the reader want the detail, without withholding the core fact and without bait like "you won't believe".
 Never add a figure, name, quote, cause, casualty number or claim that the facts don't contain. Keep every hedge the source uses
 ("reportedly", "says", "alleged"). Never present a rumour or allegation as established fact. No predictions, no advice."""
 
@@ -219,7 +220,7 @@ async def model_hooks(db: Session, settings: Settings, t: TtTopic, *, transport:
         raise ValueError(f"The model answered HTTP {r.status_code}.")
     text = "".join(c.get("text", "") for c in r.json().get("content") or [] if isinstance(c, dict) and c.get("type") == "text")
     lines = [re.sub(r"^\s*(?:\d[.)]|[-*])\s*", "", ln).strip() for ln in text.splitlines() if ln.strip()][:3]
-    kinds = ("breaking", "curiosity", "bold")
+    kinds = ("breaking", "viral", "curiosity")
     out = []
     for kind, line in zip(kinds, lines):
         line = intel.with_credit(line, b.outlet)[:280]
@@ -306,11 +307,15 @@ async def alerts(db: Session, settings: Settings, topics: list[TtTopic], now: da
     lines = []
     for t in topics:
         term = (t.parts or {}).get("terminal") or {}
-        kind = "fast" if term.get("fast") else "rumor" if term.get("rumor") and float((term.get("viral") or {}).get("score") or 0) >= ALERT_VIRAL else None
+        xs = [x for x in (t.sources or []) if x.get("source") == "x_accounts"]
+        x_indep = len({str(x.get("outlet") or "").lower() for x in xs})
+        kind = ("fast" if term.get("fast") else "rumor" if term.get("rumor") and float((term.get("viral") or {}).get("score") or 0) >= ALERT_VIRAL
+                else "x" if x_indep >= X_ALERT_ACCOUNTS else None)
         if kind is None or (t.id, kind) in done:
             continue
         ev, vi = term.get("evidence") or {}, term.get("viral") or {}
-        text = (f"Price Chat Terminal: {'BREAKING (fast lane)' if kind == 'fast' else 'Rumour needs review'}\n{t.title}\n"
+        label = {"fast": "BREAKING (fast lane)", "rumor": "Rumour needs review", "x": "Emerging on X"}[kind]
+        text = (f"Price Chat Terminal: {label}\n{t.title}\n"
                 f"Viral {vi.get('score')} | Evidence {ev.get('score')} ({ev.get('level')})\n"
                 + (term.get("fast_why") or "; ".join(ev.get("reasons") or [])[:200]) + "\nAdmin > Price Chat Terminal")
         try:
@@ -326,3 +331,91 @@ async def alerts(db: Session, settings: Settings, topics: list[TtTopic], now: da
         s.state = state
         db.commit()
     return lines
+
+
+# --- X Intelligence (app/terminal/xintel) --------------------------------------------------------------------------------------------
+
+
+def _x_posts(rows: list[Any]) -> list[dict[str, Any]]:
+    return [{"handle": (r.extra or {}).get("handle"), "tier": (r.extra or {}).get("tier"), "group": (r.extra or {}).get("group"), "at": engine._iso(r.published_at or r.first_seen),
+             "fp": (r.extra or {}).get("fp") or "", "quoted": (r.extra or {}).get("quoted"), "post_id": (r.extra or {}).get("post_id"), "text": r.title,
+             "tags": (r.extra or {}).get("tags") or {}, "engagement": r.engagement, "history": r.history or [], "url": r.url} for r in rows]
+
+
+def x_access(db: Session, settings: Settings) -> dict[str, Any]:
+    """What X access Price Chat has, from the connection's own last test and its measured usage (no request made here)."""
+    from app.connectors.state import get_connector_state
+    from app.models.enums import Platform
+    from app.security import credentials
+    from app.social.budget import PlatformBudget
+
+    creds = credentials.x_credentials(settings)
+    st = get_connector_state(db, Platform.X)
+    b = PlatformBudget(db, settings)
+    caps = st.capabilities or {}
+    return {"configured": creds.configured, "app_only": creds.app_only, "user_context": creds.user_context, "status": st.status,
+            "account": st.account_username, "capabilities": {k: {"status": v.get("status"), "detail": v.get("detail"), "checked_at": v.get("checked_at")} for k, v in caps.items()},
+            "tested": bool(caps), "last_error": st.last_error, "usage_today": b.today(), "usage_month": b.month(), "budget": b.limits(),
+            "plan": "pay-per-use (credits)", "prices": {"post_read": 0.005, "user_read": 0.010, "list_read": 0.005, "owned_read": 0.001, "trends_request": 0.010},
+            "pricing_source": "docs.x.com/x-api/getting-started/pricing (read 2026-11-18): billed per resource, once per UTC day; 3M post reads per monthly cycle",
+            "search_ok": (caps.get("search_recent") or {}).get("status") == "available"}
+
+
+def x_overview(db: Session, settings: Settings) -> dict[str, Any]:
+    from app.terminal import xintel
+    from app.trending import sources as tsources
+
+    now = utcnow()
+    s = engine.settings_row(db)
+    db.commit()
+    opts = tsources.merged(s.sources).get("x_accounts") or {}
+    accounts = xintel.clean_watchlist(opts.get("accounts"))
+    rows = list(db.scalars(select(TtSignal).where(TtSignal.source == "x_accounts", TtSignal.last_seen >= now - timedelta(hours=24))))
+    posts = _x_posts(rows)
+    by_handle: dict[str, list[dict[str, Any]]] = {}
+    for p in posts:
+        by_handle.setdefault(str(p["handle"] or "").lower(), []).append(p)
+    watch = [{**a, "posts_24h": len(by_handle.get(a["handle"].lower(), [])),
+              "last_post": max((str(p["at"]) for p in by_handle.get(a["handle"].lower(), [])), default=None)} for a in accounts]
+    ids = {r.id for r in rows}
+    topics = [t for t in db.scalars(select(TtTopic).where(TtTopic.last_seen >= now - timedelta(hours=24))) if ids & set(int(i) for i in (t.signal_ids or []))]
+    tposts = _posts_for(db, [t.id for t in topics])
+    narratives = []
+    for t in topics:
+        mine = [p for p, r in zip(posts, rows) if r.id in set(int(i) for i in (t.signal_ids or []))]
+        out = story_out(t, tposts.get(t.id), s)
+        out["x"] = {**xintel.independence(mine), "velocity": xintel.velocity(mine, now),
+                    "links": [{"handle": p["handle"], "tier": p["tier"], "url": p["url"], "text": p["text"], "at": p["at"], "engagement": p["engagement"]}
+                              for p in sorted(mine, key=lambda p: str(p["at"] or ""))[:20]]}
+        narratives.append(out)
+    narratives.sort(key=lambda n: (-(n["x"]["independent"]), -float((n["viral"] or {}).get("score") or 0)))
+    state = s.state or {}
+    return {"now": now.isoformat(), "access": x_access(db, settings), "enabled": bool(opts.get("on")), "daily_usd": float(opts.get("daily_usd") or 1.0),
+            "max_posts": int(opts.get("max_posts") or 50), "spent_today": xintel.spent_today(state, now), "spent_month": xintel.month_spend(state, now),
+            "last_read": (state.get("x_intel") or {}).get("last_read"), "estimate": xintel.estimate(accounts), "groups": xintel.GROUPS, "tiers": xintel.TIERS,
+            "watchlist": watch, "emerging": xintel.emerging(posts, now), "narratives": narratives[:60], "posts_24h": len(posts),
+            "health": ((state.get("health") or {}).get("x_accounts")), "controls": controls(db, s)}
+
+
+def x_settings(db: Session, *, on: bool | None = None, confirm_paid: bool = False, daily_usd: float | None = None, max_posts: int | None = None,
+               accounts: list[dict[str, Any]] | None = None) -> None:
+    from app.terminal import xintel
+    from app.trending import sources as tsources
+
+    s = engine.settings_row(db)
+    db.commit()
+    merged = tsources.merged(s.sources)
+    o = dict(merged.get("x_accounts") or {})
+    if on is True and not o.get("on") and not confirm_paid:
+        raise ValueError("Reading X accounts is paid ($0.005 per post, $0.010 per account a day): it needs an explicit confirmation.")
+    if on is not None:
+        o["on"] = on
+    if daily_usd is not None:
+        o["daily_usd"] = round(max(0.1, min(50.0, float(daily_usd))), 2)
+    if max_posts is not None:
+        o["max_posts"] = max(10, min(100, int(max_posts)))
+    if accounts is not None:
+        o["accounts"] = xintel.clean_watchlist(accounts)
+    merged["x_accounts"] = o
+    s.sources = merged
+    db.commit()

@@ -62,6 +62,8 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
             if k not in merged:
                 raise HTTPException(400, f"Unknown source: {k}")
             allowed = set(sources.DEFAULT_SOURCES[k])
+            if k == "x_accounts" and v.get("on") and not merged[k].get("on"):
+                raise HTTPException(400, "Reading X accounts is paid: turn it on in Price Chat Terminal › X Intelligence, which shows the price and asks you to confirm.")
             if set(v) - allowed:
                 raise HTTPException(400, f"Unknown option for {k}: {', '.join(sorted(set(v) - allowed))}")
             merged[k].update(v)
