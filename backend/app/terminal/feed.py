@@ -390,9 +390,19 @@ def x_overview(db: Session, settings: Settings) -> dict[str, Any]:
         narratives.append(out)
     narratives.sort(key=lambda n: (-(n["x"]["independent"]), -float((n["viral"] or {}).get("score") or 0)))
     state = s.state or {}
-    return {"now": now.isoformat(), "access": x_access(db, settings), "enabled": bool(opts.get("on")), "daily_usd": float(opts.get("daily_usd") or 1.0),
+    xi = dict(state.get("x_intel") or {})
+    sent_topics = {p.topic_id for p in db.scalars(select(TtPost).where(TtPost.status.in_(("published", "dry_run", "uncertain"))))}
+    from app.trending import coordinate as tc
+
+    for k, e in ((xi.get("pilot") or {}).get("ledger") or {}).items():  # published by the News Desk counts too
+        if not e.get("published") and e.get("verified_at"):
+            c = tc.newsdesk_conflict(db, [str(e.get("title") or "")], now) or ""
+            if "published" in c or "released" in c:
+                sent_topics.add(int(k))
+    return {"now": now.isoformat(), "access": x_access(db, settings), "enabled": bool(opts.get("on")),
+            "pilot": xintel.pilot_metrics(xi, now, sent_topics), "paused": xi.get("paused"), "protect": xintel.protect_posting(db, settings, now), "daily_usd": float(opts.get("daily_usd") or 1.0),
             "max_posts": int(opts.get("max_posts") or 50), "spent_today": xintel.spent_today(state, now), "spent_month": xintel.month_spend(state, now),
-            "last_read": (state.get("x_intel") or {}).get("last_read"), "estimate": xintel.estimate(accounts), "groups": xintel.GROUPS, "tiers": xintel.TIERS,
+            "last_read": (state.get("x_intel") or {}).get("last_read"), "estimate": xintel.estimate([a for a in accounts if a.get("on")]), "groups": xintel.GROUPS, "tiers": xintel.TIERS,
             "watchlist": watch, "emerging": xintel.emerging(posts, now), "narratives": narratives[:60], "posts_24h": len(posts),
             "health": ((state.get("health") or {}).get("x_accounts")), "controls": controls(db, s)}
 

@@ -130,6 +130,7 @@ class WatchEntry(StrictInput):
     group: str = Field(max_length=20)
     tier: Literal["A", "B", "C"]
     note: str = Field("", max_length=120)
+    on: bool = True
 
 
 class WatchlistInput(StrictInput):

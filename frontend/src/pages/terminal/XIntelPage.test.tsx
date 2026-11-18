@@ -22,7 +22,12 @@ const OVERVIEW: XOverview = {
     x: { posts: 4, independent: 2, independent_accounts: ["zachxbt", "lookonchain"], copies: 2, coordinated: false, tiers: { B: 1, C: 1 },
       velocity: { per_min: 12.5, between_reads: 0, basis: "X public counts" },
       links: [{ handle: "zachxbt", tier: "B", url: "https://x.com/zachxbt/status/10", text: "Bybaz exchange drained", at: null, engagement: 900 }] } }],
-  posts_24h: 4, health: null,
+  posts_24h: 4, health: null, paused: null, protect: null,
+  pilot: { started: "2026-11-18T08:10:00Z", spend_usd: 0.42, posts_read: 40, unique_posts: 38, duplicates_returned: 0, stories: 5, x_led: 3, before_other_sources: 2,
+    lead_min: { median: 22, max: 41, n: 2 }, verified: 2, useful_discoveries: 1, verified_published: 1, false_positives: 1, cost_per_useful: 0.42,
+    budget_check: "$28.53 left this month covers 13 days at $1.00 plus the posting reserve", days: { "2026-11-18": { usd: 0.42, new: 38 } },
+    recent: [{ title: "Bybaz drained", x_first: "2026-11-18T09:00:00Z", other_first: "2026-11-18T09:22:00Z", x_led: true, lead_min: 22, accounts: ["@zachxbt"],
+      verified_at: "2026-11-18T09:25:00Z", rumor: false, claim: "confirmed", published: true }] },
 };
 
 let calls: string[] = [];
@@ -49,6 +54,8 @@ describe("X Intelligence", () => {
     expect(screen.getByText("unsupported")).toBeTruthy();
     expect((screen.getByText(/@zachxbt \[B\]/) as HTMLAnchorElement).href).toBe("https://x.com/zachxbt/status/10");
     expect(screen.getByText("$BYZ · 4")).toBeTruthy();
+    expect(document.body.textContent).toMatch(/Cost per useful discovery\$0\.42/);
+    expect(document.body.textContent).toMatch(/median lead 22 min/);
   });
 
   it("turns paid reads on only after the price is confirmed", async () => {
@@ -71,13 +78,14 @@ describe("X Intelligence", () => {
     render(<XIntelPage />);
     await settle();
     fireEvent.change(screen.getByLabelText("Tier of zachxbt"), { target: { value: "A" } });
+    fireEvent.click(screen.getByLabelText("Read zachxbt"));
     fireEvent.click(screen.getByLabelText("Remove Reuters"));
     fireEvent.change(screen.getByLabelText("New handle"), { target: { value: "@PeckShieldAlert" } });
     fireEvent.click(screen.getByText("Add"));
     fireEvent.click(screen.getByText("Save watchlist"));
     await settle();
     const put = calls.find((c) => c.startsWith("PUT /api/terminal/x/watchlist")) ?? "";
-    expect(put).toContain('"handle":"zachxbt","group":"onchain","tier":"A"');
+    expect(put).toContain('"handle":"zachxbt","group":"onchain","tier":"A","note":"","on":false');
     expect(put).toContain('"handle":"PeckShieldAlert"');
     expect(put).not.toContain("Reuters");
   });

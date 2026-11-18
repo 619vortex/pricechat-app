@@ -127,6 +127,11 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
         failing = bool(problem) and not unavailable and not idle
         stored[name] = _store(db, items, now)
         db.commit()  # never hold SQLite's write lock across the next source's network read (2026-11-18: a 16 s GDELT read locked the worker's claim)
+        if name == "x_accounts":
+            lr = (((s.state or {}).get("x_intel") or {}).get("last_read") or {})
+            logger.info("x pilot read: %d new posts, %s requests, $%.4f%s | today $%.4f", len(items), lr.get("requests"), float(lr.get("usd") or 0),
+                        f" ({_safe(problem or lr.get('problem'), 120)})" if (problem or lr.get("problem")) else "",
+                        float((((s.state or {}).get("x_intel") or {}).get("spend") or {}).get(now.strftime("%Y-%m-%d"), 0)))
         if name in discovery.DEFAULTS:  # the Terminal's own sources: one line per read, so production shows they work
             logger.info("terminal source %s: %d items, %d new%s", name, len(items), stored[name], f" ({_safe(problem, 100)})" if problem else "")
         usage["requests"][name] = int(usage["requests"].get(name, 0)) + int(meta.get("requests") or 0)
@@ -998,6 +1003,15 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
             logger.info(x_access_line(db, s, settings))
         except Exception:  # noqa: BLE001
             logger.exception("trending: startup log failed")
+    try:  # the owner's X Intelligence pilot (2026-11-18): switched on once, only if the X budget supports it
+        from app.terminal import xintel
+
+        if (line := xintel.activate_pilot(db, s, settings, now)) is not None:
+            logger.info(line)
+            db.commit()
+    except Exception:  # noqa: BLE001 - the pilot never stops a scan
+        logger.exception("trending: x pilot activation failed")
+        db.rollback()
     out: dict[str, Any] = {"mode": s.mode, "automatic": automatic(s), "live": coordinate.x_live(db, s), "stopped": s.kill_switch, "expired": expire(db, now)}
     if not s.enabled:
         out["skipped"] = "Trending Topics is switched off"
@@ -1010,6 +1024,17 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
     async with httpx.AsyncClient(transport=transport or HTTP_TRANSPORT, timeout=20, follow_redirects=True) as client:
         read = await read_sources(db, s, settings, runtime, now, client, only)
     topics = build_topics(db, s, now)
+    try:
+        from app.terminal import xintel
+
+        st = dict(s.state or {})
+        xi = dict(st.get("x_intel") or {})
+        for line in xintel.pilot_ledger(xi, topics, now):
+            logger.info(line)
+        st["x_intel"] = xi
+        s.state = st
+    except Exception:  # noqa: BLE001
+        logger.exception("trending: x pilot ledger failed")
     made = 0
     for t in sorted(topics, key=lambda t: (not _fast(t), -t.score)):
         if made >= MAX_NEW_PER_SCAN or (t.score < s.suggest_score and not _fast(t)):

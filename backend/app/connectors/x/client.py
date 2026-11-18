@@ -94,6 +94,12 @@ class XClient:
                                est_cost=PRICE_USER_READ, endpoint="users/by/username")
         return body["data"]
 
+    async def users_by_usernames(self, usernames: list[str]) -> dict[str, Any]:
+        """Up to 100 accounts in one request (GET /2/users/by): $0.010 per user returned."""
+        names = [u.lstrip("@") for u in usernames][:100]
+        return await self._get("/2/users/by", {"usernames": ",".join(names), "user.fields": "username"}, est_cost=PRICE_USER_READ * len(names),
+                               endpoint="users/by", count_users=True)
+
     async def me(self) -> dict[str, Any]:
         if not self.has_user_context:
             raise XNotConfiguredError("Account (user-context) keys are needed for this; add them on the Connection page.")
@@ -101,11 +107,13 @@ class XClient:
         return body["data"]
 
     async def search_recent(self, query: str, max_results: int = 10, since_id: str | None = None, *, rich: bool = False,
-                            until_id: str | None = None) -> dict[str, Any]:
-        """`rich` also asks for author avatars and attached media (same billing: posts + users returned)."""
-        params = {"query": query, "max_results": str(max(10, min(100, max_results))), "tweet.fields": TWEET_FIELDS + (",attachments,entities" if rich else ""),
-                  "expansions": "author_id" + (",attachments.media_keys" if rich else ""),
-                  "user.fields": USER_FIELDS + (",profile_image_url" if rich else "")}
+                            until_id: str | None = None, authors: bool = True) -> dict[str, Any]:
+        """`rich` also asks for author avatars and attached media (same billing: posts + users returned). authors=False: no user objects
+        (each is a $0.010 User: Read), for a caller that already knows who each author_id is."""
+        params = {"query": query, "max_results": str(max(10, min(100, max_results))), "tweet.fields": TWEET_FIELDS + (",attachments,entities" if rich else "")}
+        if authors or rich:
+            params["expansions"] = "author_id" + (",attachments.media_keys" if rich else "")
+            params["user.fields"] = USER_FIELDS + (",profile_image_url" if rich else "")
         if rich:
             params["media.fields"] = "type,url,preview_image_url,width,height"
         if since_id:

@@ -41,24 +41,40 @@ class XWeb(Web):
         super().__init__(now)
         self.x_posts: list[dict[str, Any]] = []
         self.queries: list[dict[str, str]] = []
+        self.lookups: list[list[str]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.x.com" and request.url.path == "/2/users/by":
+            names = dict(request.url.params)["usernames"].split(",")
+            self.lookups.append(names)
+            return httpx.Response(200, json={"data": [{"id": USERS[n], "username": n} for n in names if n in USERS]})
         if request.url.host == "api.x.com" and request.url.path == "/2/tweets/search/recent":
             q = dict(request.url.params)
             self.queries.append(q)
             since = int(q.get("since_id") or 0)
             handles = {h.split(":", 1)[1].lower() for h in q["query"].strip("()").split(") ")[0].replace("(", "").split(" OR ")}
             data = [p for p in self.x_posts if int(p["id"]) > since and next(h for h, u in USERS.items() if u == p["author_id"]).lower() in handles]
-            users = [{"id": USERS[h], "username": h, "name": h} for h in USERS if USERS[h] in {p["author_id"] for p in data}]
+            users = [{"id": USERS[h], "username": h, "name": h} for h in USERS if USERS[h] in {p["author_id"] for p in data}] if "expansions" in q else []
             meta = {"result_count": len(data), **({"newest_id": max((p["id"] for p in data), key=int)} if data else {})}
             return httpx.Response(200, json={"data": data, "includes": {"users": users}, "meta": meta})
         return super().handler(request)
 
 
 @pytest.fixture
-def xweb(db: Session) -> XWeb:
+def xweb(db: Session, monkeypatch: pytest.MonkeyPatch) -> XWeb:
     connect_x_user(db)
+    s = get_settings()
+    monkeypatch.setattr(s, "x_daily_budget_usd", 5.0)  # production's account guard (the owner's caps)
+    monkeypatch.setattr(s, "x_monthly_budget_usd", 30.0)
+    pilot_handled(db)
     return XWeb(NOW)
+
+
+def pilot_handled(db: Session) -> None:
+    """The one-time pilot activation already happened (these tests switch X Intelligence on and off themselves)."""
+    t = engine.settings_row(db)
+    t.state = {**(t.state or {}), "x_intel": {"pilot": {"approved": xintel.PILOT_APPROVED}}}
+    db.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -118,7 +134,7 @@ def test_queries_fit_xs_length_limit_and_exclude_reposts() -> None:
 def test_watchlist_validation_drops_bad_entries() -> None:
     rows = xintel.clean_watchlist([{"handle": "@Reuters", "group": "breaking", "tier": "a"}, {"handle": "bad handle!", "group": "breaking", "tier": "A"},
                                    {"handle": "reuters", "group": "breaking", "tier": "A"}, {"handle": "x", "group": "nope", "tier": "A"}])
-    assert rows == [{"handle": "Reuters", "group": "breaking", "tier": "A", "note": ""}]
+    assert rows == [{"handle": "Reuters", "group": "breaking", "tier": "A", "note": "", "on": True}]
 
 
 # --- ingestion, incremental reads, cost --------------------------------------------------------------------------------------------------
@@ -132,11 +148,17 @@ async def test_reads_are_incremental_and_the_cost_is_measured(db: Session, xweb:
     sigs = list(db.scalars(select(TtSignal).where(TtSignal.source == "x_accounts")))
     assert {s.extra["handle"] for s in sigs} == {"zachxbt", "lookonchain"} and sigs[0].url.startswith("https://x.com/")
     st = engine.settings_row(db).state["x_intel"]
-    assert st["last_read"]["usd"] == pytest.approx(2 * 0.005 + 2 * 0.010)  # 2 posts, 2 authors (billed once a day)
+    assert xweb.lookups == [[w["handle"] for w in WATCH]]  # the watched accounts, looked up once in one request
+    assert st["last_read"]["usd"] == pytest.approx(2 * 0.005 + len(WATCH) * 0.010)
+    assert "expansions" not in xweb.queries[0]  # searches never pay for author objects
     xweb.x_posts.append(post(12, "PeckShieldAlert", "Bybaz exploit: attacker drained ~$120M, funds moving to Tornado Cash", 2))
     await tick(db, xweb, NOW + timedelta(minutes=6))
     assert xweb.queries[-1]["since_id"] == "11"  # only what's new is read (and paid for)
-    assert engine.settings_row(db).state["x_intel"]["last_read"]["usd"] == pytest.approx(0.005 + 0.010)
+    # every watched author is known by now: no user objects asked for, so only the post is paid
+    assert "expansions" not in xweb.queries[-1]
+    assert engine.settings_row(db).state["x_intel"]["last_read"]["usd"] == pytest.approx(0.005)
+    sig = db.scalars(select(TtSignal).where(TtSignal.external_id == "xpost:12")).one()
+    assert sig.extra["handle"] == "PeckShieldAlert"  # named from the cache
 
 
 async def test_the_daily_cap_stops_reads_before_spending(db: Session, xweb: XWeb) -> None:
@@ -255,3 +277,93 @@ async def test_the_x_api_route_shows_access_watchlist_and_estimate(db: Session, 
     assert r.status_code == 400
     r = client.put("/api/terminal/x/settings", json={"on": True, "confirm_paid": True, "daily_usd": 1.5})
     assert r.status_code == 200 and r.json()["enabled"] is True and r.json()["daily_usd"] == 1.5
+
+
+
+# --- the pilot (owner, 2026-11-18: $30 a month and $5 a day across all X activity; X Intelligence $1 a day) -----------------------------
+
+
+def _budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = get_settings()
+    monkeypatch.setattr(s, "x_daily_budget_usd", 5.0)
+    monkeypatch.setattr(s, "x_monthly_budget_usd", 30.0)
+
+
+def _spend(db: Session, day_cost: float, month_cost: float, writes: float = 0.15) -> None:
+    from app.connectors.state import get_connector_state
+    from app.models.enums import Platform
+    from app.social.budget import _day
+
+    st = get_connector_state(db, Platform.X)
+    today = _day()
+    earlier = (utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+    usage = {today: {"requests": 10, "posts": 10, "users": 0, "cost": day_cost, "writes": 5, "write_cost": writes}}
+    if month_cost > day_cost and earlier[:7] == today[:7]:
+        usage[earlier] = {"requests": 10, "posts": 10, "users": 0, "cost": round(month_cost - day_cost, 4), "writes": 5, "write_cost": writes}
+    st.usage = usage
+    db.commit()
+
+
+async def test_the_pilot_starts_once_when_the_budget_supports_it(db: Session, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    connect_x_user(db)
+    _budget(monkeypatch)
+    _spend(db, 0.1, 1.47)
+    web = XWeb(NOW)
+    with caplog.at_level(logging.INFO, logger="app.trending.engine"):
+        await tick(db, web)
+    from app.trending import sources
+
+    o = sources.merged(engine.settings_row(db).sources)["x_accounts"]
+    assert o["on"] is True and o["daily_usd"] == 1.0
+    on = {a["handle"].lower() for a in o["accounts"] if a["on"]}
+    assert on == xintel.PILOT and "reuters" not in on and "deitaone" not in on  # high-signal only: no wires (RSS has them), no firehoses
+    assert any(r.getMessage().startswith("x pilot: STARTED") for r in caplog.records)
+    feed.x_settings(db, on=False)  # the owner turns it off: it stays off
+    await tick(db, web, NOW + timedelta(minutes=6))
+    assert sources.merged(engine.settings_row(db).sources)["x_accounts"]["on"] is False
+
+
+async def test_the_pilot_does_not_start_without_room_in_the_month(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    connect_x_user(db)
+    _budget(monkeypatch)
+    _spend(db, 0.1, 25.0)
+    await tick(db, XWeb(NOW))
+    from app.trending import sources
+
+    assert sources.merged(engine.settings_row(db).sources)["x_accounts"]["on"] is False
+    assert "left this month" in engine.settings_row(db).state["x_intel"]["pilot"]["budget"]
+
+
+async def test_paid_reads_stop_before_they_could_touch_the_posting_reserve(db: Session, xweb: XWeb) -> None:
+    turn_on(db)
+    _spend(db, 3.45, 3.45)  # $5 a day - $1.50 reserve = $3.50: one more search ($0.10 worst case) would cut into posting
+    xweb.x_posts = [post(10, "zachxbt", HACK, 20)]
+    await tick(db, xweb)
+    assert xweb.queries == []
+    xi = engine.settings_row(db).state["x_intel"]
+    assert "protect X posting" in (xi["last_read"]["problem"] or "") and xi["paused"]["why"]
+    from app.social.budget import PlatformBudget
+
+    PlatformBudget(db, get_settings()).check(0.2)  # a post still fits under the account guard
+
+
+def test_pilot_metrics_measure_lead_verification_and_false_positives() -> None:
+    xi: dict[str, Any] = {"pilot": {"started": (NOW - timedelta(hours=10)).isoformat()}}
+    xintel.pilot_day(xi, NOW, usd=0.4, posts=40, new=38, dupes=2)
+
+    class T:
+        def __init__(self, i: int, title: str, srcs: list[dict[str, Any]], rumor: bool, level: str) -> None:
+            self.id, self.title, self.sources, self.status = i, title, srcs, "active"
+            self.parts = {"terminal": {"evidence": {"rumor": rumor, "level": level}, "claim": {"status": "confirmed" if not rumor else "unsupported"}}}
+
+    at = lambda m: (NOW - timedelta(minutes=m)).isoformat()  # noqa: E731
+    lead = T(1, "Bybaz drained", [{"source": "x_accounts", "outlet": "@zachxbt", "at": at(60)}, {"source": "news", "outlet": "CoinDesk", "at": at(38)}], False, "corroborated")
+    flop = T(2, "Bank collapse rumour", [{"source": "x_accounts", "outlet": "@a", "at": at(500)}], True, "unverified")
+    late = T(3, "Fed holds", [{"source": "news", "outlet": "Reuters", "at": at(90)}, {"source": "x_accounts", "outlet": "@federalreserve", "at": at(80)}], False, "confirmed")
+    xintel.pilot_ledger(xi, [lead, flop, late], NOW)
+    m = xintel.pilot_metrics(xi, NOW, {1})
+    assert m["spend_usd"] == 0.4 and m["unique_posts"] == 38 and m["duplicates_returned"] == 2
+    assert m["x_led"] == 2 and m["before_other_sources"] == 1 and m["lead_min"]["median"] == 22
+    assert m["useful_discoveries"] == 1 and m["verified_published"] == 1 and m["false_positives"] == 1 and m["cost_per_useful"] == 0.4

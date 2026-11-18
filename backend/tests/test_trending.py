@@ -857,7 +857,8 @@ async def test_each_scan_logs_sources_topics_top_five_and_the_decision_with_no_s
     assert tops and "Bybaz" in tops[0] and "growth=google" in tops[0] and " m" in tops[0] and " age=" in tops[0] and "tweet " in tops[0]
     pubs = [x for x in lines if x.startswith("trending publish:")]
     assert len(pubs) == 2 and pubs[0].startswith("trending publish: dry_run") and "dry run" in pubs[0].lower()
-    assert len(lines) <= 1 + 2 * 7  # a few lines per scan
+    once = ("x intelligence access:", "x pilot:", "terminal source ")  # once per deploy, or one per discovery-source read (app/terminal)
+    assert len([x for x in lines if not x.startswith(once)]) <= 1 + 2 * 7  # a few lines per scan
     for x in lines:
         assert not SECRETISH.search(x), x
     assert engine._safe("Authorization: Bearer abc.def.ghi token=xyz sk-ant-12345678 owner@example.com").count("[redacted]") >= 3

@@ -53,9 +53,21 @@ DEFAULT_WATCHLIST: list[dict[str, str]] = [
     *({"handle": h, "group": "outages", "tier": "C"} for h in ("downdetector",)),
     *({"handle": h, "group": "journalists", "tier": "B"} for h in ("bellingcat", "EliotHiggins")),
 ]
+# The pilot (owner, 2026-11-18: "$30 a month and $5 a day across all X activity, X Intelligence $1 a day; high-signal accounts, no
+# redundant reads"): official accounts that post rarely and matter when they do (incidents, military, regulators), named investigators,
+# and one fast breaking account. Off: the wires (Reuters, AP, AFP, BBC, Bloomberg, WSJ, FT: the News Desk's feeds already carry them, so
+# reading them on X pays twice for the same story) and the high-volume aggregators and alert bots (hundreds of posts a day each).
+PILOT = {"centcom", "deptofdefense", "statedept", "nato", "cisagov", "faanews", "cloudflare", "githubstatus", "federalreserve", "secgov",
+         "zachxbt", "peckshieldalert", "certikalert", "bellingcat", "bnonews", "flightradar24"}
+PILOT_APPROVED = "2026-11-18"  # the owner's approval; activation happens once, and only if the account's remaining X budget supports it
 HANDLE = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
 QUERY_MAX = 480  # X recent search accepts 512 characters on this access level; a margin for the operators
-DEFAULTS: dict[str, Any] = {"on": False, "accounts": DEFAULT_WATCHLIST, "max_posts": 50, "daily_usd": 1.0, "interval": 5}
+DEFAULT_WATCHLIST = [{**a, "on": a["handle"].lower() in PILOT} for a in DEFAULT_WATCHLIST]
+DEFAULTS: dict[str, Any] = {"on": False, "accounts": DEFAULT_WATCHLIST, "max_posts": 20, "daily_usd": 1.0, "interval": 5}
+# what X posting may still need this day and month: paid reads stop before they could eat into it (the account guard counts reads and
+# posts together, and a post refused by the guard would stop the News Desk on X)
+WRITE_RESERVE_DAY = 1.5
+WRITE_RESERVE_MONTH_MIN = 4.0
 POST_USD, USER_USD = 0.005, 0.010
 
 
@@ -76,7 +88,9 @@ def clean_watchlist(rows: Any) -> list[dict[str, str]]:
         if group not in GROUPS or tier not in TIERS:
             continue
         seen.add(m.group(1).lower())
-        out.append({"handle": m.group(1), "group": group, "tier": tier, "note": str(r.get("note") or "")[:120]})
+        on = r.get("on")
+        out.append({"handle": m.group(1), "group": group, "tier": tier, "note": str(r.get("note") or "")[:120],
+                    "on": bool(on) if on is not None else True})
     return out
 
 
@@ -301,9 +315,9 @@ async def read(db: Any, s: Any, settings: Any, runtime: Any, opts: dict[str, Any
 
     if not credentials.x_credentials(settings).configured:
         return [], "X is not connected (X › Connection)", {"requests": 0, "unavailable": True}
-    accounts = clean_watchlist(opts.get("accounts"))
+    accounts = [a for a in clean_watchlist(opts.get("accounts")) if a.get("on")]
     if not accounts:
-        return [], "the watchlist is empty", {"requests": 0, "idle": True}
+        return [], "no watched account is switched on", {"requests": 0, "idle": True}
     state = dict(s.state or {})
     xi = dict(state.get("x_intel") or {})
     since: dict[str, str] = dict(xi.get("since") or {})
@@ -311,31 +325,68 @@ async def read(db: Any, s: Any, settings: Any, runtime: Any, opts: dict[str, Any
     day = now.strftime("%Y-%m-%d")
     users_today = set(billed_users.get(day) or [])
     cap = float(opts.get("daily_usd") or 1.0)
-    max_posts = max(10, min(100, int(opts.get("max_posts") or 50)))
+    max_posts = max(10, min(100, int(opts.get("max_posts") or 20)))
+    ids: dict[str, str] = dict(xi.get("ids") or {})  # author_id -> handle: learnt once, so later reads don't pay $0.010 per author
+    known = {h.lower() for h in ids.values()}
+    seen_posts = set(xi.get("seen_posts") or [])
+    budget_why = protect_posting(db, settings, now)
     client = make_x_client(db, settings, runtime)
     items: list[dict[str, Any]] = []
     problems: list[str] = []
     requests, cost = 0, 0.0
     try:
+        # who each watched account is, once (one request for up to 100 accounts, $0.010 each): searches then never pay for author objects
+        missing = dict(xi.get("missing") or {})
+        unknown = [a["handle"] for a in accounts if a["handle"].lower() not in known
+                   and (missing.get(a["handle"].lower()) or "") < (now - timedelta(days=7)).isoformat()]
+        if unknown and not budget_why and spent_today({"x_intel": xi}, now) + len(unknown) * USER_USD <= cap + 1e-9:
+            body = await client.users_by_usernames(unknown)
+            requests += 1
+            found = [u for u in body.get("data") or [] if u.get("id") and u.get("username")]
+            cost += round(len(found) * USER_USD, 4)
+            for u in found:
+                ids[str(u["id"])] = str(u["username"])
+            known = {h.lower() for h in ids.values()}
+            for h in unknown:
+                if h.lower() not in known:
+                    missing[h.lower()] = now.isoformat()  # no such account (or suspended): asked again in a week
+            xi["missing"] = missing
+            pilot_day(xi, now, lookups=len(found))
         for q, handles in queries(accounts):
-            worst = max_posts * POST_USD + len(handles) * USER_USD
+            need_authors = any(h.lower() not in known and h.lower() not in missing for h in handles)
+            worst = max_posts * POST_USD + (len(handles) * USER_USD if need_authors else 0.0)
             if spent_today({"x_intel": xi}, now) + cost + worst > cap + 1e-9:
                 problems.append(f"stopped at the X Intelligence daily cap (${cap:.2f})")
                 break
+            why = budget_why or protect_posting(db, settings, now, extra=cost + worst)
+            if why:
+                problems.append(f"paused to protect X posting: {why}")
+                xi["paused"] = {"at": now.isoformat(), "why": why}
+                break
             key = ",".join(sorted(h.lower() for h in handles))[:200]
             try:
-                body = await client.search_recent(q, max_results=max_posts, since_id=since.get(key))
+                body = await client.search_recent(q, max_results=max_posts, since_id=since.get(key), authors=need_authors)
             except XForbiddenError:
                 return [], "not available on your X plan (X answered 403)", {"requests": requests + 1, "unavailable": True, "plan": True}
             requests += 1
+            # what X billed: every post returned, and each user object returned (once per UTC day per user)
+            returned = {str(u.get("username") or "").lower() for u in ((body.get("includes") or {}).get("users") or [])} - {""}
+            cost += per_post_cost(len(body.get("data") or []), len(returned - users_today))
+            users_today |= returned
+            for u in ((body.get("includes") or {}).get("users") or []):
+                if u.get("id") and u.get("username"):
+                    ids[str(u["id"])] = str(u["username"])
+            known = {h.lower() for h in ids.values()}
+            if not need_authors:  # no user objects in the answer: name each post's author from the cache
+                body = {**body, "includes": {"users": [{"id": i, "username": h} for i, h in ids.items()]}}
             got = parse(body, accounts)
-            items += got
+            dupes = [x for x in got if x["external_id"] in seen_posts]
+            items += [x for x in got if x["external_id"] not in seen_posts]
+            seen_posts |= {x["external_id"] for x in got}
             newest = (body.get("meta") or {}).get("newest_id")
             if newest:
                 since[key] = str(newest)
-            authors = {str(x["extra"]["handle"]).lower() for x in got}
-            cost += per_post_cost(len(body.get("data") or []), len(authors - users_today))
-            users_today |= authors
+            pilot_day(xi, now, posts=len(body.get("data") or []), new=len(got) - len(dupes), dupes=len(dupes))
     except XNotConfiguredError as e:
         return [], str(e)[:200], {"requests": requests, "unavailable": True}
     except XBudgetExceededError as e:
@@ -347,9 +398,159 @@ async def read(db: Any, s: Any, settings: Any, runtime: Any, opts: dict[str, Any
     finally:
         await client.aclose()
     xi["since"] = since
+    xi["ids"] = ids
+    xi["seen_posts"] = sorted(seen_posts)[-3000:]
     xi["users_billed"] = {day: sorted(users_today)}
+    if not problems:
+        xi.pop("paused", None)
     xi["last_read"] = {"at": now.isoformat(), "posts": len(items), "requests": requests, "usd": round(cost, 4), "problem": "; ".join(problems) or None}
+    pilot_day(xi, now, usd=cost, requests=requests)
     state = record_spend({**state, "x_intel": xi}, now, cost)
     s.state = state
     meta = {"requests": requests, "cost_usd": round(cost, 4), "idle": not items and not problems, "partial": "; ".join(problems) if items else ""}
     return items, (None if items or not problems else "; ".join(problems)), meta
+
+
+# --- the pilot: budget protection, activation, measurement -------------------------------------------------------------------------
+
+
+def protect_posting(db: Any, settings: Any, now: datetime, extra: float = 0.0) -> str | None:
+    """Why a paid read must not happen now, or None: after it, the account's X budget (reads and posts together) must still hold the
+    posting reserve for the day and for the rest of the month. A read refused here costs nothing and never touches X posting."""
+    from app.social.budget import PlatformBudget
+
+    b = PlatformBudget(db, settings)
+    lim = b.limits()
+    today, month = float(b.today()["cost"]), float(b.month()["cost"])
+    if today + extra > float(lim["daily_usd"]) - WRITE_RESERVE_DAY + 1e-9:
+        return f"the account's X spend today (${today:.2f}) would leave under ${WRITE_RESERVE_DAY:.2f} of the ${float(lim['daily_usd']):.2f} day for posting"
+    days_left = _days_left(now)
+    writes = _avg_write_cost(b)
+    reserve = max(WRITE_RESERVE_MONTH_MIN, writes * days_left * 1.5)
+    if month + extra > float(lim["monthly_usd"]) - reserve + 1e-9:
+        return f"the account's X spend this month (${month:.2f}) would leave under ${reserve:.2f} of the ${float(lim['monthly_usd']):.2f} month for posting"
+    return None
+
+
+def _days_left(now: datetime) -> int:
+    nxt = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return max(1, (nxt.date() - now.date()).days)
+
+
+def _avg_write_cost(b: Any) -> float:
+    usage = b._usage()
+    days = sorted(usage)[-7:]
+    return sum(float((usage[d] or {}).get("write_cost") or 0) for d in days) / max(1, len(days))
+
+
+def pilot_budget_ok(db: Any, settings: Any, now: datetime, daily_usd: float) -> tuple[bool, str]:
+    """May the pilot start? The rest of the month at its daily cap must fit under the monthly budget with the posting reserve kept."""
+    from app.social.budget import PlatformBudget
+
+    b = PlatformBudget(db, settings)
+    lim = b.limits()
+    month = float(b.month()["cost"])
+    need = daily_usd * _days_left(now) + max(WRITE_RESERVE_MONTH_MIN, _avg_write_cost(b) * _days_left(now) * 1.5)
+    room = float(lim["monthly_usd"]) - month
+    if float(lim["daily_usd"]) - WRITE_RESERVE_DAY < daily_usd:
+        return False, f"the account's ${float(lim['daily_usd']):.2f} a day can't hold ${daily_usd:.2f} of reads and the ${WRITE_RESERVE_DAY:.2f} posting reserve"
+    if room < need:
+        return False, f"${room:.2f} left this month, the pilot needs ${need:.2f} ({_days_left(now)} days at ${daily_usd:.2f} plus the posting reserve)"
+    return True, f"${room:.2f} left this month covers {_days_left(now)} days at ${daily_usd:.2f} plus the posting reserve"
+
+
+def activate_pilot(db: Any, s: Any, settings: Any, now: datetime) -> str | None:
+    """Once, after the owner's approval (PILOT_APPROVED): switch X Intelligence on at $1 a day with the pilot accounts, if the budget
+    supports it. Never again after that (an owner who turns it off keeps it off). Returns a log line, or None when nothing was done."""
+    from app.trending import sources as tsources
+
+    state = dict(s.state or {})
+    xi = dict(state.get("x_intel") or {})
+    if (xi.get("pilot") or {}).get("approved") == PILOT_APPROVED:
+        return None
+    ok, why = pilot_budget_ok(db, settings, now, 1.0)
+    pilot = {"approved": PILOT_APPROVED, "checked_at": now.isoformat(), "budget": why, "started": now.isoformat() if ok else None}
+    if ok:
+        merged = tsources.merged(s.sources)
+        o = dict(merged.get("x_accounts") or {})
+        o.update({"on": True, "daily_usd": 1.0, "max_posts": 20, "accounts": clean_watchlist(o.get("accounts") or DEFAULT_WATCHLIST)})
+        if not any(a.get("on") for a in o["accounts"]) or all(a.get("on") for a in o["accounts"]):
+            o["accounts"] = [{**a, "on": a["handle"].lower() in PILOT} for a in o["accounts"]]
+        merged["x_accounts"] = o
+        s.sources = merged
+    xi["pilot"] = pilot
+    state["x_intel"] = xi
+    s.state = state
+    return f"x pilot: {'STARTED' if ok else 'NOT started'} ({why})"
+
+
+def pilot_day(xi: dict[str, Any], now: datetime, **add: float) -> None:
+    days = dict((xi.get("pilot") or {}).get("days") or {})
+    d = dict(days.get(now.strftime("%Y-%m-%d")) or {})
+    for k, v in add.items():
+        d[k] = round(float(d.get(k, 0)) + float(v), 4)
+    days[now.strftime("%Y-%m-%d")] = d
+    xi["pilot"] = {**(xi.get("pilot") or {}), "days": dict(sorted(days.items())[-40:])}
+
+
+def pilot_ledger(xi: dict[str, Any], topics: list[Any], now: datetime) -> list[str]:
+    """Each topic X touched: when X had it, when any other source had it, the lead, whether it became verified, published, rejected
+    or went stale unconfirmed. Kept 14 days in state, so the 48-hour report survives signal clean-up."""
+    book = dict((xi.get("pilot") or {}).get("ledger") or {})
+    lines = []
+    for t in topics:
+        srcs = t.sources or []
+        xs = [x for x in srcs if x.get("source") == "x_accounts"]
+        if not xs:
+            continue
+        others = [x for x in srcs if x.get("source") != "x_accounts"]
+        x_first = min(str(x.get("at") or "") for x in xs)
+        o_first = min((str(x.get("at") or "") for x in others), default=None)
+        term = (t.parts or {}).get("terminal") or {}
+        ev = term.get("evidence") or {}
+        old = book.get(str(t.id)) or {}
+        lead = None
+        if o_first and x_first and o_first > x_first:
+            d1, d0 = _dt(o_first), _dt(x_first)
+            lead = int((d1 - d0).total_seconds() // 60) if d1 and d0 else None
+        e = {"title": t.title[:160], "x_first": old.get("x_first") or x_first, "other_first": o_first, "x_led": bool(o_first is None or (o_first > x_first)),
+             "lead_min": lead if lead is not None else old.get("lead_min"), "accounts": sorted({str(x.get("outlet")) for x in xs})[:8],
+             "verified_at": old.get("verified_at") or (now.isoformat() if not ev.get("rumor") and ev.get("level") in ("confirmed", "corroborated") else None),
+             "status": t.status, "rumor": bool(ev.get("rumor")), "claim": (term.get("claim") or {}).get("status"), "updated": now.isoformat(),
+             "published": old.get("published"), "rejected": old.get("rejected") or bool((t.parts or {}).get("rejected"))}
+        if e["verified_at"] and not old.get("verified_at"):
+            lines.append(f"x pilot: topic {t.id} verified \"{t.title[:70]}\" x_first {e['x_first'][11:16]} other_first {(o_first or '-')[11:16]} lead {e['lead_min']}")
+        book[str(t.id)] = e
+    cutoff = (now - timedelta(days=14)).isoformat()
+    xi["pilot"] = {**(xi.get("pilot") or {}), "ledger": {k: v for k, v in book.items() if str(v.get("updated")) >= cutoff}}
+    return lines
+
+
+def pilot_metrics(xi: dict[str, Any], now: datetime, published_topics: set[int]) -> dict[str, Any]:
+    """The owner's pilot measures, from what the pilot recorded."""
+    p = xi.get("pilot") or {}
+    days = p.get("days") or {}
+    ledger = p.get("ledger") or {}
+    start = p.get("started")
+    spend = round(sum(float(d.get("usd") or 0) for k, d in days.items() if not start or k >= start[:10]), 4)
+    posts = int(sum(float(d.get("posts") or 0) for d in days.values()))
+    new = int(sum(float(d.get("new") or 0) for d in days.values()))
+    dupes = int(sum(float(d.get("dupes") or 0) for d in days.values()))
+    rows = list(ledger.values())
+    for k, e in ledger.items():
+        if int(k) in published_topics:
+            e["published"] = e.get("published") or True
+    x_led = [e for e in rows if e.get("x_led")]
+    before_news = [e for e in x_led if e.get("other_first")]
+    leads = sorted(int(e["lead_min"]) for e in before_news if e.get("lead_min") is not None)
+    verified = [e for e in rows if e.get("verified_at")]
+    useful = [e for e in x_led if e.get("verified_at")]
+    stale_cut = (now - timedelta(hours=6)).isoformat()
+    false_pos = [e for e in x_led if not e.get("verified_at") and (str(e.get("x_first") or "") < stale_cut or e.get("rejected"))]
+    published = [e for e in verified if e.get("published")]
+    return {"started": start, "spend_usd": spend, "posts_read": posts, "unique_posts": new, "duplicates_returned": dupes,
+            "stories": len(rows), "x_led": len(x_led), "before_other_sources": len(before_news),
+            "lead_min": {"median": leads[len(leads) // 2] if leads else None, "max": leads[-1] if leads else None, "n": len(leads)},
+            "verified": len(verified), "useful_discoveries": len(useful), "verified_published": len(published),
+            "false_positives": len(false_pos), "cost_per_useful": round(spend / len(useful), 3) if useful else None,
+            "days": days, "budget_check": p.get("budget"), "recent": sorted(rows, key=lambda e: str(e.get("x_first") or ""), reverse=True)[:25]}
