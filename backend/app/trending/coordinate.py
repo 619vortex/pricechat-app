@@ -25,6 +25,13 @@ SENT_LIVE = ("published", "publishing", "uncertain")
 # after the last trend post. The shared X cap, the News Desk's spacing and every stop still apply; ordinary topics keep max_per_day.
 INCIDENT_EXTRA_PER_DAY = 2
 INCIDENT_GAP_MINUTES = 60
+# owner, 2026-11-18: verified, high-impact breaking events publish rapidly, not after hours of momentum scoring or the next routine slot
+# (app/terminal/intel.fast_lane). They may go beyond max_per_day by FAST_EXTRA_PER_DAY in 24 h, FAST_GAP_MINUTES after the last trend post
+# and FAST_NEWSDESK_GAP_MINUTES after a News Desk post; News Desk slots and its undecided candidates don't hold them. The shared X cap,
+# every stop and the one-story rule (a released or posted News Desk event) still apply.
+FAST_EXTRA_PER_DAY = 4
+FAST_GAP_MINUTES = 20
+FAST_NEWSDESK_GAP_MINUTES = 10
 WINDOW = timedelta(hours=24)  # the caps
 SAME_STORY_WINDOW = timedelta(hours=48)  # one event, one post across both lanes: yesterday's story is never re-posted
 # A News Desk CANDIDATE (not yet released) holds a trend post back only while the desk may still take it soon: for its first 30 minutes
@@ -59,7 +66,7 @@ def same_story(a: str, b: str) -> bool:
     return checks.same_event(a, b) or checks.similarity(checks.fingerprint(a), checks.fingerprint(b)) >= 0.5
 
 
-def newsdesk_conflict(db: Session, titles: list[str], now: datetime) -> str | None:
+def newsdesk_conflict(db: Session, titles: list[str], now: datetime, *, fast: bool = False) -> str | None:
     """The News Desk already has this story (posted, queued, dry run, or an event released for both platforms) in the last 48 h."""
     since = now - SAME_STORY_WINDOW
     posts = db.scalars(select(NdPost).where(NdPost.created_at >= since, NdPost.status.notin_(("rejected", "expired", "failed"))))
@@ -71,8 +78,8 @@ def newsdesk_conflict(db: Session, titles: list[str], now: datetime) -> str | No
     nxt = next_slot(db, now)
     slot_soon = nxt is not None and nxt - now <= SLOT_SOON
     for e in evs:
-        if e.status == "candidate" and not slot_soon and now - (_aware(e.created_at, now) or now) > CANDIDATE_HOLD:
-            continue
+        if e.status == "candidate" and (fast or (not slot_soon and now - (_aware(e.created_at, now) or now) > CANDIDATE_HOLD)):
+            continue  # a fast-lane story doesn't wait for the desk to decide; the desk's X lane then skips it (engine.deliver_x)
         if any(same_story(t, o) for t in titles for o in (e.title, e.headline) if o):
             return f"covered by the News Desk (event {e.id}, {e.status})"
     return None
@@ -112,8 +119,12 @@ def x_posts_today(db: Session, s: TtSettings, now: datetime) -> dict[str, int]:
     return {"newsdesk": nd, "trending": tt, "total": nd + tt}
 
 
-def cap_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool = False) -> str | None:
+def cap_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool = False, fast: bool = False) -> str | None:
     n = x_posts_today(db, s, now)
+    if fast and n["trending"] < s.max_per_day + FAST_EXTRA_PER_DAY and n["total"] < s.shared_daily_cap:
+        return None
+    if fast and n["total"] < s.shared_daily_cap:
+        return f"Trending's daily limit and the fast-lane allowance are used ({n['trending']}/{s.max_per_day}+{FAST_EXTRA_PER_DAY} in 24 h)"
     if n["trending"] >= s.max_per_day and not (incident and n["trending"] < s.max_per_day + INCIDENT_EXTRA_PER_DAY):
         if incident:
             return f"Trending's daily limit and the incident allowance are used ({n['trending']}/{s.max_per_day}+{INCIDENT_EXTRA_PER_DAY} in 24 h)"
@@ -134,11 +145,11 @@ def next_slot(db: Session, now: datetime) -> datetime | None:
     return next((t for t in times if t > now), None)
 
 
-def spacing_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool = False) -> str | None:
-    gap = timedelta(minutes=s.newsdesk_gap_minutes)
+def spacing_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool = False, fast: bool = False) -> str | None:
+    gap = timedelta(minutes=min(s.newsdesk_gap_minutes, FAST_NEWSDESK_GAP_MINUTES) if fast else s.newsdesk_gap_minutes)
     statuses = _sent_statuses(db, s)
     last_tt = _aware(db.scalar(select(func.max(TtPost.published_at)).where(TtPost.status.in_(statuses))), now)
-    tt_gap = min(s.gap_minutes, INCIDENT_GAP_MINUTES) if incident else s.gap_minutes
+    tt_gap = min(s.gap_minutes, FAST_GAP_MINUTES) if fast else min(s.gap_minutes, INCIDENT_GAP_MINUTES) if incident else s.gap_minutes
     if last_tt is not None and now - last_tt < timedelta(minutes=tt_gap):
         return f"spacing: the last trend post was {int((now - last_tt).total_seconds() // 60)} min ago (gap {tt_gap} min)"
     last_nd = _aware(db.scalar(select(func.max(NdPost.published_at)).where(NdPost.status.in_(statuses))), now)
@@ -155,7 +166,7 @@ def spacing_problem(db: Session, s: TtSettings, now: datetime, *, incident: bool
     except Exception:  # noqa: BLE001
         times = []
     near = [t for t in times if abs((t - now).total_seconds()) < gap.total_seconds()]
-    if near:
+    if near and not fast:  # a verified breaking event doesn't wait for a routine slot
         return f"spacing: a News Desk slot is at {near[0]:%H:%M} UTC"
     return None
 

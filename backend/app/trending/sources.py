@@ -60,7 +60,10 @@ RELIABLE_OUTLETS = {"reuters", "associated press", "ap news", "ap", "bloomberg",
 INCIDENT_OUTLETS = {"yahoo", "yahoo news", "tom's guide", "the points guy", "simple flying", "aviation week", "flightglobal", "the detroit news",
                     "detroit free press", "the seattle times", "chicago tribune", "the boston globe", "the dallas morning news", "houston chronicle",
                     "san francisco chronicle", "the atlanta journal-constitution", "newsday", "gizmodo", "mashable", "cnet", "pcmag", "the economic times",
-                    "times of india", "hindustan times", "the times of israel", "abc7", "nbc4", "wbal", "wfsb", "azfamily", "fox 5", "ktla", "kare 11"}
+                    "times of india", "hindustan times", "the times of israel", "abc7", "nbc4", "wbal", "wfsb", "azfamily", "fox 5", "ktla", "kare 11",
+                    # Apple/Microsoft/Android specialists report their platform's outages first (2026-11-17: the iCloud outage waited 2 h on
+                    # "No reliable source" while 9to5Mac and MacRumors had it)
+                    "9to5mac", "macrumors", "appleinsider", "9to5google", "android authority", "windows central", "neowin", "the register"}
 RELIABLE_X = {"reuters", "ap", "business", "cnbc", "ft", "wsj", "bbcbreaking", "markets", "bloombergtv", "reutersbiz"}
 DEFAULT_SUBREDDITS = ["CryptoCurrency", "Bitcoin", "ethereum", "stocks", "investing", "wallstreetbets", "economics", "worldnews", "technology", "geopolitics"]
 DEFAULT_ACCOUNTS = ["Reuters", "business", "CNBC", "WSJ", "FT", "AP", "BBCBreaking", "markets"]
@@ -73,6 +76,12 @@ DEFAULT_SOURCES: dict[str, dict[str, Any]] = {
     "faa": {"on": True, "min_airports": 5},
     "status": {"on": True},  # app/trending/status_feeds: providers' own status pages, free, official
 }
+# the Terminal's discovery sources (app/terminal/discovery, 2026-11-18): USGS, GDACS (official), GDELT and Hacker News (momentum only)
+from app.terminal import discovery as _discovery  # noqa: E402
+
+DEFAULT_SOURCES.update({k: dict(v) for k, v in _discovery.DEFAULTS.items()})
+NAMES.update(_discovery.NAMES)
+INTERVAL.update(_discovery.INTERVAL)
 
 Item = dict[str, Any]
 

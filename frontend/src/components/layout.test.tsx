@@ -51,7 +51,9 @@ describe("Admin layout", () => {
     expect(locate("/telegram/topics/4").page.to).toBe("/telegram");
     expect(locate("/pokemon/cards/9").area.key).toBe("pokemon");
     expect(locate("/vpn").area.key).toBe("vpn");
-    expect(locate("/world-monitor").area.key).toBe("worldmonitor");
+    expect(locate("/world-monitor").area.key).toBe("terminal");
+    expect(locate("/terminal").area.key).toBe("terminal");
+    expect(locate("/terminal/newsdesk").page.label).toBe("News Desk");
     expect(locate("/invite-bot/send").page.label).toBe("Send invites");
   });
 

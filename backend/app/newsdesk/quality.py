@@ -52,6 +52,9 @@ EVENT_SAID = re.compile(r"\b(attacks?|attacked|arson|sabotage|strikes?|struck|ha
                         r"shot down|downed|invad\w+|behind)\b", re.I)
 
 
+CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b)", re.I)
+
+
 def is_roundup(title: str) -> bool:
     from app.newsdesk import network
 
@@ -59,6 +62,10 @@ def is_roundup(title: str) -> bool:
     if network.is_roundup(t) or LIVE_PAGE.match(t):
         return True
     parts = [p.strip() for p in re.split(r"[,;]", t) if p.strip()]
+    # a continuation clause ("..., Saying 'It's Life'", "..., as shares fall") makes it one sentence, not a list (production 2026-11-17:
+    # "Trump Downplays Microsoft, JPMorgan Outages, Saying 'It's Life'" was refused as a round-up)
+    if any(CONTINUATION.match(p) for p in parts[1:]):
+        return False
     return len(parts) >= 3 and all(len(p.split()) >= _SEGMENT_WORDS for p in parts)
 
 
@@ -137,6 +144,24 @@ def event_problems(ev: Any, rows: list[Any] | None = None) -> list[str]:
             problems.append(f"a different story among its sources: {other[:90]!r}")
             break
     return problems
+
+
+def split_off_story(ev: Any, rows: list[Any]) -> tuple[list[Any], list[Any]]:
+    """(dropped, kept): the event's source rows that tell a DIFFERENT story are left out before the caption is written, instead of the
+    whole post being refused at the last check. Production 2026-11-17/18: four of five breaking releases (#649 FAA routers, #658, #662
+    Kuwait/Qeshm strikes, #667) were skipped on both X and Telegram because one corroborating row was another story ("a different story
+    among its sources: 'Iran attacks US air base in Bahrain'"). The lead (the event's own headline) always stays."""
+    lead = getattr(ev, "title", "") or ""
+    kept, dropped = [], []
+    for r in rows:
+        other = str(getattr(r, "title", "") or "")
+        if not other or other == lead or same_story(lead, other) or checks_same(lead, other):
+            kept.append(r)
+        else:
+            dropped.append(r)
+    if not kept and rows:  # nothing tells the event's own headline: keep what we have and let the final check decide
+        return [], rows
+    return dropped, kept
 
 
 REPEAT_DAYS = 7

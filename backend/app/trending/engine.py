@@ -18,6 +18,7 @@ from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.trending import TtPost, TtSettings, TtSignal, TtTopic
 from app.newsdesk import checks
+from app.terminal import discovery, intel
 from app.trending import coordinate, gates, learning, postmortem, rank, sensitive, sources, status_feeds, writer
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,8 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
                 items, problem, meta = await sources.faa(client, o)
             elif name == "status":
                 items, problem, meta = await status_feeds.read(client, now)
+            elif name in discovery.DEFAULTS:
+                items, problem, meta = await discovery.read(name, client, o, now)
             else:
                 items, problem, meta = await sources.x_source(name, db, settings, runtime, o)
         except Exception as e:  # noqa: BLE001 - one source's bug never stops the others
@@ -183,10 +186,13 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
     s.state = state
     enabled = s.categories or {}
     existing = list(db.scalars(select(TtTopic).where(TtTopic.last_seen >= now - timedelta(hours=48))))
-    owner: dict[int, TtTopic] = {}
-    for t in existing:
+    # every topic row a signal belongs to, newest first. Production 2026-11-17: the Apple iCloud outage became a NEW topic row every scan
+    # (T40050, T40070, ... 40 rows in 2 h, each with its own held draft) because each signal mapped only to its OLDEST row, which the
+    # sibling cluster had already taken, so the second cluster never found the row it made the scan before.
+    owner: dict[int, list[TtTopic]] = {}
+    for t in sorted(existing, key=lambda t: _aware(t.last_seen) or now, reverse=True):
         for sid in t.signal_ids or []:
-            owner.setdefault(int(sid), t)
+            owner.setdefault(int(sid), []).append(t)
     touched: list[TtTopic] = []
     for c in clusters:
         if not enabled.get(c.category, True):
@@ -195,9 +201,16 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
         parts["sensitive"] = sensitive.classify(" ".join(x.title for x in (c.reliable or c.signals)[:8]))
         ids = sorted(x.id for x in c.signals)
         lead = c.lead
-        topic = next((owner[i] for i in ids if i in owner and owner[i] not in touched and same_topic(owner[i], ids, lead.title)), None)
+        cands: dict[int, tuple[int, TtTopic]] = {}
+        for i in ids:
+            for o in owner.get(i, []):
+                n, _ = cands.get(o.id, (0, o))
+                cands[o.id] = (n + 1, o)
+        ranked = sorted(cands.values(), key=lambda x: (-x[0], -(_aware(x[1].last_seen) or now).timestamp()))
+        topic = next((o for _, o in ranked if o not in touched and same_topic(o, ids, lead.title)), None)
         srcs = [{"source": x.source, "outlet": x.outlet, "title": x.title, "url": x.url, "reliable": x.reliable, "engagement": x.engagement,
-                 "summary": (x.summary or "")[:500] if x.reliable else "", "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind")}}
+                 "summary": (x.summary or "")[:500] if x.reliable else "", "at": (x.published_at or x.first_seen).isoformat(), "extra": {k: v for k, v in x.extra.items() if k in ("approx_traffic", "comments", "score", "query", "trend", "geo", "kind", "official", "magnitude",
+                                                                   "alert", "event", "points", "tsunami", "domain", "thread")}}
                 # the topic's lead first: the writer leads with sources[0] (2026-11-16: a quote-led feature led trend post 152)
                 for x in sorted(c.signals, key=lambda x: (x is not lead, not x.reliable, rank.quote_led(x.title), -x.engagement))[:12]]
         metrics: dict[str, Any] = {"signals": len(c.signals)}
@@ -216,6 +229,10 @@ def build_topics(db: Session, s: TtSettings, now: datetime) -> list[TtTopic]:
             topic.sources, topic.metrics, topic.last_seen = srcs, metrics, now
             if topic.status == "cooling":
                 topic.status = "active"
+        try:
+            topic.parts = {**(topic.parts or {}), "terminal": terminal_view(topic, lead.summary or "")}
+        except Exception:  # noqa: BLE001 - the Terminal's scores never stop a scan
+            logger.exception("trending: terminal scores failed for %s", topic.title[:60])
         touched.append(topic)
     for t in existing:
         if t not in touched and t.status == "active":
@@ -272,9 +289,9 @@ def brief_of(topic: TtTopic) -> tuple[writer.Brief | None, list[dict[str, Any]]]
     return b, reliable
 
 
-def _gate(text: str, b: writer.Brief | None, reliable: list[dict[str, Any]]) -> dict[str, Any]:
+def _gate(text: str, b: writer.Brief | None, reliable: list[dict[str, Any]], breaking_ok: bool = False) -> dict[str, Any]:
     result = gates.gate(text, source_text=b.source_text if b else "", source_names=[b.outlet] if b else [], reliable_count=len(reliable),
-                        buzz_ok=bool(b and (b.google or b.x_trend)), discussion_ok=bool(b and b.reddit_sub))
+                        buzz_ok=bool(b and (b.google or b.x_trend)), discussion_ok=bool(b and b.reddit_sub), breaking_ok=breaking_ok)
     if b is None:
         return result
     problems = gates.story_problems(text, lead_title=b.headline, lead_summary="", measured=b.source_text, outlet=b.outlet, category=b.category)
@@ -320,7 +337,16 @@ async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic
             result = _gate(text, b, reliable)
         if not result["ok"]:
             held = result["reason"]
-    conflict = coordinate.newsdesk_conflict(db, [topic.title] + [x["title"] for x in reliable[:3]], now) if held is None else None
+        elif _fast(topic) and ((topic.parts or {}).get("terminal") or {}).get("breaking_ok") and not text.startswith(("BREAKING", "JUST IN")):
+            # a verified breaking event opens with BREAKING when the words still pass every check that way (app/terminal/intel)
+            lead_in = f"BREAKING: {text}"
+            tried = _gate(lead_in, b, reliable, breaking_ok=True)
+            if tried["ok"]:
+                text, result = lead_in, tried
+        if _fast(topic):
+            angle = ("fast:" + angle)[:24]
+    fast = _fast(topic)
+    conflict = coordinate.newsdesk_conflict(db, [topic.title] + [x["title"] for x in reliable[:3]], now, fast=fast) if held is None else None
     if conflict:
         held = conflict
     hot, why_not = auto_ok(s, topic, text, b)
@@ -337,15 +363,60 @@ async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic
     return post
 
 
+# --- the Terminal (app/terminal/intel, owner 2026-11-18) ------------------------------------------------------------------------------
+
+
+def terminal_view(topic: TtTopic, lead_summary: str = "") -> dict[str, Any]:
+    """Viral potential and evidence (never mixed), the rumour flag, the fast lane, measured at this scan."""
+    parts, srcs = topic.parts or {}, topic.sources or []
+    ev = intel.evidence(topic.title, srcs, parts)
+    vi = intel.viral(topic.title, topic.category, srcs, parts)
+    lead = intel.lead_of(srcs, topic.title)
+    fast, fast_why = intel.fast_lane(str(lead.get("title") or topic.title), lead_summary or str(lead.get("summary") or ""), srcs, parts, ev)
+    if fast and (parts.get("sensitive") or {}).get("tier") == "approval":
+        fast, fast_why = False, f"approval-only subject ({(parts.get('sensitive') or {}).get('label')})"
+    old = (parts.get("terminal") or {}) if isinstance(parts.get("terminal"), dict) else {}
+    return {"viral": vi, "evidence": ev, "rumor": ev["rumor"], "ahead": intel.ahead_of_mainstream(srcs, parts, ev), "fast": fast, "fast_why": fast_why,
+            "breaking_ok": intel.breaking_allowed(ev), "fast_since": old.get("fast_since") or (utcnow().isoformat() if fast else None),
+            "hooks": old.get("hooks") if old.get("hooks_for") == topic.title else None, "hooks_for": old.get("hooks_for")}
+
+
+def _fast(t: TtTopic) -> bool:
+    return bool(((t.parts or {}).get("terminal") or {}).get("fast"))
+
+
+def at_line(s: TtSettings, topic: TtTopic) -> bool:
+    """At the automatic line: hot enough, or a verified high-impact event in the fast lane."""
+    return topic.score >= s.hot_score or _fast(topic)
+
+
+def fast_post(db: Session, post: TtPost) -> bool:
+    if (post.angle or "").startswith("fast"):
+        return True
+    topic = db.get(TtTopic, post.topic_id) if post.topic_id else None
+    return topic is not None and _fast(topic)
+
+
+def breaking_ok(db: Session, post: TtPost) -> bool:
+    """May this post say BREAKING / JUST IN? Only a story the Terminal reads as verified (corroborated or better, not a rumour)."""
+    topic = db.get(TtTopic, post.topic_id) if post.topic_id else None
+    return bool(topic is not None and ((topic.parts or {}).get("terminal") or {}).get("breaking_ok"))
+
+
 def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) -> tuple[bool, str | None]:
     """(may go out without the owner, why not). Hot enough, with measured growth (rank.growth), and nothing sensitive stops it
     (app/trending/sensitive: approval-only subjects never; strict ones only with 2+ independent outlets, attributed, no person named)."""
     if b is not None and b.sensitive and b.sensitive.get("tier") == "approval":
         return False, sensitive.auto_problem(b.sensitive, text=text, outlets=b.outlets)
-    if topic.score < s.hot_score:
+    term = (topic.parts or {}).get("terminal") or {}
+    if term.get("rumor"):
+        # owner, 2026-11-18: an unverified rumour never publishes automatically as fact; the Terminal's Rumor watch shows it for review
+        return False, "unverified or hedged report (rumour watch): human review only"
+    fast = bool(term.get("fast"))
+    if topic.score < s.hot_score and not fast:
         return False, f"below the automatic line ({topic.score:.0f} < {s.hot_score:.0f})"
     g = (topic.parts or {}).get("growth") or {}
-    if not g.get("measured"):
+    if not g.get("measured") and not fast:
         return False, "no measured growth (scans, Google Trends, engagement): approval only"
     inc = (topic.parts or {}).get("incident") or {}
     if inc.get("major") and not inc.get("verified"):
@@ -367,7 +438,7 @@ def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool
     # 2026-11-16: the same for a draft HELD below the line (a gate said no to an earlier, weaker telling), and for one held only because no
     # reliable outlet had reported it yet, once one has. A draft written or held at the line itself, a sent one, or one the owner decided on
     # still blocks, so a topic gets one fresh attempt at the line, never a new draft every scan.
-    if not automatic(s) or topic.score < s.hot_score:
+    if not automatic(s) or not at_line(s, topic):
         return True
     reliable_now = brief_of(topic)[0] is not None
     desk_clear = coordinate.newsdesk_conflict(db, [topic.title] + [str(x.get("title") or "") for x in (topic.sources or [])[:3] if x.get("reliable")], now) is None
@@ -390,7 +461,7 @@ def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool, desk_clear: bool 
         return reliable_now
     if p.status == "held" and (p.hold_reason or "").startswith("covered by the News Desk (event") and "candidate" in (p.hold_reason or ""):
         return desk_clear  # the News Desk never took it (coordinate.CANDIDATE_HOLD): Trending may now
-    return (p.score or 0) < s.hot_score
+    return (p.score or 0) < s.hot_score and not (p.angle or "").startswith("fast")
 
 
 def _recent_duplicate(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:
@@ -426,12 +497,13 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     if (why := coordinate.desk_blocked(db, now, s)) is not None:
         return why
     incident = incident_post(db, post)
-    if (why := coordinate.cap_problem(db, s, now, incident=incident)) is not None:
+    fast = fast_post(db, post)
+    if (why := coordinate.cap_problem(db, s, now, incident=incident, fast=fast)) is not None:
         return why
-    if (why := coordinate.spacing_problem(db, s, now, incident=incident)) is not None:
+    if (why := coordinate.spacing_problem(db, s, now, incident=incident, fast=fast)) is not None:
         return why
     titles = [str(x.get("title") or "") for x in post.sources or []]
-    if (why := coordinate.newsdesk_conflict(db, titles, now)) is not None:
+    if (why := coordinate.newsdesk_conflict(db, titles, now, fast=fast)) is not None:
         return why
     return None
 
@@ -464,7 +536,7 @@ async def publish_due(db: Session, s: TtSettings, settings: Settings, runtime: A
         db.commit()
         return "held" if held else "waiting"
     re_check = gates.gate(post.text, source_text=post.source_text, source_names=[x["name"] for x in post.sources or []][:1], reliable_count=len(post.sources or []),
-                          buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"))
+                          buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"), breaking_ok=breaking_ok(db, post))
     if not re_check["ok"]:
         post.status, post.hold_reason, post.checks = "held", re_check["reason"], re_check["checks"]
         decision["why"] = re_check["reason"]
@@ -772,7 +844,7 @@ def watch_ledger(db: Session, s: TtSettings, topics: list[TtTopic], now: datetim
         tid = int(k)
         if tid not in pool and (t := db.get(TtTopic, tid)) is not None:
             pool[tid] = t
-    rows = [t for t in pool.values() if (t.peak_score or 0) >= s.hot_score or ((t.parts or {}).get("incident") or {}).get("major") or str(t.id) in book]
+    rows = [t for t in pool.values() if (t.peak_score or 0) >= s.hot_score or ((t.parts or {}).get("incident") or {}).get("major") or _fast(t) or str(t.id) in book]
     posts: dict[int, TtPost] = {}
     if rows:
         for p in db.scalars(select(TtPost).where(TtPost.topic_id.in_([t.id for t in rows])).order_by(TtPost.id)):
@@ -914,20 +986,32 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
         read = await read_sources(db, s, settings, runtime, now, client, only)
     topics = build_topics(db, s, now)
     made = 0
-    for t in sorted(topics, key=lambda t: -t.score):
-        if made >= MAX_NEW_PER_SCAN or t.score < s.suggest_score:
+    for t in sorted(topics, key=lambda t: (not _fast(t), -t.score)):
+        if made >= MAX_NEW_PER_SCAN or (t.score < s.suggest_score and not _fast(t)):
             break
         skip = ("not active" if t.status != "active" else "already has a tweet" if _has_post(db, t, s, now)
                 else "same story as another topic's tweet" if _recent_duplicate(db, t, s, now) else "")
         if skip:
             t.parts = {**(t.parts or {}), "skip": skip}  # the scan log says why a hot topic has no tweet
             continue
-        await suggest(db, s, settings, t, now, writer_transport=writer_transport)
+        p = await suggest(db, s, settings, t, now, writer_transport=writer_transport)
         made += 1
+        if _fast(t):
+            term = (t.parts or {}).get("terminal") or {}
+            logger.info("terminal fast lane: topic %s \"%s\" -> post %s %s (%s) | evidence %s viral %s | %s", t.id, _safe(t.title, 70), p.id, p.status,
+                        _safe(p.hold_reason or p.note or "", 80), (term.get("evidence") or {}).get("score"), (term.get("viral") or {}).get("score"),
+                        _safe(term.get("fast_why") or "", 120))
     db.commit()
     decision: dict[str, Any] = {}
     published = await publish_due(db, s, settings, runtime, agent_id, now, decision=decision) if automatic(s) or _any_approved(db) else None
     alerts_sent = await check_health(db, s, settings, now)
+    try:
+        from app.terminal import feed as terminal_feed
+
+        for line in await terminal_feed.alerts(db, settings, topics, now):
+            logger.info(line)
+    except Exception:  # noqa: BLE001 - the Terminal's alerts never break a scan
+        logger.exception("trending: terminal alerts failed")
     db.refresh(s)
     try:
         for line in watch_incidents(db, s, topics, now):
@@ -965,7 +1049,7 @@ async def approve(db: Session, settings: Settings, runtime: Any, agent_id: int, 
     if settings_row(db).kill_switch:
         raise ValueError("Trending Topics' stop is on.")
     result = gates.gate(post.text, source_text=post.source_text, source_names=[x["name"] for x in post.sources or []][:1], reliable_count=len(post.sources or []),
-                        buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"))
+                        buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"), breaking_ok=breaking_ok(db, post))
     if not result["ok"]:
         post.status, post.hold_reason, post.checks = "held", result["reason"], result["checks"]
         db.commit()
@@ -983,7 +1067,7 @@ def edit(db: Session, post: TtPost, text: str) -> dict[str, Any]:
     if not post.sources:
         raise ValueError("This topic has no reliable source behind it: there is nothing a tweet could stand on.")
     result = gates.gate(text, source_text=post.source_text, source_names=[x["name"] for x in post.sources or []][:1], reliable_count=len(post.sources or []),
-                        buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"))
+                        buzz_ok=_flag(post, "buzz"), discussion_ok=_flag(post, "discussion"), breaking_ok=breaking_ok(db, post))
     if result["ok"]:
         post.original_text = post.original_text or post.text
         post.text, post.fingerprint, post.writer = text.strip(), checks.fingerprint(text), "owner"

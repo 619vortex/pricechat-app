@@ -591,7 +591,9 @@ def _editorial_hold(db: Session, post: NdPost, now: datetime | None = None) -> s
     if ev is None:
         return ""
     rows = [db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:6]]
-    problems = quality.event_problems(ev, [r for r in rows if r is not None])
+    # the caption was written from the rows that tell this event (telegram.stories_of leaves the others out): check those
+    _, kept = quality.split_off_story(ev, [r for r in rows if r is not None])
+    problems = quality.event_problems(ev, kept)
     if now is not None and (told := quality.already_posted(db, ev, now)):
         problems.append(told)
     return "; ".join(problems)

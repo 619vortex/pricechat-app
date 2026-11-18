@@ -566,7 +566,7 @@ def growth(c: Cluster, now: datetime) -> dict[str, Any]:
 
 # --- score ----------------------------------------------------------------------------------------------------------------
 
-NORM = {"google": 6.0, "reddit": 4.5, "x_trends": 6.0, "x_accounts": 4.0}  # log10 of the engagement that counts as "very high"
+NORM = {"google": 6.0, "reddit": 4.5, "x_trends": 6.0, "x_accounts": 4.0, "hn": 3.0}  # log10 of the engagement that counts as "very high"
 
 
 FRESH_FULL = timedelta(hours=3)  # 0-3 h: today's news, full freshness

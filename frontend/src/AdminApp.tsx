@@ -45,6 +45,9 @@ const RealmAdminPage = lazy(() => import("./pages/RealmAdmin").then((m) => ({ de
 const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ default: m.VpnAdminPage })));
 const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
 const TelegramTradingPage = lazy(() => import("./pages/TelegramTradingPage").then((m) => ({ default: m.TelegramTradingPage })));
+const TerminalPage = lazy(() => import("./pages/terminal/TerminalPage").then((m) => ({ default: m.TerminalPage })));
+const TerminalNewsDesk = lazy(() => import("./pages/x/NewsDesk").then((m) => ({ default: m.NewsDesk })));
+const TerminalTrending = lazy(() => import("./pages/x/TrendingTopics").then((m) => ({ default: m.TrendingTopics })));
 const WorldMonitorPage = lazy(() => import("./pages/WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
 const TradingOSPage = lazy(() => import("./pages/TradingOS").then((m) => ({ default: m.TradingOSPage })));
 const pf = () => import("./pages/pokemon/portfolio");
@@ -67,6 +70,9 @@ export function AdminApp() {
             <Route path="content" element={<ContentPage />} />
             <Route path="x" element={<XPage />} />
             <Route path="world-monitor" element={<WorldMonitorPage />} />
+            <Route path="terminal" element={<TerminalPage />} />
+            <Route path="terminal/newsdesk" element={<TerminalNewsDesk />} />
+            <Route path="terminal/trending" element={<TerminalTrending />} />
             <Route path="brand-manager/*" element={<BrandManagerPage />} />
             <Route path="short-market/*" element={<ShortMarketPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />

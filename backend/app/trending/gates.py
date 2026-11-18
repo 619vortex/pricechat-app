@@ -80,8 +80,10 @@ def cashtags(text: str) -> list[str]:
     return [m.group(0) for m in CASHTAG_ANY.finditer(text or "")]
 
 
-def gate(text: str, *, source_text: str, source_names: list[str], reliable_count: int, buzz_ok: bool = False, discussion_ok: bool = False) -> dict[str, Any]:
-    """{"ok", "checks": [{check, passed, detail}], "reason"}: reason is the first failure, "" when it may go out."""
+def gate(text: str, *, source_text: str, source_names: list[str], reliable_count: int, buzz_ok: bool = False, discussion_ok: bool = False,
+         breaking_ok: bool = False) -> dict[str, Any]:
+    """{"ok", "checks": [{check, passed, detail}], "reason"}: reason is the first failure, "" when it may go out. breaking_ok: a verified
+    fast-lane story (app/terminal/intel.breaking_allowed) may say BREAKING / JUST IN; every other check is the same."""
     out: list[dict[str, Any]] = []
 
     def add(name: str, passed: bool, detail: str) -> None:
@@ -89,11 +91,11 @@ def gate(text: str, *, source_text: str, source_names: list[str], reliable_count
 
     t = (text or "").strip()
     add("supported", reliable_count >= 1, "No reliable source backs this topic yet (only social signals): held until an outlet reports it")
-    base = checks.check_post(t, source_text=source_text, source_names=source_names, breaking=False, links=())
+    base = checks.check_post(t, source_text=source_text, source_names=source_names, breaking=breaking_ok, links=())
     out += base.checks
     tags = cashtags(t)
     add("one_cashtag", len(tags) <= 1, f"{len(tags)} cashtags ({', '.join(tags)}): X refuses API posts with more than one")
-    add("not_breaking", not any(w in t for w in NOT_FOR_TRENDS), "A trend tweet can't say BREAKING / JUST IN")
+    add("not_breaking", breaking_ok or not any(w in t for w in NOT_FOR_TRENDS), "A trend tweet can't say BREAKING / JUST IN (only a verified breaking story)")
     buzz = [m.group(0) for m in BUZZ.finditer(t)]
     add("buzz", not buzz or buzz_ok, f"It says {buzz[0] if buzz else ''!r} but no trend source shows it")
     talk = [m.group(0) for m in DISCUSSION.finditer(t)]

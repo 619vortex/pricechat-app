@@ -200,7 +200,15 @@ async def stories_of(db: Session | None, ev: NdEvent) -> list[NdStory]:
     if db is None:
         return []
     rows = [db.get(NdStory, i) for i in ((ev.facts or {}).get("story_ids") or [])[:6]]
-    return [r for r in rows if r is not None]
+    rows = [r for r in rows if r is not None]
+    if ev.kind in ("news", "update"):
+        from app.newsdesk import quality
+
+        dropped, rows = quality.split_off_story(ev, rows)
+        if dropped:
+            logger.info("tgnews: event %s: left out %d source(s) telling a different story: %s", ev.id, len(dropped),
+                        "; ".join(repr(str(r.title)[:70]) for r in dropped))
+    return rows
 
 
 async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetime, transport: Any = None, market: Any = None,

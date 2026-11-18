@@ -39,6 +39,10 @@ class Web:
         self.status: dict[str, int] = {}
         self.faa_xml = ""
         self.status_incidents: dict[str, list[dict[str, Any]]] = {}
+        self.usgs: list[dict[str, Any]] = []
+        self.gdacs_xml = ""
+        self.gdelt: list[dict[str, Any]] = []
+        self.hn: list[dict[str, Any]] = []
         self.calls: list[str] = []
         self.posted: list[bytes] = []
 
@@ -59,6 +63,18 @@ class Web:
             return httpx.Response(200, json=[])
         if host in ("status.aws.amazon.com", "azure.status.microsoft"):
             return httpx.Response(200, text="<?xml version='1.0'?><rss version='2.0'><channel><title>status</title></channel></rss>")
+        # the Terminal's discovery sources: a quiet world unless a test sets them
+        if host == "earthquake.usgs.gov":
+            return httpx.Response(200, json={"type": "FeatureCollection", "features": self.usgs})
+        if host == "www.gdacs.org":
+            return httpx.Response(200, text=self.gdacs_xml or "<?xml version='1.0'?><rss version='2.0'><channel><title>GDACS</title></channel></rss>")
+        if host == "api.gdeltproject.org":
+            return httpx.Response(200, json={"articles": self.gdelt})
+        if host == "hacker-news.firebaseio.com":
+            if path.endswith("topstories.json"):
+                return httpx.Response(200, json=[int(x["id"]) for x in self.hn])
+            hid = int(path.rsplit("/", 1)[-1].split(".")[0])
+            return httpx.Response(200, json=next((x for x in self.hn if int(x["id"]) == hid), None))
         if host in ("www.reddit.com", "oauth.reddit.com"):
             sub = path.split("/")[2]
             return httpx.Response(200, json=reddit_listing(self.reddit.get(sub, []), self.now))

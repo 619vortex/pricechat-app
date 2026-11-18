@@ -188,7 +188,10 @@ LISTY = re.compile(r"^[^,;:]{2,40},\s*[^,;:]{2,40}(?:,\s*[^,;:]{2,40})*\s*(?:&|\
 VERB = re.compile(r"\b(is|are|was|were|has|have|had|will|would|says?|said|to|hits?|falls?|rises?|jumps?|drops?|sinks?|surges?|plunges?|soars?|slides?|"
                   r"cuts?|raises?|hikes?|holds?|opens?|closes?|launch(?:es)?|files?|sues?|wins?|loses?|warns?|seeks?|plans?|agrees?|signs?|"
                   r"hires?|fires?|resigns?|buys?|sells?|bans?|blocks?|names?|sets?|gets?|makes?|takes?|leaves?|faces?|begins?|ends?|starts?|"
-                  r"reports?|shows?|calls?|tells?|sees?|eyes?|weighs?|mulls?|tops?|beats?|misses?|halts?|resumes?|freezes?|backs?|rejects?)\b", re.I)
+                  r"reports?|shows?|calls?|tells?|sees?|eyes?|weighs?|mulls?|tops?|beats?|misses?|halts?|resumes?|freezes?|backs?|rejects?|"
+                  # one event hitting several services is one story (production 2026-11-17: "Apple outage impacts iCloud, support and App Store
+                  # for users" and "Cyberattack targets BBC, Zoom and Ikea as 178 websites hacked" were refused as round-ups)
+                  r"impacts?|affects?|targets?|disrupts?|knocks?|plagues?|strikes?|struck|downs?|hacked|breached|hit|outages?)\b", re.I)
 
 
 def is_roundup(title: str) -> bool:
