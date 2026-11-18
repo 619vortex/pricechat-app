@@ -54,6 +54,11 @@ INDEX_SHOCK = re.compile(r"\b(?:s&p(?: 500)?|nasdaq|dow(?: jones)?|nikkei|stoxx|
                          r"|\b(?:correction|bear market|worst (?:day|week|session))\b.{0,40}\b(?:s&p(?: 500)?|nasdaq|dow)\b", re.I)
 EARNINGS = re.compile(r"\b(?:earnings|results|revenue|quarterly|guidance|forecast|profit)\b", re.I)
 EARNINGS_MOVE = re.compile(r"\b(?:beats?|misses?|tops?|record|jumps?|soars?|surges?|plunges?|slumps?|sinks?|raises?|cuts?|slashes?)\b", re.I)
+# a hard geopolitical event is major when it reaches strategic ground: US or allied forces, the Gulf and its oil, a capital, a bridge,
+# a base, a nuclear site, a chokepoint, a great power. "Russian drone attack on Kharkiv kills three" is war news, not a breaking override.
+STRATEGIC = re.compile(r"\b(?:u\.?s\.?|us|american|nato|pentagon|iran\w*|irgc|israel\w*|china|chinese|taiwan|north korea\w*|nuclear|saudi\w*|gulf|"
+                       r"hormuz|bahrain\w*|kuwait\w*|qatar\w*|uae|emirates|oil|refiner\w*|terminal|pipeline|bridge|air ?base|base|carrier|navy|warships?|"
+                       r"kremlin|moscow|kyiv|tehran|beijing|crimea\w*|red sea|strait|nato)\b", re.I)
 PREVIEW = re.compile(r"\b(?:set to (?:report|announce|meet|vote|release)|ahead of|expected to|is due to|due to report|will report|preview|what to expect|awaits?|braces? for)\b", re.I)
 HACK = re.compile(r"\b(hack\w*|exploit\w*|drained|stolen|heist|breach\w*)\b", re.I)
 FIGURE = re.compile(r"(?:[$€£]\s?\d[\d,.]*\s?(?:bn|billion|b|m|mn|million|trillion|tn|k)?\b)|(?:\b\d[\d,.]*\s?%)|(?:\b\d[\d,.]*\s(?:billion|million|trillion)\b)", re.I)
@@ -246,7 +251,7 @@ def impact_class(title: str, summary: str, srcs: list[dict[str, Any]] | None, pa
         return "disaster", f"{cas}+ casualties reported"
     sig = editorial.significance(t, summary)
     if sig is not None:
-        if sig.kind == "geopolitics" and editorial.hard_event(t):
+        if sig.kind == "geopolitics" and editorial.hard_event(t) and STRATEGIC.search(t):
             return "geopolitics", f"hard geopolitical event ({sig.why})"
         if sig.kind == "corporate" and editorial.CORP_BIG.search(t):
             return "corporate", f"major corporate shock ({sig.why})"

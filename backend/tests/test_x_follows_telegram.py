@@ -53,9 +53,11 @@ async def test_x_skips_what_telegram_did_not_post(db: Session) -> None:
     events.mark(ev, "telegram", "skipped", "failed the checks: test")
     db.commit()
     desk = engine.settings_row(db)
-    assert await engine.deliver_x(db, desk, get_settings(), None, 0, T0) is None
+    # owner, 2026-11-18: each platform on its own. Telegram refusing its caption no longer silences X: X writes its own checked text
+    assert await engine.deliver_x(db, desk, get_settings(), None, 0, T0) == "dry_run"
     db.refresh(ev)
-    assert ev.x_status == "skipped" and "Telegram didn't post it" in (ev.x_note or "")
+    assert ev.x_status == "dry_run"
+    assert await engine.deliver_x(db, desk, get_settings(), None, 0, T0) is None  # once
 
 
 async def test_x_still_follows_a_telegram_post_made_late_in_its_window(db: Session) -> None:

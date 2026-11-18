@@ -161,6 +161,8 @@ def test_the_held_story_takes_the_slot_it_would_have_missed(db: Session) -> None
 
 
 BETWEEN = SLOT + timedelta(hours=2)  # 06:00 Dubai: no slot open, the next is two hours away
+ORDINARY = "EU ministers back new sanctions on Russian oil traders"  # important, verified, but not a major event (app/terminal/intel)
+MAJOR = "Missile strike hits Saudi oil terminal"
 
 
 def test_major_breaking_news_confirmed_twice_goes_at_once(db: Session) -> None:
@@ -178,7 +180,8 @@ def test_major_breaking_news_confirmed_twice_goes_at_once(db: Session) -> None:
 def test_breaking_needs_two_outlets_a_major_score_freshness_and_importance(db: Session, why: str, kw: dict[str, Any]) -> None:
     args = {"outlets": ["Financial Times", "Bloomberg"], "score": 72, "age_min": 25, "evidence": "two outlets", "importance": True, "topic": "geopolitics"}
     args.update(kw)
-    _news(db, "b2", "Missile strike hits Saudi oil terminal", args.pop("score"), args.pop("outlets"), now=BETWEEN, **args)
+    major = why in ("not major", "only a price story")  # a verified major event (owner, 2026-11-18) isn't held by the bar or the desk's topic label
+    _news(db, "b2", ORDINARY if major else "Missile strike hits Saudi oil terminal", args.pop("score"), args.pop("outlets"), now=BETWEEN, **args)
     assert events.release(db, BETWEEN, events.policy({})) is None, why
 
 
@@ -199,8 +202,11 @@ def test_breaking_near_a_slot_goes_now_as_that_slots_post_and_never_crowds_anoth
     db.add(NdEvent(key="prev", kind="news", title="Fed holds rates", headline="FED HOLDS RATES", topic="macro", evidence="official", status="released",
                    slot="slot", released_at=BETWEEN - timedelta(minutes=60), facts={}))
     db.commit()
-    _news(db, "b4", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    _news(db, "b4", ORDINARY, 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
     assert events.release(db, BETWEEN, events.policy({})) is None  # 60 minutes after the last post: under the 90-minute gap
+    _news(db, "b4m", MAJOR, 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    got = events.release(db, BETWEEN, events.policy({}))  # a verified major event isn't held by the gap (owner, 2026-11-18)
+    assert got is not None and got.slot == "breaking" and "major breaking" in got.why
 
 
 def test_at_most_two_breaking_posts_a_day(db: Session) -> None:
@@ -208,8 +214,11 @@ def test_at_most_two_breaking_posts_a_day(db: Session) -> None:
         db.add(NdEvent(key=f"br{i}", kind="news", title=f"Earlier breaking {i}", headline=f"EARLIER BREAKING {i}", topic="hack", evidence="two outlets",
                        status="released", slot="breaking", released_at=BETWEEN - timedelta(hours=3 + i * 3), facts={}))
     db.commit()
-    _news(db, "b5", "Missile strike hits Saudi oil terminal", 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    _news(db, "b5", ORDINARY, 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
     assert events.release(db, BETWEEN, events.policy({})) is None
+    _news(db, "b5m", MAJOR, 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    got = events.release(db, BETWEEN, events.policy({}))  # nor by the two-a-day cap
+    assert got is not None and got.slot == "breaking"
 
 
 def test_breaking_never_repeats_a_story_already_out(db: Session) -> None:
@@ -232,7 +241,7 @@ def test_breaking_needs_seventy_now() -> None:
 
 
 def test_69_does_not_break(db: Session) -> None:
-    _news(db, "b7", "Missile strike hits Saudi oil terminal", 69, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
+    _news(db, "b7", ORDINARY, 69, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
     assert events.release(db, BETWEEN, events.policy({})) is None
 
 

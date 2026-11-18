@@ -9,6 +9,7 @@ export function OwnerAlertsCard() {
   const [chat, setChat] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
   useEffect(() => { if (data) setChat(data.telegram_chat); }, [data?.telegram_chat]);
 
   async function act(fn: () => Promise<unknown>, done: string) {
@@ -40,11 +41,14 @@ export function OwnerAlertsCard() {
         <button className="btn btn-sm btn-primary" disabled={chat === data.telegram_chat}
           onClick={() => void act(() => api.updateOwnerAlerts({ telegram_chat: chat }), "Saved")}>Save</button>
         <button className="btn btn-sm" disabled={!data.telegram_chat} onClick={() => void act(api.testOwnerAlert, "Test alert sent: check Telegram")}>Send test</button>
+        <button className="btn btn-sm btn-primary" onClick={() => void act(async () => { const r = await api.linkOwnerAlerts(); setLink(r.url); window.open(r.url, "_blank", "noopener"); },
+          "Open the link on your phone and press Start: the bot confirms in that chat")}>Link my Telegram</button>
         <button className="btn btn-sm" onClick={() => void act(() => api.updateOwnerAlerts({ enabled: !data.enabled }), data.enabled ? "Alerts off" : "Alerts on")}>
           {data.enabled ? "Turn off" : "Turn on"}
         </button>
       </div>
       {note && <p className="muted">{note}</p>}
+      {link && <p className="small">Link (valid 30 min, works once): <a className="link" href={link} target="_blank" rel="noreferrer">{link}</a></p>}
       <ApiErrorBanner error={error} />
       {data.recent.length > 0 && (
         <ul className="muted">

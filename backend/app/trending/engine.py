@@ -121,6 +121,8 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
         idle = bool(meta.get("idle"))
         failing = bool(problem) and not unavailable and not idle
         stored[name] = _store(db, items, now)
+        if name in discovery.DEFAULTS:  # the Terminal's own sources: one line per read, so production shows they work
+            logger.info("terminal source %s: %d items, %d new%s", name, len(items), stored[name], f" ({_safe(problem, 100)})" if problem else "")
         usage["requests"][name] = int(usage["requests"].get(name, 0)) + int(meta.get("requests") or 0)
         if meta.get("cost_usd"):
             usage["cost_usd"][name] = round(float(usage["cost_usd"].get(name, 0)) + float(meta["cost_usd"]), 4)

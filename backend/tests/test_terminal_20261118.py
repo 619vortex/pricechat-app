@@ -308,3 +308,28 @@ def test_off_story_sources_are_left_out_instead_of_refusing_the_post() -> None:
     dropped, kept = quality.split_off_story(ev, [lead, same, other])
     assert lead in kept and other in dropped
     assert not quality.event_problems(ev, kept)
+
+
+# --- owner alerts: linking the owner's chat from Admin (production: alerts were "logged only", no chat set) ------------------------------
+
+
+def test_owner_link_code_works_once_and_expires(db: Session) -> None:
+    from app import alerts
+
+    code, _ = alerts.start_owner_link(db, NOW)
+    assert not alerts.claim_owner_link(db, "wrong", 4242, NOW)
+    assert not alerts.claim_owner_link(db, code, 4242, NOW + timedelta(minutes=31))  # expired
+    code, _ = alerts.start_owner_link(db, NOW)
+    assert alerts.claim_owner_link(db, code, 4242, NOW + timedelta(minutes=1))
+    assert alerts.owner_chat(db) == "4242"
+    assert not alerts.claim_owner_link(db, code, 999, NOW + timedelta(minutes=2))  # once
+    assert alerts.owner_chat(db) == "4242"
+
+
+def test_owner_link_route_needs_the_bot_and_returns_a_deep_link(db: Session, client: TestClient) -> None:
+    from app.telegram.ingestion import get_bot_state
+
+    get_bot_state(db).bot_username = "Cryptopricechatbot"
+    db.commit()
+    r = client.post("/api/system/alerts/link")
+    assert r.status_code == 200 and r.json()["url"].startswith("https://t.me/Cryptopricechatbot?start=ow_")

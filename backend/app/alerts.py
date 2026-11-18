@@ -49,6 +49,46 @@ def settings_row(db: Session) -> OwnerAlertSettings:
     return row
 
 
+# --- linking the owner's chat from Admin (2026-11-18: owner alerts were "logged only" for days: no chat id was ever set) ------------
+OWNER_LINK_PREFIX = "ow_"
+OWNER_LINK_KEY = "owner_link"
+OWNER_LINK_TTL = timedelta(minutes=30)
+
+
+def _hash(code: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
+def start_owner_link(db: Session, now: datetime | None = None) -> tuple[str, datetime]:
+    """A one-time code for the bot's deep link (t.me/<bot>?start=ow_<code>): only its hash is kept, it expires in 30 minutes."""
+    import secrets
+
+    now = now or utcnow()
+    code = secrets.token_hex(8)
+    row = db.get(OwnerAlert, OWNER_LINK_KEY) or OwnerAlert(key=OWNER_LINK_KEY)
+    row.last_text, row.last_sent_at, row.open = _hash(code), now, True
+    db.merge(row)
+    db.commit()
+    return code, now + OWNER_LINK_TTL
+
+
+def claim_owner_link(db: Session, code: str, user_id: int, now: datetime | None = None) -> bool:
+    """The person who pressed Start with a valid, unexpired code becomes the alerts' chat. The code works once."""
+    now = now or utcnow()
+    row = db.get(OwnerAlert, OWNER_LINK_KEY)
+    if row is None or not row.open or not row.last_sent_at or not code or row.last_text != _hash(code):
+        return False
+    if now - _aware(row.last_sent_at) > OWNER_LINK_TTL:
+        return False
+    s = settings_row(db)
+    s.telegram_chat, s.enabled = str(int(user_id)), True
+    row.open, row.last_text = False, ""
+    db.commit()
+    return True
+
+
 def owner_chat(db: Session) -> str | None:
     row = db.get(OwnerAlertSettings, 1)
     return (row.telegram_chat.strip() or None) if row is not None and row.enabled else None

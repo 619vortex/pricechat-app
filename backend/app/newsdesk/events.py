@@ -521,6 +521,19 @@ def _render_for(db: Session, ev: NdEvent, now: datetime) -> None:
         db.rollback()
 
 
+MAJOR_KIND = {"markets": "macro", "corporate": "corporate", "geopolitics": "geopolitics", "incident": "infrastructure", "disaster": "geopolitics", "hack": "corporate"}
+
+
+def _major_significance(story: NdStory) -> "editorial.Significance | None":
+    from app.terminal import intel
+
+    title = story.title or ""
+    if intel.RUMOR.search(title):
+        return None
+    kind, why = intel.impact_class(title, story.summary or "", [], {})
+    return editorial.Significance(MAJOR_KIND[kind], 28.0, f"major: {why}") if kind else None
+
+
 def important(held: list[chaos.Verdict], rows: list[NdStory], now: datetime) -> list[chaos.Verdict]:
     """Stories the chaos filter turned away only for not being market chaos, that still matter (app/newsdesk/editorial.significance):
     geopolitics, regulation milestones, mega-cap corporate shocks, big institutions on crypto rails, large ETF flows. Verified only by an
@@ -530,6 +543,10 @@ def important(held: list[chaos.Verdict], rows: list[NdStory], now: datetime) -> 
         if v.status not in ("rejected", "held") or not editorial.admissible(v.why):
             continue
         sig = editorial.significance(v.story.title or "", v.story.summary or "")
+        if sig is None:
+            # owner, 2026-11-18 replay: "Nasdaq enters correction as Wall Street sells off" and "Nvidia beats estimates as revenue jumps 103%
+            # to $115.8 billion" (two outlets each) never became events: neither chaos nor significance() reads them as news that matters
+            sig = _major_significance(v.story)
         if sig is None:
             continue
         others = editorial.corroborating(v.story, rows)
@@ -965,6 +982,29 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
     return None
 
 
+def verified_major(ev: NdEvent) -> bool:
+    """Two or more independent credible outlets on a major event, whatever topic the desk filed it under (production replay: the Apple
+    outage was filed as a stock "move", so verified_important said no)."""
+    return ev.kind in ("news", "update") and ev.evidence in CREDIBLE and len(outlets_of(ev)) >= 2 and bool(major_breaking(ev))
+
+
+def major_breaking(ev: NdEvent) -> str:
+    """Why this verified news event is major enough to break through the lane's spacing and caps (app/terminal/intel.impact_class), or "".
+    Never a hedged or speculative report; two or more independent outlets are already required (verified_important)."""
+    from app.newsdesk import incidents
+    from app.terminal import intel
+
+    title = ev.title or ""
+    if ev.kind not in ("news", "update") or intel.RUMOR.search(title):
+        return ""
+    names = outlets_of(ev)
+    inc = incidents.detect(title, ev.summary or "")
+    parts = {"incident": {"major": True, "verified": len(names) >= 2, "label": inc.label}} if inc is not None and inc.major else {}
+    srcs = [{"source": "news", "outlet": n, "title": title, "reliable": True, "extra": {}} for n in names]
+    kind, why = intel.impact_class(title, ev.summary or "", srcs, parts)
+    return why if kind else ""
+
+
 def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent], waiting: list[NdEvent]) -> NdEvent | None:
     """Between slots: major breaking news goes at once. Verified important (two or more independent credible outlets), first published
     within breaking_max_age, scoring breaking_bar now, and every rule a slot post meets (repeats, diversity, the checks). At most
@@ -974,31 +1014,47 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     early = upcoming - now < p.breaking_before_slot
     day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
     last = max((_utc(e.released_at, now) for e in day), default=None)
-    fresh = [e for e in waiting if e.kind in ("news", "update") and verified_important(e) and _age(e, now) <= p.breaking_max_age.total_seconds() / 60]
+    fresh = [e for e in waiting if e.kind in ("news", "update") and (verified_important(e) or verified_major(e)) and _age(e, now) <= p.breaking_max_age.total_seconds() / 60]
 
     def held(reason: str) -> None:  # the breaking lane is closed: say so for each fresh verified story it holds back (logged once per reason)
         for e in fresh:
             _note_breaking_miss(e, reason, now)
         return None
 
+    closed = None
     if early:
         if slot_filled(db, upcoming, p) is not None:
-            return held(f"the {slot_label(upcoming)} Dubai slot is already filled")
-        if last is not None and now - last < p.min_gap:
-            return held("under 20 minutes since the last post")
+            closed = f"the {slot_label(upcoming)} Dubai slot is already filled"
+        elif last is not None and now - last < p.min_gap:
+            closed = "under 20 minutes since the last post"
     else:
         if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
-            return held(f"{p.breaking_per_day} breaking posts in 24 hours already")
-        if p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
-            return held(f"{p.breaking_per_6h} breaking posts in six hours already")
-        if last is not None and now - last < p.breaking_gap:
-            return held(f"under {int(p.breaking_gap.total_seconds() // 60)} minutes since the last post")
+            closed = f"{p.breaking_per_day} breaking posts in 24 hours already"
+        elif p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
+            closed = f"{p.breaking_per_6h} breaking posts in six hours already"
+        elif last is not None and now - last < p.breaking_gap:
+            closed = f"under {int(p.breaking_gap.total_seconds() // 60)} minutes since the last post"
+    # owner, 2026-11-18: a verified MAJOR event (app/terminal/intel: hard geopolitical event, verified outage, disaster, shock, swing, big
+    # hack, shipping attacked at a chokepoint, an index shock, mega-cap results) is not held by the gap, the daily caps, a filled slot or
+    # the 70 bar. Production 2026-11-17 21:30: "US jets strike IRGC missile launch site on Iran's Qeshm Island" (two outlets, 1 min old)
+    # was refused "under 90 minutes since the last post" and never posted. Every repeat, diversity, editorial and accuracy check below
+    # still applies.
+    majors = {e.id: why for e in fresh if (why := major_breaking(e))}
+    if closed is not None:
+        if not majors:
+            return held(closed)
+        for e in fresh:
+            if e.id not in majors:
+                _note_breaking_miss(e, closed, now)
+    pool = [e for e in waiting if e.id in majors] if closed is not None else waiting
     covered = editorial.coverage(db, now)
-    for ev in sorted(waiting, key=lambda e: (-e.virality, e.id)):
+    for ev in sorted(pool, key=lambda e: (e.id not in majors, -e.virality, e.id)):
         # the discovery points rank slot stories; they never make a story breaking (the 70 bar is judged without them)
         bare = ev.virality - float((ev.parts or {}).get("discovery") or 0) * float((ev.parts or {}).get("freshness") or 1)
-        wire_way = _wire_breaking(db, ev, now, p, out, bare) if p.wire else ""
-        if wire_way:
+        wire_way = _wire_breaking(db, ev, now, p, out, bare) if p.wire and ev.id not in majors else ""
+        if ev.id in majors:
+            because = f"major breaking: {majors[ev.id]}"
+        elif wire_way:
             because = wire_way
         else:
             if ev.kind not in ("news", "update") or not verified_important(ev) or _age(ev, now) > p.breaking_max_age.total_seconds() / 60:
@@ -1030,12 +1086,14 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         if problem:
             ev.status, ev.why = "rejected", f"failed the checks: {problem}"
             continue
-        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, ("slot" if early else "breaking"), now, label
-        ev.facts = {**f, "latency": latency(ev, now), **({"slot_at": upcoming.isoformat(), "early": True} if early else {})}
+        as_slot = early and closed is None  # a major event outside the lane's limits is an extra post, never a slot's
+        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, ("slot" if as_slot else "breaking"), now, label
+        ev.facts = {**f, "latency": latency(ev, now), **({"slot_at": upcoming.isoformat(), "early": True} if as_slot else {}),
+                    **({"major": majors[ev.id]} if ev.id in majors else {})}
         editorial.stamp(ev, now)
         n = len(outlets_of(ev))
         ev.why = (f"breaking ({because}): scores {ev.virality:g} ({virality.describe(ev.parts or {})}), confirmed by {n} outlets, {int(_age(ev, now))} min old; "
-                  + (f"posted now as the {slot_label(upcoming)} Dubai slot's post instead of waiting for it" if early else
+                  + (f"posted now as the {slot_label(upcoming)} Dubai slot's post instead of waiting for it" if as_slot else
                      f"posted now instead of waiting for the {slot_label(upcoming)} Dubai slot")
                   + (f"; new because {(ev.facts or {})['new_because']}" if (ev.facts or {}).get("new_because") else ""))
         ev.x_status = ev.tg_status = "pending"

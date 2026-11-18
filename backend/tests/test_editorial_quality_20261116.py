@@ -243,7 +243,13 @@ def test_story_rows_are_loaded_for_the_identity_check(db: Session) -> None:
     db.commit()
     post = NdPost(kind="news", category="news", priority="breaking", status="queued", text=lead, key=f"event:{ev.id}", fingerprint="",
                   facts={"event_id": ev.id}, sources=[], checks=[], metrics={})
-    assert "a different story" in desk._editorial_hold(db, post)
+    # owner, 2026-11-18: the unrelated row is left out of the caption (telegram.stories_of) and of this check, instead of the whole post
+    # being refused (#649, #658, #662, #667 were lost that way); the lead's own story still goes
+    assert desk._editorial_hold(db, post) == ""
+    from app.newsdesk import quality
+
+    dropped, kept = quality.split_off_story(ev, [a, b])
+    assert dropped == [b] and kept == [a]
 
 
 async def test_the_bahrain_attack_goes_out_as_text_not_a_headline_card() -> None:

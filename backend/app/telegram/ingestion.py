@@ -91,6 +91,7 @@ class TelegramIngestor:
         self.client = client
         self._confirm: list[tuple[int, dict]] = []  # (private chat id, question) of valid website sign-ins this sync
         self._secrets: list[tuple[int, int, int, bool]] = []  # (chat, message, author, in a group?) that looked like a key or seed phrase
+        self._owner_links: list[tuple[int, int, str]] = []  # (chat id, user id, code): the owner linking alerts from Admin
         self._crew: list[tuple[int, int, str, bool]] = []  # (chat id, user id, code, is_bot): "Invite your crew" Start presses
         self._wk_updates: list[dict] = []  # Worker System: community join updates seen in this batch
         self._wk_starts: list[tuple[int, int, str, str | None, bool]] = []  # Worker System: (chat, user, code, username, is_bot)
@@ -166,6 +167,7 @@ class TelegramIngestor:
             await self._moderate()
             await self._send_confirmations()
             await self._crew_starts()
+            await self._link_owner()
             await self._workers()
             await self._welcomes()
             await self._private_group([u for u in access_updates if "callback_query" not in u])
@@ -363,6 +365,11 @@ class TelegramIngestor:
         parts = parsed.text.strip().split(maxsplit=1)
         from app.members.crew import START_PREFIX
 
+        from app.alerts import OWNER_LINK_PREFIX
+
+        if len(parts) == 2 and parts[0] == "/start" and parts[1].startswith(OWNER_LINK_PREFIX):
+            self._owner_links.append((parsed.chat.chat_id, parsed.author_id, parts[1][len(OWNER_LINK_PREFIX):][:32]))
+            return True  # Admin's "Link my Telegram" for owner alerts (answered after the commit); never stored as a message
         if len(parts) == 2 and parts[0] == "/start" and parts[1].startswith(START_PREFIX):
             self._crew.append((parsed.chat.chat_id, parsed.author_id, parts[1][len(START_PREFIX):][:24], parsed.author_is_bot))
             return True  # a friend's invite (answered after the commit); never stored as a message
@@ -535,6 +542,30 @@ class TelegramIngestor:
             except Exception as exc:  # noqa: BLE001
                 self.db.rollback()
                 logger.warning("Worker invite start not handled (%s)", type(exc).__name__)
+
+    async def _link_owner(self) -> None:
+        """Admin's "Link my Telegram": a valid code makes this private chat the owner-alerts chat, and the bot confirms in it (that
+        message is the delivery proof: Admin shows the alerts as delivering only once Telegram accepted it)."""
+        from app import alerts
+
+        pending, self._owner_links = self._owner_links, []
+        for chat_id, user_id, code in pending:
+            try:
+                ok = alerts.claim_owner_link(self.db, code, user_id)
+                if ok:
+                    await self.client.send_message(chat_id, "Price Chat: owner alerts are linked to this chat. Breaking news, rumours to review and "
+                                                            "system problems will reach you here.")
+                    row = alerts.settings_row(self.db)
+                    row_state = self.db.get(alerts.OwnerAlert, "owner_link_ok") or alerts.OwnerAlert(key="owner_link_ok")
+                    row_state.last_sent_at, row_state.sent_count, row_state.last_text = alerts.utcnow(), (row_state.sent_count or 0) + 1, f"confirmed to chat {row.telegram_chat}"
+                    self.db.merge(row_state)
+                    self.db.commit()
+                    logger.info("owner alerts: linked to a private chat and confirmed by Telegram")
+                else:
+                    await self.client.send_message(chat_id, "That link has expired or was already used. Make a new one in Admin > Settings > Owner alerts.")
+            except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
+                logger.warning("Owner alert link not handled (%s)", type(exc).__name__)
 
     async def _crew_starts(self) -> None:
         """Invite your crew: record who invited this Telegram account and answer privately with the community link (only

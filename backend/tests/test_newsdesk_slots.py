@@ -92,7 +92,7 @@ async def test_a_story_that_clears_the_bar_fills_the_slot_and_nothing_else_goes_
     await decide(db, SLOT + timedelta(minutes=2))
     out = released(db)
     assert len(out) == 1 and out[0].kind == "news" and out[0].slot == "slot" and "08:00 Dubai slot" in out[0].why
-    verified(db, "Kryptex exchange says hackers drained $900 million from its hot wallet", now=SLOT + timedelta(minutes=30), hours=0)
+    verified(db, "Kryptex exchange says hackers drained $40 million from its hot wallet", now=SLOT + timedelta(minutes=30), hours=0)  # under the major line
     await decide(db, SLOT + timedelta(minutes=40))
     assert len(released(db)) == 1  # the slot has its post
     waiting = db.scalar(select(NdEvent).where(NdEvent.status == "candidate"))

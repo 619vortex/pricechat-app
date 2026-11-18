@@ -205,6 +205,19 @@ def update_owner_alerts(payload: OwnerAlertsIn, db: DbSession, runtime: Runtime)
     return alerts.settings_out(db, runtime.settings)
 
 
+@router.post("/system/alerts/link")
+def link_owner_alerts(db: DbSession) -> dict[str, Any]:
+    """A one-time deep link: open it on the phone, press Start, and the bot makes that chat the owner-alerts chat (and confirms there)."""
+    from app import alerts
+    from app.telegram.ingestion import get_bot_state
+
+    bot = get_bot_state(db).bot_username
+    if not bot:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The Telegram bot isn't connected yet (no bot username).")
+    code, expires = alerts.start_owner_link(db)
+    return {"url": f"https://t.me/{bot}?start={alerts.OWNER_LINK_PREFIX}{code}", "expires_at": expires.isoformat()}
+
+
 @router.post("/system/alerts/test")
 async def test_owner_alert(db: DbSession, runtime: Runtime) -> dict[str, Any]:
     """Send one test message now (no cooldown) and say exactly why it failed if it did."""

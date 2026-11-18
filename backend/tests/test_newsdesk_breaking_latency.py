@@ -52,7 +52,7 @@ async def test_the_bahrain_drone_attack_breaks_between_slots(client: Any, db: Se
     }
     await _desk_tick(db)
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
-    assert ev.slot == "breaking" and "major geopolitical event" in ev.why and events.verified_important(ev)
+    assert ev.slot == "breaking" and ("major geopolitical event" in ev.why or "hard geopolitical event" in ev.why) and events.verified_important(ev)
     assert ev.facts["latency"]["event_to_release_min"] <= 20  # minutes, not the 150 of production
 
 

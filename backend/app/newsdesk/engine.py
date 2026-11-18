@@ -132,6 +132,14 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
                 # right here (no market keyword), so neither lane ever saw them. A major infrastructure incident is stored on its own merit.
                 category, strength = incidents.desk_category(inc), (2.5 if inc.major else 1.0)
             if category is None:
+                # owner, 2026-11-18 replay: "Mines hit five ships in the Strait of Hormuz, shipping officials say" was dropped here (no
+                # market keyword), so the event had one outlet and never broke. A high-impact event (app/terminal/intel) is stored too.
+                from app.terminal import intel
+
+                kind, _ = intel.impact_class(title, it.get("summary", ""), [], {})
+                if kind is not None:
+                    category, strength = ("stocks" if kind in ("markets", "corporate") else "crypto" if kind == "hack" else "politics"), 2.5
+            if category is None:
                 continue
             if inc is not None:
                 incident_stored.append(f"{feed['name']}: [{inc.why()}] {title[:120]}")
@@ -426,7 +434,15 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         following = events.X_FOLLOWS_TELEGRAM
         if following and ev.tg_status in events.TG_WAITING:
             continue  # wait for Telegram's outcome on this event (it also picks the picture X reuses)
-        if following and ev.tg_status not in ("delivered", "uncertain"):
+        own = False
+        if following and ev.tg_status == "skipped":
+            # owner, 2026-11-18: each platform on its own. Telegram refusing ITS caption (a picture caption, a model's sentence) no longer
+            # silences X: X posts its own checked headline-and-source text (never Telegram's refused package), once per event, and only
+            # if Trending hasn't posted the story. Production: #649, #658, #662, #667 were lost on X because Telegram skipped them.
+            own = True
+            following = False
+            logger.info("newsdesk: event %s: Telegram skipped it (%s); X writes its own checked text", ev.id, (ev.why or "")[:80])
+        elif following and ev.tg_status not in ("delivered", "uncertain"):
             events.mark(ev, "x", "skipped", f"Telegram didn't post it ({ev.tg_status})")
             db.commit()
             continue
@@ -449,7 +465,7 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
         shown = [next(x for x in ev.sources if x["name"] == n) for n in named]
-        text, links, source_text, named = x_words(ev, b, shown, named)
+        text, links, source_text, named = x_words(ev, b, shown, named, package=not own)
         urgent = ev.label == brief.BREAKING or ev.slot in ("extra", "breaking")
         market_kind = ev.kind in ("market", "recap") or bool(f.get("symbol"))
         post = enqueue(db, posts, kind="market" if market_kind else "news", category=ev.category or "viral", priority="breaking" if urgent else "scheduled", text=text, key=f"event:{ev.id}",
@@ -486,14 +502,14 @@ def _trend_covered(db: Session, ev: NdEvent, now: datetime) -> str:
     return f"Trending Topics already posted this story (trend post {post.id})" if post is not None else ""
 
 
-def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str]) -> tuple[str, list[str], str, list[str]]:
+def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str], package: bool = True) -> tuple[str, list[str], str, list[str]]:
     """(text, allowed links, what the sources said, source names) for X. Price Chat News (2026-11-11): the caption Telegram's package
     wrote (headline, context, a question now and then, the article link), so both platforms say the same thing; without one, the older
     headline-and-source format."""
     from app.newsdesk import network
 
     f = ev.facts or {}
-    pkg = network.stored(ev)
+    pkg = network.stored(ev) if package else None
     if pkg and pkg.get("x_text"):
         links = [str(x.get("url")) for x in pkg.get("links") or [] if x.get("url")]
         names = [str(x.get("name")) for x in pkg.get("links") or [] if x.get("kind") != "pricechat" and x.get("name")] or named

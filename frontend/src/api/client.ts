@@ -411,6 +411,7 @@ export const api = {
   ownerAlerts: () => request<OwnerAlerts>("/system/alerts"),
   updateOwnerAlerts: (body: { enabled?: boolean; telegram_chat?: string }) => request<OwnerAlerts>("/system/alerts", json("PUT", body)),
   testOwnerAlert: () => request<{ sent: boolean }>("/system/alerts/test", { method: "POST" }),
+  linkOwnerAlerts: () => request<{ url: string; expires_at: string }>("/system/alerts/link", { method: "POST" }),
 
   // Telegram account mode (official client API). Codes and passwords go straight to Telegram; nothing is stored.
   telegramConnection: () => request<TelegramConnection>("/telegram/connection"),

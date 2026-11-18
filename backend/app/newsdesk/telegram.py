@@ -84,7 +84,7 @@ def rejected(story: NdStory) -> str | None:
     return chaos.rejected(story)
 
 
-def over_limit(db: Session, s: NdTelegramSettings, now: datetime, slot: str = "regular") -> str | None:
+def over_limit(db: Session, s: NdTelegramSettings, now: datetime, slot: str = "regular", major: bool = False) -> str | None:
     """The lane's own safety limits. A scheduled slot (the desk's six a day) is held to the schedule's own count, so the old 3-4 a day
     setting can't silently drop slots; between any two posts there are still MIN_GAP minutes."""
     day = int(db.scalar(select(func.count()).select_from(NdTelegramPost).where(NdTelegramPost.status.in_(COUNTED), NdTelegramPost.created_at >= now - timedelta(days=1))) or 0)
@@ -99,6 +99,8 @@ def over_limit(db: Session, s: NdTelegramSettings, now: datetime, slot: str = "r
         return f"{day} posts in 24 hours, the limit"
     last = _aware(db.scalar(select(func.max(NdTelegramPost.created_at)).where(NdTelegramPost.status.in_(COUNTED))), now)
     gap = timedelta(minutes=s.gap_minutes) if slot == "regular" else MIN_GAP
+    if major:  # a verified major event (events.major_breaking) doesn't wait out the spacing; the daily cap above still holds
+        gap = timedelta(0)
     if last is not None and last > now - gap:
         return f"last post was under {int(gap.total_seconds() // 60)} minutes ago"
     return None
@@ -471,7 +473,7 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
     out["due"] = len(due)
     if not due:
         return done()
-    limit = over_limit(db, s, now, due[0].slot)
+    limit = over_limit(db, s, now, due[0].slot, major=bool((due[0].facts or {}).get("major")))
     if limit:
         return done(skipped=limit)
     try:
