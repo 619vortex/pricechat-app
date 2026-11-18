@@ -37,11 +37,9 @@ export const AREAS: NavArea[] = [
     // owner, 2026-11-18: everything to do with Price Chat news in one place
     key: "terminal", label: "Price Chat Terminal", icon: "◉",
     pages: [
-      { to: "/terminal", label: "Terminal", about: "Live breaking news, emerging narratives, rumours and disruptions, with viral and evidence scores, timelines and one-click publish." },
-      { to: "/terminal/x", label: "X Intelligence", about: "Narratives from watched X accounts with credibility tiers: emerging terms, independence, velocity, hooks. Paid X reads, off until you confirm." },
-      { to: "/terminal/newsdesk", label: "News Desk", about: "The News Desk: automatic X and Telegram news posts, its slots, switches and emergency stop." },
-      { to: "/terminal/trending", label: "Trending Topics", about: "Trending Topics: what is getting hot across sources, its scores, suggested tweets and limits." },
-      { to: "/world-monitor", label: "World Monitor", about: "What the News Desk is reading now, how it judged each story, and what it posts next on Telegram and X. Then the Viral Engine." },
+      // Terminal 2.0 (owner, 2026-11-18): one page. News Desk, Trending, X Intelligence, World Monitor and diagnostics live in its Settings
+      // drawer; their old addresses still open the full pages.
+      { to: "/terminal", label: "Terminal", about: "Breaking news, emerging stories and everything Price Chat publishes, on one page.", match: ["/terminal/", "/world-monitor"] },
     ],
   },
   {

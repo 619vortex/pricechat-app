@@ -65,7 +65,7 @@ def story_out(t: TtTopic, post: TtPost | None, s: TtSettings) -> dict[str, Any]:
             "breaking_ok": bool(term.get("breaking_ok")), "claim": term.get("claim"), "first_report": tl.get("first_report") or tl.get("event_time"), "detected": _iso(t.first_seen),
             "last_update": tl.get("last_update"), "age_hours": pa.get("age_hours"), "stale": pa.get("stale"), "why": pa.get("why"),
             "incident": pa.get("incident"), "sensitive": pa.get("sensitive"), "sources": links, "decision": {"status": status, "reason": reason},
-            "post": engine.post_out(post) if post is not None else None}
+            "post": engine.post_out(post) if post is not None else None, "telegram": pa.get("telegram")}
 
 
 def _posts_for(db: Session, ids: list[int]) -> dict[int, TtPost]:
@@ -119,6 +119,9 @@ def overview(db: Session, settings: Settings, *, q: str = "", lane: str = "", ca
     topics = list(db.scalars(select(TtTopic).where(TtTopic.last_seen >= since).order_by(TtTopic.last_seen.desc()).limit(600)))
     posts = _posts_for(db, [t.id for t in topics])
     rows = [story_out(t, posts.get(t.id), s) for t in topics]
+    order = {"breaking": 0, "disruption": 1, "emerging": 2, "rumor": 3, "watch": 4, "published": 5, "rejected": 6}
+    rows.sort(key=lambda r: (order.get(r["lane"], 9), -float((r["viral"] or {}).get("score") or 0), -(r["trend_score"] or 0)))
+    rows = collapse(rows)
     counts = {k: sum(1 for r in rows if r["lane"] == k) for k in LANES}
     needle = q.strip().lower()
     if needle:
@@ -128,8 +131,6 @@ def overview(db: Session, settings: Settings, *, q: str = "", lane: str = "", ca
     if category:
         rows = [r for r in rows if r["category"] == category]
     rows = [r for r in rows if float((r["viral"] or {}).get("score") or 0) >= min_viral and float((r["evidence"] or {}).get("score") or 0) >= min_evidence]
-    order = {"breaking": 0, "disruption": 1, "emerging": 2, "rumor": 3, "watch": 4, "published": 5, "rejected": 6}
-    rows.sort(key=lambda r: (order.get(r["lane"], 9), -float((r["viral"] or {}).get("score") or 0), -(r["trend_score"] or 0)))
     events = [desk_event_out(e) for e in db.scalars(select(NdEvent).where(NdEvent.created_at >= now - WINDOW).order_by(NdEvent.id.desc()).limit(60))]
     published = []
     for p in db.scalars(select(NdPost).where(NdPost.published_at >= now - WINDOW, NdPost.status.in_(("published", "dry_run", "uncertain"))).order_by(NdPost.published_at.desc()).limit(30)):
@@ -139,7 +140,9 @@ def overview(db: Session, settings: Settings, *, q: str = "", lane: str = "", ca
                           "x_id": p.x_id, "topic_id": p.topic_id})
     published.sort(key=lambda x: str(x["at"] or ""), reverse=True)
     state = s.state or {}
-    return {"now": now.isoformat(), "counts": counts, "stories": rows[:limit], "total": len(rows), "controls": controls(db, s),
+    desk_only = merge_desk(db, rows, now)
+    return {"now": now.isoformat(), "counts": counts, "stories": rows[:limit], "total": len(rows), "controls": controls(db, s), "desk_only": desk_only,
+            "automation": automation_state(db, s, now), "today": published_today(db, published, now),
             "desk_events": events, "published": published[:40], "incidents": (state.get("incidents") or [])[:20],
             "ledger": engine.ledger_summary(state.get("ledger") or []), "ledger_rows": (state.get("ledger") or [])[:30],
             "sources": social_status(s), "last_scan": (state.get("last_run") or {}).get("at"), "alerts": (state.get("terminal_alerts") or [])[-20:][::-1]}
@@ -429,3 +432,203 @@ def x_settings(db: Session, *, on: bool | None = None, confirm_paid: bool = Fals
     merged["x_accounts"] = o
     s.sources = merged
     db.commit()
+
+
+# --- Terminal 2.0: one feed, one automation switch, Telegram from the story panel (owner, 2026-11-18) ---------------------------------
+
+DESK_LANE = {"released": "published", "skipped": "rejected", "rejected": "rejected", "expired": "rejected"}
+
+
+def _stems(text: str) -> set[str]:
+    from app.newsdesk import checks
+
+    return {w[:5] for w in checks.tokens(text)}
+
+
+def _feed_same(a: str, b: str) -> bool:
+    """For showing a story once (not for any publishing decision): the strict same_story, or most of the words in common once "Russia" and
+    "Russian", "killing" and "kill" count as one."""
+    if not a or not b:
+        return False
+    if coordinate.same_story(a, b):
+        return True
+    x, y = _stems(a), _stems(b)
+    both = len(x & y)
+    return both >= 3 and both / max(1, len(x | y)) >= 0.4
+
+
+def collapse(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One story, one card: rows (already in importance order) whose headlines are the same story fold into the first; a published row always
+    wins over its unpublished twins so the card shows it went out. Display only: the rows themselves and every publishing check are unchanged."""
+    keep: list[tuple[set[str], dict[str, Any]]] = []
+    for r in rows:
+        mine = _stems(r["title"])
+        twin = next((k for k in keep if len(k[0] & mine) >= 3 and len(k[0] & mine) / max(1, len(k[0] | mine)) >= 0.4), None)
+        if twin is None:
+            keep.append((mine, r))
+            continue
+        first = twin[1]
+        if r["lane"] == "published" and first["lane"] != "published":
+            r["merged"] = [first["id"], *first.get("merged", [])]
+            keep[keep.index(twin)] = (twin[0], r)
+        else:
+            first.setdefault("merged", []).append(r["id"])
+    return [r for _, r in keep]
+
+
+def merge_desk(db: Session, rows: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+    """The News Desk's events in the last 24 h, folded into the Terminal's stories: an event that is the same story as a Terminal story is
+    attached to it (row["desk"]), so the feed shows it once; the rest come back as their own rows."""
+    out: list[dict[str, Any]] = []
+    for e in db.scalars(select(NdEvent).where(NdEvent.created_at >= now - WINDOW, NdEvent.kind != "update").order_by(NdEvent.id.desc()).limit(80)):
+        info = {"id": e.id, "status": e.status, "headline": e.headline or e.title, "why": e.why, "x_status": e.x_status, "tg_status": e.tg_status,
+                "released_at": _iso(e.released_at), "x_note": e.x_note, "tg_note": e.tg_note}
+        mine = [e.title, e.headline]
+        hits = [r for r in rows if any(_feed_same(r["title"], m) for m in mine if m)
+                or any(_feed_same(str(x.get("title") or ""), m) for x in r["sources"][:4] for m in mine if m)]
+        for r in hits:
+            r.setdefault("desk", info)
+        if hits:
+            continue
+        out.append({**desk_event_out(e), "lane": DESK_LANE.get(e.status, "watch"), "desk": info})
+    return out
+
+
+def published_today(db: Session, published: list[dict[str, Any]], now: datetime) -> dict[str, int]:
+    """Today (UTC): X posts from both desks (dry run counted apart) and Telegram channel posts Telegram confirmed."""
+    from app.models.newsdesk import NdTelegramPost
+
+    day = now.date().isoformat()
+    sent = [p for p in published if str(p.get("at") or "").startswith(day)]
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tg = sum(1 for _ in db.scalars(select(NdTelegramPost.id).where(NdTelegramPost.delivered_at >= start, NdTelegramPost.status == "delivered")))
+    return {"x": len(sent), "live": sum(1 for p in sent if p.get("status") != "dry_run"), "telegram": tg}
+
+
+def automation_state(db: Session, s: TtSettings, now: datetime) -> dict[str, Any]:
+    """One word for the owner: running, paused or attention, and what needs attention. Pausing here is the News Desk's automation switch plus
+    Trending's approval mode; the emergency stops are separate and stronger."""
+    nd = db.get(NdSettings, 1)
+    paused = (s.state or {}).get("terminal_paused")
+    stop = "News Desk emergency stop is on" if nd is not None and nd.kill_switch else "Trending stop is on" if s.kill_switch else None
+    attention: list[str] = []
+    if stop:
+        attention.append(stop)
+    if (why := coordinate.desk_blocked(db, now, s)) and why not in attention and not stop:
+        attention.append(why[0].upper() + why[1:])
+    health = (s.state or {}).get("health") or {}
+    broken = [str((health.get(k) or {}).get("name") or k) for k in ("news", "faa", "status", "usgs") if (health.get(k) or {}).get("status") == "error"]
+    if broken:
+        attention.append(f"Source not answering: {', '.join(broken)}")
+    xi = ((s.state or {}).get("x_intel") or {})
+    if xi.get("paused"):
+        attention.append(f"X reads paused: {(xi['paused'] or {}).get('why') or 'budget'}")
+    try:
+        from app.newsdesk import telegram as lane
+
+        tg = lane.settings_row(db)
+        if (why := lane._paused(tg, now)):
+            attention.append(f"Telegram: {why}")
+    except Exception:  # noqa: BLE001 - the summary never fails the dashboard
+        pass
+    on = nd is not None and nd.automation and not paused
+    status = "paused" if stop or not on else "attention" if attention else "running"
+    return {"status": status, "on": bool(on), "stopped": bool(stop), "paused_at": (paused or {}).get("at"), "attention": attention[:5],
+            "trending_auto": engine.automatic(s)}
+
+
+def set_automation(db: Session, on: bool) -> dict[str, Any]:
+    """Pause: the News Desk stops its automatic run and Trending moves to approval (both remembered); resume puts back exactly what was there.
+    Scanning, the feed, the owner's own publishing and the emergency stops are untouched. Live / dry run is never changed here."""
+    s = engine.settings_row(db)
+    nd = db.get(NdSettings, 1)
+    state = dict(s.state or {})
+    now = utcnow()
+    if not on and not state.get("terminal_paused"):
+        state["terminal_paused"] = {"at": now.isoformat(), "trending_mode": s.mode, "newsdesk_automation": bool(nd.automation) if nd else True}
+        s.mode = "approval"  # auto_confirmed_at is kept, so resuming needs no new confirmation for a mode the owner had already confirmed
+        if nd is not None:
+            nd.automation = False
+        logger.info("terminal automation: PAUSED by the owner (trending was %s)", state["terminal_paused"]["trending_mode"])
+    elif on:
+        was = state.pop("terminal_paused", None) or {}
+        if was:
+            s.mode = str(was.get("trending_mode") or s.mode)
+        if nd is not None:
+            nd.automation = bool(was.get("newsdesk_automation", True))
+        logger.info("terminal automation: RESUMED by the owner (trending %s, news desk %s)", s.mode, "on" if nd is not None and nd.automation else "off")
+    s.state = state
+    db.commit()
+    return automation_state(db, s, now)
+
+
+def _tg_text(text: str, sources: list[dict[str, Any]]) -> str:
+    import html
+
+    body = html.escape(text.strip())
+    url = next((str(x.get("url")) for x in sources if x.get("url")), "")
+    return body + (f"\n\n<a href=\"{html.escape(url, quote=True)}\">Source</a>" if url else "")
+
+
+async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: str | None, *, client: Any = None) -> dict[str, Any]:
+    """The owner's one-click Telegram send of a Terminal story, through the channel lane's own sender: never a rumour, never with an emergency
+    stop on or the lane paused, the same words checks as X, one send per story (its unique link), and not when the News Desk already has it."""
+    from app.members.telegram_missions import channel_handle
+    from app.models.newsdesk import NdTelegramPost
+    from app.newsdesk import checks
+    from app.newsdesk import telegram as lane
+
+    now = utcnow()
+    term = _term(t)
+    if term.get("rumor"):
+        raise ValueError("Not sent: this story is unverified. Wait for a reliable outlet or an official source.")
+    nd = db.get(NdSettings, 1)
+    if nd is not None and nd.kill_switch:
+        raise ValueError("Not sent: the News Desk emergency stop is on.")
+    tg = lane.settings_row(db)
+    if not tg.enabled:
+        raise ValueError("Not sent: the Telegram news lane is turned off (Settings › News Desk).")
+    if (why := lane._paused(tg, now)):
+        raise ValueError(f"Not sent: Telegram is paused ({why}).")
+    link = f"terminal:{t.id}"
+    if db.scalar(select(NdTelegramPost).where(NdTelegramPost.story_link == link)) is not None:
+        raise ValueError("Already sent to Telegram.")
+    titles = [t.title] + [str(x.get("title") or "") for x in (t.sources or [])[:4]]
+    for e in db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=48), NdEvent.tg_status.in_(("delivered", "publishing", "uncertain")))):
+        if any(coordinate.same_story(a, b) for a in titles for b in (e.title, e.headline) if a and b):
+            raise ValueError(f"Not sent: the News Desk already posted this story on Telegram (event {e.id}).")
+    for p in db.scalars(select(NdTelegramPost).where(NdTelegramPost.created_at >= now - timedelta(hours=48), NdTelegramPost.status.in_(lane.COUNTED))):
+        if any(coordinate.same_story(a, b) for a in titles for b in (p.title, p.headline) if a and b):
+            raise ValueError("Not sent: this story is already on the Telegram channel.")
+    post = await draft(db, settings, t, text)
+    if post.status == "held":
+        raise ValueError(f"Not sent: {post.hold_reason or 'a check failed'}. Edit the words until they pass.")
+    result = gates.gate(post.text, source_text=post.source_text, source_names=[x["name"] for x in post.sources or []][:1], reliable_count=len(post.sources or []),
+                        buzz_ok=engine._flag(post, "buzz"), discussion_ok=engine._flag(post, "discussion"), breaking_ok=engine.breaking_ok(db, post))
+    if not result["ok"]:
+        raise ValueError(f"Not sent: {result['reason']}")
+    handle = channel_handle(db)
+    if not handle:
+        raise ValueError("Not sent: no announcement channel is set.")
+    srcs = [{"name": str(x.get("name") or x.get("outlet") or ""), "url": str(x.get("url") or "")} for x in (post.sources or [])][:4]
+    message = {"link": link, "title": t.title, "headline": post.text.split("\n")[0][:200], "plain": post.text, "source": (srcs[0]["name"] if srcs else "Price Chat") or "Price Chat",
+               "sources": srcs, "fingerprint": checks.fingerprint(t.title), "writer": "owner", "html": _tg_text(post.text, srcs)}
+    own = client is None
+    if own:
+        from app.telegram.service import make_client
+
+        client = make_client(settings)
+    try:
+        rights, problem = await lane.bot_rights(client, handle)
+        if rights is None:
+            raise ValueError(f"Not sent: {problem}")
+        sent = await lane.send(db, tg, client, message, handle, rights, now)
+    finally:
+        if own:
+            await client.aclose()
+    if sent is None:
+        raise ValueError(f"Not sent: {(tg.state or {}).get('problem') or 'Telegram did not confirm the message'}.")
+    t.parts = {**(t.parts or {}), "telegram": {"at": now.isoformat(), "message_id": sent.message_id, "post_id": sent.id, "chat": handle}}
+    db.commit()
+    logger.info("terminal telegram: topic %s -> message %s in %s (owner)", t.id, sent.message_id, handle)
+    return {"ok": True, "message_id": sent.message_id, "chat": handle}

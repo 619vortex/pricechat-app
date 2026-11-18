@@ -44,7 +44,7 @@ describe("Admin layout", () => {
   it("keeps the sidebar short: a few areas, every old page still reachable", () => {
     expect(AREAS.length).toBeLessThanOrEqual(11);  // World Monitor got its own area (owner, 2026-11-12)
     for (const p of ["/trading-os", "/trading-bot", "/affiliate", "/members", "/rank-rewards", "/workers", "/realm", "/telegram", "/invite-bot", "/invite-bot/send",
-      "/x", "/world-monitor", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
+      "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
       "/settings", "/api-keys", "/activity"]) {
       expect(locate(p).page.to).toBe(p);
     }
@@ -53,7 +53,8 @@ describe("Admin layout", () => {
     expect(locate("/vpn").area.key).toBe("vpn");
     expect(locate("/world-monitor").area.key).toBe("terminal");
     expect(locate("/terminal").area.key).toBe("terminal");
-    expect(locate("/terminal/newsdesk").page.label).toBe("News Desk");
+    expect(locate("/world-monitor").page.to).toBe("/terminal");  // Terminal 2.0: one page, the rest in its Settings drawer
+    expect(locate("/terminal/newsdesk").page.to).toBe("/terminal");
     expect(locate("/invite-bot/send").page.label).toBe("Send invites");
   });
 

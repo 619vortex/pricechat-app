@@ -68,6 +68,28 @@ async def publish(topic_id: int, payload: DraftInput, db: DbSession, runtime: Ru
     return {**result, "story": feed.story_detail(db, t)}
 
 
+@router.post("/stories/{topic_id}/telegram")
+async def telegram(topic_id: int, payload: DraftInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    t = _topic(db, topic_id)
+    try:
+        result = await feed.publish_telegram(db, runtime.settings, t, payload.text)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+    except Exception as e:  # noqa: BLE001 - Telegram not configured or unreachable: say so, nothing was sent
+        raise HTTPException(409, f"Not sent: {e}") from None
+    return {**result, "story": feed.story_detail(db, t)}
+
+
+class AutomationInput(StrictInput):
+    on: bool
+
+
+@router.post("/automation")
+def automation(payload: AutomationInput, db: DbSession) -> dict[str, Any]:
+    """Pause or resume automatic publishing (News Desk automation + Trending's automatic mode). Never touches live / dry run or the stops."""
+    return feed.set_automation(db, payload.on)
+
+
 class RejectInput(StrictInput):
     reason: str = Field("", max_length=300)
 

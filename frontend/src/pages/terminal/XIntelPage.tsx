@@ -2,7 +2,7 @@ import { useState } from "react";
 import { request } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, relativeTime, type Tone } from "../../components/ui";
-import { StoryRow, type Story } from "./TerminalPage";
+import { StoryRow, type Story } from "./classic";
 import "./terminal.css";
 
 /** Admin › Price Chat Terminal › X Intelligence (owner, 2026-11-18): narratives from watched X accounts with credibility tiers, through
