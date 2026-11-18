@@ -190,9 +190,9 @@ def parse_gdelt(body: dict[str, Any]) -> list[Item]:
 async def gdelt(client: httpx.AsyncClient, opts: dict[str, Any]) -> Result:
     url = GDELT.format(q=quote(GDELT_QUERY), n=int(opts.get("max_records") or 75), span=quote(str(opts.get("timespan") or "60min")))
     try:
-        r = await client.get(url, headers=_get_headers())
+        r = await client.get(url, headers=_get_headers(), timeout=8)
     except httpx.HTTPError as e:
-        return [], f"GDELT: {type(e).__name__}", {"requests": 1}
+        return [], f"GDELT: {type(e).__name__}", {"requests": 1, "idle": True}
     if r.status_code == 429:
         return [], "GDELT: rate limited (tries again next read)", {"requests": 1, "idle": True}
     if r.status_code != 200:
@@ -224,7 +224,7 @@ def parse_hn(item: dict[str, Any], min_points: int) -> Item | None:
 
 async def hn(client: httpx.AsyncClient, opts: dict[str, Any]) -> Result:
     try:
-        r = await client.get(HN_TOP, headers=_get_headers())
+        r = await client.get(HN_TOP, headers=_get_headers(), timeout=6)
         ids = [int(i) for i in (r.json() or [])[: int(opts.get("top") or 30)]] if r.status_code == 200 else []
     except (httpx.HTTPError, ValueError, TypeError) as e:
         return [], f"Hacker News: {type(e).__name__}", {"requests": 1}
@@ -237,7 +237,7 @@ async def hn(client: httpx.AsyncClient, opts: dict[str, Any]) -> Result:
     async def one(i: int) -> dict[str, Any] | None:
         async with sem:
             try:
-                x = await client.get(HN_ITEM.format(id=i), headers=_get_headers())
+                x = await client.get(HN_ITEM.format(id=i), headers=_get_headers(), timeout=6)
                 return x.json() if x.status_code == 200 else None
             except (httpx.HTTPError, ValueError):
                 return None

@@ -121,6 +121,7 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
         idle = bool(meta.get("idle"))
         failing = bool(problem) and not unavailable and not idle
         stored[name] = _store(db, items, now)
+        db.commit()  # never hold SQLite's write lock across the next source's network read (2026-11-18: a 16 s GDELT read locked the worker's claim)
         if name in discovery.DEFAULTS:  # the Terminal's own sources: one line per read, so production shows they work
             logger.info("terminal source %s: %d items, %d new%s", name, len(items), stored[name], f" ({_safe(problem, 100)})" if problem else "")
         usage["requests"][name] = int(usage["requests"].get(name, 0)) + int(meta.get("requests") or 0)
