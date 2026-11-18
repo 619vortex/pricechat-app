@@ -296,7 +296,11 @@ def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
         take("major", f"{deaths} killed")
     elif deaths >= strong_at:
         take("strong", f"{deaths} killed")
-    pct = ev.pct
+    # a market move's own figure may sit in the lead sentence of the same article ("...as liquidations sweep through leveraged longs. More
+    # than $1 billion in positions were forced shut in 12 hours"): only that sentence, never the background further down
+    lead = re.split(r"(?<=[.!?])\s+", (summary or "").strip())[0] if summary else ""
+    move = ev.family == "market" or bool(LIQ.search(head))
+    pct = ev.pct or (pct_of(lead) if move else 0.0)
     if pct:
         if INDEX.search(head):
             if pct >= 4:
@@ -320,7 +324,7 @@ def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
                 take("strong", f"a {pct:g}% move in a mega-cap")
         elif pct >= 20:
             take("strong", f"a {pct:g}% move")
-    money = money_of(head)
+    money = money_of(head) or (money_of(lead) if LIQ.search(head) else 0.0)
     if money and not AFTERMATH.search(head):  # "...loot from $6.3B Binance hack": the old theft's figure, not a new one
         if ev.family == "hack":
             if money >= 250e6:
@@ -371,7 +375,8 @@ def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
     from app.newsdesk import editorial
 
     sig = editorial.significance(head)
-    if sig is not None and not HEDGE.search(head) and (sig.kind in ("structure", "flows") or str(sig.why).startswith("market-wide swing")):
+    # a study, pilot, test or exploration is not an outcome (production 2026-11-18: "Citi and Circle to help World Bank study stablecoin payouts")
+    if sig is not None and not HEDGE.search(head) and not NOT_YET.search(head) and (sig.kind in ("structure", "flows") or str(sig.why).startswith("market-wide swing")):
         take("strong", str(sig.why))
     return best
 
@@ -390,6 +395,8 @@ MACRO_EXTREME = _rx(r"\b(highest|lowest|fastest|slowest|biggest|record|since (?:
                     r"unexpected\w*|surpris\w*|contracts?|contracted|recession)\b")
 INDEX_REGIME = _rx(r"\b(?:enters?|entered|in|into|tips? into)\s+(?:a )?(correction|bear market)\b|\bcircuit breakers?\b|\btrading (?:halted|halt)\b|"
                    r"\bworst (?:day|week|month) since\b")
+NOT_YET = _rx(r"\b(stud(?:y|ies|ying)|pilots?|piloting|trials?|testing|to test|tests|explor\w*|consider\w*|plans? to|planning|aims? to|to help|"
+              r"research\w*|evaluat\w*|proof of concept|memorandum|mou|partnership to)\b")
 PRICE_EXTREME = _rx(r"\b(record high|all-time high|new record|(?:lowest|highest) (?:level |close )?since (?:(?:january|february|march|april|may|june|july|"
                     r"august|september|october|november|december) )?(?:19|20)\d\d|\d+-year (?:high|low))\b")
 MAJOR_ASSET = _rx(r"\b(xrp|solana|sol|gold|silver|dollar|yen|euro|treasur(?:y|ies)|10-year|bond yields?)\b")

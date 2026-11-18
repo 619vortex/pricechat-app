@@ -258,3 +258,14 @@ def test_trending_never_auto_posts_a_story_with_no_consequence(db: Session) -> N
                             parts={"terminal": {"fast": True}, "growth": {"measured": True}})
     ok, why = engine.auto_ok(s, topic, "text", None)
     assert not ok and why.startswith("not newsworthy")
+
+
+def test_a_study_or_pilot_is_not_an_outcome(db: Session) -> None:
+    """Production 2026-11-18 12:04 UTC, first slot after this gate went live: "Citi and Circle to help World Bank study stablecoin payouts"
+    was released as an institution on crypto rails. A study is not an outcome; the delivery gate refuses it even after release."""
+    assert not newsworthy.assess("Citi and Circle to help World Bank study stablecoin payouts").ok
+    ev = NdEvent(key="citi", kind="news", title="Citi and Circle to help World Bank study stablecoin payouts", headline="CITI AND CIRCLE", summary="",
+                 topic="crypto", evidence="two outlets", status="released", released_at=NOW, facts={}, sources=[])
+    db.add(ev)
+    db.commit()
+    assert editorial.delivery_gate(db, ev, NOW, "telegram").startswith("not newsworthy")

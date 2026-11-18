@@ -271,7 +271,8 @@ async def test_talks_ahead_of_a_meeting_never_go_out(client: Any, db: Session, w
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, NOW)
     assert tg.sent == []
-    assert "routine statement or talks with no outcome" in (db.scalars(select(NdEvent)).one().tg_note or "")
+    note = db.scalars(select(NdEvent)).one().tg_note or ""
+    assert "routine statement or talks with no outcome" in note or "not newsworthy" in note  # 2026-11-18: the newsworthiness gate says so first
 
 
 async def test_just_in_goes_out_as_one_short_text_post(client: Any, db: Session, wired: dict[str, Any]) -> None:
