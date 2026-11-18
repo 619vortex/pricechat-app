@@ -367,3 +367,17 @@ def test_pilot_metrics_measure_lead_verification_and_false_positives() -> None:
     assert m["spend_usd"] == 0.4 and m["unique_posts"] == 38 and m["duplicates_returned"] == 2
     assert m["x_led"] == 2 and m["before_other_sources"] == 1 and m["lead_min"]["median"] == 22
     assert m["useful_discoveries"] == 1 and m["verified_published"] == 1 and m["false_positives"] == 1 and m["cost_per_useful"] == 0.4
+
+
+def test_posts_from_before_the_pilot_never_count_as_discoveries() -> None:
+    """Production 2026-11-18 09:10: the first read returned a post from the day before, and the ledger credited X with a 408-minute lead."""
+    xi: dict[str, Any] = {"pilot": {"started": NOW.isoformat()}}
+
+    class T:
+        id, title, status, parts = 7, "Quad9 withdraws from France", "active", {"terminal": {"evidence": {"rumor": False, "level": "corroborated"}}}
+        sources = [{"source": "x_accounts", "outlet": "@a", "at": (NOW - timedelta(hours=18)).isoformat()},
+                   {"source": "news", "outlet": "The Register", "at": (NOW - timedelta(hours=11)).isoformat()}]
+
+    xintel.pilot_ledger(xi, [T()], NOW)
+    m = xintel.pilot_metrics(xi, NOW, set())
+    assert m["stories"] == 0 and m["x_led"] == 0 and m["useful_discoveries"] == 0

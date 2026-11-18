@@ -497,10 +497,12 @@ def pilot_ledger(xi: dict[str, Any], topics: list[Any], now: datetime) -> list[s
     """Each topic X touched: when X had it, when any other source had it, the lead, whether it became verified, published, rejected
     or went stale unconfirmed. Kept 14 days in state, so the 48-hour report survives signal clean-up."""
     book = dict((xi.get("pilot") or {}).get("ledger") or {})
+    started = str((xi.get("pilot") or {}).get("started") or "")
     lines = []
     for t in topics:
         srcs = t.sources or []
-        xs = [x for x in srcs if x.get("source") == "x_accounts"]
+        # only posts published after the pilot began: the first read also returns older posts, which X didn't discover live
+        xs = [x for x in srcs if x.get("source") == "x_accounts" and str(x.get("at") or "") >= started]
         if not xs:
             continue
         others = [x for x in srcs if x.get("source") != "x_accounts"]
@@ -536,7 +538,7 @@ def pilot_metrics(xi: dict[str, Any], now: datetime, published_topics: set[int])
     posts = int(sum(float(d.get("posts") or 0) for d in days.values()))
     new = int(sum(float(d.get("new") or 0) for d in days.values()))
     dupes = int(sum(float(d.get("dupes") or 0) for d in days.values()))
-    rows = list(ledger.values())
+    rows = [e for e in ledger.values() if not start or str(e.get("x_first") or "") >= start]  # never a post from before the pilot
     for k, e in ledger.items():
         if int(k) in published_topics:
             e["published"] = e.get("published") or True
