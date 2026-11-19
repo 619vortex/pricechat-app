@@ -641,6 +641,10 @@ def qualify(title: str, summary: str = "", *, outlets: int = 0, base: Assessment
         return a
     e = exceptional(title, summary, outlets=outlets)
     if not e.ok:
+        x = extraordinary(title, summary, outlets=outlets) if EXTRAORDINARY_LIVE else None
+        if x is not None and x.ok:
+            parts = {**a.parts, "consequence": 45}
+            return audience_gate(Assessment(True, "extraordinary", x.why, "", sum(parts.values()), parts, a.event), title, summary)
         return a
     parts = {**a.parts, "consequence": 45}
     return audience_gate(Assessment(True, "exceptional", e.why, "", sum(parts.values()), parts, a.event), title, summary)
@@ -775,7 +779,7 @@ def structural_weak(head: str) -> str | None:
 # outright unless an outcome is stated (a deal signed, sanctions imposed, a strike that landed). Verification is never an angle.
 
 INTEREST_BAR = 60
-INTEREST_BASE = {"major": 70, "strong": 50, "exceptional": 50}
+INTEREST_BASE = {"major": 70, "strong": 50, "exceptional": 50, "extraordinary": 50}
 INTERCEPTED = _rx(r"\b(intercept\w*|shoots? down|shot down|downs|downed|repels?|repelled|thwart\w*|foils?|foiled|repulse\w*)\b")
 LANDED = _rx(r"\b(kill\w*|dead|deaths?|wounded|injur\w*|casualt\w*|damag\w*|ablaze|on fire|fire at|destroy\w*|hits?|hit by|struck|"
              r"blasts?|explosions? (?:at|in|hit)|impact(?:ed|s)? (?:on|at)|sets? off|shut(?:s)? down)\b")
@@ -875,6 +879,8 @@ def audience(title: str, summary: str, a: Assessment) -> tuple[int, str, str]:
     # the exceptional path's three kinds (exceptional()): a system people depend on failing now and critical infrastructure under attack
     # always matter to this audience; an institution's decisive act only when it lands on their markets, is a crime or case, or is hostile
     why = a.why or ""
+    if why.startswith("extraordinary: "):  # a discovery, a revelation, a first: the reason itself
+        angles.append((15, why.removeprefix("extraordinary: ")))
     if why.endswith("outage, happening now"):
         angles.append((15, why.removeprefix("exceptional: ")))
     elif why.startswith("exceptional: cyberattack"):
@@ -901,5 +907,58 @@ def audience_gate(a: Assessment, title: str, summary: str = "") -> Assessment:
     score, pitch, why_not = audience(title, summary, a)
     if why_not:
         return Assessment(False, "none", a.why, f"why would our audience care? {why_not}", a.stop_scroll, a.parts, a.event, score, pitch)
-    extra = a.why and not a.why.startswith("exceptional:") and a.why not in pitch and "a state strikes another" not in a.why
+    extra = a.why and not a.why.startswith(("exceptional:", "extraordinary:")) and a.why not in pitch and "a state strikes another" not in a.why
     return Assessment(True, a.strength, a.why, "", a.stop_scroll, a.parts, a.event, score, f"{pitch} ({a.why})" if extra else pitch)
+
+
+# --- the extraordinary story (owner, 2026-11-19, validation round) ------------------------------------------------------------------------
+# "Add a carefully verified extraordinary-news category for discoveries, bizarre events, major revelations and unexpected developments. Don't
+# let ordinary speculation or conspiracy claims pass as facts." Stories with no figure that a reader would still forward: a discovery stated
+# as found, documents that reveal, something done by mistake on a vast scale, a first in history. Verified like the exceptional path (two or
+# more outlets), stated as fact (no hedge, forecast, plan, study-suggests, claim or theory), something that HAPPENED, on any beat but sport
+# and celebrity.
+# EXTRAORDINARY_LIVE is False until the next real candidates show it catches what the gate misses without letting junk through: until then
+# it is judged and logged for every candidate ("editorial candidate:" lines) but publishes nothing.
+EXTRAORDINARY_LIVE = False
+
+FINDERS = r"(?:scientists?|researchers?|astronomers?|archaeologists?|physicists?|biologists?|geologists?|palaeontologists?|paleontologists?|" \
+          r"doctors|surgeons|engineers|divers|miners|explorers|nasa|esa|cern|telescope|probe|rover|james webb|hubble|study|team)"
+DISCOVERY = _rx(r"\b(discover(?:s|ed|y|ies)?|find(?:s)?|found|unearth(?:s|ed)?|detect(?:s|ed)|identif(?:y|ies|ied)|confirm(?:s|ed)|spot(?:s|ted)|"
+                r"recover(?:s|ed)|uncover(?:s|ed)|sequenc(?:es|ed)|decod(?:es|ed)|photograph(?:s|ed))\b")
+REVELATION = _rx(r"\b(leaked|leaks?|unsealed|declassified|(?:documents|records|emails|files|messages|filings|recordings|data) (?:show|reveal)s?|"
+                 r"reveal(?:s|ed)|expos(?:es|ed)|admits?|admitted|confess(?:es|ed)|secretly)\b")
+UNEXPECTED = _rx(r"\b(accidentally|mistakenly|by mistake|erroneously|fat[- ]finger\w*|in error|bizarre|unprecedented|for the first time(?: ever| in (?:history|\d+ years))?|"
+                 r"first[- ]ever|world'?s first|never before|abruptly|unexpectedly|out of nowhere|stuns?|stunned|shock(?:s|ed)? (?:the|markets|investors|traders))\b")
+CONSPIRACY = _rx(r"\b(conspirac\w*|hoax\w*|theor(?:y|ies|ists?)|claims? without evidence|unverified|unconfirmed|alleged(?:ly)?|rumou?r\w*|"
+                 r"psychic|prophec\w*|prediction|predicts?|flat earth|cover-?up claims?|sighting|sightings|mystery (?:object|drone)s?|"
+                 r"may|might|could|possibly|suggests?|hints?|appears? to|seems? to|believed to|thought to|likely|claims?|claimed|says? it (?:found|has))\b")
+
+
+def extraordinary(title: str, summary: str = "", *, outlets: int = 0) -> Exceptional:
+    """Extraordinary without a figure: a discovery, a revelation or an unexpected development, stated as fact by two or more outlets."""
+    head = title or ""
+    main = main_clause_soft(head)
+    if outlets < 2:
+        return Exceptional(False, "", "an extraordinary story needs two or more independent outlets")
+    if CONSPIRACY.search(head) or HEDGE.search(head) or FORECAST.search(head) or NOT_YET.search(head) or NOT_HAPPENED.search(main):
+        return Exceptional(False, "", "speculation, a claim or a theory: nothing established yet")
+    if REACTION.search(head) or structural_weak(head) or OFF_BEAT.search(head) or EVERGREEN.search(head):
+        return Exceptional(False, "", "a reaction, feature or off-beat story")
+    if (m := DISCOVERY.search(main)) and re.search(rf"\b{FINDERS}\b", main, re.I):
+        return Exceptional(True, f"extraordinary: a discovery ({m.group(0)})", "")
+    if m := REVELATION.search(main):
+        return Exceptional(True, f"extraordinary: a revelation ({m.group(0)})", "")
+    if m := UNEXPECTED.search(head):
+        return Exceptional(True, f"extraordinary: unexpected ({m.group(0)})", "")
+    return Exceptional(False, "", "not a discovery, a revelation or an unexpected development")
+
+
+def shadow(title: str, summary: str = "", *, outlets: int = 0, evidence: str = "") -> dict[str, Any]:
+    """Everything the gate would say about a candidate, for the production log (measurement, owner 2026-11-19): the live decision, the
+    audience score and reason, and what the extraordinary path would add while it is not live."""
+    a = qualify(title, summary, outlets=outlets)
+    x = extraordinary(title, summary, outlets=outlets)
+    xa = audience_gate(Assessment(True, "extraordinary", x.why, "", 0, {}, event_of(title, summary)), title, summary) if x.ok and not a.ok else None
+    return {"decision": "PUBLISH" if a.ok else "REJECT", "interest": a.interest, "strength": a.strength, "evidence": evidence, "outlets": outlets,
+            "why": a.pitch if a.ok else a.reason, "extraordinary": (x.why if x.ok else x.reason),
+            "extraordinary_would_publish": bool(xa is not None and xa.ok), "extraordinary_interest": xa.interest if xa is not None else 0, "live": EXTRAORDINARY_LIVE, "title": title[:200]}
