@@ -372,7 +372,7 @@ async def test_the_preview_queue_shows_each_candidate_with_its_gates_and_the_own
     assert set(card["gates"]) == {"dedup", "diversity", "evidence", "bar", "numbers", "headline", "owner"} and all(g["ok"] for g in card["gates"].values())
     assert card["headline"].startswith("NYSE") and card["credit"].startswith("Source: ") and card["image"].endswith(f"/{card['event']}.jpg")
     pic, meta = await pq.preview(db, card["event"], SLOT)
-    assert pic[:3] == b"\xff\xd8\xff" and meta["kind"] in ("photo", "graphic", "artwork", "card")
+    assert pic[:3] == b"\xff\xd8\xff" and meta["kind"] in ("photo", "template", "text")  # no headline card (2026-11-19): a TEXT ONLY preview
     pq.block(db, card["event"], True, "not today", SLOT)
     q = pq.build(db, SLOT - timedelta(minutes=40), {})
     assert q["candidates"][0]["will_post"] is False and "blocked" in q["candidates"][0]["status"]

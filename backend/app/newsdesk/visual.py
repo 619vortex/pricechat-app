@@ -1216,7 +1216,21 @@ async def _again(ev: Any, chosen: dict[str, Any], *, transport: Any, now: Any, d
 
 
 async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None,
-                    now: Any = None, db: Any = None, style: str | None = None) -> tuple[bytes, dict[str, Any]]:
+                    now: Any = None, db: Any = None, style: str | None = None, platform: str = "telegram",
+                    records: list[Any] | None = None) -> tuple[bytes, dict[str, Any]]:
+    """The picture for an event after the Visual Editor's final look (app/newsdesk/editor.review, owner 2026-11-19): every style and every
+    lane (Telegram, X, the Admin preview) goes through it, and a refused picture makes the post text only. `platform` "x" draws Price
+    Chat's templates in 16:9, Telegram gets the square format; `records` are the photos already used ([url, at, title, key])."""
+    from app.newsdesk import editor
+
+    image, meta = await _for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now, db=db, style=style,
+                                   platform=platform, records=records)
+    return editor.review(ev, image, meta)
+
+
+async def _for_event(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, recent: list[dict[str, Any]] | None = None,
+                     now: Any = None, db: Any = None, style: str | None = None, platform: str = "telegram",
+                     records: list[Any] | None = None) -> tuple[bytes, dict[str, Any]]:
     """The picture for an event, and what it was (stored on the event, so X re-renders exactly what Telegram showed). Owner, 2026-11-11:
     real photos first (licensed, of the actual subject), then the GPU's illustration (labelled), then the desk's own drawn visuals; a
     chart for a measured move stays a chart (accuracy first)."""
@@ -1233,13 +1247,13 @@ async def for_event(ev: Any, *, used: set[str] | None = None, transport: Any = N
 
         if stored_visual.get("style") == "clean":
             try:
-                again = await clean.redraw(ev, stored_visual, transport=transport, db=db, now=now)
+                again = await clean.redraw(ev, stored_visual, transport=transport, db=db, now=now, platform=platform)
             except Exception as e:  # noqa: BLE001 - drawn afresh below
                 logger.info("newsdesk visual: couldn't redraw clean picture for %s (%s)", getattr(ev, "id", None), type(e).__name__)
                 again = None
             if again is not None:
                 return again
-        return await clean.picture(ev, used=used, transport=transport, market=market, now=now, db=db)
+        return await clean.picture(ev, used=used, transport=transport, market=market, now=now, db=db, platform=platform, records=records)
     special = viral_visual(ev, recent, now, db)  # Viral Engine 2.0: a data post's card, a developing story's timeline
     if special is not None:
         return special

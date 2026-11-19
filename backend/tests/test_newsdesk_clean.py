@@ -29,11 +29,26 @@ def bars(n: int = 60, start: float = 100.0) -> list[list[float]]:
 
 
 def photo(w: int = 1200, h: int = 1500) -> Image.Image:
-    img = Image.new("RGB", (w, h), (40, 90, 160))
-    for y in range(h):
-        for x in range(0, w, 40):
-            img.putpixel((x, y), (200, (x * 7) % 255, (y * 3) % 255))
-    return img
+    """A photograph-like picture: varied colour and detail everywhere (the editor refuses flat, washed-out or blurry pictures)."""
+    import random
+
+    rnd = random.Random(5)
+    small = Image.new("RGB", (max(1, w // 3), max(1, h // 3)))
+    small.putdata([(rnd.randint(20, 230), rnd.randint(20, 230), rnd.randint(20, 230)) for _ in range(small.width * small.height)])
+    return small.resize((w, h), Image.Resampling.BILINEAR)
+
+
+def falling(n: int = 96, pct: float = -4.0) -> list[list[float]]:
+    """Candles that fall `pct` over the day, wiggling as real prices do."""
+    import math
+
+    out, p = [], 100.0
+    step = (1 + pct / 100) ** (1 / n)
+    for i in range(n):
+        o = p
+        p = p * step * (1 + 0.002 * math.sin(i * 1.1))
+        out.append([1_762_900_000.0 + 900 * i, o, max(o, p) * 1.001, min(o, p) * 0.999, p])
+    return out
 
 
 # ---------------------------------------------------------------- words
@@ -153,7 +168,7 @@ def found(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
     async def discover(client: Any, queries: list[str], terms: list[str], **kw: Any) -> list[Any]:
         calls.append({"queries": queries, "terms": terms, **kw})
-        return [photos.LicensedPhoto(url="https://upload.wikimedia.org/x.jpg", page="https://commons.wikimedia.org/wiki/File:X.jpg", title="File:X.jpg",
+        return [photos.LicensedPhoto(url="https://upload.wikimedia.org/x.jpg", page="https://commons.wikimedia.org/wiki/File:X.jpg", title="File:NVIDIA Headquarters.jpg",
                                      creator="Jane Doe", licence="CC BY-SA 4.0", licence_url="https://creativecommons.org/licenses/by-sa/4.0/",
                                      provider="wikimedia", source="wikimedia", width=1200, height=1500)]
 
@@ -165,21 +180,22 @@ def found(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-async def test_a_story_naming_an_asset_with_a_subject_photo_is_a_collage(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_price_story_is_one_strong_move_card_from_its_candles(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+    # owner, 2026-11-19: one strong image per post; the photo-and-candles collage (posts 185, 190) gave way to the move card
     async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
         assert symbol == "NVDA"
-        return bars()
+        return falling(96, -4.0)
 
     monkeypatch.setattr(clean, "fetch_bars", fake_bars)
     data, meta = await clean.picture(ev("Nvidia falls 4% after Jensen Huang's keynote"), now=AT)
-    assert meta["layout"] == "collage" and meta["style"] == "clean" and meta["symbol"] == "NVDA" and len(meta["bars"]) == 60
-    assert found[0]["terms"] == ["Jensen Huang"] and found[0]["panel"] is True  # the person the story is about, in a portrait panel
-    assert meta["licence"] and "CC BY-SA" in meta["credit_line"]
+    assert meta["layout"] == "move" and meta["style"] == "clean" and meta["symbol"] == "NVDA" and len(meta["bars"]) == 96
+    assert round(meta["pct"]) == -4 and meta["up"] is False and Image.open(io.BytesIO(data)).size == (1280, 1280)
+    assert found == []  # the chart is the picture: no photo is searched
 
 
 async def test_x_redraws_exactly_what_telegram_showed(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
-        return bars()
+        return falling(96, -4.0)
 
     async def download(url: str, transport: Any = None) -> Image.Image:
         return photo()
@@ -190,7 +206,7 @@ async def test_x_redraws_exactly_what_telegram_showed(found: list[dict[str, Any]
     data, meta = await clean.picture(e, now=AT)
     e.facts = {**e.facts, "visual": meta}
     again, meta2 = await visual.for_event(e)  # X: no database, no style setting: the stored style decides
-    assert again == data and meta2 is meta or meta2 == meta
+    assert again == data and {k: v for k, v in meta2.items() if k != "editor"} == meta and meta2["editor"]["ok"] is True
 
 
 async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -220,13 +236,15 @@ async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(mon
     assert all(c["sensitive"] for c in calls) and not any(c["terms"] == ["John Smith"] for c in calls)  # a private person: never
 
 
-async def test_no_photo_but_prices_is_the_chart(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_no_photo_but_prices_is_the_move_card(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
-        return bars()
+        return falling(96, -3.0)
 
     monkeypatch.setattr(clean, "fetch_bars", fake_bars)
-    data, meta = await clean.picture(ev("Bitcoin falls 3% after a Mercado Bitcoin outage"), now=AT)
-    assert meta["layout"] == "chart" and meta["symbol"] == "BTC-USD" and Image.open(io.BytesIO(data)).size == (1600, 900)
+    data, meta = await clean.picture(ev("Bitcoin falls 3% as leveraged longs unwind"), now=AT)
+    assert meta["layout"] == "move" and meta["symbol"] == "BTC-USD" and Image.open(io.BytesIO(data)).size == (1280, 1280)
+    data, meta = await clean.picture(ev("Bitcoin falls 3% as leveraged longs unwind"), now=AT, platform="x")
+    assert Image.open(io.BytesIO(data)).size == (1600, 900)  # X: 16:9
 
 
 async def test_nothing_real_is_a_text_post(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,11 +259,14 @@ async def test_nothing_real_is_a_text_post(monkeypatch: pytest.MonkeyPatch) -> N
 async def test_a_data_post_keeps_its_comparison_card() -> None:
     from app.newsdesk import datapost
 
+    tsla = [[86400 * i, 100.0 + 3.4 * i / 21 + (0.4 if i % 3 else -0.3)] for i in range(21)]
+    nvda = [[86400 * i, 100.0 - 23.2 * i / 21 + (0.5 if i % 2 else -0.4)] for i in range(21)]
+    tsla[-1][1], nvda[-1][1] = 103.4, 76.8
     post = datapost.DataPost(kind="battle", subject="TSLA:NVDA:30", headline="Tesla vs Nvidia over the past 30 days: +3.4% against −23.2%",
-                             lines=["Tesla +3.4%", "Nvidia −23.2%"], interest=62, why={}, series={"TSLA": [[0, 100.0], [1, 103.4]], "NVDA": [[0, 100.0], [1, 76.8]]},
+                             lines=["Tesla +3.4%", "Nvidia −23.2%"], interest=62, why={}, series={"TSLA": tsla, "NVDA": nvda},
                              bars=[], symbols=["TSLA", "NVDA"], as_of=AT.isoformat())
     data, meta = await clean.picture(ev(post.headline, kind="data", data=post.out()), now=AT)
-    assert meta["layout"] == "data" and meta["style"] == "clean"
+    assert meta["layout"] == "battle" and meta["style"] == "clean" and meta["pcts"] == [3.4, -23.2]
 
 
 def test_style_setting_defaults_to_clean_and_can_go_back(db: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,7 +291,7 @@ async def test_a_product_story_shows_the_photo_alone(found: list[dict[str, Any]]
 
     monkeypatch.setattr(clean, "fetch_bars", fake_bars)
     _, meta = await clean.picture(ev("Nvidia opens a new campus in Taipei"), now=AT)
-    assert meta["layout"] == "photo" and "bars" not in meta
+    assert meta["layout"] == "photo" and "bars" not in meta and meta["editor"]["role"] == "headquarters"
 
 
 def test_a_credit_the_font_cannot_draw_moves_to_the_caption() -> None:
@@ -284,16 +305,21 @@ def test_a_credit_the_font_cannot_draw_moves_to_the_caption() -> None:
     assert clean.image_credit(latin) == latin["credit"] and clean.with_credit("x", "y", latin) == ("x", "y")
 
 
-async def test_a_market_move_gets_its_markets_photo_beside_the_verified_chart(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_market_move_is_the_verified_move_card(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
     async def checked(e: Any, chosen: Any, market: Any, now: Any) -> Any:
         return b"", {"number_check": {"ok": True}}
 
     monkeypatch.setattr(visual, "_chart_for", checked)  # the series check itself is visual.verify_series's own tests
     pts = [[1_762_900_000 + 900 * i, 7600 - 3 * i] for i in range(97)]
     e = ev("S&P 500 falls 3.8% in 24 hours", kind="market", points=pts, name="S&P 500", window="24h", data_source="Yahoo Finance")
+
+    async def series_pct(e2: Any, chosen: Any, market: Any, now: Any) -> Any:
+        return b"", {"number_check": {"ok": True, "series_pct": (pts[-1][1] / pts[0][1] - 1) * 100}}
+
+    monkeypatch.setattr(visual, "_chart_for", series_pct)
     data, meta = await clean.picture(e, now=AT)
-    assert meta["layout"] == "collage" and meta["number_check"] == {"ok": True} and len(meta["bars"]) == 96
-    assert found[0]["terms"] == ["stock exchange"]  # the New York Stock Exchange for an S&P 500 move
+    # owner, 2026-11-19: a crash is a huge verified red figure over its own series, one image (no stock-exchange photo beside it)
+    assert meta["layout"] == "move" and meta["number_check"]["ok"] is True and meta["up"] is False and found == []
 
 
 # ---------------------------------------------------------------- tickers only where the sentence establishes the asset (2026-11-13)

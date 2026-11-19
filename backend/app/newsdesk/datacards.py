@@ -115,7 +115,18 @@ def _bars(d: ImageDraw.ImageDraw, box: tuple[int, int, int, int], bars: list[lis
 
 
 def data_card(post: dict[str, Any], *, when: datetime | None, mad: bool = False, theme: str = "paper") -> tuple[bytes, dict[str, Any]]:
-    """A data post's picture. mad: the daily MARKETS GONE MAD kicker in red."""
+    """A data post's picture. mad: the daily MARKETS GONE MAD kicker in red. Since 2026-11-19 the Price Chat premium templates
+    (app/newsdesk/templates, via clean.data_template) draw it: the 2026-11-18 gold card was a pale thin line in which the -3.6% day was
+    the last few pixels. The older paper card stays only for a post the templates cannot draw."""
+    from app.newsdesk import clean, templates
+
+    spec = clean.data_template(post, when, mad)
+    if spec is not None:
+        try:
+            data, meta = clean.render(spec[0], spec[1], "x")
+            return data, {**meta, "kind": "data", "layout": f"data-{post.get('kind', '')}", "design": "data", "mad": mad, "template_args": spec[1]}
+        except templates.TemplateRefused as e:  # figures that don't check out: the words go alone, never a wrong picture
+            return b"", {"kind": "text", "layout": "text", "editor": {"ok": False, "why": f"data card refused: {e}"}}
     kind = post.get("kind", "")
     kicker = "MARKETS GONE MAD" if mad else KICKER.get(kind, "THE NUMBERS")
     accent = MAD if mad else design.ACCENT["markets"]

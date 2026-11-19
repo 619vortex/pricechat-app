@@ -269,9 +269,10 @@ def test_data_cards_and_the_timeline_are_drawn_to_scale_at_16_by_9() -> None:
     data = {"BTC-USD": daily(60000, [-1.0] * 30), "GC=F": daily(3000, [0.6] * 30)}
     b = datapost.battle("BTC-USD", "GC=F", data, NOW, 30)
     img, meta = datacards.data_card(b.out(), when=NOW, mad=True)
-    assert Image.open(io.BytesIO(img)).size == (1600, 900) and meta["mad"] is True and meta["format"] == "data-lines"
-    bars, meta2 = datacards.data_card({"kind": "ranking", "headline": "x", "bars": [["A", 3.0], ["B", -2.0]]}, when=NOW)
-    assert meta2["format"] == "data-bars"
+    # 2026-11-19: drawn by the premium templates (app/newsdesk/templates), readable on a phone
+    assert Image.open(io.BytesIO(img)).size == (1600, 900) and meta["mad"] is True and meta["template"] == "battle" and meta["design"] == "data"
+    bars, meta2 = datacards.data_card({"kind": "ranking", "headline": "x", "bars": [["A", 3.0], ["B", -2.0], ["C", 1.0]]}, when=NOW)
+    assert meta2["template"] == "ranking" and meta2["phone_min_px"] >= 8
     tl, meta3 = datacards.timeline_card(headline="Bybaz reopens withdrawals", entries=[(NOW - timedelta(days=2), "Bybaz hacked for $40M"),
                                                                                    (NOW - timedelta(days=1), "Bybaz halts withdrawals"), (NOW, "Bybaz reopens withdrawals")], when=NOW)
     assert Image.open(io.BytesIO(tl)).size == (1600, 900) and meta3["design"] == "timeline"

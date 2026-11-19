@@ -29,7 +29,8 @@ def test_nothing_is_queued_while_the_pc_is_offline(db: Session) -> None:
     assert rq.waiting(db, ev, utcnow()) is False
 
 
-def test_a_slot_story_gets_qwen_and_breaking_gets_klein(client: TestClient, db: Session) -> None:
+def test_a_slot_story_gets_qwen_for_its_caption_and_breaking_gets_no_job(client: TestClient, db: Session) -> None:
+    # owner, 2026-11-19: no AI picture stands in for news (app/newsdesk/editor), so breaking news never waits for one
     _online(client)
     now = utcnow()
     slot = _event(db, "Oil tanker traffic through Hormuz falls")
@@ -37,9 +38,9 @@ def test_a_slot_story_gets_qwen_and_breaking_gets_klein(client: TestClient, db: 
     hot = _event(db, "Exchange hacked for 400 million dollars")
     hot.slot, hot.label = "extra", brief.BREAKING
     a, b = rq.on_release(db, slot, now), rq.on_release(db, hot, now)
-    assert a.payload["model"] == "qwen" and b.payload["model"] == "klein"
-    assert b.priority > a.priority and b.deadline - now <= rq.WAIT_BREAKING + timedelta(seconds=1)
+    assert a.payload["model"] == "qwen" and "copy_request" in a.payload and b is None
     assert rq.waiting(db, slot, now) and not rq.waiting(db, slot, now + rq.WAIT_SLOT + timedelta(seconds=5))
+    assert not rq.waiting(db, hot, now)
 
 
 def test_charts_never_wait_for_a_background(client: TestClient, db: Session) -> None:
@@ -61,7 +62,7 @@ def test_prerender_paints_the_likely_stories_before_the_slot(client: TestClient,
     assert db.query(NdRenderJob).filter(NdRenderJob.event_id == evs[0].id).count() == 1 and job.payload["model"] == "qwen"
 
 
-def test_a_ready_background_makes_the_cinematic_picture_and_x_gets_the_same(client: TestClient, db: Session) -> None:
+def test_a_ready_background_is_never_published_as_the_news_picture(client: TestClient, db: Session) -> None:
     h = _online(client)
     ev = _event(db, "Oil tanker traffic through Hormuz falls as Iran war drags on")
     ev.status, ev.released_at, ev.sources = "released", utcnow(), [{"name": "Reuters", "url": "https://reuters.com/x"}]
@@ -74,12 +75,11 @@ def test_a_ready_background_makes_the_cinematic_picture_and_x_gets_the_same(clie
     ev = db.get(NdEvent, ev.id)
     assert rq.waiting(db, ev, utcnow()) is False
     data, meta = asyncio.run(visual.for_event(ev, db=db, now=utcnow()))
-    assert meta["kind"] == "cinematic" and meta["render_job"] == job["id"]
-    img = Image.open(io.BytesIO(data))
-    assert img.size == (1600, 900)
+    # owner, 2026-11-19 ("no fabricated documentary scenes ... or misleading AI visuals"): the painted tanker is never the news picture
+    assert data == b"" and meta["kind"] == "text" and meta["editor"]["was"] == "cinematic"
     ev.facts = {**(ev.facts or {}), "visual": meta}
     again, meta2 = asyncio.run(visual.for_event(ev, db=db))
-    assert meta2["kind"] == "cinematic" and meta2["render_job"] == meta["render_job"]
+    assert again == b"" and meta2["kind"] == "text"  # X follows Telegram: text too
 
 
 def test_without_a_background_the_desk_s_own_visual_goes(db: Session) -> None:

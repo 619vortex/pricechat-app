@@ -129,10 +129,18 @@ def prerender(db: Session, now: datetime, upcoming: datetime | None, candidates:
     return n
 
 
+# Owner, 2026-11-19: "No fabricated documentary scenes ... or misleading AI visuals." The Visual Editor (app/newsdesk/editor) never
+# publishes a GPU background as a news picture, so a post never waits for one and breaking news (whose job carried only a picture) gets
+# no job at all. A slot story's job still goes to the PC for its local caption (copy_request): only that is worth a short wait.
+AI_PICTURES_PUBLISHED = False
+
+
 def on_release(db: Session, ev: NdEvent, now: datetime) -> NdRenderJob | None:
-    """A released story with no background coming: one now (klein for breaking, Qwen for a slot), if the PC is there to paint it."""
+    """A released story with no background coming: one now (Qwen for a slot story, carrying its caption request), if the PC is there."""
     if not wants_background(ev) or not online(db, now):
         return None
+    if not AI_PICTURES_PUBLISHED and _breaking(ev):
+        return None  # a breaking job only ever painted a picture, and pictures are no longer used
     jobs = list(db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id)))
     if any(j.status == "done" and j.image for j in jobs):
         return None
@@ -153,6 +161,8 @@ def waiting(db: Session, ev: Any, now: datetime) -> bool:
     if not wants_background(ev) or (getattr(ev, "facts", None) or {}).get("visual"):
         return False
     live = list(db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id, NdRenderJob.status.in_(("queued", "claimed")))))
+    if not AI_PICTURES_PUBLISHED:  # only the PC's caption is worth holding the post for
+        live = [j for j in live if (j.payload or {}).get("copy_request")]
     if not live:
         return False
     if not online(db, now):

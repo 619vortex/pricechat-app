@@ -259,10 +259,11 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)
         if not result.ok:
             return None, result.reason
-    used = {u for u, _ in ((s.state or {}).get("used_photos") or []) if u} if s is not None else set()
+    records = [list(r) for r in ((s.state or {}).get("used_photos") or []) if r] if s is not None else []
+    used = {r[0] for r in records if r and r[0]}
     recent = list((s.state or {}).get("recent_visuals") or []) if s is not None else []
     try:
-        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now, db=db)
+        image, meta = await visual.for_event(ev, used=used, transport=transport, market=market, recent=recent, now=now, db=db, records=records)
     except Exception as e:  # noqa: BLE001 - no picture, no post (the wire style's text-only post is b"", not an error)
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"
@@ -270,9 +271,12 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     if s is not None:  # what the picture looked like, so the next ones look different
         seen = {k: meta.get(k) for k in ("kind", "motif", "palette", "layout", "tone", "design")}
         s.state = {**(s.state or {}), "recent_visuals": [*recent, {**seen, "event": ev.id, "at": now.isoformat()}][-visual.RECENT * 2:]}
-    if s is not None and meta.get("kind") == "photo":
-        keep = [(u, at) for u, at in ((s.state or {}).get("used_photos") or []) if at >= (now - timedelta(days=visual.USED_DAYS)).isoformat()]
-        s.state = {**(s.state or {}), "used_photos": [*keep, (meta["url"], now.isoformat())][-200:]}
+    if s is not None and meta.get("kind") == "photo" and meta.get("url"):  # one photograph, one story (app/newsdesk/editor.reuse_problem)
+        from app.newsdesk import editor
+
+        cut = (now - timedelta(days=editor.REUSE_DAYS)).isoformat()
+        keep = [list(r) for r in ((s.state or {}).get("used_photos") or []) if r and len(r) >= 2 and str(r[1]) >= cut]
+        s.state = {**(s.state or {}), "used_photos": [*keep, [meta["url"], now.isoformat(), (ev.headline or ev.title or "")[:200], ev.key]][-600:]}
     if pkg is not None and meta.get("style") == "clean":  # a photographer's name the picture couldn't draw: credited in the caption
         from app.newsdesk import clean
 

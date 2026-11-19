@@ -45,7 +45,9 @@ class Tg:
         return {"message_id": 500 + len(self.sent), "chat": {"id": -100123, "type": "channel"}}
 
     async def send_message(self, chat: Any, text: str, **kw: Any) -> dict[str, Any]:
-        raise AssertionError("a breaking post goes with its picture")
+        # a text-only post (owner, 2026-11-19: no suitable picture -> clean text, never a stand-in): recorded with no image
+        self.sent.append({"image": None, "caption": text, **kw})
+        return {"message_id": 500 + len(self.sent), "chat": {"id": -100123, "type": "channel"}}
 
 
 class X:
@@ -114,7 +116,7 @@ async def _desk_tick(db: Session) -> None:
     await events.decide(db, BETWEEN, quotes={}, watchlist=[], categories=desk.categories or {}, desk_state=desk.state, liquidations=False)
 
 
-async def test_a_world_monitor_event_breaks_on_telegram_and_x_with_a_klein_picture(client: Any, db: Session, live: dict[str, Any]) -> None:
+async def test_a_world_monitor_event_breaks_on_telegram_and_x_at_once_as_text(client: Any, db: Session, live: dict[str, Any]) -> None:
     w = _gpu_online(client, db)
     # 1. detection: two World Monitor-catalog publishers report the same major event, 20 and 12 minutes ago
     _both_report(live)
@@ -124,29 +126,19 @@ async def test_a_world_monitor_event_breaks_on_telegram_and_x_with_a_klein_pictu
     assert ev.slot == "breaking" and ev.virality >= events.POLICY.breaking_bar and events.verified_important(ev)
     assert {s["name"] for s in ev.sources} >= {"DW", "The National"} and "confirmed by 2 outlets" in ev.why
     assert all(sources.via(s["name"]) == sources.WORLDMONITOR_VIA for s in ev.sources)
-    # 3. image generation: one klein job, at the top of the queue; Telegram holds the post for it
-    job = db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id)).one()
-    assert job.payload["model"] == "klein" and job.priority == 10 and "text" in job.payload["negative"]
+    # 3. no GPU job (owner, 2026-11-19: no AI picture stands in for a missile strike) and so no wait for one
+    assert db.scalars(select(NdRenderJob).where(NdRenderJob.event_id == ev.id)).first() is None
     tg = live["tg"]
-    held = await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=5))
-    assert "waiting for its picture" in held["skipped"] and tg.sent == []
-    got = rq.claim(db, w, {"gpu": "NVIDIA GeForce RTX 5090"}, BETWEEN + timedelta(seconds=10))
-    assert got["model"] == "klein" and got["event_id"] == ev.id
-    done = rq.complete(db, got["id"], w, _picture(42), {"model": "black-forest-labs/FLUX.2-klein-4B", "seconds": 2.05, "ocr": {"checked": True, "found": []}},
-                       BETWEEN + timedelta(seconds=25))
-    assert done["ok"] is True
-    # 4. publication: Telegram with the cinematic picture, then X with the same picture, no approval step
-    sent = await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=40))
-    assert sent["sent"] == 501 and len(tg.sent) == 1
-    pic = Image.open(io.BytesIO(tg.sent[0]["image"]))
-    assert pic.size == (1600, 900) and "<b>" in tg.sent[0]["caption"] and "Sources: DW · The National" in tg.sent[0]["caption"]  # feed links: named, not linked
+    # 4. publication at once: Telegram as clean text (no dated photograph of the strike exists), then X the same, no approval step
+    sent = await lane.tick(db, get_settings(), tg, BETWEEN + timedelta(seconds=5))
+    assert sent["sent"] == 501 and len(tg.sent) == 1 and tg.sent[0]["image"] is None
+    assert "<b>" in tg.sent[0]["caption"] and "Sources: DW · The National" in tg.sent[0]["caption"]  # feed links: named, not linked
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    assert ev.tg_status == "delivered" and ev.facts["visual"]["kind"] == "cinematic" and "klein" in ev.facts["visual"]["model"].lower()
+    assert ev.tg_status == "delivered" and ev.facts["visual"]["kind"] == "text"
     x = live["x"]
     result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=1))
-    assert result == "published" and len(x.posts) == 1 and x.posts[0]["media"] == ["media1"]
-    assert x.uploads[0] == tg.sent[0]["image"]  # the very same picture
+    assert result == "published" and len(x.posts) == 1 and not x.posts[0]["media"] and x.uploads == []
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
     post = db.get(NdPost, ev.x_post_id)

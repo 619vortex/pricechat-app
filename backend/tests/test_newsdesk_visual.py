@@ -181,7 +181,7 @@ async def test_a_news_picture_is_a_real_licensed_photo_of_the_subject_never_reus
     assert again["url"] == "https://img/t2.jpg" and again["design"] == meta["design"]
 
 
-async def test_a_major_breaking_story_gets_editorial_artwork_credited_as_an_illustration(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_major_breaking_story_gets_no_artwork_standing_in_for_a_photo(monkeypatch: pytest.MonkeyPatch) -> None:
     async def never(client: Any, query: str, limit: int = 12) -> list[visual.Photo]:
         raise AssertionError("a hack is never illustrated with a stock photo")
 
@@ -189,11 +189,8 @@ async def test_a_major_breaking_story_gets_editorial_artwork_credited_as_an_illu
     ev = NdEvent(key="k", kind="news", title="Bybaz hacked", headline="BYBAZ EXCHANGE SAYS HACKERS DRAINED $40 MILLION", topic="hack", sources=[{"name": "The Block"}],
                  facts={}, first_seen=SLOT, virality=70, label="")
     data, meta = await visual.for_event(ev)
-    assert meta["kind"] == "artwork" and jpeg_size(data) == (1600, 900)
-    assert meta["type_px"] >= visual.MIN_TYPE and meta["contrast"] >= 4.5  # readable on a phone
-    ev.facts = {"visual": meta}  # X re-renders exactly what Telegram showed
-    again, same = await visual.for_event(ev)
-    assert same["kind"] == "artwork" and same["motif"] == meta["motif"] and same["palette"] == meta["palette"]
+    # owner, 2026-11-19: no generic AI headline card stands in for news: text only
+    assert data == b"" and meta["kind"] == "text" and meta["editor"]["was"] == "artwork"
 
 
 # --- the slots, end to end ---------------------------------------------------------------------------------------------
@@ -234,11 +231,11 @@ async def test_a_verified_story_goes_out_as_picture_headline_and_source_and_noth
     await lane.tick(db, get_settings(), tg, now, quotes={})
     sent = tg.sent[0]
     # Price Chat News (2026-11-11): a written caption with context, the byline, the verification line and the outlets' own article links
-    assert sent["card"] is True and sent["text"].startswith("<b>Bybaz exchange says hackers drained $400M from its hot wallet</b>")
+    assert sent["card"] is False and sent["text"].startswith("<b>Bybaz exchange says hackers drained $400M from its hot wallet</b>")
     assert "Price Chat News" in sent["text"] and "Verified across 2 outlets" in sent["text"] and '<a href="https://' in sent["text"]
     assert "PRICE ALERT" not in sent["text"] and "#" not in sent["text"] and "exclusive" not in sent["text"].lower()
     seen = lane.settings_row(db).state["recent_visuals"]
-    assert seen[-1]["kind"] == "card" and seen[-1]["design"] == "card"  # no photo, PC offline: the typographic front page; remembered for variety
+    assert seen[-1]["kind"] == "text"  # no real photo of the exchange: clean text, not a typographic headline card (owner, 2026-11-19)
 
 
 async def test_a_company_story_gets_a_real_licensed_photo_of_the_company(monkeypatch: pytest.MonkeyPatch) -> None:

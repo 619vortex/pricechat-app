@@ -660,7 +660,7 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
             ev = db.get(NdEvent, event_id)
             if ev is not None:
                 stage = "image"
-                image, meta = await visual.for_event(ev, db=db)
+                image, meta = await visual.for_event(ev, db=db, platform="x")
                 ev.facts = {**(ev.facts or {}), "visual": meta}
                 if image:  # the wire style's text-only post (b"") goes without a picture, as on Telegram
                     stage = "permit"
@@ -918,7 +918,7 @@ async def test_post_preview(db: Session, event_id: int | None, now: datetime) ->
     if ev is None:
         return None
     text, result = _test_text(ev, now)
-    image, meta = await visual.for_event(ev, db=db)
+    image, meta = await visual.for_event(ev, db=db, platform="x")
     mime = "image/jpeg" if image[:3] == b"\xff\xd8\xff" else "image/png"
     return {"event_id": ev.id, "headline": ev.headline, "text": text, "ok": result.ok, "reason": result.reason if not result.ok else "", "x_status": ev.x_status,
             "image": f"data:{mime};base64,{base64.b64encode(image).decode()}" if image else "", "visual": meta}

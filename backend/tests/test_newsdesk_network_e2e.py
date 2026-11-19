@@ -55,17 +55,17 @@ async def test_a_slot_story_posts_the_pcs_caption_with_article_links_on_telegram
     assert cap.startswith("<b>Missile hits Aramco's Ras Tanura, the kingdom's largest oil export terminal</b>")
     assert 'href="https://www.dw.com/en/missile-strike-hits-saudi-aramco-terminal/a-79912345"' in cap and f'href="{NAT_URL}"' in cap  # tracking dropped
     assert "Price Chat News · Verified across 2 outlets" in cap and "Are markets pricing this in yet?" in cap
-    assert Image.open(io.BytesIO(tg.sent[0]["image"])).size == (1600, 900)
+    assert tg.sent[0]["image"] is None  # owner, 2026-11-19: the GPU's painted scene is never the news picture of a missile strike
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    assert ev.facts["package"]["copy"]["writer"] == "local" and ev.facts["visual"]["ai_illustration"] is True
+    assert ev.facts["package"]["copy"]["writer"] == "local" and ev.facts["visual"]["kind"] == "text"  # the PC's caption still goes
     # X: the same words and the article link, the same picture, posted automatically
     x = live["x"]
     # the same moment as Telegram (owner, 2026-11-11): the Telegram job hands straight to X, no 5-minute wait for X's own tick
     assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
     text = x.posts[0]["text"]
     assert text.startswith("Missile hits Aramco's Ras Tanura") and "https://www.dw.com/en/missile-strike-hits-saudi-aramco-terminal/a-79912345" in text
-    assert network.x_length(text) <= 280 and "Source: DW" not in text and x.uploads[0] == tg.sent[0]["image"]
+    assert network.x_length(text) <= 280 and "Source: DW" not in text and x.uploads == []
     db.expire_all()
     post = db.get(NdPost, db.get(NdEvent, ev.id).x_post_id)
     assert post.status == "published" and any(c["check"] == "no_link" and c["passed"] for c in post.checks)

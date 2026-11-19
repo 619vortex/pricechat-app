@@ -114,9 +114,10 @@ async def preview(db: Session, event_id: int, now: datetime) -> tuple[bytes, dic
             copy.facts = {**(copy.facts or {}), "package": pkg}
     tg = db.get(NdTelegramSettings, 1)
     state = (tg.state or {}) if tg is not None else {}
-    used = {u for u, _ in (state.get("used_photos") or []) if u}
+    records = [list(r) for r in (state.get("used_photos") or []) if r]
+    used = {r[0] for r in records if r and r[0]}
     try:
-        got = await visual.for_event(copy, used=used, recent=list(state.get("recent_visuals") or []), now=now, db=db)
+        got = await visual.for_event(copy, used=used, recent=list(state.get("recent_visuals") or []), now=now, db=db, records=records)
     except visual.NumbersRefused as e:
         got = visual.graphic(visual.post_headline(copy), palette="crimson", layout="lower", seed=1, source=f"NOT POSTED: numbers check failed: {str(e)[:80]}")
     if not got[0]:  # the wire style's text-only post: the preview says so (nothing is drawn for the real post)
