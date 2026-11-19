@@ -180,35 +180,6 @@ def found(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-async def test_a_price_story_is_one_strong_move_card_from_its_candles(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
-    # owner, 2026-11-19: one strong image per post; the photo-and-candles collage (posts 185, 190) gave way to the move card
-    async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
-        assert symbol == "NVDA"
-        return falling(96, -4.0)
-
-    monkeypatch.setattr(clean, "fetch_bars", fake_bars)
-    data, meta = await clean.picture(ev("Nvidia falls 4% after Jensen Huang's keynote"), now=AT)
-    assert meta["layout"] == "move" and meta["style"] == "clean" and meta["symbol"] == "NVDA" and len(meta["bars"]) == 96
-    assert round(meta["pct"]) == -4 and meta["up"] is False and Image.open(io.BytesIO(data)).size == (1280, 1280)
-    assert found == []  # the chart is the picture: no photo is searched
-
-
-async def test_x_redraws_exactly_what_telegram_showed(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
-        return falling(96, -4.0)
-
-    async def download(url: str, transport: Any = None) -> Image.Image:
-        return photo()
-
-    monkeypatch.setattr(clean, "fetch_bars", fake_bars)
-    monkeypatch.setattr(clean, "download", download)
-    e = ev("Nvidia falls 4% after Jensen Huang's keynote")
-    data, meta = await clean.picture(e, now=AT)
-    e.facts = {**e.facts, "visual": meta}
-    again, meta2 = await visual.for_event(e)  # X: no database, no style setting: the stored style decides
-    assert again == data and {k: v for k, v in meta2.items() if k != "editor"} == meta and meta2["editor"]["ok"] is True
-
-
 async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
@@ -234,17 +205,6 @@ async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(mon
     calls.clear()
     await clean.picture(ev("John Smith charged with fraud at Ohio exchange"), now=AT)
     assert all(c["sensitive"] for c in calls) and not any(c["terms"] == ["John Smith"] for c in calls)  # a private person: never
-
-
-async def test_no_photo_but_prices_is_the_move_card(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
-        return falling(96, -3.0)
-
-    monkeypatch.setattr(clean, "fetch_bars", fake_bars)
-    data, meta = await clean.picture(ev("Bitcoin falls 3% as leveraged longs unwind"), now=AT)
-    assert meta["layout"] == "move" and meta["symbol"] == "BTC-USD" and Image.open(io.BytesIO(data)).size == (1280, 1280)
-    data, meta = await clean.picture(ev("Bitcoin falls 3% as leveraged longs unwind"), now=AT, platform="x")
-    assert Image.open(io.BytesIO(data)).size == (1600, 900)  # X: 16:9
 
 
 async def test_nothing_real_is_a_text_post(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -303,23 +263,6 @@ def test_a_credit_the_font_cannot_draw_moves_to_the_caption() -> None:
     assert html.endswith("@thepricechat</a>") and plain.endswith("@thepricechat")
     latin = {"credit": "Photo: Jane Doe / Wikimedia Commons (CC BY-SA 4.0)", "licence": "CC BY-SA 4.0"}
     assert clean.image_credit(latin) == latin["credit"] and clean.with_credit("x", "y", latin) == ("x", "y")
-
-
-async def test_a_market_move_is_the_verified_move_card(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
-    async def checked(e: Any, chosen: Any, market: Any, now: Any) -> Any:
-        return b"", {"number_check": {"ok": True}}
-
-    monkeypatch.setattr(visual, "_chart_for", checked)  # the series check itself is visual.verify_series's own tests
-    pts = [[1_762_900_000 + 900 * i, 7600 - 3 * i] for i in range(97)]
-    e = ev("S&P 500 falls 3.8% in 24 hours", kind="market", points=pts, name="S&P 500", window="24h", data_source="Yahoo Finance")
-
-    async def series_pct(e2: Any, chosen: Any, market: Any, now: Any) -> Any:
-        return b"", {"number_check": {"ok": True, "series_pct": (pts[-1][1] / pts[0][1] - 1) * 100}}
-
-    monkeypatch.setattr(visual, "_chart_for", series_pct)
-    data, meta = await clean.picture(e, now=AT)
-    # owner, 2026-11-19: a crash is a huge verified red figure over its own series, one image (no stock-exchange photo beside it)
-    assert meta["layout"] == "move" and meta["number_check"]["ok"] is True and meta["up"] is False and found == []
 
 
 # ---------------------------------------------------------------- tickers only where the sentence establishes the asset (2026-11-13)

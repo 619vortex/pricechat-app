@@ -460,10 +460,13 @@ def collage(photo: Image.Image, credit: str, bars: list[list[float]], label: str
     return _png(canvas), {"layout": "collage", "subject": list(box)}
 
 
-def single_photo(photo: Image.Image, credit: str) -> tuple[bytes, dict[str, Any]]:
-    img, box = photo_picture(photo, credit)
+def single_photo(photo: Image.Image, credit: str, platform: str = "x") -> tuple[bytes, dict[str, Any]]:
+    """The photograph alone, cropped (never stretched) to the platform's frame, with its licence credit small in a corner."""
+    from app.newsdesk import photography
+
+    img, box = photography.frame(photo, platform)
     _small(img, credit, "left")
-    return _png(img), {"layout": "photo", "subject": list(box)}
+    return _png(img), {"layout": "photo", "subject": list(box), "frame": list(img.size)}
 
 
 def single_chart(bars: list[list[float]], label: str) -> tuple[bytes, dict[str, Any]]:
@@ -600,7 +603,7 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
     story isn't sensitive), else the company. Every licence and relevance rule of app/newsdesk/photos applies, then the editor's: what
     the photo depicts (a sign, a headquarters, a product, the person; never a generic scene that merely carries the name), its pixels,
     one photo per story, and the vision check when the model is available. None: the post goes as text, never with a stand-in."""
-    from app.newsdesk import editor, photos, visual
+    from app.newsdesk import editor, photography, photos, visual
 
     b = editor.brief(ev)
     sensitive = visual.is_sensitive(ev)
@@ -627,7 +630,8 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
             except Exception as e:  # noqa: BLE001
                 logger.info("clean: photo discovery failed (%s)", type(e).__name__)
                 continue
-            for p in found[:3]:
+            passed: list[tuple[float, Any, Any, Any]] = []
+            for p in found[:4]:
                 fit = editor.depiction(p.title, p.tags, p.description, terms[0], b, person=is_person)
                 if not fit.ok and fit.depiction != "weak":
                     logger.info("visual editor: skip %s for event %s: %s", p.title[:80], getattr(ev, "id", None), fit.why)
@@ -641,6 +645,9 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
                 if (why := editor.pixel_problem(img)):
                     logger.info("visual editor: skip %s: %s", p.title[:80], why)
                     continue
+                passed.append((photography.aesthetic(img), p, img, fit))
+            # owner, 2026-11-19: of the relevant, licensed photos, the most striking (dark surround, rich colour, contrast, detail)
+            for score, p, img, fit in sorted(passed, key=lambda x: -x[0]):
                 look = None
                 if looks < MAX_VISION_LOOKS:
                     looks += 1
@@ -650,7 +657,7 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
                     logger.info("visual editor: skip %s for event %s: %s", p.title[:80], getattr(ev, "id", None), why)
                     continue
                 meta = p.to_meta() if hasattr(p, "to_meta") else {"url": p.url}
-                verdict = {"ok": True, **fit.out(), "why": why, "vision": look, "subject": terms[0]}
+                verdict = {"ok": True, **fit.out(), "why": why, "vision": look, "subject": terms[0], "aesthetic": score}
                 verdict["ok"] = True
                 return img, {"url": p.url, "page": meta.get("page", ""), "title": meta.get("title", ""), "credit": p.credit,
                              "licence": meta.get("licence", "") or getattr(p, "licence", ""), "photo": meta, "person": terms[0] if is_person else "",
@@ -821,10 +828,17 @@ def text_only(base: dict[str, Any], why: str = "") -> tuple[bytes, dict[str, Any
 
 async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = None, market: Any = None, now: datetime | None = None,
                   db: Any = None, platform: str = "telegram", records: list[Any] | None = None) -> tuple[bytes, dict[str, Any]]:
-    """The clean picture for an event and what it was made of (stored on the event: X redraws the same from it, in its 16:9 format).
-    Owner, 2026-11-19: Price Chat's own templates from verified numbers for markets, data and outages; a photograph only when its subject
-    is the story's subject (app/newsdesk/editor); otherwise text only. Never a generic stand-in, never an invented chart."""
-    from app.newsdesk import editor, visual
+    """The clean picture for an event and what it was made of (stored on the event: X redraws the same photograph in its own frame).
+
+    Owner, 2026-11-19 (second brief): beautiful, relevant, real photographs by default; the caption carries the news and the numbers.
+    1. A comparison (one asset against another, the week's ranking): its chart, because the story IS the comparison.
+    2. A market move or a single-asset data post: its numbers are still verified (a refused figure stops the post), then the subject's
+       photograph (app/newsdesk/photography): gold shows gold, Bitcoin shows Bitcoin.
+    3. A war or a disaster: a dated photograph of the event itself, or text. Never a stand-in.
+    4. A person the story is about, then the subject the headline names first: the editor's library photograph, else the most striking
+       licensed photo whose record shows the subject (app/newsdesk/editor).
+    5. A live outage with no photograph: the outage card. Otherwise text only."""
+    from app.newsdesk import editor, photography, visual
 
     now = now or datetime.now(timezone.utc)
     fmt = "x" if platform == "x" else "tg"
@@ -832,64 +846,58 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
     used = used or set()
     base = {"style": STYLE}
     b = editor.brief(ev)
-    if getattr(ev, "kind", "") == "data" and f.get("data"):  # a Viral Engine data post: its own figures, drawn big
-        when = getattr(ev, "released_at", None) or now
-        spec = data_template(f["data"], when, bool(f.get("kicker")))
-        got = _template(spec[0], spec[1], fmt, base) if spec else None
-        return got or text_only(base, "the data card's figures did not check out")
-    if getattr(ev, "kind", "") in ("market", "recap"):  # a measured move: the desk's own checked series
+    kind = getattr(ev, "kind", "")
+    subject = None
+    if kind == "data" and f.get("data"):
+        post = f["data"]
+        if post.get("bars") or post.get("kind") in ("battle", "ranking", "rotation"):  # a comparison: the chart is the story
+            spec = data_template(post, getattr(ev, "released_at", None) or now, bool(f.get("kicker")))
+            got = _template(spec[0], spec[1], fmt, base) if spec else None
+            return got or text_only(base, "the comparison's figures did not check out")
+        syms = list(post.get("symbols") or (post.get("series") or {}).keys())
+        subject = photography.subject_for_symbol(syms[0] if syms else "", str(post.get("headline") or ""))
+    elif kind in ("market", "recap"):
         chosen = visual.plan(ev, [])
         checked = await visual._chart_for(ev, chosen, market, now)  # raises NumbersRefused when the numbers don't check out
-        if checked is not None:
-            pts = [list(p) for p in (ev.facts or {}).get("points") or []]
-            coin = str(f.get("coin") or (f.get("tickers") or [""])[0] or "").lstrip("$").upper()
-            if len(pts) < 10:
-                pts = [list(p) for p in await visual.candles_for(coin, market)] if coin else []
-            pct = float((checked[1].get("number_check") or {}).get("series_pct") or 0)
-            window = {"15M": "Last 15 minutes", "1H": "Last hour", "4H": "Last 4 hours", "24H": "Last 24 hours"}.get(str(f.get("window") or "24h").upper(), str(f.get("window") or ""))
-            name = visual.DISPLAY.get(str(f.get("name") or coin), str(f.get("name") or coin))
-            args = {"name": name, "ticker": coin or name[:4], "pct": pct, "points": pts, "window": window,
-                    "source": str(f.get("data_source") or "Hyperliquid"), "when": _iso(f.get("as_of") or now)}
-            got = _template("move", args, fmt, base, number_check=checked[1].get("number_check"))
-            if got:
-                return got
-        return text_only(base, "no verified series to draw")
+        if checked is None:
+            return text_only(base, "no verified series")
+        subject = photography.subject_for_symbol(str(f.get("coin") or (f.get("tickers") or [""])[0] or ""), str(f.get("name") or ev.headline))
+    if subject is not None:
+        got = await photography.library_photo(subject, transport=transport, records=records)
+        if got is not None:
+            return _photo_out(got, base, platform)
+        return text_only(base, f"no {subject.name} photograph available")
+    if kind in ("data", "market", "recap"):
+        return text_only(base, "no photograph of this asset")
+    if b.cls in ("conflict", "disaster"):  # the event itself, dated, or nothing
+        got = await find_photo(ev, used=used, transport=transport, panel=False, records=records)
+        return _photo_out(got, base, platform) if got is not None else text_only(base, f"no dated photograph of this {b.cls}")
     text = f"{ev.headline} {ev.title}"
-    subject = chart_subject(text)
-    if subject is not None and not charted_story(ev, subject[0]):
-        subject = None  # not a story about this asset's price, and no measured reaction: no chart beside it
-    bars: list[list[float]] = []
-    if subject is not None and b.cls not in ("conflict", "disaster"):
-        try:
-            async with httpx.AsyncClient(transport=transport) as client:
-                bars = await fetch_bars(client, subject[0], now)
-        except Exception as e:  # noqa: BLE001 - no chart
-            logger.info("clean: no candles for %s (%s)", subject[0], type(e).__name__)
-            bars = []
-    move = _story_move(ev, subject, bars) if subject is not None and bars else None
-    if b.cls in ("outage", "cyber") and b.incident is not None:  # the service's name and status, with the shares' real move if they are the story
-        stock = (move["ticker"], float(move["pct"]), "24H") if move else None
-        got = _template("outage", _outage(ev, b, stock), fmt, base, symbol=subject[0] if (subject and move) else "")
-        if got:
-            return got
-    if move is not None:
-        got = _template("move", move, fmt, base, symbol=subject[0], bars=bars)
-        if got:
-            return got
-    if subject is not None and subject[1].startswith("$") and b.cls not in ("conflict", "disaster"):
-        peak = await _peak_move(ev, subject, transport, now)
-        if peak is not None:
-            got = _template("move", peak, fmt, base, symbol=subject[0])
-            if got:
-                return got
+    person = person_subject(ev)
+    lib = photography.subject_of(text)
+    if person and not (lib and lib.rx().search(text).start() < text.find(person.split()[-1])):
+        got = await find_photo(ev, used=used, transport=transport, panel=False, records=records)  # the person first in its plans
+        if got is not None:
+            return _photo_out(got, base, platform)
+    if lib is not None:
+        got = await photography.library_photo(lib, transport=transport, records=records)
+        if got is not None:
+            return _photo_out(got, base, platform)
     got = await find_photo(ev, used=used, transport=transport, panel=False, records=records)
     if got is not None:
-        img, pmeta = got
-        credit = image_credit(pmeta)
-        data, meta = single_photo(img, credit)
-        return data, {**base, **pmeta, **meta, "kind": "photo", "credit_line": credit}
-    # nothing real and relevant: a text post (owner, 2026-11-16 and 2026-11-19: never a stand-in, no headline-only card)
-    return text_only(base, f"no picture shows this {b.cls} story's subject")
+        return _photo_out(got, base, platform)
+    if b.cls in ("outage", "cyber") and b.incident is not None:  # no photograph of the service: its name and status, nothing invented
+        got = _template("outage", _outage(ev, b, None), fmt, base)
+        if got:
+            return got
+    return text_only(base, f"no photograph shows this {b.cls} story's subject")
+
+
+def _photo_out(got: tuple[Image.Image, dict[str, Any]], base: dict[str, Any], platform: str) -> tuple[bytes, dict[str, Any]]:
+    img, pmeta = got
+    credit = image_credit(pmeta)
+    data, meta = single_photo(img, credit, platform)
+    return data, {**base, **pmeta, **meta, "kind": "photo", "credit_line": credit}
 
 
 async def download(url: str, transport: Any = None) -> Image.Image:
@@ -918,7 +926,7 @@ async def redraw(ev: Any, meta: dict[str, Any], *, transport: Any = None, db: An
         credit = str(meta.get("credit_line") or image_credit(meta))
         if layout == "collage":
             return collage(img, credit, meta.get("bars") or [], str(meta.get("label") or ""))[0], meta
-        return single_photo(img, credit)[0], meta
+        return single_photo(img, credit, platform)[0], meta
     if layout == "chart" and meta.get("bars"):
         return single_chart(meta["bars"], str(meta.get("label") or ""))[0], meta
     if layout == "ai" and db is not None and getattr(ev, "id", None):

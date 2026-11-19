@@ -69,8 +69,8 @@ PAST_CONTEXT = _rx(r"\b(then came|had (?:rallied|risen|climbed|surged|been|hit)|
 CLASSES = ("move", "data", "outage", "cyber", "conflict", "disaster", "corporate", "person", "news")
 # what may illustrate each class (the picture's `kind`/`layout` after clean.picture): anything else is refused at the final gate
 ALLOWED = {
-    "move": {"template", "chart"},
-    "data": {"template", "data"},
+    "move": {"photo", "template", "chart"},
+    "data": {"photo", "template", "data"},
     "outage": {"template", "photo"},
     "cyber": {"template", "photo"},
     "conflict": {"photo"},  # only with depiction "event" (dated, of this event)
@@ -245,6 +245,7 @@ Look at the image itself, not its file name. Reply with JSON only:
  "generic": true/false (could illustrate any company or story: trees, a lobby, an anonymous office block, a road, stock-photo look),
  "misleading": true/false (implies something the story does not say: a different event, people who are not involved, a fabricated scene),
  "text_heavy": true/false (a screenshot, a document, a chart or a card rather than a photograph),
+ "watermark": true/false (a stock-photo watermark or a visible "preview" mark),
  "what": "what the image shows, at most 10 words"}}"""
 
 
@@ -297,6 +298,8 @@ def vision_verdict(v: dict[str, Any] | None, fit: Fit) -> tuple[bool, str]:
     what = str(v.get("what") or "")[:80]
     if v.get("misleading"):
         return False, f"vision: could mislead ({what})"
+    if v.get("watermark"):
+        return False, f"vision: watermarked ({what})"
     if v.get("text_heavy"):
         return False, f"vision: a screenshot, document or card, not a photograph ({what})"
     if v.get("generic"):
@@ -307,25 +310,29 @@ def vision_verdict(v: dict[str, Any] | None, fit: Fit) -> tuple[bool, str]:
 
 
 # --------------------------------------------------------------------------------------------------- 4. the pixels
-SHARP_MIN = 120.0  # variance of the Laplacian at 800 px wide; every real photo in the 2026-11 audit set measured 550 or more
+# edge sharpness: the mean of the strongest 2% of Laplacian responses at 800 px wide. A whole-picture variance called clean, dark or
+# minimal compositions "blurry" (a Microsoft Store wall, a nugget on black); the sharpest edges don't care how much of the frame is
+# empty. Calibrated 2026-11-19: the 41 audit pictures 132 or more, the library photos 108 or more, the same photos blurred 2 px 32.
+SHARP_MIN = 60.0
 CONTRAST_MIN = 26.0  # luminance standard deviation: below this the picture is washed out
 UI_FLAT_MAX = 0.09  # share of the picture in perfectly flat near-white blocks: post 167 (a tweet screenshot) 0.10, real photos at most 0.05
 
 
-def pixel_problem(img: Image.Image) -> str | None:
+def pixel_problem(img: Image.Image, ui: bool = True, sharp_min: float = SHARP_MIN) -> str | None:
     g = img.convert("L")
     if g.width > 800:
         g = g.resize((800, max(1, round(g.height * 800 / g.width))))
     a = np.asarray(g, dtype=np.float64)
-    lap = a[1:-1, 1:-1] * -4 + a[:-2, 1:-1] + a[2:, 1:-1] + a[1:-1, :-2] + a[1:-1, 2:]
-    if lap.var() < SHARP_MIN:
-        return f"blurry (sharpness {lap.var():.0f} < {SHARP_MIN:.0f})"
+    lap = np.abs(a[1:-1, 1:-1] * -4 + a[:-2, 1:-1] + a[2:, 1:-1] + a[1:-1, :-2] + a[1:-1, 2:]).ravel()
+    edge = float(np.mean(np.partition(lap, lap.size - max(1, lap.size // 50))[-max(1, lap.size // 50):]))
+    if edge < sharp_min:
+        return f"blurry (edge sharpness {edge:.0f} < {sharp_min:.0f})"
     if a.std() < CONTRAST_MIN:
         return f"washed out (contrast {a.std():.0f} < {CONTRAST_MIN:.0f})"
     h, w = (a.shape[0] // 8) * 8, (a.shape[1] // 8) * 8
     blocks = a[:h, :w].reshape(h // 8, 8, w // 8, 8).swapaxes(1, 2)
     flat_white = (blocks.std(axis=(2, 3)) < 1.0) & (blocks.mean(axis=(2, 3)) > 225)
-    if flat_white.mean() > UI_FLAT_MAX:
+    if ui and flat_white.mean() > UI_FLAT_MAX:
         return f"looks like a screenshot or a text card ({flat_white.mean():.0%} flat white)"
     return None
 
@@ -400,7 +407,8 @@ def review(ev: Any, image: bytes, meta: dict[str, Any]) -> tuple[bytes, dict[str
             why = f"a photograph does not fit a {b.cls} story"
         if not why:
             try:
-                why = pixel_problem(Image.open(io.BytesIO(image))) or ""
+                lib = bool(meta.get("library"))  # an editor-vetted library photograph (app/newsdesk/photography): only a broken download fails
+                why = pixel_problem(Image.open(io.BytesIO(image)), ui=not lib, sharp_min=35.0 if lib else SHARP_MIN) or ""
             except Exception:  # noqa: BLE001
                 why = "the picture could not be read"
     elif kind in ("chart", "data", "timeline"):

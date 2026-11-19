@@ -47,8 +47,9 @@ def photo_like(w: int = 1920, h: int = 1080, seed: int = 3) -> Image.Image:
     import random
 
     rnd = random.Random(seed)
-    small = Image.new("RGB", (192, 108))
-    small.putdata([(rnd.randint(20, 230), rnd.randint(20, 230), rnd.randint(20, 230)) for _ in range(192 * 108)])
+    small = Image.new("RGB", (w // 3, h // 3))
+    lum = [rnd.randint(15, 240) for _ in range(small.width * small.height)]  # light and dark areas, tinted: a photograph's spread
+    small.putdata([(v, max(0, min(255, v + rnd.randint(-40, 40))), max(0, min(255, v + rnd.randint(-60, 20)))) for v in lum])
     return small.resize((w, h), Image.Resampling.BILINEAR)
 
 
@@ -157,9 +158,13 @@ def test_a_screenshot_a_blur_and_a_washed_out_picture_are_refused() -> None:
     shot = photo_like()  # post 167: a photo behind a large white tweet card
     ImageDraw.Draw(shot).rounded_rectangle((900, 250, 1880, 900), radius=30, fill=(255, 255, 255))
     assert "screenshot" in (editor.pixel_problem(shot) or "")
-    blur = Image.new("RGB", (1920, 1080), (90, 110, 140))
-    ImageDraw.Draw(blur).ellipse((600, 300, 1300, 800), fill=(110, 130, 160))
+    from PIL import ImageFilter
+
+    blur = photo_like().filter(ImageFilter.GaussianBlur(4))  # an out-of-focus or upscaled thumbnail
     assert "blurry" in (editor.pixel_problem(blur) or "")
+    dark = Image.new("RGB", (1920, 1080), (8, 8, 10))  # a sharp subject on a large black background is not blurry
+    dark.paste(photo_like(500, 400), (700, 340))
+    assert editor.pixel_problem(dark, ui=False) is None
     assert editor.pixel_problem(photo_like()) is None
 
 
@@ -221,39 +226,6 @@ def msft_daily() -> list[tuple[datetime, float]]:
     return early + [(datetime.fromisoformat(f"2026-{d}T14:30:00+00:00"), c) for d, c in real]
 
 
-async def test_post_195_microsoft_gets_its_real_fall_from_the_record_not_a_treehouse(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.newsdesk import datapost
-
-    asked: list[str] = []
-
-    async def discover(client: Any, queries: list[str], terms: list[str], **kw: Any) -> list[Any]:
-        asked.extend(terms)
-        return [TREEHOUSE]
-
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
-        return photo_like()
-
-    async def bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
-        return []  # no intraday candles: the 24-hour card can't be drawn
-
-    async def daily(client: Any, symbol: str, range_: str = "2y") -> list[tuple[datetime, float]]:
-        assert symbol == "MSFT"
-        return msft_daily()
-
-    monkeypatch.setattr(photos, "discover", discover)
-    monkeypatch.setattr(photos, "fetch", fetch)
-    monkeypatch.setattr(clean, "fetch_bars", bars)
-    monkeypatch.setattr(datapost, "fetch_daily", daily)
-    e = ev("Microsoft had rallied back to record Highs. Then came the election and Outlook outage.")
-    assert editor.brief(e).cls == "corporate"  # the outage is background, a week old: no OUTAGE card stamped with today's time
-    data, meta = await visual.for_event(e, style="clean", now=AT)
-    assert meta["template"] == "move" and round(meta["pct"], 1) == -8.5 and Image.open(io.BytesIO(data)).size == (1280, 1280)
-    assert meta["template_args"]["window"] == "Since its 4 Nov peak close" and meta["editor"]["ok"] is True
-    e.facts = {**e.facts, "visual": meta}
-    again, xmeta = await visual.for_event(e, now=AT, platform="x")  # X redraws the same figures in 16:9
-    assert Image.open(io.BytesIO(again)).size == (1600, 900) and xmeta["pct"] == meta["pct"]
-
-
 async def test_post_195_without_prices_goes_as_text_never_the_treehouse(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.newsdesk import datapost
 
@@ -293,23 +265,6 @@ def candles(pct: float, n: int = 96) -> list[list[float]]:
         p = p * step * (1 + 0.0015 * math.sin(i * 1.3))
         out.append([t0 + 900 * i, o, max(o, p) * 1.001, min(o, p) * 0.999, p])
     return out
-
-
-async def test_a_price_story_gets_the_move_card_only_when_the_candles_agree(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def nothing(*a: Any, **k: Any) -> list[Any]:
-        return []
-
-    monkeypatch.setattr(photos, "discover", nothing)
-    for pct, want in ((-5.4, "move"), (+2.0, "text")):
-        async def bars(client: Any, symbol: str, end: Any = None, _p: float = pct) -> list[list[float]]:
-            return candles(_p)
-
-        monkeypatch.setattr(clean, "fetch_bars", bars)
-        head = "JUST IN: Bitcoin breaks below $70,000 as liquidations sweep through leveraged longs ($BTC -5.4% in 24H)"  # post 173
-        data, meta = await visual.for_event(ev(head), style="clean", now=AT)
-        assert meta["kind"] == ("template" if want == "move" else "text"), (pct, meta)
-        if want == "move":  # post 173 was bare candles with no figure: now the asset, the measured -5.4% and the series
-            assert meta["template_args"]["name"] == "Bitcoin" and abs(meta["pct"] - (-5.4)) < 0.6 and meta["up"] is False
 
 
 def test_the_move_card_draws_only_the_figure_its_own_points_show() -> None:

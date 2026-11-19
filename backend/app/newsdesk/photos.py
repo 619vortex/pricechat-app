@@ -428,25 +428,32 @@ async def search_commons(client: httpx.AsyncClient, query: str, limit: int = 20)
               "gsrlimit": str(limit), "prop": "imageinfo", "iiprop": "url|size|extmetadata|mime", "iiurlwidth": "1920"}
     r = await client.get(COMMONS, params=params, headers=UA, timeout=TIMEOUT)
     r.raise_for_status()
-    out = []
     pages = sorted((r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 0))
-    for page in pages:
-        info = (page.get("imageinfo") or [{}])[0]
-        meta = info.get("extmetadata") or {}
+    return [p for p in (record_from_commons(page, query) for page in pages) if p is not None]
 
-        def mv(k: str) -> str:
-            return str((meta.get(k) or {}).get("value", "") or "")
 
-        if mv("NonFree").lower() == "true":
-            continue
-        year = YEAR.search(_plain(mv("DateTimeOriginal")))
-        out.append(LicensedPhoto(
-            title=page.get("title", ""), url=info.get("thumburl") or info.get("url", ""), page=info.get("descriptionurl", ""),
-            creator=_plain(mv("Artist")), provider="wikimedia", source="wikimedia", licence=_plain(mv("LicenseShortName")),
-            licence_url=mv("LicenseUrl"), width=int(info.get("width") or 0), height=int(info.get("height") or 0),
-            description=_plain(mv("ImageDescription"))[:600], tags=tuple(c.strip() for c in mv("Categories").split("|") if c.strip()),
-            year=int(year.group(1)) if year else None, mime=info.get("mime", ""), restrictions=mv("Restrictions"), query=query))
-    return out
+WATERMARK = re.compile(r"\bwatermark", re.I)
+
+
+def record_from_commons(page: dict[str, Any], query: str = "") -> LicensedPhoto | None:
+    """One Commons file page (prop=imageinfo with extmetadata) as a LicensedPhoto; None for a non-free or watermarked file."""
+    info = (page.get("imageinfo") or [{}])[0]
+    meta = info.get("extmetadata") or {}
+
+    def mv(k: str) -> str:
+        return str((meta.get(k) or {}).get("value", "") or "")
+
+    if mv("NonFree").lower() == "true":
+        return None
+    if WATERMARK.search(mv("Categories")) or WATERMARK.search(page.get("title", "")):
+        return None  # owner, 2026-11-19: never a watermarked picture
+    year = YEAR.search(_plain(mv("DateTimeOriginal")))
+    return LicensedPhoto(
+        title=page.get("title", ""), url=info.get("thumburl") or info.get("url", ""), page=info.get("descriptionurl", ""),
+        creator=_plain(mv("Artist")), provider="wikimedia", source="wikimedia", licence=_plain(mv("LicenseShortName")),
+        licence_url=mv("LicenseUrl"), width=int(info.get("width") or 0), height=int(info.get("height") or 0),
+        description=_plain(mv("ImageDescription"))[:600], tags=tuple(c.strip() for c in mv("Categories").split("|") if c.strip()),
+        year=int(year.group(1)) if year else None, mime=info.get("mime", ""), restrictions=mv("Restrictions"), query=query)
 
 
 async def search_openverse(client: httpx.AsyncClient, query: str, limit: int = 20) -> list[LicensedPhoto]:

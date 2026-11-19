@@ -430,3 +430,16 @@ def _no_learned_casing(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.newsdesk import wire
 
     monkeypatch.setattr(wire, "_VOCAB", {})
+
+
+@pytest.fixture(autouse=True)
+def _no_library_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: the subject library (app/newsdesk/photography) reads Wikimedia Commons; tests never touch the network, so the library
+    is empty unless a test supplies its records (tests/test_newsdesk_photography_20261119.py)."""
+    from app.newsdesk import photography
+
+    async def none(client: object, subject: object) -> list:
+        return []
+
+    monkeypatch.setattr(photography, "_records", none)
+    photography._cache.clear()
