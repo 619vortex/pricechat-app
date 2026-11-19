@@ -653,6 +653,10 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
                     looks += 1
                     look = await editor.vision(img, story, _expectation(b, terms[0], is_person), settings=settings)
                 ok, why = editor.vision_verdict(look, fit)
+                if ok and look is None:
+                    # owner, 2026-11-19: "Never trust a filename alone. If visual verification is unavailable, use only manually approved
+                    # subject-specific images or publish text-only." A searched photo is never published on its record alone.
+                    ok, why = False, "not visually verified (no vision check available): only the library's approved photos go without one"
                 if not ok:
                     logger.info("visual editor: skip %s for event %s: %s", p.title[:80], getattr(ev, "id", None), why)
                     continue

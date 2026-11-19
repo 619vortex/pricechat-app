@@ -403,6 +403,8 @@ def review(ev: Any, image: bytes, meta: dict[str, Any]) -> tuple[bytes, dict[str
             good = [x for x in fits if x.ok and x.depiction in ("strong", "person", "event")]
             if not good:
                 why = (fits[0].why if fits else "the photo's subject is unknown")
+        if not why and not meta.get("library") and not (meta.get("editor") or {}).get("vision"):
+            why = "not visually verified and not an editor-approved library photo (owner, 2026-11-19)"
         if not why and "photo" not in ALLOWED.get(b.cls, set()):
             why = f"a photograph does not fit a {b.cls} story"
         if not why:
@@ -418,6 +420,58 @@ def review(ev: Any, image: bytes, meta: dict[str, Any]) -> tuple[bytes, dict[str
         logger.info("visual editor: event %s goes without a picture: %s", getattr(ev, "id", None), why)
         return b"", {**meta, "kind": "text", "layout": "text", "editor": {"ok": False, "why": why, "class": b.cls, "was": kind or layout}}
     return image, {**meta, "editor": {**(meta.get("editor") or {}), "ok": True, "class": b.cls}}
+
+
+# ---------------------------------------------------------------------------------------------------- production self-test
+VISION_STATUS: dict[str, Any] = {"state": "unknown"}
+NEGATIVE = "File:A small treehouse on Microsoft campus.jpg"  # post 195's photo: the model must refuse it for a Microsoft story
+
+
+async def self_test(settings: Any = None, transport: Any = None) -> dict[str, Any]:
+    """Once after each start: does visual verification work HERE? One look at the library's gold photograph (must be recognised as gold)
+    and one at post 195's treehouse against "Microsoft" (must be refused). The result is logged ("visual editor self-test: ...") and
+    kept in VISION_STATUS. Without a working check, only library photos are published (clean.find_photo and review refuse the rest)."""
+    import httpx
+
+    from app.newsdesk import photography, photos
+    from app.security import credentials
+
+    try:
+        if settings is None:
+            from app.config.settings import get_settings
+
+            settings = get_settings()
+        if not credentials.resolve("anthropic_api_key", settings) or not getattr(settings, "newsdesk_model", ""):
+            out = {"state": "unavailable", "why": "no Anthropic key or model set: library photos or text only"}
+        else:
+            gold = await photography.library_photo(photography.BY_KEY["gold"], transport=transport)
+            if gold is None:
+                out = {"state": "untested", "why": "the gold library photo could not be read from Commons"}
+            else:
+                yes = await vision(gold[0], "Gold's biggest one-day drop since March", "gold: the metal itself (nuggets, bars, coins)",
+                                   settings=settings, transport=transport)
+                no = None
+                async with httpx.AsyncClient(transport=transport) as client:
+                    r = await client.get(photos.COMMONS, params={"action": "query", "format": "json", "titles": NEGATIVE, "prop": "imageinfo",
+                                                                 "iiprop": "url", "iiurlwidth": "1280"}, headers=photos.UA, timeout=photos.TIMEOUT)
+                    page = next(iter(((r.json().get("query") or {}).get("pages") or {}).values()), {})
+                    url = ((page.get("imageinfo") or [{}])[0]).get("thumburl")
+                    if url:
+                        img = Image.open(io.BytesIO((await client.get(url, headers=photos.UA, timeout=photos.TIMEOUT)).content)).convert("RGB")
+                        no = await vision(img, "Microsoft had rallied back to record highs. Then came the election and Outlook outage",
+                                          "Microsoft: its recognisable branding (logo, signage, store, headquarters) or its own product", settings=settings, transport=transport)
+                fit = Fit(True, "strong", "subject", "")
+                passed_yes = yes is not None and vision_verdict(yes, fit)[0]
+                refused_no = no is not None and not vision_verdict(no, fit)[0]
+                out = {"state": "working" if passed_yes and refused_no else "unreliable" if yes is not None else "failing",
+                       "gold": (yes or {}).get("what"), "treehouse": (no or {}).get("what"), "gold_ok": passed_yes, "treehouse_refused": refused_no}
+    except Exception as e:  # noqa: BLE001 - a self-test never stops anything
+        out = {"state": "failing", "why": type(e).__name__}
+    VISION_STATUS.clear()
+    VISION_STATUS.update({**out, "at": datetime.now(timezone.utc).isoformat()})
+    level = logging.INFO if out["state"] == "working" else logging.WARNING
+    logger.log(level, "visual editor self-test: vision %s %s", out["state"].upper(), json.dumps({k: v for k, v in out.items() if k != "state"}))
+    return out
 
 
 __all__ = ["Brief", "Fit", "brief", "depiction", "pixel_problem", "reuse_problem", "review", "vision", "vision_verdict"]

@@ -150,7 +150,12 @@ def test_a_stored_photo_chosen_before_the_editor_is_judged_again_before_x_posts_
     assert image == b"" and "treehouse" in out["editor"]["why"]
     meta = {"kind": "photo", "layout": "photo", "style": "clean", "url": NVIDIA_HQ.url, "title": NVIDIA_HQ.title, "photo": {"tags": list(NVIDIA_HQ.tags)}}
     image, out = editor.review(ev("Nvidia opens a new research lab in Taipei"), img.getvalue(), meta)
+    assert image == b"" and "not visually verified" in out["editor"]["why"]  # a good record is not enough without a look (2026-11-19)
+    seen = {**meta, "editor": {"ok": True, "depiction": "strong", "vision": {"shows_subject": True, "what": "Nvidia's headquarters sign"}}}
+    image, out = editor.review(ev("Nvidia opens a new research lab in Taipei"), img.getvalue(), seen)
     assert image and out["editor"]["ok"] is True
+    lib = {**meta, "library": "nvidia", "editor": {"ok": True, "role": "subject"}}  # an editor-approved library photo needs no look
+    assert editor.review(ev("Nvidia opens a new research lab in Taipei"), img.getvalue(), lib)[0]
 
 
 # ------------------------------------------------------------------------------------------------ pixels

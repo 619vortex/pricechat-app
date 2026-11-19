@@ -522,22 +522,24 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     """Why this queued post can't go out now, or None."""
     if (why := coordinate.desk_blocked(db, now, s)) is not None:
         return why
+    # owner, 2026-11-18/19: a queued post is judged by the LATEST editorial rules first, whatever else it waits for. Before, a post
+    # next to a News Desk slot reported only "spacing" (the time-dependent failure of
+    # test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes near 04:00 UTC) and its editorial verdict waited.
+    from app.newsdesk import newsworthy
+
+    titles = [str(x.get("title") or "") for x in post.sources or []]
+    told = [t for t in (titles[:1] + [(post.text or "").split("\n")[0]]) if t]
+    checked = [newsworthy.qualify(t, post.source_text or "", outlets=len(post.sources or [])) for t in told]
+    if checked and all(a.strength == "none" for a in checked):
+        return f"not newsworthy: {checked[0].reason}"
     incident = incident_post(db, post)
     fast = fast_post(db, post)
     if (why := coordinate.cap_problem(db, s, now, incident=incident, fast=fast)) is not None:
         return why
     if (why := coordinate.spacing_problem(db, s, now, incident=incident, fast=fast)) is not None:
         return why
-    titles = [str(x.get("title") or "") for x in post.sources or []]
     if (why := coordinate.newsdesk_conflict(db, titles, now, fast=fast, topic_id=post.topic_id)) is not None:
         return why
-    # owner, 2026-11-18: a post queued before the newsworthiness gate (or before a rule tightened) is judged again at the last moment
-    from app.newsdesk import newsworthy
-
-    told = [t for t in (titles[:1] + [(post.text or "").split("\n")[0]]) if t]
-    checked = [newsworthy.qualify(t, post.source_text or "", outlets=len(post.sources or [])) for t in told]
-    if checked and all(a.strength == "none" for a in checked):
-        return f"not newsworthy: {checked[0].reason}"
     return None
 
 

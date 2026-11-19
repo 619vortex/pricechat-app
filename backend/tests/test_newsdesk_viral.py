@@ -236,16 +236,23 @@ def daily(start: float, moves_pct: list[float], end: datetime = NOW, *, base_noi
     return out
 
 
+def closed(series: list[tuple[datetime, float]], kind: str = "close", at: datetime = NOW) -> datapost.Last:
+    """What Yahoo's metadata would say about the last value (see test_newsdesk_market_data_20261119.py for the real payloads)."""
+    return datapost.Last(kind, series[-1][1], series[-2][1], at)
+
+
 def test_an_anomaly_names_the_last_time_it_moved_this_much() -> None:
     series = daily(60000, [-9.0])
-    p = datapost.anomaly("BTC-USD", series, NOW)
-    assert p is not None and p.headline == "Bitcoin's biggest one-day drop in at least two years: −9.0%"
-    assert "−9.0% on the day" in p.told and "−9.0% on the day" not in " ".join(p.lines) and p.interest >= 75  # the chart and the checks have it, not the caption
+    p = datapost.anomaly("NVDA", series, NOW, closed(series))
+    assert p is not None and p.headline == "Nvidia's biggest one-day drop in at least two years: −9.0%"
+    assert "−9.0% from the previous close" in p.told and "closed at" in p.told and p.interest >= 75  # the checks have it, not the caption
     assert p.lines == ["A typical day over the last 90 moved it 1.0%: today was 9.1 times that."]  # the takeaway
     with_earlier = daily(60000, [-9.5, *[0.5] * 200, -9.0])
-    q = datapost.anomaly("BTC-USD", with_earlier, NOW)
+    q = datapost.anomaly("NVDA", with_earlier, NOW, closed(with_earlier))
     assert q is not None and "since " in q.headline  # the date we found, e.g. "since April 2026"
-    assert datapost.anomaly("BTC-USD", daily(60000, [1.1]), NOW) is None  # an ordinary day is no post
+    calm = daily(60000, [1.1])
+    assert datapost.anomaly("NVDA", calm, NOW, closed(calm)) is None  # an ordinary day is no post
+    assert datapost.anomaly("NVDA", series, NOW, None) is None  # nobody said what the last value is: no post
 
 
 def test_battles_rankings_and_the_daily_mad_pick_only_post_when_compelling() -> None:

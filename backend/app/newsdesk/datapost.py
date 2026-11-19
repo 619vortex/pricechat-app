@@ -46,7 +46,7 @@ TAG = {s: t for s, _, t in ASSETS}
 CRYPTO = {"BTC-USD", "ETH-USD", "SOL-USD"}
 DATA_BAR = 55  # a data post takes a slot only above this
 MGM_BAR = 75
-TTL = 6 * 3600
+TTL = 20 * 60  # the last bar can be a live price: never older than this when a post is built (was 6 hours until 2026-11-19)
 _cache: dict[str, tuple[float, list[tuple[datetime, float]]]] = {}
 
 
@@ -65,6 +65,7 @@ class DataPost:
     # every figure the chart shows, for the checks (owner, 2026-11-15: the caption is the headline and one takeaway; the chart carries the
     # data, so the full list is never in the caption, but the checks still verify the words and the card against all of it)
     table: list[str] = field(default_factory=list)
+    last: dict[str, Any] = field(default_factory=dict)  # Last.out(): what the final value is (intraday, close, session, utc_day)
 
     @property
     def told(self) -> str:
@@ -75,6 +76,85 @@ class DataPost:
 
 
 # --- prices -----------------------------------------------------------------------------------------------------------------------
+
+
+LIVE_MAX_AGE = timedelta(minutes=90)  # an intraday figure older than this at the moment it is posted is not posted
+
+
+@dataclass
+class Last:
+    """What the last value of a daily series IS (owner, 2026-11-19: "distinguish intraday price, daily change, official close and
+    settlement. Never call an intraday quote a closing price."). The 2026-11-18 gold post said "closed at 3,724.8" at 20:00 UTC; it was a
+    live futures price, and the session's final value was 3,741.9.
+
+    kind: "intraday"  the session is still trading (Yahoo's regularMarketTime is inside currentTradingPeriod.regular): a live price;
+          "close"     a stock or index session that has ended: its closing price;
+          "session"   a futures session that has ended: the last value of the session as Yahoo reports it. It is NOT called a
+                      settlement: the exchange's official settlement price is published separately and we don't read it;
+          "utc_day"   crypto, which never closes: the price now, against the 00:00 UTC daily open.
+    The daily change is always against the previous daily bar (`prev`), named as such in the words."""
+    kind: str
+    price: float
+    prev: float
+    at: datetime  # when the price was (regularMarketTime), not when we read it
+    instrument: str = ""
+
+    @property
+    def change(self) -> float:
+        return (self.price / self.prev - 1) * 100
+
+    def words(self, name: str, symbol: str) -> str:
+        p, ref = price(self.price, symbol), price(self.prev, symbol)
+        if self.kind == "intraday":
+            return f"{cap(name)} at {p} at {self.at:%H:%M} UTC, {pct(self.change)} from the previous close ({ref}), with the session still trading."
+        if self.kind == "utc_day":
+            return f"{cap(name)} at {p} at {self.at:%H:%M} UTC, {pct(self.change)} since the 00:00 UTC daily open ({ref})."
+        if self.kind == "session":
+            return f"{cap(name)} ended the session at {p}, {pct(self.change)} from the previous session ({ref})."
+        return f"{cap(name)} closed at {p}, {pct(self.change)} from the previous close ({ref})."
+
+    def out(self) -> dict[str, Any]:
+        return {"kind": self.kind, "price": self.price, "prev": self.prev, "at": self.at.isoformat(), "instrument": self.instrument}
+
+
+_last: dict[str, Last] = {}
+
+
+def last_of(payload: dict[str, Any], series: list[tuple[datetime, float]]) -> Last | None:
+    """The last value's kind from Yahoo's chart metadata; None when the metadata can't say (the post then makes no claim about it)."""
+    try:
+        meta = payload["chart"]["result"][0]["meta"]
+        at = datetime.fromtimestamp(int(meta["regularMarketTime"]), tz=timezone.utc)
+        period = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
+        start, end = int(period["start"]), int(period["end"])
+        kind_of = str(meta.get("instrumentType") or "").upper()
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    if len(series) < 2:
+        return None
+    price_now, prev = series[-1][1], series[-2][1]
+    live_price = float(meta.get("regularMarketPrice") or price_now)
+    if abs(live_price / price_now - 1) > 0.005:  # the quote and the bar disagree: we can't say which the post should print
+        return None
+    if kind_of == "CRYPTOCURRENCY":
+        kind = "utc_day"
+    elif start <= at.timestamp() < end:
+        kind = "intraday"
+    else:
+        kind = "session" if kind_of == "FUTURE" else "close"
+    return Last(kind, price_now, prev, at, kind_of)
+
+
+def fresh_problem(post: dict[str, Any], now: datetime) -> str | None:
+    """Right before a data post goes out: a live (intraday or crypto) figure must still be recent, or the post waits for a new one."""
+    last = (post or {}).get("last") or {}
+    if last.get("kind") not in ("intraday", "utc_day"):
+        return None
+    at = datetime.fromisoformat(str(last["at"]))
+    age = now - (at if at.tzinfo else at.replace(tzinfo=timezone.utc))
+    if age > LIVE_MAX_AGE:
+        return f"its live price is from {at:%H:%M} UTC, {int(age.total_seconds() // 60)} min ago"
+    return None
 
 
 def parse_daily(payload: dict[str, Any]) -> list[tuple[datetime, float]]:
@@ -92,7 +172,13 @@ async def fetch_daily(client: httpx.AsyncClient, symbol: str, range_: str = "2y"
         return hit[1]
     try:
         r = await client.get(sources.CHART.format(symbol=symbol), params={"range": range_, "interval": "1d"}, headers=sources.UA, timeout=15)
-        got = parse_daily(r.json()) if r.status_code == 200 else []
+        payload = r.json() if r.status_code == 200 else {}
+        got = parse_daily(payload)
+        last = last_of(payload, got)
+        if last is not None:
+            _last[symbol] = last
+        else:
+            _last.pop(symbol, None)
     except (httpx.HTTPError, ValueError) as e:
         logger.info("newsdesk datapost: %s %s", symbol, type(e).__name__)
         got = []
@@ -156,9 +242,15 @@ def _fresh(series: list[tuple[datetime, float]], now: datetime, days: int = 4) -
 # --- the generators ---------------------------------------------------------------------------------------------------------------
 
 
-def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime) -> DataPost | None:
-    """Today's move against the asset's own last 90 daily moves, and the last time it moved this much the same way."""
-    if len(series) < 120 or not _fresh(series, now, 2):
+def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime, last: Last | None = None) -> DataPost | None:
+    """Today's move against the asset's own last 90 daily moves, and the last time it moved this much the same way. `last` says what the
+    final value is (fetch_daily reads it from Yahoo); without it nothing is posted, because the words would have to guess."""
+    quote = last if last is not None else _last.get(symbol)
+    if len(series) < 120 or not _fresh(series, now, 2) or quote is None:
+        return None
+    if abs(quote.price - series[-1][1]) > 1e-9 or abs(quote.prev - series[-2][1]) > 1e-9:
+        return None  # the description is of another fetch
+    if quote.kind in ("intraday", "utc_day") and now - quote.at > LIVE_MAX_AGE:
         return None
     rets = [(series[i][0], (series[i][1] / series[i - 1][1] - 1) * 100) for i in range(1, len(series))]
     day, r = rets[-1]
@@ -172,12 +264,13 @@ def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime) ->
     move = "gain" if up else "drop"
     since = f"since {month(last)}" if last else "in at least two years"
     days = (day - last).days if last else 730
-    head = f"{cap(name)}'s biggest one-day {move} {since}: {pct(r)}"
-    lines = [f"A typical day over the last 90 moved it {sd:.1f}%: today was {z:.1f} times that."]
-    table = [f"{cap(name)} closed at {price(series[-1][1], symbol)}, {pct(r)} on the day."]
+    so_far = quote.kind in ("intraday", "utc_day")  # a live price: the day isn't over, and the words say so
+    head = f"{cap(name)}'s biggest one-day {move} {since}{', so far today' if so_far else ''}: {pct(r)}"
+    lines = [f"A typical day over the last 90 moved it {sd:.1f}%: today {'is' if so_far else 'was'} {z:.1f} times that."]
+    table = [quote.words(name, symbol)]
     why = {"rarity": round(min(60.0, 12 * z), 1), "since": 25.0 if days >= 365 else 15.0 if days >= 180 else 5.0 if days >= 60 else 0.0, "reach": 15.0 if symbol in ("BTC-USD", "^GSPC", "^IXIC", "NVDA", "GC=F") else 8.0}
-    return DataPost("anomaly", f"anomaly:{symbol}", head, lines, int(min(100, sum(why.values()))), why, {symbol: _pts(series, 120)}, symbols=[symbol], as_of=day.isoformat(),
-                    table=table)
+    return DataPost("anomaly", f"anomaly:{symbol}", head, lines, int(min(100, sum(why.values()))), why, {symbol: _pts(series, 120)}, symbols=[symbol],
+                    as_of=quote.at.isoformat(), table=table, last=quote.out())
 
 
 def battle(a: str, b: str, data: dict[str, list[tuple[datetime, float]]], now: datetime, days: int = 30) -> DataPost | None:

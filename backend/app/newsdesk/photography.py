@@ -72,10 +72,13 @@ LIBRARY: tuple[Subject, ...] = (
     Subject("ether", "Ether", r"\b(ether|ethereum|eth)\b(?! foundation)", (
         "File:Close-up of a physical Ethereum coin (51002904687).jpg",
     )),
-    Subject("oil", "Oil", r"\b(oil|crude|brent|wti|opec\+?)\b", (
+    Subject("oil", "Oil", r"\b(oil|crude|brent|wti|opec\+?|diesel|gasoline)\b", (
         "File:LostHillsPumpjacksSunset.JPG",
         "File:PumpjacksFull.JPG",
         "File:PumpjacksSundown.JPG",
+        "File:Alpine Melina (IMO 9387944) North Sea 2016.jpg",
+        "File:Oil Tanker in North Sea 3928.jpg",
+        "File:Crude Oil Tanker Emerald Shiner at BP Oil Refinery Jetty, Kwinana, September 2021 01.jpg",
     )),
     Subject("microsoft", "Microsoft", r"\b(microsoft|msft|outlook|azure|xbox)\b", (
         "File:Microsoft Store @ Metropolis (32458694837).jpg",
@@ -96,7 +99,75 @@ LIBRARY: tuple[Subject, ...] = (
         "File:Seattle - Tesla at 435 Westlake N 02.jpg",
         "File:Tesla Showroom Dadeland Mall, 27 November 2023 - Red car.jpg",
     )),
-    Subject("stocks", "Wall Street", r"\b(s&p 500|nasdaq|dow jones|wall street|nyse|new york stock exchange|u\.s\. stocks|us stocks)\b", (
+    Subject("dogecoin", "Dogecoin", r"\b(dogecoin|doge)\b", (
+        "File:Dogecoin gold coin black background 1 - tails.jpg",
+        "File:Dogecoin gold coin on wood 3 - tails.jpg",
+        "File:Dogecoin gold coin with euro coins wood background 2 - tails.jpg",
+    )),
+    Subject("natgas", "Natural gas", r"\b(natural gas|lng|gas prices?|henry hub)\b", (
+        "File:2023-05-20 01 LNG tanker, GULF ENERGY - IMO 7390143.jpg",
+        "File:Aristarchos (LNG Tanker).jpg",
+        "File:LNG Tanker \"Gaslog Saratoga\", Melkøya, Norway.jpg",
+    )),
+    Subject("copper", "Copper", r"\bcopper\b", (
+        "File:Bundles of cathode copper.png",
+    )),
+    Subject("grains", "Wheat", r"\b(wheat|grains?)\b", (
+        "File:A wheat field before harvest.jpg",
+        "File:Sunset-over-the-wheat-field-featured.jpg",
+        "File:Wheat harvest on the Palouse.jpg",
+        "File:Wheat close-up.JPG",
+    )),
+    Subject("fed", "The Federal Reserve", r"\b(federal reserve|fomc|(?-i:Fed)(?:'s|’s)?)\b", (
+        "File:Eccles Building (26088200676).jpg",
+        "File:Marriner S. Eccles Federal Reserve Board Building.jpg",
+        "File:Eccles Building - north side.JPG",
+    )),
+    Subject("ecb", "The European Central Bank", r"\b(ecb|european central bank)\b", (
+        "File:Seat of the European Central Bank and Frankfurt Skyline at dawn 20150422 1.jpg",
+        "File:Frankfurt am Main, Seat of the European Central Bank (Skytower (ECB)).jpg",
+        "File:Frankfurt EZB.Nordwest-2.20141228.jpg",
+        "File:Europäische Zentralbank Frankfurt.jpg",
+    )),
+    Subject("amazon", "Amazon", r"\b(amazon(?! rainforest| basin| river| forest| region|ia)|amzn|aws)\b", (
+        "File:Amazon Spheres at night from 7th and Lenora.jpg",
+        "File:2024-12-21, Amazon Spheres (Seattle), 170559.jpg",
+        "File:Amazon Spheres 01.jpg",
+    )),
+    Subject("google", "Google", r"\b(google|alphabet|googl)\b", (
+        "File:GoogleTorontoOffice3.jpg",
+        "File:GoogleTorontoOffice4.jpg",
+        "File:Google 1600 Amphitheatre (4136750386).jpg",
+        "File:Google Headquarters in Ireland Building Sign.jpg",
+    )),
+    Subject("samsung", "Samsung", r"\bsamsung\b", (
+        "File:Samsung felirat egy épület tetején, Budapest, 2025.jpg",
+    )),
+    Subject("tsmc", "TSMC", r"\b(tsmc|taiwan semiconductor)\b", (
+        "File:Building of Taiwan Semiconductor Manufacturing Fab 12B at night.jpg",
+        "File:Building of Taiwan Semiconductor Manufacturing Fab 12B at dusk1.jpg",
+        "File:TSMC Fab 12A 01.jpg",
+    )),
+    Subject("jpmorgan", "JPMorgan Chase", r"\b(jpmorgan|jp morgan|chase bank)\b", (
+        "File:JPMorgan Chase - 270 Park Avenue (55283843744).jpg",
+    )),
+    Subject("nasdaq", "Nasdaq", r"\bnasdaq\b", (
+        "File:Nasdaq MarketSite (51494550508).jpg",
+        "File:NASDAQ Times Square - panoramio.jpg",
+        "File:NASDAQ Market Site 201506.jpg",
+    )),
+    Subject("shipping", "Trade and shipping", r"\b(tariffs?|trade war|trade deal|shipping|container ships?|freight|supply chains?)\b", (
+        "File:MAERSK HANOI Container Ship (Port Koper SIKOP, 2023).jpg",
+        "File:Port Jersey container ship sunset 2018.jpg",
+        "File:MSC HARMONY III (container ship, 2006) in Port Koper (SIKOP, 2024).jpg",
+        "File:Container ship NYK Themis at the Port of Los Angeles.jpg",
+    )),
+    Subject("power", "The power grid", r"\b(power grid|blackouts?|power outages?|electricity|power prices?)\b", (
+        "File:Deep orange sunset.jpg",
+        "File:High Voltage - panoramio.jpg",
+        "File:Power Sunset (48755830892).jpg",
+    )),
+    Subject("stocks", "Wall Street", r"\b(s&p 500|dow jones|wall street|nyse|new york stock exchange|u\.s\. stocks|us stocks)\b", (
         "File:Sign of the New York Stock Exchange, Broad Street.jpg",
         "File:New York Stock Exchange Facade.JPG",
         "File:NEW YORK STOCK EXCHANGE 20240521.jpg",
@@ -106,7 +177,8 @@ BY_KEY = {s.key: s for s in LIBRARY}
 # a data post's or market move's symbol -> its subject
 SYMBOLS = {"GC=F": "gold", "XAU": "gold", "GOLD": "gold", "PAXG": "gold", "SI=F": "silver", "SILVER": "silver", "BTC-USD": "bitcoin", "BTC": "bitcoin",
            "ETH-USD": "ether", "ETH": "ether", "CL=F": "oil", "BZ=F": "oil", "CL": "oil", "OIL": "oil", "^GSPC": "stocks", "^IXIC": "stocks",
-           "^DJI": "stocks", "MSFT": "microsoft", "NVDA": "nvidia", "AAPL": "apple", "TSLA": "tesla"}
+           "^DJI": "stocks", "NG=F": "natgas", "HG=F": "copper", "ZW=F": "grains", "DOGE-USD": "dogecoin", "DOGE": "dogecoin",
+           "AMZN": "amazon", "GOOGL": "google", "GOOG": "google", "TSM": "tsmc", "JPM": "jpmorgan", "MSFT": "microsoft", "NVDA": "nvidia", "AAPL": "apple", "TSLA": "tesla"}
 
 _cache: dict[str, tuple[float, Any]] = {}
 

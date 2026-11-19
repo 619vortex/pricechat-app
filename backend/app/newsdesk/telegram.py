@@ -295,6 +295,11 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     from app.newsdesk import quality
 
     problems += quality.event_problems(ev, rows)  # owner, 2026-11-16: still worth a post, and one story only, right before it goes
+    if ev.kind == "data":  # owner, 2026-11-19: an intraday figure is posted only while it is still the current one
+        from app.newsdesk import datapost
+
+        if (stale := datapost.fresh_problem(f.get("data") or {}, now)):
+            problems.append(f"stale market data: {stale}")
     if db is not None and (told := quality.already_posted(db, ev, now)):
         problems.append(told)
     if problems:

@@ -80,11 +80,17 @@ async def test_a_story_goes_out_with_its_strongest_factual_hook_on_both_platform
 
 
 async def test_markets_gone_mad_takes_the_slot_after_the_close_once_a_day(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811
+    from app.newsdesk import datapost
+
     data = {"BTC-USD": daily(60000, [-9.0], AT - timedelta(hours=1)), "GC=F": daily(3000, [0.2], AT - timedelta(hours=1))}
+    btc = data["BTC-USD"]
+    # what Yahoo's metadata says about the last value (2026-11-19): crypto never closes, so the day so far, from 00:00 UTC
+    datapost._last["BTC-USD"] = datapost.Last("utc_day", btc[-1][1], btc[-2][1], AT - timedelta(hours=1), "CRYPTOCURRENCY")
     await _decide(db, AT, daily_data=data)
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
     assert ev.kind == "data" and ev.key.startswith("mgm:") and ev.facts["kicker"] == "MARKETS GONE MAD"
-    assert ev.headline == "Bitcoin's biggest one-day drop in at least two years: −9.0%" and ev.evidence == "price data"
+    assert ev.headline == "Bitcoin's biggest one-day drop in at least two years, so far today: −9.0%" and ev.evidence == "price data"
+    assert "since the 00:00 UTC daily open" in ev.facts["told"] and "closed at" not in ev.facts["told"]
     tg = live["tg"]
     assert (await lane.tick(db, get_settings(), tg, AT + timedelta(minutes=1)))["sent"]
     cap = tg.sent[0]["caption"]
@@ -97,6 +103,7 @@ async def test_markets_gone_mad_takes_the_slot_after_the_close_once_a_day(client
     # the next slot, same US day: no second MARKETS GONE MAD
     await _decide(db, AT + timedelta(hours=3), daily_data=data)
     assert db.scalar(select(NdEvent.id).where(NdEvent.key.like("mgm:%"), NdEvent.id != ev.id)) is None
+    datapost._last.clear()
 
 
 async def test_the_emergency_pause_holds_data_posts_too(client: Any, db: Session, live: dict[str, Any]) -> None:  # noqa: F811

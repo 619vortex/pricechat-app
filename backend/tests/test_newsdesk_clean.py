@@ -180,7 +180,23 @@ def found(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     return calls
 
 
-async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def sees(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """A working vision check (production self-test 'WORKING'): the model looks and says the photo shows the subject."""
+    from app.newsdesk import editor
+
+    looked: list[str] = []
+
+    async def vision(img: Any, story: str, expect: str, **kw: Any) -> dict[str, Any]:
+        looked.append(expect)
+        return {"shows_subject": True, "recognisable": True, "generic": False, "misleading": False, "text_heavy": False, "watermark": False,
+                "what": "the subject, clearly"}
+
+    monkeypatch.setattr(editor, "vision", vision)
+    return looked
+
+
+async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(monkeypatch: pytest.MonkeyPatch, sees: list[str]) -> None:
     calls: list[dict[str, Any]] = []
 
     def shot(title: str) -> Any:
@@ -245,13 +261,21 @@ def test_a_chart_only_beside_a_story_about_that_price_or_a_measured_reaction() -
     assert clean.charted_story(ev("US consumer prices rose 0.4%", viral={"reactions": [{"symbol": "^GSPC", "pct": -1.2}]}), "^GSPC")
 
 
-async def test_a_product_story_shows_the_photo_alone(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_product_story_shows_the_photo_alone(found: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch, sees: list[str]) -> None:
     async def fake_bars(client: Any, symbol: str, end: Any = None) -> list[list[float]]:
         raise AssertionError("no prices are read for a story that isn't about a price")
 
     monkeypatch.setattr(clean, "fetch_bars", fake_bars)
     _, meta = await clean.picture(ev("Nvidia opens a new campus in Taipei"), now=AT)
-    assert meta["layout"] == "photo" and "bars" not in meta and meta["editor"]["role"] == "headquarters"
+    assert meta["layout"] == "photo" and "bars" not in meta and meta["editor"]["role"] == "headquarters" and meta["editor"]["vision"]
+    assert sees and "nvidia" in sees[0]  # the model looked before it went out
+
+
+async def test_without_vision_a_searched_photo_is_never_published(found: list[dict[str, Any]]) -> None:
+    # owner, 2026-11-19: "Never trust a filename alone. If visual verification is unavailable, use only manually approved
+    # subject-specific images or publish text-only." The test environment has no Anthropic key: vision is unavailable.
+    data, meta = await clean.picture(ev("Nvidia opens a new campus in Taipei"), now=AT)
+    assert data == b"" and meta["kind"] == "text"
 
 
 def test_a_credit_the_font_cannot_draw_moves_to_the_caption() -> None:

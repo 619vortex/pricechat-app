@@ -198,7 +198,12 @@ def test_the_most_striking_relevant_photo_wins() -> None:
 
 @pytest.mark.parametrize("headline,key", [("Gold hits a record", "gold"), ("Goldman Sachs cuts jobs", None), ("Asian stocks slide", None),
                                           ("S&P 500 falls 2%", "stocks"), ("Microsoft Outlook down for thousands", "microsoft"),
-                                          ("Silver lining for retailers", None), ("Ethereum upgrade goes live", "ether")])
+                                          ("Silver lining for retailers", None), ("Ethereum upgrade goes live", "ether"),
+                                          ("Fed holds rates steady", "fed"), ("Investors fed up with volatility", None),  # "fed up" is not the Fed
+                                          ("Amazon rainforest fires spread", None), ("Amazon cuts 14,000 jobs", "amazon"),
+                                          ("Trump announces new tariffs on Canada", "shipping"), ("Nasdaq falls 3%", "nasdaq"),
+                                          ("ECB cuts rates for a third time", "ecb"), ("Natural gas prices spike in Europe", "natgas"),
+                                          ("Russian diesel exports double", "oil"), ("Texas power grid strains under heat", "power")])
 def test_the_subject_is_read_from_the_headline(headline: str, key: str | None) -> None:
     s = photography.subject_of(headline)
     assert (s.key if s else None) == key
@@ -207,3 +212,34 @@ def test_the_subject_is_read_from_the_headline(headline: str, key: str | None) -
 def test_every_library_file_is_a_commons_file_title() -> None:
     for s in photography.LIBRARY:
         assert s.files and all(f.startswith("File:") and f.rsplit(".", 1)[-1].lower() in ("jpg", "jpeg", "png") for f in s.files)
+
+
+async def test_the_production_self_test_reports_whether_vision_works(library: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from app.security import credentials
+
+    class S:
+        newsdesk_model = "claude-haiku-5-5"
+
+    out = await editor.self_test()  # the test settings: no Anthropic key
+    assert out["state"] == "unavailable" and editor.VISION_STATUS["state"] == "unavailable"  # no key: said plainly, library or text only
+
+    monkeypatch.setattr(credentials, "resolve", lambda name, settings=None: "k")
+
+    async def vision(img: Any, story: str, expect: str, **kw: Any) -> dict[str, Any]:
+        gold = expect.startswith("gold")
+        return {"shows_subject": gold, "recognisable": gold, "generic": not gold, "misleading": False, "text_heavy": False, "watermark": False,
+                "what": "a gold nugget" if gold else "a treehouse in a forest"}
+
+    monkeypatch.setattr(editor, "vision", vision)
+    buf = io.BytesIO()
+    pic().save(buf, "JPEG")
+
+    def commons(request: httpx.Request) -> httpx.Response:
+        if "api.php" in str(request.url):
+            return httpx.Response(200, json={"query": {"pages": {"1": {"title": editor.NEGATIVE, "imageinfo": [{"thumburl": "https://upload.wikimedia.org/t.jpg"}]}}}})
+        return httpx.Response(200, content=buf.getvalue())
+
+    out = await editor.self_test(S(), transport=httpx.MockTransport(commons))
+    assert out == {**out, "state": "working", "gold_ok": True, "treehouse_refused": True, "treehouse": "a treehouse in a forest"}

@@ -443,3 +443,6 @@ def _no_library_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(photography, "_records", none)
     photography._cache.clear()
+    from app.newsdesk import datapost
+
+    datapost._last.clear()

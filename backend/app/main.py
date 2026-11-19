@@ -215,6 +215,13 @@ def create_app(
         else:
             observability.startup_self_check(app_settings, [s.name for s in specs])
         if app_settings.is_production and initialize_database:
+            # the Visual Editor's production self-test (2026-11-19): is visual verification working on this server? (logs one line)
+            import asyncio as _asyncio
+
+            from app.newsdesk import editor as _editor
+
+            app.state.vision_self_test = _asyncio.get_running_loop().create_task(_editor.self_test(app_settings))
+        if app_settings.is_production and initialize_database:
             # build the market homepage's rows once now, in the background, so the first visitor after a deploy doesn't
             # wait for the ~50k-card build (the scheduled warm-up only runs where background jobs are on)
             import threading

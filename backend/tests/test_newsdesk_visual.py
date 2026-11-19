@@ -171,13 +171,15 @@ async def test_a_news_picture_is_a_real_licensed_photo_of_the_subject_never_reus
     monkeypatch.setattr(photos, "discover", discover)
     monkeypatch.setattr(visual, "fetch_image", fetch)
     ev = NdEvent(key="k", kind="news", title="Treasury cuts off MEXC", headline="U.S. TREASURY MOVES TO CUT OFF MEXC", topic="controversy", sources=[{"name": "CoinDesk"}], facts={})
-    data, meta = await visual.for_event(ev, used={"https://img/t1.jpg"})
+    data, meta = await visual._for_event(ev, used={"https://img/t1.jpg"})  # the selection itself
     assert jpeg_size(data) == (1600, 900) and meta["url"] == "https://img/t2.jpg" and meta["kind"] == "photo"
+    published, why = await visual.for_event(ev, used={"https://img/t1.jpg"})  # what goes out: no vision check here, so text
+    assert published == b"" and "not visually verified" in why["editor"]["why"]
     assert asked["sensitive"] is True and "https://img/t1.jpg" in asked["used"]  # a sanctions story: no people in the photo
     assert meta["credit"] == "Photo: D / Wikimedia Commons (CC BY-SA 3.0)" and meta["photo"]["licence"] == "CC BY-SA 3.0" and meta["photo"]["page"]
     assert meta["design"] in ("band", "side", "overlay") and meta["covered"] <= 0.08  # the headline never sits on the subject
     ev.facts = {"visual": meta}  # X uses the same picture as Telegram
-    _, again = await visual.for_event(ev)
+    _, again = await visual._for_event(ev)
     assert again["url"] == "https://img/t2.jpg" and again["design"] == meta["design"]
 
 
@@ -252,7 +254,7 @@ async def test_a_company_story_gets_a_real_licensed_photo_of_the_company(monkeyp
     monkeypatch.setattr(visual, "fetch_image", fetch)
     ev = NdEvent(key="k2", kind="news", title="Nvidia board investigates Jensen Huang", headline="NVIDIA BOARD INVESTIGATES JENSEN HUANG", topic="corporate",
                  sources=[{"name": "Decrypt"}], facts={"importance": {"kind": "corporate"}})
-    data, meta = await visual.for_event(ev)
+    data, meta = await visual._for_event(ev)
     assert meta["kind"] == "photo" and meta["url"] == "https://img/nv.jpg" and meta["credit"] == "Photo: Coolcaesar / Wikimedia Commons (CC BY-SA 4.0)"
     assert jpeg_size(data) == (1600, 900) and meta["headline_px"] >= 44
 

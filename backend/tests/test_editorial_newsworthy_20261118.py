@@ -283,6 +283,10 @@ def test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes(db: 
     db.add(post)
     db.commit()
     assert (engine.waiting_reason(db, s, post, NOW) or "").startswith("not newsworthy")
+    # every moment of the day, next to a News Desk slot or not (it failed on the clock near 04:00 UTC before 2026-11-19)
+    day = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    for minutes in range(0, 24 * 60, 10):
+        assert (engine.waiting_reason(db, s, post, day + timedelta(minutes=minutes)) or "").startswith("not newsworthy"), minutes
 
 
 # --- second round (owner, 2026-11-18): an exceptional-story path, checked on 270 real candidates of 11-15..18 ------------------------------
