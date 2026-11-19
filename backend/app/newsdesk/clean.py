@@ -355,7 +355,9 @@ def photo_credit(meta: dict[str, Any]) -> str:
     lic = str(meta.get("licence") or "").strip()
     if lic and lic.lower() not in credit.lower():
         credit = f"{credit}, {lic}" if credit else lic
-    return credit if credit.lower().startswith("photo") else f"Photo: {credit}" if credit else ""
+    out = credit if credit.lower().startswith("photo") else f"Photo: {credit}" if credit else ""
+    who = str(meta.get("who") or "").strip()  # who is pictured, where and when (photography.CAPTIONS)
+    return f"{who} · {out}" if who and out else out
 
 
 def drawable(text: str) -> bool:
@@ -535,6 +537,10 @@ def chart_subject(text: str) -> tuple[str, str, str] | None:
 # owner, 2026-11-12: "allow authentic, licensed photos of public figures in controversy stories when directly relevant, with neutral presentation
 # and no implication of guilt". A controversy story may show the public figure it is about; never a private person, never on a story of
 # violence or death, and never a photo of an arrest, a courtroom, a police scene or a prison (that photo would imply the guilt).
+# an act of violence in the headline: never a person's portrait for it (the war's diplomacy is fine: "Trump tells Xi ... end Ukraine war")
+ACT_OF_VIOLENCE = re.compile(r"\b(strikes?|struck|attack\w*|kill\w*|dead|deaths?|dies|died|bomb\w*|shell(?:ed|ing)|missiles?|drones?|explosions?|"
+                             r"blasts?|shooting|shot|gunm[ae]n|invad\w*|invasion|intercept\w*|wounded|injur\w*|casualt\w*|massacre\w*|"
+                             r"assassinat\w*|hostages?|murder\w*|terror\w*|raids?)\b", re.I)
 VIOLENT = re.compile(r"\b(death|deaths|dead|dies|died|killed|kills?|murder\w*|suicide|wars?|casualt(?:y|ies)|assault\w*|rape|sexual|shooting|"
                      r"terror\w*|kidnap\w*|attack\w*|bomb\w*|strikes?)\b", re.I)
 ROLE = re.compile(r"\b(CEO|chief executive|founder|co-?founder|chair(?:man|woman)?|president|prime minister|minister|senator|governor|"
@@ -873,6 +879,17 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
         return text_only(base, f"no {subject.name} photograph available")
     if kind in ("data", "market", "recap"):
         return text_only(base, "no photograph of this asset")
+    text = f"{ev.headline} {ev.title}"
+    # the people a story is about (owner, 2026-11-19: "Trump/Xi/Zelensky story -> relevant real photograph of the people"), from the
+    # editor's people library: before a company or market subject only when named first, and never for an act of violence (a war's diplomacy
+    # is about the leaders; a strike is about the strike: its own photograph or text)
+    who = photography.people_of(text)
+    lib_at = photography.subject_of(text)
+    lib_pos = lib_at.rx().search(text).start() if lib_at is not None else len(text)  # type: ignore[union-attr]
+    if who is not None and who[1] <= lib_pos and not ACT_OF_VIOLENCE.search(text):
+        got = await photography.library_photo(who[0], transport=transport, records=records)
+        if got is not None:
+            return _photo_out(got, base, platform)
     if b.cls in ("conflict", "disaster"):  # the event itself, dated, or nothing
         got = await find_photo(ev, used=used, transport=transport, panel=False, records=records)
         return _photo_out(got, base, platform) if got is not None else text_only(base, f"no dated photograph of this {b.cls}")

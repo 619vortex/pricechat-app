@@ -335,6 +335,8 @@ class Assessment:
     stop_scroll: int
     parts: dict[str, int] = field(default_factory=dict)
     event: Event | None = None
+    interest: int = 0  # the audience-interest score (audience()), 0-100
+    pitch: str = ""  # the specific reason THIS audience would care, when it passes
 
 
 def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
@@ -527,7 +529,7 @@ def assess(title: str, summary: str = "", *, relevant: bool = True, age_min: flo
         return Assessment(False, strength, "", f"why should anyone care? {reason}", score, parts, ev)
     if score < STOP_SCROLL:
         return Assessment(False, strength, why, f"stop-scroll {score} < {STOP_SCROLL}: {why}, but not enough to stop a reader", score, parts, ev)
-    return Assessment(True, strength, why, "", score, parts, ev)
+    return audience_gate(Assessment(True, strength, why, "", score, parts, ev), title, summary)
 
 
 STOP_SCROLL = 60
@@ -628,7 +630,7 @@ def judge(db: Any, title: str, summary: str = "", now: datetime | None = None, *
     if not a.ok and not rep and a.strength == "none" and (dev := development_of(title, summary, history, now)):
         # a substantial development of a story already out IS the reason to care: losses doubled, the founder arrested, withdrawals halted
         parts = {**a.parts, "consequence": 45}
-        return Assessment(True, "strong", dev, "", sum(parts.values()), parts, a.event)
+        return audience_gate(Assessment(True, "strong", dev, "", sum(parts.values()), parts, a.event), title, summary)
     return qualify(title, summary, outlets=outlets, base=a, repeat=rep)
 
 
@@ -641,7 +643,7 @@ def qualify(title: str, summary: str = "", *, outlets: int = 0, base: Assessment
     if not e.ok:
         return a
     parts = {**a.parts, "consequence": 45}
-    return Assessment(True, "exceptional", e.why, "", sum(parts.values()), parts, a.event)
+    return audience_gate(Assessment(True, "exceptional", e.why, "", sum(parts.values()), parts, a.event), title, summary)
 
 
 ANY_FIRM_HARD = _rx(r"\b(arrests?|arrested|charged|indicted|bankrupt|files? for bankruptcy|insolven\w*|(?:halt|suspend|paus|freez)\w* (?:all )?withdrawals)\b")
@@ -682,6 +684,7 @@ OUTAGE = _rx(r"\b(outages?|is down|are down|went down|goes down|disruption|disru
 CYBER = _rx(r"\b(cyber ?attack\w*|hack(?:ed|ers|s)?|breach(?:ed)?|ransomware)\b")
 CRITICAL = _rx(r"\b(oil|gas|energy|grid|pipeline|port|airport|hospitals?|central bank|ministry|government|military|nuclear|water|"
                r"\d{2,}\s+(?:major\s+)?(?:websites|companies|banks|organi[sz]ations|hospitals|firms))\b")
+MODAL = _rx(r"\b(can|could|would|will|may|might|should|must|help|helps|helping|wants? to|hopes? to|ready to)\b")
 OFF_BEAT = _rx(r"\b(nba|nfl|nhl|mlb|uefa|fifa|premier league|james bond|oscars?|grammys?|album|box office|celebrity|royal family)\b")
 
 
@@ -707,7 +710,7 @@ def exceptional(title: str, summary: str = "", *, outlets: int = 0, **_: Any) ->
     # the institution must be the SUBJECT and its decisive verb must follow at once ("Supreme Court ends", "China, Canada agree to cut");
     # "UK energy giant quits North Sea over tax raids" is not the UK raiding anything
     if (actor := AUTHORITY.search(lead)) and (act := DECISIVE.search(main[actor.end():])) and len(main[actor.end():actor.end() + act.start()].split()) <= 3 \
-            and not ROUTINE.search(main[:act.start() + actor.end()]):
+            and not ROUTINE.search(main[:act.start() + actor.end()]) and not MODAL.search(main[actor.end():actor.end() + act.start()]):
         return Exceptional(True, f"exceptional: {actor.group(0)} {act.group(0)} (a decisive act by an institution)", "")
     if SYSTEMIC.search(main) and OUTAGE.search(main) and not OVER.search(head):
         return Exceptional(True, f"exceptional: {SYSTEMIC.search(main).group(0)} outage, happening now", "")  # type: ignore[union-attr]
@@ -755,3 +758,148 @@ def structural_weak(head: str) -> str | None:
     if quality.is_roundup(t):
         return "a round-up of several stories, not one story"
     return quality.feature(t)
+
+
+# --- would OUR audience care? (owner, 2026-11-19) ---------------------------------------------------------------------------------------
+# "Price Chat's Telegram channel still looks like a boring automated RSS feed ... Stop publishing ordinary news simply because it's
+# verified or geopolitically significant. Before publishing, ask: why would our crypto, markets and world-news audience actually care?"
+# Audit of the last 30 real posts (167-198): Telegram 197 "U.S., China can help end Ukraine war, Trump tells Xi before trilateral with
+# Putin" (a remark, through the exceptional path) and 198 "Saudi-led coalition intercepts Houthi missiles targeting Riyadh and south" (an
+# interception with nothing hit, through "a state strikes another") were verified and significant, and nobody's reason to open the channel.
+#
+# A consequence (assess/exceptional) is necessary; it is not enough. The story must also carry an ANGLE this audience cares about, stated in
+# the story itself: a crash or pump, money on the scale of billions, a market regime, a major attack (a state strikes a state and it lands),
+# casualties, a scandal (arrests, charges, investigations, frozen or seized money), a genuine surprise (first, record, unexpected), or a
+# direct hit on crypto, markets or energy. Each angle adds to the audience-interest score and names the specific reason to publish. Routine
+# military updates (missiles intercepted, nothing hit) and diplomacy talk (remarks, meetings, "can help", "ahead of the summit") are refused
+# outright unless an outcome is stated (a deal signed, sanctions imposed, a strike that landed). Verification is never an angle.
+
+INTEREST_BAR = 60
+INTEREST_BASE = {"major": 70, "strong": 50, "exceptional": 50}
+INTERCEPTED = _rx(r"\b(intercept\w*|shoots? down|shot down|downs|downed|repels?|repelled|thwart\w*|foils?|foiled|repulse\w*)\b")
+LANDED = _rx(r"\b(kill\w*|dead|deaths?|wounded|injur\w*|casualt\w*|damag\w*|ablaze|on fire|fire at|destroy\w*|hits?|hit by|struck|"
+             r"blasts?|explosions? (?:at|in|hit)|impact(?:ed|s)? (?:on|at)|sets? off|shut(?:s)? down)\b")
+DIPLOMACY = _rx(r"\b(tells?|told|says?|said|talks?|meets?|meeting|summit|trilateral|bilateral|ahead of|discuss\w*|urges?|calls? (?:on|for)|"
+                r"can help|could help|to help|pushes? for|seeks?|warns?|vows?|signals?|envoy|visits?|visiting|hosts?|phone call|spoke)\b")
+BEAT = _rx(r"\b(crypto\w*|bitcoin|btc|ether(?:eum)?|eth|stablecoins?|tokens?|memecoins?|defi|exchanges?|binance|coinbase|tether|circle|"
+           r"stocks?|shares|equities|nasdaq|s&p|dow|wall street|markets?|traders?|investors?|oil|crude|brent|wti|gas|gold|silver|dollar|"
+           r"yields?|bonds?|treasur(?:y|ies)|fed|ecb|central bank|rates?|inflation|tariffs?|sanctions|liquidat\w*|etfs?|hedge funds?|banks?|"
+           r"hormuz|shipping|tankers?|refiner(?:y|ies)|pipeline|ipo|earnings|revenue|nvidia|apple|microsoft|tesla|amazon|google|alphabet|meta|"
+           r"openai|tsmc|samsung)\b")
+SCANDAL = _rx(r"\b(arrest\w*|charged|charges|indict\w*|convict\w*|fraud\w*|scandal|affair|spy|spies|espionage|probe[sd]?|investigat\w*|"
+              r"subpoena\w*|raid(?:ed|s)?|launder\w*|brib\w*|embezzl\w*|ponzi|seiz\w*|freez\w*|frozen|court order|sued|sues|lawsuit|"
+              r"heist|rug ?pull\w*|drain(?:s|ed)?|scam\w*|collaps\w*|insolven\w*|bankrupt\w*|hack(?:ed|ers?)?|exploit\w*|stolen|theft|insider trading|manipulat\w*|acquit\w*|verdict|trial|sentenc\w*)\b")
+AGREED = _rx(r"\b(?:agree(?:s|d)?|sign(?:s|ed)?|seal(?:s|ed)?|strikes?|struck|reach(?:es|ed)?)\b (?:a |an |the )?(?:new |final )?"
+              r"(?:to (?:further )?(?!(?:talk|meet|discuss|hold|resume|continue|consider|explore|study)\b)\w+|deal|agreement|accord|treaty|pact)\b")
+HOSTILE = _rx(r"\b(clos(?:e|es|ed|ing)|shuts?|expel\w*|seiz\w*|ban(?:s|ned)?|sanction\w*|nationali[sz]\w*|blockade\w*|declares?)\b")
+SURPRISE = _rx(r"\b(unexpected\w*|surpris\w*|shock\w*|first(?:-ever)?|record|biggest|largest|worst|historic|unprecedented|"
+               r"since (?:19|20)\d\d|in (?:\d+|two|three|four|five|ten) (?:years|decades)|\d+-year (?:high|low)|all-time)\b")
+MARKET_ANGLE = _rx(r"\b(crash\w*|plunge\w*|tumbl\w*|soar\w*|surg\w*|rout|sell-?off|liquidat\w*|correction|bear market|"
+                   r"breaks? (?:below|above)|record high|all-time high)\b")
+
+
+LEADERS = _rx(r"\b(trump|biden|xi|putin|zelensk\w*|netanyahu|modi|erdogan|macron|starmer|merz|khamenei|kim jong un|mbs|bin salman|"
+              r"president|prime minister|foreign minister|chancellor|secretary of state|rubio|vance|lavrov)\b")
+
+
+STATE_NAMES = {"US": "the US", "UAE": "the UAE", "NKOREA": "North Korea", "SAUDI": "Saudi Arabia", "YEMEN": "the Houthis", "NATO": "NATO"}
+
+
+GIANT = _rx(r"\b(nyse|nasdaq|cme|dtcc|swift|lseg|deutsche b(?:ö|oe|o)rse|ice|blackrock|vanguard|fidelity|jpmorgan|jp morgan|goldman(?: sachs)?|"
+            r"morgan stanley|citi(?:group|bank)?|bank of america|wells fargo|hsbc|barclays|ubs|deutsche bank|bny(?: mellon)?|state street|"
+            r"federal reserve|fed|ecb|bank of england|central bank|treasury)\b")
+
+
+def _big_move(head: str, pct: float) -> str:
+    """Which asset made a move big enough for this audience, by asset class (owner, 2026-11-18: a 3% stock move is not news)."""
+    if not pct:
+        return ""
+    for rx, at in ((INDEX, 2), (CRYPTO, 5), (OIL, 5), (MEGA, 6), (MAJOR_ASSET, 3)):
+        if (m := rx.search(head)) and pct >= at:
+            return m.group(0)
+    return ""
+
+
+def audience(title: str, summary: str, a: Assessment) -> tuple[int, str, str]:
+    """(score 0-100, the specific reason to publish, why not). The base is the consequence's strength; every angle the story itself states
+    adds to it and is named; routine military updates and diplomacy talk are refused outright. Nothing is invented: every angle is a match
+    in the headline (or, for figures, its own lead sentence)."""
+    head = title or ""
+    ev = a.event or event_of(title, summary)
+    main = main_clause(head)
+    score = INTEREST_BASE.get(a.strength, 0)
+    # refusals first: the forms that read as news and are not
+    if ev.kin() == "conflict" and (m := INTERCEPTED.search(head)) and not LANDED.search(head) and not WAR_MAJOR.search(head) and ev.deaths == 0 \
+            and not (SURPRISE.search(head) and SURPRISE.search(head).group(0).lower().startswith("first")):  # type: ignore[union-attr]
+        return score - 30, "", f"a routine military update: {m.group(0)}, with nothing hit and no casualties stated"
+    outcome = PEACE_DONE.search(head) or SANCTION_ACT.search(head) or RATE_ACT.search(head) or HARD_OUTCOME.search(head) or ev.deaths or ev.pct \
+        or ev.money >= 1e9 or (ev.kin() == "conflict" and HARD_CONFLICT.search(main) and not INTERCEPTED.search(main)) or AGREED.search(head)
+    if (m := DIPLOMACY.search(head)) and not outcome and (ev.states or LEADERS.search(head) or ev.kin() == "conflict"):
+        return score - 30, "", f"diplomacy talk ({m.group(0)}): remarks, meetings or offers, with no signed outcome or consequence"
+    angles: list[tuple[int, str]] = []
+    if (asset := _big_move(head, ev.pct)) and not EVERGREEN.search(head) and not FORECAST.search(head):
+        angles.append((15, f"a {ev.pct:g}% move in {asset}"))
+    elif m := MARKET_ANGLE.search(head):
+        angles.append((15, f"a market shock ({m.group(0)})"))
+    if ev.money >= 1e9 and AFTERMATH.search(head):  # "after $6.3B heist": the scale of the case, not new money
+        angles.append((10, f"the ${ev.money / 1e9:g}B {AFTERMATH.search(head).group(0).split()[-1]} case"))  # type: ignore[union-attr]
+    elif ev.money >= 10e9:
+        angles.append((20, f"${ev.money / 1e9:g}B at stake"))
+    elif ev.money >= 1e9:
+        angles.append((15, f"${ev.money / 1e9:g}B at stake"))
+    elif ev.money >= 100e6:
+        angles.append((10, f"${ev.money / 1e6:,.0f}M at stake"))
+    elif (mm := money_of(head)) >= 1e9:  # an aftermath's figure ("after $6.3B heist"): the scale of the story, not new money
+        angles.append((10, f"the ${mm / 1e9:g}B case"))
+    if ev.deaths >= 10:
+        angles.append((15, f"{ev.deaths} killed"))
+    if ev.kin() == "conflict" and len(ev.states) >= 2 and HARD_CONFLICT.search(main) and not INTERCEPTED.search(main):
+        angles.append((15, f"a major attack: {', '.join(STATE_NAMES.get(x, x.title()) for x in sorted(ev.states))}"))
+    if WAR_MAJOR.search(head) or CHOKE_CLOSED.search(head) or INFRA_HIT.search(head):
+        angles.append((15, f"escalation: {(WAR_MAJOR.search(head) or CHOKE_CLOSED.search(head) or INFRA_HIT.search(head)).group(0)}"))  # type: ignore[union-attr]
+    if m := SCANDAL.search(head):
+        angles.append((10, f"a scandal or crime: {m.group(0)}"))
+    if "disruption, happening now" in (a.why or "") and re.search(OUTAGE.pattern + r"|\bground stop\b|\bgrounded\b|\bflights? (?:cancel|halt)\w*",
+                                                                     main_clause_soft(head), re.I):  # the outage itself, not its paperwork  # Apple Pay, iCloud and the App Store down at once: readers feel it now
+        angles.append((15, a.why))
+    if ev.family == "disaster" and a.strength in ("major", "strong"):  # a magnitude 7+ quake, a deadly crash
+        angles.append((15, f"a major disaster: {a.why}"))
+    if (m := GIANT.search(" ".join(main_clause_soft(head).split()[:5]))) and str(a.why).endswith("on crypto rails"):
+        angles.append((10, f"a market giant moves onto crypto rails: {m.group(0)}"))  # the NYSE settling on a blockchain, not a payments add-on
+    if (m := CORP_HARD.search(head) or HARD_OUTCOME.search(head)) and not HEDGE.search(head):  # a collapse, an arrest, a resignation, halted withdrawals
+        angles.append((10, f"a hard outcome: {m.group(0)}"))
+    if m := (SURPRISE.search(head) or RELATIVE.search(head)):
+        angles.append((10, f"a surprise: {m.group(0)}"))
+    if PEACE_DONE.search(head) or SANCTION_ACT.search(head) or RATE_ACT.search(head):
+        angles.append((10, "a decision that moves markets"))
+    # the exceptional path's three kinds (exceptional()): a system people depend on failing now and critical infrastructure under attack
+    # always matter to this audience; an institution's decisive act only when it lands on their markets, is a crime or case, or is hostile
+    why = a.why or ""
+    if why.endswith("outage, happening now"):
+        angles.append((15, why.removeprefix("exceptional: ")))
+    elif why.startswith("exceptional: cyberattack"):
+        angles.append((15, why.removeprefix("exceptional: ")))
+    elif why.endswith("(a decisive act by an institution)") and (BEAT.search(head) or SCANDAL.search(head) or HOSTILE.search(head)):
+        angles.append((10, f"a decisive act: {why.removeprefix('exceptional: ').removesuffix(' (a decisive act by an institution)')}"))
+    if not angles:  # being on the beat is not a reason on its own: a routine stablecoin partnership is still routine
+        return score, "", (f"{a.why or 'on the beat'}, but routine: no crash or pump, no billions, no major attack, casualties, scandal, surprise "
+                           f"or market-moving decision for a crypto, markets or world-news reader")
+    angles.sort(key=lambda x: -x[0])
+    if m := BEAT.search(head):
+        angles.append((10, f"on our readers' markets: {m.group(0)}"))
+    score = min(100, score + sum(p for p, _ in angles))
+    pitch = "; ".join(w for _, w in [*angles[:2], *angles[-1:]] if w) if len(angles) > 2 else "; ".join(w for _, w in angles)
+    if score < INTEREST_BAR:
+        return score, pitch, (f"audience interest {score} < {INTEREST_BAR}: {a.why}, but nothing that makes a crypto, markets or world-news reader care "
+                              f"(no crash or pump, no billions, no major attack, casualties, scandal or surprise)")
+    return score, pitch, ""
+
+
+def audience_gate(a: Assessment, title: str, summary: str = "") -> Assessment:
+    """Every path that says yes (consequence, development, exceptional) ends here. A refusal is strength "none": nothing downstream (the
+    fast lane, the breaking bypass, the last check before a send) treats it as a consequence."""
+    score, pitch, why_not = audience(title, summary, a)
+    if why_not:
+        return Assessment(False, "none", a.why, f"why would our audience care? {why_not}", a.stop_scroll, a.parts, a.event, score, pitch)
+    extra = a.why and not a.why.startswith("exceptional:") and a.why not in pitch and "a state strikes another" not in a.why
+    return Assessment(True, a.strength, a.why, "", a.stop_scroll, a.parts, a.event, score, f"{pitch} ({a.why})" if extra else pitch)

@@ -167,13 +167,128 @@ LIBRARY: tuple[Subject, ...] = (
         "File:High Voltage - panoramio.jpg",
         "File:Power Sunset (48755830892).jpg",
     )),
+    Subject("binance", "Binance", r"\bbinance\b", (
+        "File:2022 - Press Conferences BE6 1591 (52472274614).jpg",
+        "File:2022 - Q&A PO1 4700 (52471974491).jpg",
+        "File:2022 - Press Conferences BE6 1583 (52472585725).jpg",
+    )),
     Subject("stocks", "Wall Street", r"\b(s&p 500|dow jones|wall street|nyse|new york stock exchange|u\.s\. stocks|us stocks)\b", (
         "File:Sign of the New York Stock Exchange, Broad Street.jpg",
         "File:New York Stock Exchange Facade.JPG",
         "File:NEW YORK STOCK EXCHANGE 20240521.jpg",
     )),
 )
-BY_KEY = {s.key: s for s in LIBRARY}
+# -------------------------------------------------------------------------------------------------- people (owner, 2026-11-19)
+# "Trump/Xi/Zelensky story -> relevant real photograph of the people or event." Leaders and the market's most-named people, each file looked
+# at before it went in (official White House photos are public domain; Kremlin, Web Summit and Commons photographers' files are CC BY/BY-SA/
+# CC0, re-verified live). A pair is used when the story names both; otherwise the person named first. CAPTIONS says who is pictured, where
+# and when, drawn with the credit: an archive photo never passes for today's meeting. Never in a story of violence (clean.picture).
+CAPTIONS: dict[str, str] = {
+    "File:Donald Trump visit to China, May 2026 P20260514DT-1182.jpg": "Xi Jinping and Donald Trump in Beijing, May 2026",
+    "File:President Donald Trump greets Chinese President Xi Jinping before a bilateral meeting at the Gimhae International Airport terminal (54890669438).jpg": "Donald Trump and Xi Jinping in Busan, October 2025",
+    "File:Donald Trump visit to China, May 2026T-0783.jpg": "Xi Jinping and Donald Trump in Beijing, May 2026",
+    "File:P20260924DT-2338 (55563017265).jpg": "Xi Jinping and Donald Trump at the White House, September 2026",
+    "File:P20250815DT-1255 President Donald Trump meets with Russian President Vladimir Putin at Joint Base Elmendorf Richardson in Anchorage, Alaska.jpg": "Donald Trump and Vladimir Putin in Alaska, August 2025",
+    "File:President Donald Trump participates in a bilateral meeting with Ukrainian president Volodymyr Zelenskyy P20250625DT-0772.jpg": "Volodymyr Zelensky and Donald Trump in The Hague, June 2025",
+    "File:Donald Trump hosts a meeting with Ukrainian President Volodymyr Zelenskyy in the Cabinet Room of the White House on October 17, 2025 - 1.jpg": "Donald Trump and Volodymyr Zelensky at the White House, October 2025",
+    "File:President Donald Trump walks with Israeli Prime Minister Benjamin Netanyahu at the Knesset in Jerusalem (54855555063).jpg": "Donald Trump and Benjamin Netanyahu at the Knesset, October 2025",
+    "File:President Donald Trump is greeted by Israeli Prime Minister Benjamin Netanyahu and others after disembarking Air Force One at Ben Gurion International Airport (54855297376).jpg": "Donald Trump and Benjamin Netanyahu in Israel, October 2025",
+    "File:Xi Jinping and Vladimir Putin at the parade marking the 80th anniversary of the Great Victory at Great Patriotic War (2025).jpg": "Xi Jinping and Vladimir Putin in Moscow, May 2025",
+    "File:P20251106AM-0645 President Donald Trump makes an announcement on lowering drug prices in the Oval Office.jpg": "Donald Trump at the White House, November 2025",
+    "File:President Donald Trump participates in a bilateral meeting with Chinese President Xi Jinping at the Gimhae International Airport terminal (54890669548).jpg": "Donald Trump in Busan, October 2025",
+    "File:President Donald Trump participates in a bilateral meeting with Chinese President Xi Jinping at the Gimhae International Airport terminal (54890689459).jpg": "Xi Jinping in Busan, October 2025",
+    "File:13.05.2025 - Sessão de abertura do IV Fórum CELAC-China (54516194129).jpg": "Xi Jinping in Beijing, May 2025",
+    "File:Vladimir Putin in Murmansk (2025-03-27) 2.jpg": "Vladimir Putin in Murmansk, March 2025",
+    "File:Владимир Путин - 03 (08-09-2025).jpg": "Vladimir Putin, September 2025",
+    "File:Vladimir Putin at award ceremonies (2025-05-22) 07.jpg": "Vladimir Putin, May 2025",
+    "File:President Donald Trump participates in a bilateral meeting with President Volodymyr Zelenskyy of Ukraine (54732036979).jpg": "Volodymyr Zelensky at the White House, August 2025",
+    "File:11.09 總統出席「第一屆李國鼎獎頒獎典禮」 - 53319959776.jpg": "Nvidia CEO Jensen Huang in Taipei, November 2023",
+    "File:Jensen huang stanford 2026-04-30 037.jpg": "Nvidia CEO Jensen Huang at Stanford, April 2026",
+    "File:Elon Musk (54817688006).jpg": "Elon Musk, September 2025",
+    "File:Elon Musk - 54819827616.jpg": "Elon Musk, September 2025",
+    "File:2022 - Press Conferences BE6 1591 (52472274614).jpg": "Binance founder Changpeng Zhao at Web Summit, November 2022",
+    "File:2022 - Q&A PO1 4700 (52471974491).jpg": "Binance founder Changpeng Zhao at Web Summit, November 2022",
+    "File:2022 - Press Conferences BE6 1583 (52472585725).jpg": "Binance founder Changpeng Zhao at Web Summit, November 2022"
+}
+
+PAIRS: tuple[tuple[Subject, str, str], ...] = (  # (subject, first name pattern, second name pattern)
+    (Subject("trump_xi", "Donald Trump and Xi Jinping", r"\btrump(?:'s|’s)?\b", (
+        "File:Donald Trump visit to China, May 2026 P20260514DT-1182.jpg",
+        "File:President Donald Trump greets Chinese President Xi Jinping before a bilateral meeting at the Gimhae International Airport terminal (54890669438).jpg",
+        "File:Donald Trump visit to China, May 2026T-0783.jpg",
+        "File:P20260924DT-2338 (55563017265).jpg",
+    )), r"\btrump(?:'s|’s)?\b", r"(?-i:\bXi(?: Jinping)?\b)"),
+    (Subject("trump_putin", "Donald Trump and Vladimir Putin", r"\btrump(?:'s|’s)?\b", (
+        "File:P20250815DT-1255 President Donald Trump meets with Russian President Vladimir Putin at Joint Base Elmendorf Richardson in Anchorage, Alaska.jpg",
+    )), r"\btrump(?:'s|’s)?\b", r"\bputin(?:'s|’s)?\b"),
+    (Subject("trump_zelensky", "Donald Trump and Volodymyr Zelensky", r"\btrump(?:'s|’s)?\b", (
+        "File:President Donald Trump participates in a bilateral meeting with Ukrainian president Volodymyr Zelenskyy P20250625DT-0772.jpg",
+        "File:Donald Trump hosts a meeting with Ukrainian President Volodymyr Zelenskyy in the Cabinet Room of the White House on October 17, 2025 - 1.jpg",
+    )), r"\btrump(?:'s|’s)?\b", r"\bzelensk\w*\b"),
+    (Subject("trump_netanyahu", "Donald Trump and Benjamin Netanyahu", r"\btrump(?:'s|’s)?\b", (
+        "File:President Donald Trump walks with Israeli Prime Minister Benjamin Netanyahu at the Knesset in Jerusalem (54855555063).jpg",
+        "File:President Donald Trump is greeted by Israeli Prime Minister Benjamin Netanyahu and others after disembarking Air Force One at Ben Gurion International Airport (54855297376).jpg",
+    )), r"\btrump(?:'s|’s)?\b", r"\bnetanyahu(?:'s|’s)?\b"),
+    (Subject("xi_putin", "Xi Jinping and Vladimir Putin", r"(?-i:\bXi(?: Jinping)?\b)", (
+        "File:Xi Jinping and Vladimir Putin at the parade marking the 80th anniversary of the Great Victory at Great Patriotic War (2025).jpg",
+    )), r"(?-i:\bXi(?: Jinping)?\b)", r"\bputin(?:'s|’s)?\b"),
+)
+PEOPLE: tuple[Subject, ...] = (
+    Subject("trump", "Donald Trump", r"\btrump(?:'s|’s)?\b", (
+        "File:P20251106AM-0645 President Donald Trump makes an announcement on lowering drug prices in the Oval Office.jpg",
+        "File:President Donald Trump participates in a bilateral meeting with Chinese President Xi Jinping at the Gimhae International Airport terminal (54890669548).jpg",
+    )),
+    Subject("xi", "Xi Jinping", r"(?-i:\bXi(?: Jinping)?\b)", (
+        "File:President Donald Trump participates in a bilateral meeting with Chinese President Xi Jinping at the Gimhae International Airport terminal (54890689459).jpg",
+        "File:13.05.2025 - Sessão de abertura do IV Fórum CELAC-China (54516194129).jpg",
+    )),
+    Subject("putin", "Vladimir Putin", r"\bputin(?:'s|’s)?\b", (
+        "File:Vladimir Putin in Murmansk (2025-03-27) 2.jpg",
+        "File:Владимир Путин - 03 (08-09-2025).jpg",
+        "File:Vladimir Putin at award ceremonies (2025-05-22) 07.jpg",
+    )),
+    Subject("zelensky", "Volodymyr Zelensky", r"\bzelensk\w*\b", (
+        "File:President Donald Trump participates in a bilateral meeting with President Volodymyr Zelenskyy of Ukraine (54732036979).jpg",
+    )),
+    Subject("jensen_huang", "Jensen Huang", r"\bjensen huang\b|(?-i:\bHuang\b)", (
+        "File:11.09 總統出席「第一屆李國鼎獎頒獎典禮」 - 53319959776.jpg",
+        "File:Jensen huang stanford 2026-04-30 037.jpg",
+    )),
+    Subject("musk", "Elon Musk", r"\belon musk\b|(?-i:\bMusk(?:'s|’s)?\b)(?! deer| ox| oxen| melon)", (
+        "File:Elon Musk (54817688006).jpg",
+        "File:Elon Musk - 54819827616.jpg",
+    )),
+    Subject("cz", "Changpeng Zhao", r"\bchangpeng zhao\b|\bzhao changpeng\b|(?-i:\bCZ\b)", (
+        "File:2022 - Press Conferences BE6 1591 (52472274614).jpg",
+        "File:2022 - Q&A PO1 4700 (52471974491).jpg",
+        "File:2022 - Press Conferences BE6 1583 (52472585725).jpg",
+    )),
+)
+
+
+def people_of(text: str) -> tuple[Subject, int] | None:
+    """(the people photograph a headline calls for, where in it they are first named), or None. A pair when both are named (the pair named
+    earliest when there are several: "Trump tells Xi before trilateral with Putin" is Trump and Xi), else the person named first."""
+    t = text or ""
+    pairs = []
+    for s, a, b in PAIRS:
+        ma, mb = re.search(a, t, re.I), re.search(b, t, re.I)
+        if ma and mb:
+            pairs.append((max(ma.start(), mb.start()), min(ma.start(), mb.start()), s))
+    if pairs:
+        _, first, s = min(pairs, key=lambda p: p[0])
+        return s, first
+    # "Huang" alone is Jensen Huang only beside Jensen or Nvidia (PDD's Colin Huang is not)
+    solo = [(m.start(), s) for s in PEOPLE if (m := s.rx().search(t)) and (s.key != "jensen_huang" or re.search(r"jensen|nvidia", t, re.I))]
+    if solo:
+        at, s = min(solo, key=lambda h: h[0])
+        return s, at
+    return None
+
+
+
+
+BY_KEY = {s.key: s for s in (*LIBRARY, *PEOPLE, *(p[0] for p in PAIRS))}
 # a data post's or market move's symbol -> its subject
 SYMBOLS = {"GC=F": "gold", "XAU": "gold", "GOLD": "gold", "PAXG": "gold", "SI=F": "silver", "SILVER": "silver", "BTC-USD": "bitcoin", "BTC": "bitcoin",
            "ETH-USD": "ether", "ETH": "ether", "CL=F": "oil", "BZ=F": "oil", "CL": "oil", "OIL": "oil", "^GSPC": "stocks", "^IXIC": "stocks",
@@ -244,6 +359,13 @@ async def _records(client: Any, subject: Subject) -> list[Any]:
     return out
 
 
+def _title_of(p: Any) -> str:
+    page = str(getattr(p, "page", "") or "")
+    from urllib.parse import unquote
+
+    return unquote(page.rsplit("/wiki/", 1)[-1]).replace("_", " ") if "/wiki/" in page else ""
+
+
 def rotation(records: list[Any], urls: list[str], seed: int = 0) -> list[str]:
     """The library's URLs, least recently used first (never used first of all, in the editor's order)."""
     last: dict[str, str] = {}
@@ -270,7 +392,8 @@ async def library_photo(subject: Subject, *, transport: Any = None, records: lis
                 if img is None or editor.pixel_problem(img, ui=False, sharp_min=LIBRARY_SHARP_MIN):  # an editor looked at it: only blur and fading can change
                     continue
                 meta = p.to_meta()
-                return img, {"url": p.url, "page": meta.get("page", ""), "title": meta.get("title", ""), "credit": p.credit,
+                who = CAPTIONS.get(str(meta.get("title") or ""), "") or CAPTIONS.get(_title_of(p), "")
+                return img, {"url": p.url, "page": meta.get("page", ""), "title": meta.get("title", ""), "credit": p.credit, "who": who,
                              "licence": meta.get("licence", "") or p.licence, "photo": meta, "person": "", "library": subject.key,
                              "editor": {"ok": True, "depiction": "strong", "role": "subject", "subject": subject.name,
                                         "why": f"the editor's {subject.name} photograph", "aesthetic": aesthetic(img)}}
@@ -288,4 +411,4 @@ def frame(img: Image.Image, platform: str) -> tuple[Image.Image, tuple[float, fl
     return photos.mild_tone(out), box
 
 
-__all__ = ["FRAMES", "LIBRARY", "Subject", "aesthetic", "frame", "library_photo", "rotation", "subject_for_symbol", "subject_of"]
+__all__ = ["CAPTIONS", "FRAMES", "LIBRARY", "PAIRS", "PEOPLE", "Subject", "people_of", "aesthetic", "frame", "library_photo", "rotation", "subject_for_symbol", "subject_of"]

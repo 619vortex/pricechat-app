@@ -369,8 +369,12 @@ def test_one_release_and_one_outage_are_one_event() -> None:
 
 
 def test_the_bahrain_interception_is_a_state_striking_a_state() -> None:
-    """The first gate rejected it: the side clause "as Tehran says it attacked..." read as a routine statement."""
-    assert newsworthy.assess("Bahrain intercepts Iranian aerial attacks as Tehran says it attacked US targets").ok
+    """The first gate rejected it: the side clause "as Tehran says it attacked..." read as a routine statement. It is still a state striking
+    a state (the consequence); but owner, 2026-11-19: an interception with nothing hit is a routine military update for this audience
+    (tests/test_editorial_audience_20261119.py). The strike itself, as the other outlets told it, is what goes out."""
+    a = newsworthy.assess("Bahrain intercepts Iranian aerial attacks as Tehran says it attacked US targets")
+    assert not a.ok and "a state strikes another" in a.why and "routine military update" in a.reason
+    assert newsworthy.qualify("Iran targets US military radar in Bahrain in ‘retaliatory’ drone strike", "", outlets=3).ok
 
 
 def test_an_exceptional_story_never_gets_a_breaking_label_or_the_fast_lane(db: Session) -> None:
