@@ -234,6 +234,23 @@ def depiction(title: str, tags: Any, description: str, subject: str, b: Brief, *
 
 
 # --------------------------------------------------------------------------------------------------- 3. the vision check
+def vision_config(settings: Any = None) -> tuple[str, str, str]:
+    """(key, model, why-not) for the image check: its own switch, its own key, its own model. Never the writers' anthropic_api_key."""
+    from app.security import credentials
+
+    if settings is None:
+        from app.config.settings import get_settings
+
+        settings = get_settings()
+    if not getattr(settings, "newsdesk_vision_enabled", False):
+        return "", "", "the image check is off (NEWSDESK_VISION_ENABLED is not set): no paid call without the owner's approval"
+    key = credentials.resolve("newsdesk_vision_api_key", settings) or ""
+    model = str(getattr(settings, "newsdesk_vision_model", "") or "")
+    if not key or not model:
+        return "", "", "the image check is on but has no newsdesk_vision_api_key or model"
+    return key, model, ""
+
+
 VISION_PROMPT = """You are the photo editor of a financial breaking-news channel. A post will carry the attached image.
 
 Story: {story}
@@ -254,19 +271,13 @@ async def vision(img: Image.Image, story: str, expect: str, *, settings: Any = N
     import httpx
 
     from app.newsdesk.writer import ANTHROPIC_URL
-    from app.security import credentials
 
     try:
-        if settings is None:
-            from app.config.settings import get_settings
-
-            settings = get_settings()
-        key = credentials.resolve("anthropic_api_key", settings)
-        model = getattr(settings, "newsdesk_model", "")
+        key, model, _ = vision_config(settings)
     except Exception as e:  # noqa: BLE001
         logger.info("visual editor: no vision (%s)", type(e).__name__)
         return None
-    if not key or not model:
+    if not key:
         return None
     small = img.convert("RGB").copy()
     small.thumbnail((1024, 1024))
@@ -434,15 +445,15 @@ async def self_test(settings: Any = None, transport: Any = None) -> dict[str, An
     import httpx
 
     from app.newsdesk import photography, photos
-    from app.security import credentials
 
     try:
         if settings is None:
             from app.config.settings import get_settings
 
             settings = get_settings()
-        if not credentials.resolve("anthropic_api_key", settings) or not getattr(settings, "newsdesk_model", ""):
-            out = {"state": "unavailable", "why": "no Anthropic key or model set: library photos or text only"}
+        key, _, why_not = vision_config(settings)
+        if not key:  # off or unconfigured: no paid call at all, not even the self-test
+            out = {"state": "unavailable", "why": f"{why_not}: library photos or text only"}
         else:
             gold = await photography.library_photo(photography.BY_KEY["gold"], transport=transport)
             if gold is None:

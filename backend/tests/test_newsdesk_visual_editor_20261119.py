@@ -320,10 +320,11 @@ async def test_the_vision_check_sends_the_pixels_and_reads_the_verdict(monkeypat
         verdict = {"shows_subject": False, "recognisable": False, "generic": True, "misleading": False, "text_heavy": False, "what": "a treehouse in a forest"}
         return httpx.Response(200, json={"content": [{"type": "text", "text": json.dumps(verdict)}]})
 
-    monkeypatch.setattr(credentials, "resolve", lambda name, settings=None: "test-key")
+    monkeypatch.setattr(credentials, "resolve", lambda name, settings=None: "test-key" if name == "newsdesk_vision_api_key" else None)
 
     class S:
-        newsdesk_model = "claude-haiku-5-5"
+        newsdesk_vision_enabled = True
+        newsdesk_vision_model = "claude-haiku-5-5"
 
     v = await editor.vision(photo_like(), "Microsoft had rallied back to record highs", "Microsoft: its branding", settings=S(),
                             transport=httpx.MockTransport(handler))
@@ -334,7 +335,8 @@ async def test_the_vision_check_sends_the_pixels_and_reads_the_verdict(monkeypat
 
 async def test_no_key_means_no_vision_call_and_the_rules_stand() -> None:
     class S:
-        newsdesk_model = "claude-haiku-5-5"
+        newsdesk_vision_enabled = True
+        newsdesk_vision_model = "claude-haiku-5-5"
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("no key: the model is never called")

@@ -290,6 +290,13 @@ class Settings(BaseSettings):
     x_write_cost_estimate_usd: float = Field(0.015, ge=0)  # X's price for a post with no link; one with a link is $0.20
     # The News Desk (app/newsdesk). The model only rewrites headlines, and only with an Anthropic key; without one, posts are the attributed headline.
     newsdesk_model: str = "claude-haiku-5-5"
+    # The Visual Editor's image check (app/newsdesk/editor.vision), owner 2026-11-19: entirely separate from the caption writers above.
+    # Off unless the owner turns it on (NEWSDESK_VISION_ENABLED=true): no paid call without approval. It reads ONLY its own key
+    # (newsdesk_vision_api_key, env or Admin › Settings › API keys), never anthropic_api_key, so enabling it never changes how
+    # captions are written, and adding a writer key never turns the image check on.
+    newsdesk_vision_enabled: bool = False
+    newsdesk_vision_api_key: SecretStr | None = None
+    newsdesk_vision_model: str = "claude-haiku-5-5"
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

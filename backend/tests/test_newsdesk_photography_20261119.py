@@ -225,7 +225,9 @@ async def test_the_production_self_test_reports_whether_vision_works(library: li
     out = await editor.self_test()  # the test settings: no Anthropic key
     assert out["state"] == "unavailable" and editor.VISION_STATUS["state"] == "unavailable"  # no key: said plainly, library or text only
 
-    monkeypatch.setattr(credentials, "resolve", lambda name, settings=None: "k")
+    monkeypatch.setattr(credentials, "resolve", lambda name, settings=None: "k" if name == "newsdesk_vision_api_key" else None)
+    S.newsdesk_vision_enabled = True
+    S.newsdesk_vision_model = "claude-haiku-5-5"
 
     async def vision(img: Any, story: str, expect: str, **kw: Any) -> dict[str, Any]:
         gold = expect.startswith("gold")
