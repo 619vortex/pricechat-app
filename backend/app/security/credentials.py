@@ -36,6 +36,7 @@ KNOWN_SECRETS: dict[str, str] = {
     "anthropic_api_key": "anthropic_api_key",
     # News Desk image relevance check only (app/newsdesk/editor.vision); never used by any writer
     "newsdesk_vision_api_key": "newsdesk_vision_api_key",
+    "newsdesk_chief_api_key": "newsdesk_chief_api_key",
     # Kiwi AI Investment Committee: the OpenAI backend (app/committee/llm.py). A ChatGPT subscription is not an API key.
     "openai_api_key": "openai_api_key",
     "x_member_client_secret": "x_member_client_secret",

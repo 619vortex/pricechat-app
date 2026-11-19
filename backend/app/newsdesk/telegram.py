@@ -517,7 +517,12 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
             from app.newsdesk import validation  # observes only: the post is already out
 
             validation.record_image(db, "telegram", str(post.message_id), ev, message.get("card"), (ev.facts or {}).get("visual") or {}, post.url or "")
+            from app.newsdesk import memory  # the story's memory across every lane
+
+            memory.remember(db, "telegram", str(post.message_id), ev.title or ev.headline or "", ev.summary or "", now)
             db.commit()
+            await validation.second_look(db, "telegram", str(post.message_id), message.get("card"), ev.headline or ev.title or "",
+                                         (ev.facts or {}).get("visual") or {}, settings=settings)  # optional; vision is off: nothing runs
             await validation.tick(db, now, settings=settings)
             return done(sent=post.message_id, event=ev.id)
         row = db.scalar(select(NdTelegramPost).where(NdTelegramPost.story_link == f"event:{ev.id}"))

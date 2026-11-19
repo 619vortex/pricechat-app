@@ -34,6 +34,8 @@ POKEMON_KEYS: dict[str, tuple[str, str, str]] = {
                           "Pokémon Portfolio's ✨ Estimate Condition (vision model, daily limits). Server-side only."),
     "newsdesk_vision_api_key": ("News Desk image check (Anthropic vision)", "API key", "console.anthropic.com › API keys. Used ONLY to check that a "
                                 "news photo shows the story's subject; captions never use it. Also needs NEWSDESK_VISION_ENABLED=true. Server-side only."),
+    "newsdesk_chief_api_key": ("News Desk AI editor (Anthropic)", "API key", "console.anthropic.com › API keys. Used ONLY by the AI "
+                               "Editor-in-Chief's shadow review of shortlisted stories. Also needs NEWSDESK_CHIEF_ENABLED=true and has its own daily cap. Server-side only."),
     "resend_api_key": ("Email sign-in (Resend)", "API key", "resend.com › API Keys › Create (Full access, so Price Chat can add and verify the "
                        "pricechat.live domain). Sends the 6-digit sign-in codes. Server-side only."),
     "tiktok_client_key": ("TikTok (Brand Manager)", "Client key", "developers.tiktok.com › your app › App details. Login Kit + Content Posting API. "

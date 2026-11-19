@@ -729,6 +729,13 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
 
         validation.record_image(db, "x", x_id, ev_row, picture, (ev_row.facts or {}).get("visual") or {}, f"https://x.com/i/status/{x_id}")
         db.commit()
+        await validation.second_look(db, "x", x_id, picture, ev_row.headline or ev_row.title or "", (ev_row.facts or {}).get("visual") or {},
+                                     settings=settings)  # optional; vision is off: nothing runs
+    from app.newsdesk import memory  # the story's memory across every lane
+
+    memory.remember(db, "x-newsdesk", x_id, (ev_row.title or ev_row.headline) if ev_row is not None else (post.text or "").split("\n")[0],
+                    (ev_row.summary or "") if ev_row is not None else "", now)
+    db.commit()
     return "published"
 
 
@@ -781,6 +788,9 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
     from app.newsdesk import validation
 
     await validation.tick(db, now, settings=settings)  # flags to the owner at once; the report at 30 candidates
+    from app.newsdesk import chief
+
+    await chief.tick(db, now, settings=settings)  # the AI editor's shadow review: does nothing unless the owner switched it on
     result = None
     if why is None:
         result = await deliver_x(db, s, settings, runtime, agent_id, now)

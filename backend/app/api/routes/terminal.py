@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import Field
+from sqlalchemy import select
 
 from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
@@ -15,12 +16,56 @@ from app.terminal import feed
 router = APIRouter(prefix="/terminal", tags=["terminal"])
 
 
-@router.get("/validation")
-def validation_progress(db: DbSession) -> dict[str, Any]:
-    """The validation round (owner, 2026-11-19): candidates judged, pictures audited, flags and the 30-candidate report."""
-    from app.newsdesk import validation
+def _part(fn: Any) -> Any:
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 - one part failing never blanks the page
+        return {"error": type(e).__name__}
 
-    return validation.progress(db)
+
+@router.get("/validation")
+def validation_progress(db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """Settings › Validation (owner, 2026-11-19): the 30-candidate validation round (candidates judged, pictures audited, flags, the report),
+    the AI editor's shadow comparison and cost estimate, the owner's feedback, story memory and leads, and how posts performed."""
+    from app.newsdesk import chief, feedback, memory, performance, validation
+
+    return {**validation.progress(db), "chief": _part(lambda: chief.evaluation(db, settings=runtime.settings)), "feedback": _part(lambda: feedback.summary(db)),
+            "memory": _part(lambda: memory.summary(db)), "performance": _part(lambda: performance.measure(db))}
+
+
+class FeedbackInput(StrictInput):
+    target: str = Field(..., pattern=r"^(event|topic):\d{1,10}$")
+    verdict: Literal["great", "boring", "wrong_image", "missed"]
+    note: str = Field("", max_length=500)
+
+
+@router.post("/feedback")
+def give_feedback(payload: FeedbackInput, db: DbSession) -> dict[str, Any]:
+    """One click: Great / Boring / Wrong image / Missed story, stored against the event or topic with what was decided and published."""
+    from app.newsdesk import feedback
+
+    try:
+        return feedback.give(db, payload.target, payload.verdict, payload.note)
+    except feedback.FeedbackError as e:
+        raise HTTPException(409, str(e)) from None
+
+
+@router.get("/insight")
+def insight(db: DbSession, target: str = Query(..., pattern=r"^(event|topic):\d{1,10}$")) -> dict[str, Any]:
+    """The story panel's extras: the owner's feedback, the story so far across every lane, its X performance, the AI editor's verdict."""
+    from app.models.newsdesk import NdValidation
+    from app.newsdesk import feedback, memory, performance
+
+    try:
+        snap = feedback.snapshot(db, target)
+    except feedback.FeedbackError as e:
+        raise HTTPException(404, str(e)) from None
+    ch = db.scalar(select(NdValidation).where(NdValidation.kind == "chief", NdValidation.ref == target)) if target.startswith("event:") else None
+    cd = ch.data if ch is not None else {}
+    return {"feedback": feedback.current(db, target)["verdicts"], "published": bool(snap.get("published")),
+            "picture": bool((snap.get("picture") or {}).get("kind")), "memory": memory.story_of(db, str(snap.get("title") or "")),
+            "performance": _part(lambda: performance.of_target(db, target)),
+            "chief": {k: cd.get(k) for k in ("status", "verdict", "why_care", "best_angle", "problems")} if ch is not None else None}
 
 
 @router.get("")

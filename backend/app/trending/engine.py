@@ -669,6 +669,9 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
     record_latency(s, post, topic, now)
     guard.record_attempt(req, None, None, "executed", reason="trending topics", external_id=x_id)
     _note(s, "x_last_ok", {"at": now.isoformat(), "post_id": post.id, "x_id": x_id})
+    from app.newsdesk import memory  # the story's memory across every lane
+
+    memory.remember(db, "x-trending", str(post.id), (topic.title if topic is not None else "") or (post.text or "").split("\n")[0], "", now)
     db.commit()
     logger.info("trending published %s (post %s)", x_id, post.id)
     return "published"
@@ -1042,6 +1045,9 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
     async with httpx.AsyncClient(transport=transport or HTTP_TRANSPORT, timeout=20, follow_redirects=True) as client:
         read = await read_sources(db, s, settings, runtime, now, client, only)
     topics = build_topics(db, s, now)
+    from app.newsdesk import memory  # X Intelligence's early leads and their confirmation (no extra request: the scan's own sources)
+
+    memory.watch_leads(db, topics, now)
     try:
         from app.terminal import xintel
 

@@ -192,3 +192,40 @@ class NdValidation(IdMixin, TimestampMixin, Base):
     flag: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     alerted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class NdFeedback(IdMixin, TimestampMixin, Base):
+    """The owner's one-click verdict on a story (owner, 2026-11-19): great | boring | wrong_image | missed, against the actual event or topic
+    and a snapshot of what the desk decided and published when it was given, so it stays true after the story moves on. One row per target
+    and verdict: a second click removes it."""
+
+    __tablename__ = "nd_feedback"
+    __table_args__ = (UniqueConstraint("target", "verdict", name="uq_nd_feedback_target_verdict"), Index("ix_nd_feedback_created", "created_at"))
+
+    target: Mapped[str] = mapped_column(String(40), nullable=False)  # event:<NdEvent id> | topic:<TtTopic id>
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class NdStoryline(IdMixin, TimestampMixin, Base):
+    """Persistent story memory (owner, 2026-11-19): one real-world story across Telegram, X (News Desk and Trending), released events and X
+    Intelligence leads, with the largest facts already told (deaths, sums, moves, hard outcomes) so a follow-up can be judged on what is
+    actually new. It outlives the 7-day posting history the repeat gate reads."""
+
+    __tablename__ = "nd_storylines"
+    __table_args__ = (Index("ix_nd_storylines_last", "last_at"),)
+
+    title: Mapped[str] = mapped_column(String(300), nullable=False)  # the first headline told (or seen, for a lead)
+    family: Mapped[str] = mapped_column(String(24), default="news", nullable=False)
+    anchors: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    regions: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    states: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)
+    told: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)  # {deaths, money, pct, outcomes, titles}
+    sightings: Mapped[list[Any]] = mapped_column(JSON, default=list, nullable=False)  # [{lane, ref, at, title, status}] newest last
+    first_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    last_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    told_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # first time we published it
+    lead_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # first X Intelligence lead (unverified)
+    lead_by: Mapped[str] = mapped_column(String(80), default="", server_default="", nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # first reliable outlet or official source after the lead

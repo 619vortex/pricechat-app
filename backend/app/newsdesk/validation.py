@@ -65,13 +65,45 @@ def record_candidate(db: Session, ev: Any, shadow: dict[str, Any]) -> None:
         ref = str(ev.id)
         if ev.id is None or _row(db, "candidate", ref) is not None:
             return
-        data = {**shadow, "id": ev.id, "kind": getattr(ev, "kind", ""), "virality": int(getattr(ev, "virality", 0) or 0),
+        data = {**shadow, "id": ev.id, "kind": getattr(ev, "kind", ""), "virality": int(getattr(ev, "virality", 0) or 0), "photo": photo_subject(str(ev.title or "")),
                 "sources": [str(x.get("name") or "") for x in (getattr(ev, "sources", None) or []) if isinstance(x, dict)][:5],
                 "seen_at": utcnow().isoformat()}
+        flag = false_negative(data)
+        if not flag and (mem := shadow.get("memory")):
+            from app.newsdesk import memory
+
+            data["memory_note"] = memory.disagrees(mem, str(data.get("decision") or ""))  # shown, not alerted: memory is in shadow
         with db.begin_nested():
-            db.add(NdValidation(kind="candidate", ref=ref, flag=false_negative(data), data=data))
+            db.add(NdValidation(kind="candidate", ref=ref, flag=flag, data=data))
     except Exception as e:  # noqa: BLE001
         logger.info("validation: candidate #%s not recorded (%s)", getattr(ev, "id", "?"), type(e).__name__)
+
+
+def photo_subject(title: str) -> dict[str, Any]:
+    """Whether the photography library has the story's subject, and if not, the specific actors it names (the gap to fill)."""
+    try:
+        from app.newsdesk import newsworthy, photography
+
+        named = photography.people_of(title)
+        subject = photography.subject_of(title)
+        key = named[0].key if named else (subject.key if subject else "")
+        if key:
+            return {"library": key}
+        return {"library": "", "gap": sorted(a for a in newsworthy.event_of(title).anchors if not a.startswith(("$", "~")))[:4]}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def photo_gaps(db: Session, limit: int = 300) -> list[dict[str, Any]]:
+    """The subjects real candidates named most often that the library has no photo for (published ones count double)."""
+    n: Counter[str] = Counter()
+    pub: Counter[str] = Counter()
+    for r in db.scalars(select(NdValidation).where(NdValidation.kind == "candidate").order_by(NdValidation.id.desc()).limit(limit)):
+        d = r.data or {}
+        for a in (d.get("photo") or {}).get("gap") or []:
+            n[a] += 1
+            pub[a] += d.get("decision") == "PUBLISH"
+    return [{"subject": a, "candidates": c, "published": pub[a]} for a, c in sorted(n.items(), key=lambda kv: (-(kv[1] + pub[kv[0]]), kv[0]))[:10]]
 
 
 def record_gate(db: Session, ev: Any, ok: bool, interest: int, why: str) -> None:
@@ -157,6 +189,40 @@ def record_image(db: Session, platform: str, ref: str, ev: Any, image: bytes | N
         logger.info("validation: %s image %s not recorded (%s)", platform, ref, type(e).__name__)
 
 
+async def second_look(db: Session, platform: str, ref: str, image: bytes | None, headline: str, meta: dict[str, Any], *, settings: Any = None,
+                      transport: Any = None) -> dict[str, Any] | None:
+    """The optional INDEPENDENT vision check of a published picture (owner, 2026-11-19: "add an optional independent vision check, but keep
+    paid vision disabled until approved"). It uses the image check's own switch and key (NEWSDESK_VISION_ENABLED, newsdesk_vision_api_key):
+    with vision off, which it is, nothing is called and nothing changes. It looks at what was actually published, after the fact, so it
+    audits the picture editor rather than repeating it. Never raises."""
+    try:
+        from app.newsdesk import editor
+
+        key, _, _ = editor.vision_config(settings)
+        if not key or not image or (meta or {}).get("kind") != "photo":
+            return None
+        from PIL import Image
+
+        expect = str((meta or {}).get("who") or (meta or {}).get("library") or (meta or {}).get("title") or "the story's subject")
+        v = await editor.vision(Image.open(io.BytesIO(image)), headline, expect, settings=settings, transport=transport)
+        if v is None:
+            return None
+        bad = [k for k in ("misleading", "generic", "text_heavy", "watermark") if v.get(k)] + ([] if v.get("shows_subject") and v.get("recognisable") else ["subject not recognisable"])
+        row = _row(db, "image", f"{platform}:{ref}")
+        if row is not None:
+            data = dict(row.data or {})
+            data["vision"] = {**v, "problems": bad}
+            row.data = data
+            if bad:
+                row.flag = (row.flag + "; " if row.flag else "bad image: ") + "vision: " + ", ".join(bad)
+                row.alerted = False
+            db.commit()
+        return v
+    except Exception as e:  # noqa: BLE001
+        logger.info("validation: second look at %s %s failed (%s)", platform, ref, type(e).__name__)
+        return None
+
+
 # ------------------------------------------------------------------------------------------------------------------ the report
 def _first(db: Session, kind: str, n: int) -> list[NdValidation]:
     return list(db.scalars(select(NdValidation).where(NdValidation.kind == kind).order_by(NdValidation.id).limit(n)))
@@ -182,6 +248,8 @@ def build_report(db: Session, now: datetime | None = None) -> dict[str, Any]:
         "refusal_reasons": Counter(_reason_group(str(c.get("why") or "")) for c in refused).most_common(),
         "possible_false_negatives": [{"id": c.get("id"), "title": c.get("title"), "why_flagged": c.get("flag"), "gate_reason": c.get("why")} for c in fns],
         "extraordinary_shadow": {"would_add": len(would), "titles": [c.get("title") for c in would], "live": False},
+        "story_memory_shadow": {"published_with_nothing_new": [{"id": c.get("id"), "title": c.get("title"), "note": c.get("memory_note")}
+                                                               for c in cands if c.get("memory_note")], "enforced": False},
         "images": {"audited": len(imgs), "flagged": sum(1 for i in imgs if i.get("problems")), "rows": imgs},
         "rows": cands,
         "note": "Actual production decisions as the gate made them. Image checks are rule-based while AI vision is off; flags are for review.",
@@ -229,6 +297,15 @@ async def tick(db: Session, now: datetime | None = None, *, settings: Any = None
     return out
 
 
+def _vision_state() -> str:
+    try:
+        from app.newsdesk import editor
+
+        return "on" if editor.vision_config()[0] else "off"
+    except Exception:  # noqa: BLE001
+        return "off"
+
+
 def progress(db: Session, limit: int = 60) -> dict[str, Any]:
     """What Terminal Admin shows."""
     from app.newsdesk import newsworthy
@@ -242,7 +319,8 @@ def progress(db: Session, limit: int = 60) -> dict[str, Any]:
                        "published": sum(1 for r in first if (r.data or {}).get("decision") == "PUBLISH"),
                        "flagged": sum(1 for r in first if r.flag)},
         "images": {"count": _count(db, "image"), "target": TARGET_IMAGES, "flagged": sum(1 for r in imgs if r.flag)},
-        "extraordinary_live": newsworthy.EXTRAORDINARY_LIVE, "vision": "off",
+        "extraordinary_live": newsworthy.EXTRAORDINARY_LIVE, "vision": _vision_state(),
+        "photo_gaps": photo_gaps(db),
         "rows": [{**(r.data or {}), "flag": r.flag, "alerted": r.alerted} for r in cands],
         "image_rows": [{**(r.data or {}), "flag": r.flag, "alerted": r.alerted} for r in imgs],
         "report": report.data if report is not None else None,

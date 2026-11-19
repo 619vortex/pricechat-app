@@ -297,6 +297,14 @@ class Settings(BaseSettings):
     newsdesk_vision_enabled: bool = False
     newsdesk_vision_api_key: SecretStr | None = None
     newsdesk_vision_model: str = "claude-haiku-5-5"
+    # The AI Editor-in-Chief (app/newsdesk/chief), owner 2026-11-19: reviews shortlisted News Desk candidates in SHADOW (it never decides a
+    # post). Off unless the owner approves it (NEWSDESK_CHIEF_ENABLED=true): until then it only records what it would review and what that
+    # would cost. Its own key (newsdesk_chief_api_key), never the writers' or the image check's; a hard daily spend cap of its own.
+    newsdesk_chief_enabled: bool = False
+    newsdesk_chief_api_key: SecretStr | None = None
+    newsdesk_chief_model: str = "claude-opus-5-5"
+    newsdesk_chief_effort: str = "low"
+    newsdesk_chief_daily_usd: float = Field(1.0, ge=0, le=20)
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

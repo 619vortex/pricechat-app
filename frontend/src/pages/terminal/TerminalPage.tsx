@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "re
 import { request } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import type { Story } from "./classic";
+import { StoryInsight } from "./StoryInsight";
 import "./t2.css";
 
 /** PRICE CHAT TERMINAL 2.0 (owner, 2026-11-18): one page. A top bar with one automation switch and the emergency stop, three counters, the
@@ -234,7 +235,9 @@ function Counter({ label, value, tone, active, onClick, hint }: { label: string;
   );
 }
 
-function VerdictChip({ v }: { v: Verdict }) {
+function VerdictChip({ v, lead }: { v: Verdict; lead?: boolean }) {
+  // owner, 2026-11-19: an X-only report is an early LEAD, never a fact, until a reliable outlet or official source confirms it
+  if (v === "unverified" && lead) return <span className="t2-verdict v-unverified" title="Seen on X first. Not verified until a reliable outlet or official source reports it.">! Early lead · X</span>;
   return <span className={`t2-verdict v-${v}`}>{v === "verified" ? "✓ " : v === "unverified" ? "! " : ""}{VERDICT_TEXT[v]}</span>;
 }
 
@@ -288,7 +291,7 @@ function FeedCard({ i, n, onOpen }: { i: Item; n: number; onOpen: () => void }) 
       <button className="t2-card-btn" onClick={onOpen}>
         <span className="t2-card-top">
           <span className={`t2-lane lane-${i.lane}`}>{LANE_TEXT[i.lane] ?? i.lane}</span>
-          <VerdictChip v={i.verdict} />
+          <VerdictChip v={i.verdict} lead={i.x} />
           <span className="t2-meta">{i.category} · {ago(i.at)}</span>
           <span className="t2-grow" />
           <Importance level={i.level} />
@@ -390,7 +393,7 @@ function StoryPanel({ item, onClose, onChanged }: { item: Item; onClose: () => v
   return (
     <Panel label="Story" onClose={onClose}>
       <div className="t2-sheet-head">
-        <span className="t2-card-top"><span className={`t2-lane lane-${item.lane}`}>{LANE_TEXT[item.lane] ?? item.lane}</span><VerdictChip v={item.verdict} /><span className="t2-meta">{item.category} · {ago(item.at)}</span></span>
+        <span className="t2-card-top"><span className={`t2-lane lane-${item.lane}`}>{LANE_TEXT[item.lane] ?? item.lane}</span><VerdictChip v={item.verdict} lead={item.x} /><span className="t2-meta">{item.category} · {ago(item.at)}</span></span>
         <button className="t2-icon" aria-label="Close" onClick={onClose}>✕</button>
       </div>
       {item.story ? <StoryBody id={item.story.id} onChanged={onChanged} onClose={onClose} /> : item.desk ? <DeskBody d={item.desk} /> : null}
@@ -409,6 +412,7 @@ function DeskBody({ d }: { d: DeskRow }) {
         {d.why && <p className="t2-reason">{d.why}</p>}
         <p className="t2-meta">X: {sent[0]}{d.desk.x_note ? ` (${d.desk.x_note})` : ""} · Telegram: {sent[1]}{d.desk.tg_note ? ` (${d.desk.tg_note})` : ""}</p>
       </Section>
+      <StoryInsight target={`event:${d.id}`} />
       <Section title="Sources">
         <ul className="t2-sources">{d.sources.map((x, i) => <li key={i}>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">{x.name}</a> : x.name}</li>)}</ul>
       </Section>
@@ -483,6 +487,8 @@ function StoryBody({ id, onChanged, onClose }: { id: number; onChanged: () => vo
         </div>
         {note && <p className={note.ok ? "t2-okline" : "t2-problem"}>{note.text}</p>}
       </Section>
+
+      <StoryInsight target={`topic:${id}`} />
 
       <Section title="Timeline">
         <ol className="t2-timeline">{data.timeline.slice(-12).map((t, i) => (

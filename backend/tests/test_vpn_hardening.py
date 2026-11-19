@@ -381,7 +381,8 @@ def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) ->
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(alembic_config())
-    assert script.get_heads() == ["0117_nd_validation"]  # 0117: News Desk validation records (create-only)
+    assert script.get_heads() == ["0118_nd_editor"]  # 0118: story feedback + story memory (create-only)
+    assert script.get_revision("0118_nd_editor").down_revision == "0117_nd_validation"
     assert script.get_revision("0117_nd_validation").down_revision == "0116_vpn_trial_guards"
     assert script.get_revision("0114_trending_topics").down_revision == "0111_vpn_server_traffic_allowance"
     assert script.get_revision("0115_vpn_server_checks").down_revision == "0114_trending_topics"
@@ -409,7 +410,7 @@ def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) ->
         values = {c["name"]: (now if "DATE" in str(c["type"]).upper() else 0) for c in cols}
         conn.execute(text(f"INSERT INTO tt_settings (id{''.join(', ' + k for k in values)}) VALUES (1{''.join(', :' + k for k in values)})"), values)
     to("head")
-    assert tables() - before == kiwi | {"nd_validation"}  # 0117 (News Desk validation) follows the Kiwi migrations
+    assert tables() - before == kiwi | {"nd_validation", "nd_feedback", "nd_storylines"}  # 0117-0118 (News Desk validation, feedback, story memory) follows the Kiwi migrations
     to("0114_trending_topics", down=True)
     assert tables() == before
     with engine.connect() as conn:

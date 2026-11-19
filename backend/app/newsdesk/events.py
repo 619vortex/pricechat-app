@@ -634,12 +634,20 @@ def _measure(ev: NdEvent, stage: str, db: Session | None = None) -> None:
 
     try:
         out = newsworthy.shadow(ev.title or ev.headline or "", ev.summary or "", outlets=len(outlets_of(ev)), evidence=str(ev.evidence or ""))
+        if db is not None:  # story memory's view (shadow: the repeat gate already decided), owner 2026-11-19
+            from app.newsdesk import memory
+
+            out["memory"] = memory.followup(db, ev.title or ev.headline or "", ev.summary or "")
         logger.info("editorial candidate: %s", json.dumps({"id": ev.id, "stage": stage, "kind": ev.kind, "virality": int(ev.virality or 0), **out},
                                                          ensure_ascii=False))
         if db is not None:  # kept in production (app/newsdesk/validation): Terminal › Settings › Validation
             from app.newsdesk import validation
 
             validation.record_candidate(db, ev, out)
+            from app.config.settings import get_settings
+            from app.newsdesk import chief
+
+            chief.shortlist(db, ev, out, out.get("memory"), settings=get_settings())  # the AI editor's shortlist: stored, never sent while it is off
     except Exception as e:  # noqa: BLE001
         logger.info("editorial candidate: #%s not measured (%s)", ev.id, type(e).__name__)
 

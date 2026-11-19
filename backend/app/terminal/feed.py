@@ -633,6 +633,9 @@ async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: st
     if sent is None:
         raise ValueError(f"Not sent: {(tg.state or {}).get('problem') or 'Telegram did not confirm the message'}.")
     t.parts = {**(t.parts or {}), "telegram": {"at": now.isoformat(), "message_id": sent.message_id, "post_id": sent.id, "chat": handle}}
+    from app.newsdesk import memory  # the story's memory across every lane
+
+    memory.remember(db, "telegram", str(sent.message_id), t.title, "", now)
     db.commit()
     logger.info("terminal telegram: topic %s -> message %s in %s (owner)", t.id, sent.message_id, handle)
     return {"ok": True, "message_id": sent.message_id, "chat": handle}
