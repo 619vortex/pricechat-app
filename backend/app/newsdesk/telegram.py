@@ -514,6 +514,11 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
         if post is not None:
             events.mark(ev, "telegram", "delivered", "", post_id=post.id, message_id=post.message_id)
             db.commit()
+            from app.newsdesk import validation  # observes only: the post is already out
+
+            validation.record_image(db, "telegram", str(post.message_id), ev, message.get("card"), (ev.facts or {}).get("visual") or {}, post.url or "")
+            db.commit()
+            await validation.tick(db, now, settings=settings)
             return done(sent=post.message_id, event=ev.id)
         row = db.scalar(select(NdTelegramPost).where(NdTelegramPost.story_link == f"event:{ev.id}"))
         if row is not None and row.status == "uncertain":

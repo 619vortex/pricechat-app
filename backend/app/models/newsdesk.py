@@ -177,3 +177,18 @@ class NdRenderJob(IdMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class NdValidation(IdMixin, TimestampMixin, Base):
+    """The validation round's record (owner, 2026-11-19), kept in production so it never depends on anyone watching: one row per News Desk
+    candidate (its editorial decision and the extraordinary-news shadow verdict), per published picture (its automated audit) and the
+    report made at 30 candidates. `flag` holds what needs the owner's eyes; `alerted` once the owner was told."""
+
+    __tablename__ = "nd_validation"
+    __table_args__ = (UniqueConstraint("kind", "ref", name="uq_nd_validation_kind_ref"), Index("ix_nd_validation_kind", "kind", "created_at"))
+
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)  # candidate | image | report
+    ref: Mapped[str] = mapped_column(String(64), nullable=False)  # event id | telegram:<message id> / x:<post id> | "30"
+    flag: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    alerted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

@@ -15,6 +15,14 @@ from app.terminal import feed
 router = APIRouter(prefix="/terminal", tags=["terminal"])
 
 
+@router.get("/validation")
+def validation_progress(db: DbSession) -> dict[str, Any]:
+    """The validation round (owner, 2026-11-19): candidates judged, pictures audited, flags and the 30-candidate report."""
+    from app.newsdesk import validation
+
+    return validation.progress(db)
+
+
 @router.get("")
 def overview(db: DbSession, runtime: Runtime, q: str = Query("", max_length=120), lane: str = Query("", max_length=20),
              category: str = Query("", max_length=20), min_viral: float = Query(0, ge=0, le=100), min_evidence: float = Query(0, ge=0, le=100),

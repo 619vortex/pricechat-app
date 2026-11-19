@@ -172,7 +172,7 @@ describe("Terminal 2.0", () => {
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const drawer = screen.getByRole("dialog", { name: "Settings" });
-    expect(within(drawer).getAllByRole("tab").map((t) => t.textContent)).toEqual(["General", "News Desk", "Trending", "X Intelligence", "World Monitor", "Diagnostics"]);
+    expect(within(drawer).getAllByRole("tab").map((t) => t.textContent)).toEqual(["General", "News Desk", "Trending", "X Intelligence", "World Monitor", "Validation", "Diagnostics"]);
     expect(within(drawer).getByText("Live")).toBeTruthy();
     expect(within(drawer).getByRole("button", { name: "Stop all X posting" })).toBeTruthy();
   });

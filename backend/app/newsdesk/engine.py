@@ -652,6 +652,7 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     client = make_x_client(db, settings, runtime)  # type: ignore[arg-type]
     stage = "permit"
     media = None
+    picture: bytes | None = None
     try:
         event_id = (post.facts or {}).get("event_id")
         if X_FORMAT == "visual" and event_id:
@@ -667,6 +668,7 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
                     upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
                     stage = "upload"
                     media = [await client.upload_image(image, permit=upload_permit)]
+                    picture = image
         stage = "permit"
         permit = guard.issue_news_permit(req)
         stage = "post"
@@ -722,6 +724,11 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     lat = events.latency(ev_row, now) if ev_row is not None else {}
     logger.info("newsdesk published %s (post %s, event %s, picture %s; event -> X %s min, first seen -> X %s min)", x_id, post.id, ev_id, "yes" if media else "no",
                 lat.get("event_to_release_min"), lat.get("detect_to_release_min"))
+    if picture and ev_row is not None:  # audited at once (app/newsdesk/validation); observes only
+        from app.newsdesk import validation
+
+        validation.record_image(db, "x", x_id, ev_row, picture, (ev_row.facts or {}).get("visual") or {}, f"https://x.com/i/status/{x_id}")
+        db.commit()
     return "published"
 
 
@@ -771,6 +778,9 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
     made_snap = snapshot(db, s, quotes, posts, now) if (s.state or {}).get("snapshot") else 0
     db.commit()
     await events.alert_slots(db, now, events.policy(s.state or {}))
+    from app.newsdesk import validation
+
+    await validation.tick(db, now, settings=settings)  # flags to the owner at once; the report at 30 candidates
     result = None
     if why is None:
         result = await deliver_x(db, s, settings, runtime, agent_id, now)

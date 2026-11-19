@@ -13,6 +13,7 @@ const Classic = lazy(() => import("./classic").then((m) => ({ default: m.Termina
 const XIntel = lazy(() => import("./XIntelPage").then((m) => ({ default: m.XIntelPage })));
 const NewsDesk = lazy(() => import("../x/NewsDesk").then((m) => ({ default: m.NewsDesk })));
 const Trending = lazy(() => import("../x/TrendingTopics").then((m) => ({ default: m.TrendingTopics })));
+const Validation = lazy(() => import("./ValidationTab").then((m) => ({ default: m.ValidationTab })));
 const WorldMonitor = lazy(() => import("../WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
 
 type DeskInfo = { id: number; status: string; headline: string; why: string; x_status: string; tg_status: string; released_at: string | null; x_note?: string; tg_note?: string };
@@ -507,7 +508,7 @@ function StoryBody({ id, onChanged, onClose }: { id: number; onChanged: () => vo
 // --- settings --------------------------------------------------------------------------------------------------------------------------
 
 const TABS = [{ key: "general", label: "General" }, { key: "newsdesk", label: "News Desk" }, { key: "trending", label: "Trending" },
-  { key: "x", label: "X Intelligence" }, { key: "monitor", label: "World Monitor" }, { key: "diagnostics", label: "Diagnostics" }] as const;
+  { key: "x", label: "X Intelligence" }, { key: "monitor", label: "World Monitor" }, { key: "validation", label: "Validation" }, { key: "diagnostics", label: "Diagnostics" }] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
 function SettingsDrawer({ data, onClose, run }: { data: T2Overview | null; onClose: () => void; run: (fn: () => Promise<unknown>, ok: string) => Promise<void> }) {
@@ -553,6 +554,7 @@ function SettingsDrawer({ data, onClose, run }: { data: T2Overview | null; onClo
           {tab === "x" && <XIntel />}
           {tab === "monitor" && <WorldMonitor />}
           {tab === "diagnostics" && <Classic />}
+          {tab === "validation" && <Validation />}
         </Suspense>
       </div>
     </Panel>

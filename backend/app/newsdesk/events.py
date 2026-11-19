@@ -623,11 +623,11 @@ def _offer_story(db: Session, v: chaos.Verdict, recent: list[NdEvent], quotes: d
     _fill(ev, v, score, facts, head, now, quotes, adj, p.experiments)
     if not _insert(db, recent, ev):
         return 0
-    _measure(ev, "candidate")
+    _measure(ev, "candidate", db)
     return 1
 
 
-def _measure(ev: NdEvent, stage: str) -> None:
+def _measure(ev: NdEvent, stage: str, db: Session | None = None) -> None:
     """One production log line per candidate (owner, 2026-11-19: validate the gate on NEW real events, rejected ones included): the
     audience score, evidence, decision and exact reason, and what the extraordinary path would do. Log only: never changes a decision."""
     import json
@@ -636,6 +636,10 @@ def _measure(ev: NdEvent, stage: str) -> None:
         out = newsworthy.shadow(ev.title or ev.headline or "", ev.summary or "", outlets=len(outlets_of(ev)), evidence=str(ev.evidence or ""))
         logger.info("editorial candidate: %s", json.dumps({"id": ev.id, "stage": stage, "kind": ev.kind, "virality": int(ev.virality or 0), **out},
                                                          ensure_ascii=False))
+        if db is not None:  # kept in production (app/newsdesk/validation): Terminal › Settings › Validation
+            from app.newsdesk import validation
+
+            validation.record_candidate(db, ev, out)
     except Exception as e:  # noqa: BLE001
         logger.info("editorial candidate: #%s not measured (%s)", ev.id, type(e).__name__)
 
@@ -1027,9 +1031,15 @@ def _newsworthy(db: Session, ev: NdEvent, label: str, now: datetime) -> tuple[st
     if not a.ok:
         _note_breaking_miss(ev, a.reason, now)
         logger.info("editorial gate: #%s refused (interest %s): %s | %s", ev.id, a.interest, a.reason[:200], title[:100])
+        from app.newsdesk import validation
+
+        validation.record_gate(db, ev, False, a.interest, a.reason)
         return f"not published: {a.reason}", label
     ev.facts = {**(ev.facts or {}), "newsworthy": {"why": a.why, "strength": a.strength, "stop_scroll": a.stop_scroll, "parts": a.parts}}
-    logger.info("editorial gate: #%s qualifies (%s, interest %s): %s | %s", ev.id, a.strength, a.interest, (a.pitch or a.why)[:160], title[:100])  # measured in production (owner, 2026-11-18)
+    logger.info("editorial gate: #%s qualifies (%s, interest %s): %s | %s", ev.id, a.strength, a.interest, (a.pitch or a.why)[:160], title[:100])
+    from app.newsdesk import validation
+
+    validation.record_gate(db, ev, True, a.interest, a.pitch or a.why)  # measured in production (owner, 2026-11-18)
     if ev.kind == "update" or not label:
         return "", label
     return "", (label if a.strength == "major" and _age(ev, now) <= 90 else "")
