@@ -61,6 +61,8 @@ struct RootView: View {
             KiwiColor.ground.ignoresSafeArea()
             if !model.declarationAccepted {
                 DeclarationView(model: model)
+            } else if !model.routingExplained {
+                NavigationStack { RoutingExplainerView(onContinue: { model.finishRoutingExplanation() }) }
             } else if !model.signedIn {
                 WelcomeView(model: model)
             } else {
@@ -83,15 +85,21 @@ struct DeclarationView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Before you start").font(.title.bold())
-                Text("What Kiwi VPN collects").font(.headline)
-                bullet("Your Price Chat account, to sign you in and check your plan.")
-                bullet("Each device's name, public key and tunnel address, to run the VPN.")
-                bullet("Each device's last connection time and the amount of data it used, to show your use and apply limits.")
-                bullet("Your IP address, which the VPN server has to see in order to connect you. Checking your exit address doesn't store it.")
+                Text("What Kiwi VPN keeps").font(.headline)
+                bullet("Your Price Chat account: your Kiwi Passport username and member number, to sign you in and check your plan.")
+                bullet("For each device: the name the app gives it, its public key and its tunnel address, to run the VPN.")
+                bullet("For each device: when it last connected, and how much data it used this month, to show your use and apply limits.")
+                bullet("If you start a free trial: one-way fingerprints of your sign-in identities, such as your email address, so a trial can be used only once. These stay after an account is deleted.")
+                Text("What passes through without being kept").font(.headline)
+                bullet("Your IP address. The VPN server needs it to connect you, and holds it in memory while this device is set up there, not in our database. The servers' security logs can record connection attempts, and are rotated away.")
+                bullet("Requests to pricechat.live, such as signing in and checking your plan, appear with your IP address in our hosting providers' request logs (Railway and Vercel).")
+                bullet("Your traffic, while the VPN is on. DNS lookups are answered by the server's own resolver or by Cloudflare (1.1.1.1), depending on the server, unless you set your own.")
                 Text("What it doesn't do").font(.headline)
-                bullet("The app doesn't collect the sites you visit.")
+                bullet("No record of the sites you visit or of what you send.")
                 bullet("Your device's private key is made on this iPhone and never leaves it.")
-                bullet("Kiwi VPN doesn't sell or share this data with third parties, and uses it only to run the service.")
+                bullet("Kiwi VPN doesn't sell your data, use it for advertising, or disclose it to third parties. The infrastructure companies named in the privacy policy handle it only to run the service for us.")
+                bullet("No ads, analytics or tracking in the app.")
+                bullet("You can delete your account at any time, in Settings.")
                 Text("This is a public beta. There's no kill switch, and DNS and IPv6 leak testing isn't finished.").font(.footnote).foregroundStyle(KiwiColor.warn)
                 Link("Read the privacy policy", destination: URL(string: "\(kiwiBaseURL)/vpn/privacy")!)
                 Button { model.acceptDeclaration() } label: { Text("Continue").frame(maxWidth: .infinity).padding(.vertical, 6) }
@@ -123,6 +131,7 @@ struct WelcomeView: View {
                     .buttonStyle(.borderedProminent).foregroundStyle(KiwiColor.ink)
                 Text("Opens a secure browser sheet. Kiwi VPN never sees your password.").font(.footnote).foregroundStyle(KiwiColor.muted).multilineTextAlignment(.center)
             }
+            if let notice = model.notice { Text(notice).foregroundStyle(KiwiColor.soft).multilineTextAlignment(.center) }
             if let error = model.error { Text(error).foregroundStyle(KiwiColor.warn).multilineTextAlignment(.center) }
         }.padding(28)
     }

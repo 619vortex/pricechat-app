@@ -34,8 +34,8 @@
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.2.0;
+				CURRENT_PROJECT_VERSION = 2;
 				VALIDATE_PRODUCT = NO;
 				KIWI_COMMIT = "";
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -199,8 +199,8 @@
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
-				MARKETING_VERSION = 0.1.0;
-				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.2.0;
+				CURRENT_PROJECT_VERSION = 2;
 				VALIDATE_PRODUCT = YES;
 				KIWI_COMMIT = "";
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
@@ -261,6 +261,10 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		61E36CFDDD17B99453F60368 = {
+			isa = PBXBuildFile;
+			fileRef = B0F7946FBD267E650B5C109A;
+		};
 		6627E7BA2FEAEE220FF53293 = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WireGuardKit;
@@ -292,6 +296,7 @@
 				00744381AD8675313B4B2D85,
 				34C71FBDE2E2E792BF6A036E,
 				914FF9CE1E7223CEBD7F0224,
+				61E36CFDDD17B99453F60368,
 				28CDD3492866832B7E825945,
 				0EA12BEE2B9907D3AC495CAD,
 				4E6630FDB074D5B941601907,
@@ -435,6 +440,12 @@
 			path = OtherViews.swift;
 			sourceTree = "<group>";
 		};
+		B0F7946FBD267E650B5C109A = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AccountViews.swift;
+			sourceTree = "<group>";
+		};
 		B1ABE3A7773183E8F223499E = {
 			isa = PBXTargetDependency;
 			target = 3D17845273900D63FF7E9FAC;
@@ -494,6 +505,7 @@
 		D6AD9B506F544742164351C1 = {
 			isa = PBXGroup;
 			children = (
+				B0F7946FBD267E650B5C109A,
 				BD57D638DBCD75582130C009,
 				AD8EB3682857AD3B33F29B18,
 				CE23E85235BABB044F985DC6,
