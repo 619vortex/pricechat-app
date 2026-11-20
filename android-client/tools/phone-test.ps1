@@ -1,5 +1,5 @@
 # OWNER-RUN. Physical-phone test kit for Kiwi VPN 0.2.0 against production. Needs a phone on USB with USB debugging on, and nothing else attached.
-#   powershell -ExecutionPolicy Bypass -File android-client\tools\phone-test.ps1 -Apk C:\AI\pc-wt\kiwi-release\android\0.2.0\KiwiVPN-0.2.0-e4aaef1.apk
+#   powershell -ExecutionPolicy Bypass -File android-client\tools\phone-test.ps1 -Apk C:\AI\pc-wt\kiwi-release\android\0.2.0\KiwiVPN-0.2.0-4c3e829.apk
 # Walks you through: store-review sign-in, Helsinki 1, the public IP, "Only apps I choose" with WhatsApp / Telegram / Signal, DNS and IPv6 leak
 # checks, reconnects, Block connections without VPN, and deleting the (review) account. At each step it gathers evidence by itself (Android's own
 # VPN routing table, tunnel byte counters, screenshots) and writes android-client\test-evidence\phone-<date>-<model>\REPORT.md.

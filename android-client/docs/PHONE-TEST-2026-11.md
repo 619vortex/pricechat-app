@@ -7,8 +7,8 @@ Production has had the mobile backend and the store-review seats since 2026-11-2
 **store-review account**, so the deletion test deletes only a throwaway review seat. Your own account is never touched.
 
 ## APK
-- `C:\AI\pc-wt\kiwi-release\android\0.2.0\KiwiVPN-0.2.0-e4aaef1.apk` (the website flavour: Auto-Call included, signed with the release key)
-- SHA-256 `CE755EEB49271BCBCAF98C1615DDC447E31156A7D4A030158CB4BA8B161BE615`
+- `C:\AI\pc-wt\kiwi-release\android\0.2.0\KiwiVPN-0.2.0-4c3e829.apk` (the website flavour: Auto-Call included, signed with the release key)
+- SHA-256 `008AD5604FF94F7491AF099FB0E298E2E3BE8A620AEC9FFFD79CEFA4D8AD6397`
 - versionName 0.2.0, versionCode 4. It talks to `https://pricechat.live`.
 - Don't use the `-play.aab`. That's the Play bundle, and it can't be installed directly.
 
@@ -33,7 +33,7 @@ Production has had the mobile backend and the store-review seats since 2026-11-2
 ## 2. Run the kit
 In PowerShell, from `D:\pc-wt\kiwi-mobile`:
 ```powershell
-powershell -ExecutionPolicy Bypass -File android-client\tools\phone-test.ps1 -Apk C:\AI\pc-wt\kiwi-release\android\0.2.0\KiwiVPN-0.2.0-e4aaef1.apk
+powershell -ExecutionPolicy Bypass -File android-client\tools\phone-test.ps1 -Apk C:\AI\pc-wt\kiwi-release\android\0.2.0\KiwiVPN-0.2.0-4c3e829.apk
 ```
 It installs the APK and records the phone. Then it asks you to do each step on the phone and press Enter, or type a short answer.
 It takes the screenshots and reads Android's routing table and tunnel counters itself. Options:
