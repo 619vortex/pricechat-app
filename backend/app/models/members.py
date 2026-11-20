@@ -46,6 +46,8 @@ class Member(IdMixin, TimestampMixin, Base):
     # passwordless sign-in: set ONLY after the member typed a code sent to it (never from a provider or a guess)
     email: Mapped[str | None] = mapped_column(String(254))  # normalised (trimmed, lower-case); unique via ux_members_email
     email_verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # a Kiwi VPN store-review seat (app/vpn/reviewer.py): set only by the review password sign-in; accepts only scoped sessions
+    review_seat: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
 
 
 Index("ux_members_email", Member.email, unique=True)

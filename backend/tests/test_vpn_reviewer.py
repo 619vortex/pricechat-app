@@ -62,7 +62,7 @@ def test_wrong_details_are_refused_the_same_way(client: TestClient, db: Session,
     a = client.post(LOGIN, json={"email": EMAIL, "password": "wrong-password"})
     b = client.post(LOGIN, json={"email": "other@example.com", "password": PASSWORD})
     assert a.status_code == b.status_code == 401 and a.json()["detail"] == b.json()["detail"]
-    assert db.scalar(select(Member).where(Member.email == EMAIL)) is None
+    assert db.scalar(select(Member).where(Member.review_seat.is_(True))) is None and db.scalar(select(Member).where(Member.email == EMAIL)) is None
 
 
 def test_works_while_closed_with_one_login_on_one_server(client: TestClient, db: Session, account: None, fake: ProxyNode) -> None:  # noqa: F811
@@ -84,7 +84,8 @@ def test_no_admin_rights_and_off_the_leaderboard(client: TestClient, db: Session
     sign_in(client)
     assert client.cookies.get(admin_auth.COOKIE) is None  # the Admin session is a separate cookie, and this sign-in never sets it
     db.expire_all()
-    assert db.scalar(select(Member).where(Member.email == EMAIL)).leaderboard_opt_out is True
+    seat = db.scalar(select(Member).where(Member.review_seat.is_(True)))
+    assert seat.leaderboard_opt_out is True and seat.email is None  # no email: no email-code sign-in can reach a seat
 
 
 def test_no_payment_needed_while_payments_are_on(client: TestClient, db: Session, account: None, fake: ProxyNode) -> None:  # noqa: F811
@@ -112,7 +113,7 @@ def test_admin_block_still_wins(client: TestClient, db: Session, account: None, 
     server, _ = helsinki(db, fake)
     sign_in(client)
     db.expire_all()
-    member = db.scalar(select(Member).where(Member.email == EMAIL))
+    member = db.scalar(select(Member).where(Member.review_seat.is_(True)))
     vpn.account_of(db, member).status = "blocked"
     db.commit()
     assert client.post("/api/members/vpn/browser", json={"server_id": server.id}).status_code == 403

@@ -381,7 +381,8 @@ def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) ->
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(alembic_config())
-    assert script.get_heads() == ["0118_nd_editor"]  # 0118: story feedback + story memory (create-only)
+    assert script.get_heads() == ["0119_vpn_review_seats"]  # 0119: Kiwi VPN store-review seats (one column)
+    assert script.get_revision("0119_vpn_review_seats").down_revision == "0118_nd_editor"
     assert script.get_revision("0118_nd_editor").down_revision == "0117_nd_validation"
     assert script.get_revision("0117_nd_validation").down_revision == "0116_vpn_trial_guards"
     assert script.get_revision("0114_trending_topics").down_revision == "0111_vpn_server_traffic_allowance"
@@ -522,14 +523,14 @@ def review(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_reviewer_is_bound_by_member_id_and_its_trial_is_used(client: TestClient, db: Session, review: None) -> None:
+    """Since seats (2026-11-20): the rights are the seat flag set by this sign-in, and a seat has no email at all."""
     assert client.post("/api/members/auth/reviewer", json={"email": REVIEW_EMAIL, "password": REVIEW_PASSWORD}).status_code == 200
-    bound = vpn.settings(db).reviewer_member_id
+    bound = vpn.settings(db).reviewer_member_id  # the latest seat
     rev = db.get(Member, bound)
-    assert rev is not None and rev.email == REVIEW_EMAIL and reviewer.is_reviewer(db, rev)
+    assert rev is not None and rev.review_seat and rev.email is None and reviewer.is_reviewer(db, rev)
     acct = vpn.account_of(db, rev)
     assert acct.trial_started_at is not None and vpn.access(db, acct) == "active"  # the review rights, not a trial
-    assert trial_guard.used_identity(db, rev) == "email address"
-    rev.email = "changed@example.com"  # its email no longer matters
+    rev.email = "changed@example.com"  # an email never matters
     db.commit()
     assert reviewer.is_reviewer(db, rev)
     other = fresh(db, "impostor")
@@ -539,9 +540,12 @@ def test_the_reviewer_is_bound_by_member_id_and_its_trial_is_used(client: TestCl
 
 
 def test_a_passport_already_holding_the_review_address_never_becomes_the_reviewer(client: TestClient, db: Session, review: None) -> None:
+    """Since seats: the sign-in makes its own seat and never touches the Passport that holds the address."""
     person = fresh(db, "person", REVIEW_EMAIL)
-    assert client.post("/api/members/auth/reviewer", json={"email": REVIEW_EMAIL, "password": REVIEW_PASSWORD}).status_code == 401
-    assert vpn.settings(db).reviewer_member_id is None and not reviewer.is_reviewer(db, person)
+    assert client.post("/api/members/auth/reviewer", json={"email": REVIEW_EMAIL, "password": REVIEW_PASSWORD}).status_code == 200
+    db.expire_all()
+    assert vpn.settings(db).reviewer_member_id != person.id and not reviewer.is_reviewer(db, person) and not person.review_seat
+    assert person.email == REVIEW_EMAIL
 
 
 # --- I4: nested JSON in the payment webhook ---------------------------------------------------------------------------

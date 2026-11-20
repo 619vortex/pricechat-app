@@ -544,7 +544,7 @@ def reviewer_sign_in(payload: ReviewerSignIn, request: Request, response: Respon
     if wait is not None:
         raise HTTPException(429, "Too many tries. Please wait a few minutes.", headers={"Retry-After": str(wait)})
     try:
-        member = reviewer.sign_in(db, runtime.settings, payload.email, payload.password)
+        member = reviewer.sign_in(db, runtime.settings, payload.email, payload.password, current=_current(db, pc_session))  # the same browser keeps its seat
     except MemberError as exc:
         raise HTTPException(401, str(exc)) from exc
     if pc_session:

@@ -8,17 +8,23 @@ to end it sooner: sync then takes its logins and devices off the servers.
 
 Restricted (2026-11-20, mobile store review):
 - The password sign-in gives a "kr." session that reaches only the VPN routes, who's signed in, deleting the account, signing
-  out, signing in again and handing the Kiwi VPN app its own session (REVIEW_SCOPE, enforced in main.admin_guard). It can't
+  out, signing in again and handing the Kiwi VPN app its own session (review_token_may, enforced in main.admin_guard). It can't
   touch XP, rewards, trading, wallets or anything else of Price Chat's.
 - A WireGuard device only from a Kiwi VPN app session ("kd.", itself scoped by app.members.desktop_scope), with a key made on
-  the phone, on SERVER only, one at a time (app.vpn.service.create_device). Never from the website, so no config with a
+  the phone, on SERVER only, one per seat (app.vpn.service.create_device). Never from the website, so no config with a
   private key is ever handed out for it.
-- Deleting the account works as for anyone. The next password sign-in makes and binds a fresh review member.
 
-The rights belong to one stored member (vpn_settings.reviewer_member_id, security audit L9), bound on the first password
-sign-in: never to whoever holds the address, so no other way of setting a member's email can make someone the reviewer.
-Its free trial is marked used (and its email remembered as having had one), so the account is worth nothing once the
-variables are removed.
+Seats (2026-11-20, before the mobile deploy): every password sign-in gets its OWN review member, a "seat" (Member.review_seat),
+so an Android reviewer and an iPhone reviewer reviewing at the same time never share devices, sessions or a deletion. Signing in
+again from a browser that already holds a seat's "kr." session keeps that seat. At most MAX_SEATS: the next sign-in first
+reclaims seats with no live session, then the least recently used. Seats have no email, so no email-code, Google, X or
+Telegram sign-in can ever land on one, and a seat accepts only "kr." and "kd." sessions (members.service.member_for_token):
+any other session of a seat, such as an unscoped one from before the restriction, is refused and deleted on first use
+(migration 0119 also deletes them). Deleting a seat deletes only that seat.
+
+The rights come only from the seat flag, set only by this sign-in (security audit L9): never from an email address. Each seat's
+free trial is marked used, so a seat is worth nothing once the variables are removed. vpn_settings.reviewer_member_id still
+names the latest seat, so a rollback to the code before seats keeps one working review account.
 """
 
 import base64
@@ -27,15 +33,14 @@ import hmac
 import secrets
 from datetime import date, datetime, time, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config.settings import Settings, get_settings
 from app.db.base import utcnow
 from app.members import xp as ledger
 from app.members.service import MemberError, create_member
-from app.models.members import Member, MemberAuditLog, MemberSession
-from app.models.vpn import VpnSettings
+from app.models.members import Member, MemberSession
 
 SERVER = "Helsinki 1"
 REVIEW_TOKEN_PREFIX = "kr."  # not in token_urlsafe's alphabet either, so no other session can start this way
@@ -94,17 +99,13 @@ def configured(s: Settings | None = None) -> bool:
     return bool(_email(s)) and bool(_stored(s)) and _ends(s) is not None
 
 
-def bound_id(db: Session) -> int | None:
-    row = db.get(VpnSettings, 1)
-    return row.reviewer_member_id if row is not None else None
+MAX_SEATS = 10
+SESSION_KINDS = ("reviewer", "desktop")  # the only sessions a seat accepts: the scoped "kr." browser session and the app's "kd."
 
 
 def is_reviewer(db: Session, member: Member | None, s: Settings | None = None) -> bool:
-    """The configured review account: the member bound on its first sign-in, whatever its email says now."""
-    if member is None or not configured(s):
-        return False
-    bound = bound_id(db)
-    return bound is not None and member.id == bound
+    """A review seat, while the review account is configured."""
+    return member is not None and bool(member.review_seat) and configured(s)
 
 
 def in_time(now: datetime | None = None, s: Settings | None = None) -> bool:
@@ -112,39 +113,53 @@ def in_time(now: datetime | None = None, s: Settings | None = None) -> bool:
     return ends is not None and (now or utcnow()) <= ends
 
 
-def sign_in(db: Session, s: Settings, email: str, password: str) -> Member:
-    """The review account's member, created on its first sign-in. One answer for every failure."""
+def sign_in(db: Session, s: Settings, email: str, password: str, current: Member | None = None) -> Member:
+    """A review seat: `current` when it already is one (the same browser signing in again), else a fresh seat. One answer for
+    every failure."""
     addr = (email or "").strip().lower()
     good = check_password(_stored(s), password) if _stored(s) else False  # the hash is checked first, so a wrong address costs the same
     if not good or not addr or addr != _email(s) or not in_time(s=s):
         raise MemberError(FAIL)
-    bound = bound_id(db)
-    member = db.get(Member, bound) if bound is not None else None
+    member = current if current is not None and current.review_seat and current.status == "active" else None
     if member is None:
-        member = db.scalar(select(Member).where(Member.email == addr))
-        if member is not None and not _made_here(db, member):
-            # someone else's Passport holds the review address: never hand it the rights (and never say why)
-            raise MemberError(FAIL)
-        if member is None:
-            member = create_member(db)
-            member.email, member.leaderboard_opt_out = addr, True  # never on the public leaderboard
-            ledger.audit(db, member.id, "member", "vpn_reviewer_created", {})
-    if member.status != "active":
-        raise MemberError(FAIL)
-    # browser sessions from before the scoped "kr." ones could reach all of Price Chat: they end here (app sessions stay)
-    db.query(MemberSession).filter(MemberSession.member_id == member.id, MemberSession.kind.is_(None)).delete(synchronize_session=False)
-    _bind(db, member)  # idempotent: also uses up the trial of a review account bound by migration 0116
+        _make_room(db)
+        member = create_member(db)
+        member.review_seat, member.leaderboard_opt_out = True, True  # never on the public leaderboard, and no email
+        ledger.audit(db, member.id, "member", "vpn_reviewer_created", {})
+    # a seat accepts only scoped sessions: anything else it holds ends here too (member_for_token refuses them anyway)
+    db.query(MemberSession).filter(MemberSession.member_id == member.id,
+                                   or_(MemberSession.kind.is_(None), MemberSession.kind.not_in(SESSION_KINDS))).delete(synchronize_session=False)
+    _bind(db, member)
     db.commit()
     return member
 
 
-def _made_here(db: Session, member: Member) -> bool:
-    """The member was created by this sign-in (before members were bound by id), not a person's own Passport."""
-    return db.scalar(select(MemberAuditLog.id).where(MemberAuditLog.member_id == member.id, MemberAuditLog.action == "vpn_reviewer_created").limit(1)) is not None
+def _make_room(db: Session) -> None:
+    """Keep at most MAX_SEATS - 1 seats before a new one: seats with no live session go first, then the least recently used."""
+    from app.members.service import delete_member
+
+    now = utcnow()
+    seats = list(db.scalars(select(Member).where(Member.review_seat.is_(True))))
+    if len(seats) < MAX_SEATS:
+        return
+    seen: dict[int, datetime] = {}
+    live: set[int] = set()
+    for row in db.scalars(select(MemberSession).where(MemberSession.member_id.in_([m.id for m in seats]))):
+        exp = row.expires_at if row.expires_at.tzinfo else row.expires_at.replace(tzinfo=timezone.utc)
+        if exp > now:
+            live.add(row.member_id)
+        at = row.last_seen_at or row.created_at
+        if at is not None:
+            at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+            seen[row.member_id] = max(seen.get(row.member_id, at), at)
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    seats.sort(key=lambda m: (m.id in live, seen.get(m.id, oldest), m.id))
+    for m in seats[: len(seats) - MAX_SEATS + 1]:
+        delete_member(db, m, actor="system")
 
 
 def _bind(db: Session, member: Member) -> None:
-    """Store the member as the review account and use up its free trial (and its email's)."""
+    """Use up the seat's free trial, and name it in vpn_settings.reviewer_member_id (the latest seat, for a rollback)."""
     from app.vpn import service, trial_guard
 
     service.settings(db).reviewer_member_id = member.id

@@ -159,6 +159,12 @@ def member_for_token(db: Session, token: str | None) -> Member | None:
     member = db.get(Member, s.member_id)
     if member is None or member.status != "active":
         return None
+    if member.review_seat and s.kind not in ("reviewer", "desktop"):
+        # a store-review seat accepts only its scoped sessions (app/vpn/reviewer.py): any other one, such as an unscoped
+        # browser session from before the restriction, ends on first use
+        db.delete(s)
+        db.commit()
+        return None
     return member
 
 

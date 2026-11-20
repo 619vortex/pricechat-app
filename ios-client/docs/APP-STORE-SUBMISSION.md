@@ -67,7 +67,7 @@ Fill the gaps and paste into App Review Information > Notes.
 >
 > **Every app on the iPhone uses the VPN.** The app doesn't offer per-app selection, which iOS reserves for MDM-managed devices; the screen "What uses Kiwi VPN on iPhone" explains this before sign-in.
 >
-> **Account deletion:** Settings > Delete account. Type the username shown to confirm. This deletes the Price Chat account on our server, removes the VPN configuration and the keys from the iPhone, and returns to the sign-in screen. You can delete the review account: signing in again with the same email and password creates a fresh one. Deletion is also available on the web at https://pricechat.live/vpn/delete-account.
+> **Account deletion:** Settings > Delete account. Type the username shown to confirm. This deletes the Price Chat account on our server, removes the VPN configuration and the keys from the iPhone, and returns to the sign-in screen. You can delete the review account: it deletes only your own copy, and signing in again with the same email and password creates a fresh one. Deletion is also available on the web at https://pricechat.live/vpn/delete-account.
 >
 > **Purchases:** the app sells nothing and has no purchase screen.
 >
@@ -75,7 +75,8 @@ Fill the gaps and paste into App Review Information > Notes.
 
 **The review account (built 2026-11-20, not deployed).** Option 1 from the earlier version of this section was built, on `feat/kiwi-mobile`:
 - `/vpn/desktop` shows **"App Store or Google Play reviewer? Use the review account"** on a phone's sign-in. `/vpn/reviewer` then returns to the app's sign-in page, where the reviewer taps Allow.
-- From a Kiwi VPN app session, the review account can make **one** WireGuard device, with the key made on the iPhone, on **Helsinki 1** only. A new install replaces the last device. The website still can't make one.
+- Every review sign-in gets its own seat (its own member), so App Review and Google Play reviewing at the same time never disconnect each other.
+- From a Kiwi VPN app session, a seat can make **one** WireGuard device, with the key made on the iPhone, on **Helsinki 1** only. A new install on the same seat replaces its last device. The website still can't make one.
 - The password sign-in's browser session is restricted (`kr.`): VPN, who's signed in, deletion, sign-out, and handing the app its session. Nothing else of Price Chat's, and no linking another sign-in to the shared account.
 - Deleting it works. The next sign-in makes a fresh review account.
 - Tests: `backend/tests/test_vpn_reviewer_mobile.py` (12) and `frontend/src/website/vpnDesktop.test.tsx`. **Not yet tried on a real iPhone against Helsinki 1:** owner setup step 4 in `docs/KIWI-STORE-REVIEW-ACCOUNT.md`.
