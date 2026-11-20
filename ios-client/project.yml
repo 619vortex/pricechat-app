@@ -17,8 +17,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
 packages:
   WireGuardKit:
-    url: https://git.zx2c4.com/wireguard-apple
-    revision: 2fec12a6e1f6e3460b6ee483aa00ad29cddadab1
+    path: Vendor/wireguard-apple
   KiwiCore:
     path: Packages/KiwiCore
 targets:
@@ -59,7 +58,7 @@ targets:
     legacy:
       toolPath: /usr/bin/make
       arguments: $(ACTION)
-      workingDirectory: ${BUILD_DIR%Build/*}SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo
+      workingDirectory: $(SRCROOT)/Vendor/wireguard-apple/Sources/WireGuardKitGo
       passSettings: true
     settings:
       base:

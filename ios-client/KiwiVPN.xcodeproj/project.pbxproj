@@ -263,7 +263,6 @@
 		};
 		6627E7BA2FEAEE220FF53293 = {
 			isa = XCSwiftPackageProductDependency;
-			package = ACDC82C364CFE9E97B00C3F6;
 			productName = WireGuardKit;
 		};
 		66ADC382DA4DC6DC7D4A96AB = {
@@ -427,12 +426,8 @@
 			);
 		};
 		ACDC82C364CFE9E97B00C3F6 = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://git.zx2c4.com/wireguard-apple";
-			requirement = {
-				kind = revision;
-				revision = 2fec12a6e1f6e3460b6ee483aa00ad29cddadab1;
-			};
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Vendor/wireguard-apple";
 		};
 		AD8EB3682857AD3B33F29B18 = {
 			isa = PBXFileReference;
@@ -513,7 +508,7 @@
 			buildPhases = (
 			);
 			buildToolPath = /usr/bin/make;
-			buildWorkingDirectory = "${BUILD_DIR%Build/*}SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo";
+			buildWorkingDirectory = "$(SRCROOT)/Vendor/wireguard-apple/Sources/WireGuardKitGo";
 			dependencies = (
 			);
 			name = WireGuardGoBridgeiOS;

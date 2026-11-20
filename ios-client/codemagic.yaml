@@ -1,0 +1,82 @@
+# Cloud Mac builds of Kiwi VPN for iPhone.
+# No workflow has a trigger: each starts only when asked. No workflow has a publishing section: nothing goes to TestFlight, the App Store or anywhere else.
+definitions:
+  mac: &mac
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+  go: &go
+    name: Install Go 1.22.12, checksum checked
+    script: |
+      set -euo pipefail
+      curl -fsSL -o /tmp/go.tgz https://go.dev/dl/go1.22.12.darwin-arm64.tar.gz
+      echo "416c35218edb9d20990b5d8fc87be655d8b39926f15524ea35c66ee70273050d  /tmp/go.tgz" | shasum -a 256 -c -
+      mkdir -p "$HOME/kiwi-go"
+      tar -C "$HOME/kiwi-go" -xzf /tmp/go.tgz
+      # WireGuardKit's Makefile looks in /usr/local/bin, and Xcode doesn't always keep the build's PATH
+      sudo mkdir -p /usr/local/bin
+      sudo ln -sf "$HOME/kiwi-go/go/bin/go" /usr/local/bin/go
+      echo "PATH=$HOME/kiwi-go/go/bin:$PATH" >> "$CM_ENV"
+      "$HOME/kiwi-go/go/bin/go" version
+
+workflows:
+  # Needs no Apple account. Finds compile errors, and runs the logic tests.
+  kiwi-compile:
+    name: Kiwi VPN compile check, unsigned
+    <<: *mac
+    environment:
+      xcode: 26.6
+    artifacts:
+      - build/logs/*.log
+    scripts:
+      - *go
+      - name: Source and project checks
+        script: python3 tools/check_sources.py
+      - name: Logic tests
+        ignore_failure: true
+        script: |
+          mkdir -p build/logs
+          set -o pipefail
+          (cd Packages/KiwiCore && swift test) 2>&1 | tee build/logs/swift-test.log || touch build/logs/tests-failed.log
+      - name: Compile the app and the tunnel for iPhone, unsigned
+        script: |
+          mkdir -p build/logs
+          set -o pipefail
+          xcodebuild -project KiwiVPN.xcodeproj -scheme KiwiVPN -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO KIWI_COMMIT="$(awk '{print $2}' BUILD-INFO.txt | cut -c1-12)" build 2>&1 | tee build/logs/xcodebuild.log
+      - name: Fail if the logic tests failed
+        script: test ! -e build/logs/tests-failed.log
+
+  # Needs the Apple Developer account, the App Store Connect key named kiwi, and the kiwi_signing group. Makes an Ad Hoc IPA for the registered iPhone, and uploads it nowhere.
+  kiwi-adhoc-ipa:
+    name: Kiwi VPN signed Ad Hoc IPA
+    <<: *mac
+    integrations:
+      app_store_connect: kiwi
+    environment:
+      xcode: 26.6
+      groups:
+        - kiwi_signing  # CERTIFICATE_PRIVATE_KEY (secret) and KIWI_IPHONE_UDID
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/logs/*.log
+      - /tmp/xcodebuild_logs/*.log
+    scripts:
+      - *go
+      - name: Source and project checks
+        script: python3 tools/check_sources.py
+      - name: App IDs, Network Extensions and the iPhone
+        script: bash tools/apple-setup.sh
+      - name: Keychain
+        script: keychain initialize
+      - name: Certificate and profiles for the app and its tunnel
+        script: |
+          # Without --strict-match-identifier, this also covers live.pricechat.kiwivpn.tunnel
+          app-store-connect fetch-signing-files live.pricechat.kiwivpn --type IOS_APP_ADHOC --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Build the signed IPA
+        script: |
+          xcode-project build-ipa --project KiwiVPN.xcodeproj --scheme KiwiVPN --config Release \
+            --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO KIWI_COMMIT=$(awk '{print $2}' BUILD-INFO.txt | cut -c1-12)"
+      - name: Check what was signed
+        script: bash tools/verify-ipa.sh build/ios/ipa/*.ipa

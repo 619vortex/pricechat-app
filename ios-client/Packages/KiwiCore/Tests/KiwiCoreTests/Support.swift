@@ -48,11 +48,11 @@ struct FakeKeys: KeyMaker {
 
 /// The backend's rules that matter to the client: a device limit, and scripted failures.
 final class FakeAPI: KiwiAPI, @unchecked Sendable {
-    var current = account()
+    var current = KiwiCoreTests.account()
     var calls: [String] = []
     var accountError: ApiError?
     var failuresBeforeAnswer = 0
-    var peerAnswer = peer()
+    var peerAnswer = KiwiCoreTests.peer()
     var addError: ApiError?
     var nextId: Int64 = 50
 

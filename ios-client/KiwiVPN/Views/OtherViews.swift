@@ -98,6 +98,33 @@ struct PassportView: View {
     }
 }
 
+/// What iOS allows instead of Auto-Call VPN. The Shortcuts steps use iOS's own automations with this app's Connect and Disconnect actions: iOS runs them, and they know nothing about calls.
+struct AutoCallLimitsView: View {
+    var body: some View {
+        Form {
+            Section("Why it isn't available") {
+                Text("iOS gives apps no way to know that another app is on a call, and apps can't read other apps' notifications. A suspended app also isn't woken when a call starts. Android's Auto-Call VPN relies on notification access, which iPhone doesn't offer.")
+            }
+            Section("What you can do") {
+                Text("Connect before you call. Or use On-Demand VPN, which keeps the VPN on for the networks you choose, so a call is covered from its start.")
+            }
+            Section {
+                Text("1. Open the Shortcuts app, then Automation, and add a new automation.")
+                Text("2. Choose App, pick WhatsApp or Telegram, and choose Is Opened.")
+                Text("3. Choose Run Immediately, then add the action Connect Kiwi VPN.")
+                Text("4. If you want it to stop too, make a second automation with Is Closed and Disconnect Kiwi VPN.")
+            } header: {
+                Text("Connect when you open an app")
+            } footer: {
+                Text("This follows the app being opened, not a call: a call arriving while the app is closed won't start it, and it also runs when you only open the app to read messages. The Disconnect automation ends the VPN even if you started it yourself. Not yet tested on a real iPhone.")
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(KiwiColor.ground)
+        .navigationTitle("Auto-Call VPN")
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var connection: ConnectionCoordinator
@@ -111,6 +138,7 @@ struct SettingsView: View {
             Form {
                 accountSection
                 onDemandSection
+                autoCallSection
                 advancedSection
                 Section {
                     NavigationLink("Connection diagnostics") { DiagnosticsView(connection: connection) }
@@ -174,6 +202,17 @@ struct SettingsView: View {
             Text("On-Demand VPN")
         } footer: {
             Text("iOS starts the VPN by itself on the networks you choose, using saved details. Pressing Disconnect turns this off, or iOS would reconnect straight away. Not yet tested on a real iPhone.")
+        }
+    }
+
+    /// Not a feature switch: there's nothing iOS allows here to switch on. It says so, and points to what iOS does allow.
+    private var autoCallSection: some View {
+        Section {
+            NavigationLink("Auto-Call VPN on iPhone") { AutoCallLimitsView() }
+        } header: {
+            Text("Calls")
+        } footer: {
+            Text("iPhone apps can't detect WhatsApp or Telegram calls, so Kiwi VPN can't connect by itself for a call on iPhone.")
         }
     }
 

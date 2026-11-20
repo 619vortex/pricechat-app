@@ -3,7 +3,7 @@
 | Feature | Result | Why |
 |---|---|---|
 | Per-app VPN | **Not built, and no toggles shown** | Apple's documentation says it needs a device enrolled in MDM with managed apps. A consumer app can't set it up |
-| Auto-Call VPN | **Not built, not promised** | No public iOS API tells an app that WhatsApp or Telegram is in a call, and apps can't read another app's notifications |
+| Auto-Call VPN | **Not built, not promised, and Settings says why** | No public iOS API tells an app that WhatsApp or Telegram is in a call, and apps can't read another app's notifications. `CXCallObserver` is the nearest API: it's for the app while it's running, it doesn't say which app a call belongs to, and it doesn't wake a suspended app, so it can't start a VPN for a call that begins while Kiwi VPN isn't on screen |
 | Kill switch | **Not claimed** | See "Send all traffic" below |
 | Quantum resistance, obfuscation | **Not built, not shown** | Need server support that doesn't exist |
 | Gaming Mode | **Models only, hidden** | Nothing can measure latency to the servers yet. The screen shows only if the server's capability turns on, and it shows no figures |
@@ -11,7 +11,7 @@
 
 ## What's offered instead
 - **On-Demand VPN** (`NEOnDemandRule`): Off, Always, On Wi-Fi, On mobile data. iOS starts the tunnel by itself using saved details. Apple evaluates rules in order, and the first match wins. **Pressing Disconnect turns On-Demand off,** or iOS would reconnect immediately. The person is told this, and pressing Connect restores it.
-- **Shortcuts:** "Connect Kiwi VPN" and "Disconnect Kiwi VPN", for Siri and for a person's own automations, such as "when I open this app". **This is the closest honest answer to Auto-Call:** a person can build an automation for opening WhatsApp, but that isn't call detection. The result only says the request was made, and the app shows the truth.
+- **Shortcuts:** "Connect Kiwi VPN" and "Disconnect Kiwi VPN", for Siri and for a person's own automations, such as "when I open this app". **This is the closest honest answer to Auto-Call,** and Settings > Auto-Call VPN on iPhone gives the steps: a person can build an automation for opening WhatsApp, but that isn't call detection. The result only says the request was made, and the app shows the truth.
 - **Manual connection and accurate status in the app.**
 
 ## Advanced settings: only ones with a real effect

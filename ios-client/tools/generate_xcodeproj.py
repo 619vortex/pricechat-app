@@ -7,8 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = "live.pricechat.kiwivpn"
-WG_URL = "https://git.zx2c4.com/wireguard-apple"
-WG_REVISION = "2fec12a6e1f6e3460b6ee483aa00ad29cddadab1"  # tag 1.0.16-27
+WG_PATH = "Vendor/wireguard-apple"  # the official source, with two small changes: see its KIWI-PATCHES.md
 DEPLOYMENT = "17.0"
 VERSION = "0.1.0"
 BUILD = "1"
@@ -95,9 +94,9 @@ products = group("Products", [app_product, ext_product], name="Products")
 main_group = group("main", [app_group, ext_group, products])
 
 # --- packages -----------------------------------------------------------------------------------------------------
-wg_pkg = add(oid("pkg", "wireguard"), "XCRemoteSwiftPackageReference", repositoryURL=WG_URL, requirement={"kind": "revision", "revision": WG_REVISION})
+wg_pkg = add(oid("pkg", "wireguard"), "XCLocalSwiftPackageReference", relativePath=WG_PATH)
 local_pkg = add(oid("pkg", "kiwicore"), "XCLocalSwiftPackageReference", relativePath="Packages/KiwiCore")
-kit = add(oid("product-dep", "WireGuardKit"), "XCSwiftPackageProductDependency", package=wg_pkg, productName="WireGuardKit")
+kit = add(oid("product-dep", "WireGuardKit"), "XCSwiftPackageProductDependency", productName="WireGuardKit")
 core_app = add(oid("product-dep", "KiwiCore-app"), "XCSwiftPackageProductDependency", productName="KiwiCore")
 core_ext = add(oid("product-dep", "KiwiCore-ext"), "XCSwiftPackageProductDependency", productName="KiwiCore")
 
@@ -129,7 +128,7 @@ EXT = oid("target", "ext")
 APP = oid("target", "app")
 
 add(GO, "PBXLegacyTarget", buildArgumentsString="$(ACTION)", buildConfigurationList=configs("go", go_settings, go_settings), buildPhases=[], buildToolPath="/usr/bin/make",
-    buildWorkingDirectory="${BUILD_DIR%Build/*}SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo", dependencies=[], name="WireGuardGoBridgeiOS", passBuildSettingsInEnvironment="1", productName="WireGuardGoBridgeiOS")
+    buildWorkingDirectory=f"$(SRCROOT)/{WG_PATH}/Sources/WireGuardKitGo", dependencies=[], name="WireGuardGoBridgeiOS", passBuildSettingsInEnvironment="1", productName="WireGuardGoBridgeiOS")
 
 add(EXT, "PBXNativeTarget", buildConfigurationList=configs("ext", ext_settings, ext_settings),
     buildPhases=[sources("ext", "KiwiTunnel"), frameworks("ext", [kit, core_ext]), add(oid("res", "ext"), "PBXResourcesBuildPhase", buildActionMask="2147483647", files=[], runOnlyForDeploymentPostprocessing="0")],
