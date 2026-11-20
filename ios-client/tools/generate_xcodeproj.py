@@ -68,8 +68,8 @@ def sources(target: str, folder: str) -> str:
     return add(oid("sources", target), "PBXSourcesBuildPhase", buildActionMask="2147483647", files=files, runOnlyForDeploymentPostprocessing="0")
 
 
-def frameworks(target: str, products: list[str], refs: tuple[str, ...] = ()) -> str:
-    files = [build_file(target, product=p) for p in products] + [build_file(target, ref=r) for r in refs]
+def frameworks(target: str, products: list[str]) -> str:
+    files = [build_file(target, product=p) for p in products]
     return add(oid("frameworks", target), "PBXFrameworksBuildPhase", buildActionMask="2147483647", files=files, runOnlyForDeploymentPostprocessing="0")
 
 
@@ -91,10 +91,7 @@ ext_group = tree("KiwiTunnel", ["Info.plist", "KiwiTunnel.entitlements"])
 app_product = add(oid("product", "app"), "PBXFileReference", explicitFileType="wrapper.application", includeInIndex="0", path="KiwiVPN.app", sourceTree="BUILT_PRODUCTS_DIR")
 ext_product = add(oid("product", "ext"), "PBXFileReference", explicitFileType="wrapper.app-extension", includeInIndex="0", path="KiwiTunnel.appex", sourceTree="BUILT_PRODUCTS_DIR")
 products = group("Products", [app_product, ext_product], name="Products")
-# Linked by name, not only imported: without it Xcode skips the App Intents metadata step ("No AppIntents.framework dependency found"), and Shortcuts wouldn't list the app's actions.
-app_intents = add(oid("sdk", "AppIntents.framework"), "PBXFileReference", lastKnownFileType="wrapper.framework", name="AppIntents.framework", path="System/Library/Frameworks/AppIntents.framework", sourceTree="SDKROOT")
-sdk_group = group("Frameworks", [app_intents], name="Frameworks")
-main_group = group("main", [app_group, ext_group, sdk_group, products])
+main_group = group("main", [app_group, ext_group, products])
 
 # --- packages -----------------------------------------------------------------------------------------------------
 wg_pkg = add(oid("pkg", "wireguard"), "XCLocalSwiftPackageReference", relativePath=WG_PATH)
@@ -141,7 +138,7 @@ embed = add(oid("embed", "app"), "PBXCopyFilesBuildPhase", buildActionMask="2147
             files=[build_file("embed", ref=ext_product, attrs={"ATTRIBUTES": ["RemoveHeadersOnCopy"]})], name="Embed Foundation Extensions", runOnlyForDeploymentPostprocessing="0")
 resources = add(oid("res", "app"), "PBXResourcesBuildPhase", buildActionMask="2147483647", files=[build_file("app", ref=oid("ref", "KiwiVPN/Assets.xcassets"))], runOnlyForDeploymentPostprocessing="0")
 add(APP, "PBXNativeTarget", buildConfigurationList=configs("app", app_settings, app_settings),
-    buildPhases=[sources("app", "KiwiVPN"), frameworks("app", [core_app], (app_intents,)), resources, embed],
+    buildPhases=[sources("app", "KiwiVPN"), frameworks("app", [core_app]), resources, embed],
     buildRules=[], dependencies=[dependency("app", EXT, "KiwiTunnel")], name="KiwiVPN", packageProductDependencies=[core_app], productName="KiwiVPN", productReference=app_product, productType="com.apple.product-type.application")
 
 add(oid("project"), "PBXProject", attributes={"BuildIndependentTargetsInParallel": "1", "LastSwiftUpdateCheck": "1600", "LastUpgradeCheck": "1600"}, buildConfigurationList=project_cfg, compatibilityVersion="Xcode 15.0",
