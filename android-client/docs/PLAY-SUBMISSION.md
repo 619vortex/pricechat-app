@@ -1,5 +1,7 @@
 # Google Play submission pack for Kiwi VPN 0.2.0
 
+**Current status, files and the owner's Play Console steps: `docs/KIWI-STORE-READINESS.md` (2026-11-20).** Upload file: `KiwiVPN-0.2.0-4c3e829-play.aab`.
+
 **Docs only. Nothing has been submitted, uploaded or published.** Answers are derived from the code on `feat/kiwi-android-selective` (Android app and `backend/`) on 2026-11-20. Google's forms and policies change: re-read each linked page on the day you submit. `GOOGLE-PLAY.md` has the earlier readiness notes and sources.
 
 ## 0. Blocker: an organization developer account
@@ -71,7 +73,7 @@ From what the app and backend really do. "Collected" means sent off the phone to
 
 ## 5. Account deletion
 - **In-app path:** Settings > Account > **Delete account** (also Account tab > Delete account). Lists what's deleted and kept, asks for the username typed exactly, calls `DELETE /api/members/me`, and on success erases everything Kiwi VPN stored on the phone and returns to sign-in. Unit-tested with a fake API and the real HTTP client; a backend test proves an app session can delete the account and that its VPN account and devices cascade.
-- **Web URL for the Play form: `https://pricechat.live/vpn/delete-account`** (built 2026-11-20 on `feat/kiwi-mobile`, **not deployed**; the app's `ACCOUNT_DELETION_WEB_URL` now points there). It's a public page titled "Delete your Kiwi VPN account" that names the app and Price Chat. It gives the Android and iPhone in-app paths, and lists what's deleted and kept, the same lists as the app's screen. It deletes in place once signed in (the same `DELETE /api/members/me` with the typed username), and has a request path for people who can't sign in (contact page, ownership checked, answer within one month). Tests: `frontend/src/website/vpnDelete.test.tsx`.
+- **Web URL for the Play form: `https://pricechat.live/vpn/delete-account`** (**live since 2026-11-20**; the app's `ACCOUNT_DELETION_WEB_URL` now points there). It's a public page titled "Delete your Kiwi VPN account" that names the app and Price Chat. It gives the Android and iPhone in-app paths, and lists what's deleted and kept, the same lists as the app's screen. It deletes in place once signed in (the same `DELETE /api/members/me` with the typed username), and has a request path for people who can't sign in (contact page, ownership checked, answer within one month). Tests: `frontend/src/website/vpnDelete.test.tsx`.
 - **What's deleted** (from `backend/app/members/service.py` `delete_member` and the database's `ON DELETE CASCADE`): the member, sign-in identities, sessions, XP history, badges, missions, referral code; the VPN account (plan, trial, time), all VPN devices (servers drop their peers at the next sync), browser-extension logins, support reports. **Kept:** salted one-way hashes that a trial or one-time reward was used (`vpn_trial_claims`, `xp_claims`), payment records with the account link set to null, an audit line with no identity.
 
 ## 6. Privacy policy: what pricechat.live/vpn/privacy must add or confirm
@@ -100,7 +102,7 @@ From what the app and backend really do. "Collected" means sent off the phone to
 
 ## 9. Other Play items
 - **Billing:** no purchase in the app. If paid access is ever sold in the Android app, Play Billing rules apply; linking to website payments has regional rules. Decide before turning payments on.
-- **Licences:** show Apache-2.0 notices for the WireGuard library and other dependencies in the app (still to do).
+- **Licences:** **done 2026-11-20** (`fafec4b`): Settings > Open-source licences shows the Apache-2.0 (WireGuard tunnel library, AndroidX/Compose, Kotlin, kotlinx, OkHttp/Okio), MIT (wireguard-go) and BSD (Go) notices, bundled as `assets/licences.txt`; `LicencesTest` checks they're complete.
 - **Target SDK:** 36. Lint notes 37 is available; Play's yearly target-API deadline should be checked on the day.
 - **Store assets:** 512 px icon, 1024x500 feature graphic, phone screenshots (onboarding, Home connected, App-Based VPN, Locations, Delete account), short and full descriptions. **No claims about kill switch, leak protection or "military-grade"** until the phone tests (DNS, IPv6, lockdown) pass.
 - **Reviewer access (built 2026-11-20, not deployed):** the store-review account now works in the app: every sign-in gets its own seat (simultaneous reviewers never disconnect each other), one WireGuard device per seat from the app session, key made on the phone, Helsinki 1 only, restricted browser session. Setup and limits: `docs/KIWI-STORE-REVIEW-ACCOUNT.md`. **App access** text for Play Console: "All functionality requires sign-in. Tap Sign in; in the browser tab, tap 'App Store or Google Play reviewer? Use the review account', enter [EMAIL] / [PASSWORD], then tap Allow. Tap Connect and accept Android's VPN prompt. The account uses the Helsinki server only. You may delete it (Settings > Account > Delete account); signing in again with the same details creates a fresh one." Never use the owner's own account.

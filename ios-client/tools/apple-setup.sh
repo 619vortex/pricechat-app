@@ -3,7 +3,7 @@
 # It makes App IDs for the app and its tunnel, turns on Network Extensions for both, and registers the one iPhone. It uploads no app.
 set -euo pipefail
 
-: "${KIWI_IPHONE_UDID:?Add KIWI_IPHONE_UDID to the kiwi_signing group}"
+# KIWI_IPHONE_UDID is needed for the Ad Hoc IPA only; App Store and TestFlight builds register no device.
 
 resource_id() {
   app-store-connect bundle-ids list --bundle-id-identifier "$1" --strict-match-identifier --platform IOS --json \
@@ -24,5 +24,9 @@ for pair in "live.pricechat.kiwivpn|Kiwi VPN" "live.pricechat.kiwivpn.tunnel|Kiw
   echo "App ID ready: $identifier"
 done
 
-app-store-connect devices register --name "Kiwi test iPhone" --udid "$KIWI_IPHONE_UDID" --platform IOS --ignore-registration-errors >/dev/null
-echo "iPhone registered, or already was"
+if [ -n "${KIWI_IPHONE_UDID:-}" ]; then
+  app-store-connect devices register --name "Kiwi test iPhone" --udid "$KIWI_IPHONE_UDID" --platform IOS --ignore-registration-errors >/dev/null
+  echo "iPhone registered, or already was"
+else
+  echo "No KIWI_IPHONE_UDID: no device registered (fine for App Store and TestFlight builds)"
+fi

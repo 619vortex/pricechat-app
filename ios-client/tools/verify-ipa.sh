@@ -1,8 +1,9 @@
 #!/bin/bash
-# Run by the cloud build after signing. Fails the build unless the IPA can really be used on the registered iPhone. It says nothing about whether the VPN works: only a real iPhone can show that.
+# Run by the cloud build after signing. Ad Hoc (KIWI_IPHONE_UDID set): fails unless the IPA can really be used on the registered iPhone.
+# App Store (KIWI_IPHONE_UDID unset, kiwi-appstore-ipa / kiwi-testflight): fails unless it is a distribution build for no particular device. It says nothing about whether the VPN works: only a real iPhone can show that.
 set -euo pipefail
 IPA="$1"
-: "${KIWI_IPHONE_UDID:?KIWI_IPHONE_UDID is missing}"
+UDID="${KIWI_IPHONE_UDID:-}"
 WORK="$(mktemp -d)"
 unzip -q "$IPA" -d "$WORK"
 APP="$WORK/Payload/KiwiVPN.app"
@@ -22,8 +23,14 @@ for bundle in "$APP" "$EXT"; do
   grep -q "packet-tunnel-provider" <<<"$ent" && ok "$label: packet tunnel entitlement" || bad "$label: no packet tunnel entitlement"
   grep -q 'AppIdentifierPrefix' <<<"$ent" && bad "$label: the keychain group wasn't filled in" || ok "$label: keychain groups filled in"
   profile="$(security cms -D -i "$bundle/embedded.mobileprovision")"
-  grep -q "$KIWI_IPHONE_UDID" <<<"$profile" && ok "$label: the profile includes this iPhone" || bad "$label: the profile doesn't include this iPhone"
-  grep -q "<key>ProvisionsAllDevices</key>" <<<"$profile" && bad "$label: not an Ad Hoc profile" || ok "$label: the profile is limited to registered devices"
+  if [ -n "$UDID" ]; then
+    grep -q "$UDID" <<<"$profile" && ok "$label: the profile includes this iPhone" || bad "$label: the profile doesn't include this iPhone"
+    grep -q "<key>ProvisionsAllDevices</key>" <<<"$profile" && bad "$label: not an Ad Hoc profile" || ok "$label: the profile is limited to registered devices"
+  else
+    grep -q "<key>ProvisionedDevices</key>" <<<"$profile" && bad "$label: lists devices, so not an App Store profile" || ok "$label: App Store profile (no device list)"
+    grep -q "beta-reports-active" <<<"$profile" && ok "$label: TestFlight-capable (beta-reports-active)" || bad "$label: no beta-reports-active: not an App Store profile"
+  fi
+  [ -f "$bundle/PrivacyInfo.xcprivacy" ] && ok "$label: privacy manifest included" || bad "$label: no PrivacyInfo.xcprivacy"
   grep -A1 "get-task-allow" <<<"$profile" | grep -q "<false/>" && ok "$label: not a debug signature" || bad "$label: a debug signature"
 done
 

@@ -1,5 +1,7 @@
 # App Store submission pack, Kiwi VPN for iPhone 0.2.0
 
+**Current status and the owner's Apple Developer / App Store Connect steps: `docs/KIWI-STORE-READINESS.md` (2026-11-20).**
+
 Prepared 2026-11-20. **Nothing here has been submitted or uploaded, and no Apple account action has been taken.** Every answer below comes from the code on `feat/kiwi-ios-selective` and the backend it talks to. Re-check each one against the build you actually submit, and against Apple's pages on the day.
 
 ## 1. Before anything else: what only the owner can do
@@ -123,5 +125,6 @@ So, from Apple's table: **no CCATS is needed**, and **either exclude France or f
 | Per-app claims | None made: `docs/SELECTIVE-VPN-IOS.md` |
 | Open-source licences | **Built:** Settings > Licences (WireGuard MIT, Go BSD). Check the texts against the exact versions shipped |
 | In-app purchase | None. Read Guideline 3.1 before ever selling access in the app |
-| Screenshots | Need a real iPhone, after the test plan |
-| Version | 0.2.0, build 2 |
+| Privacy manifests | **Added 2026-11-20:** `KiwiVPN/PrivacyInfo.xcprivacy` (UserDefaults CA92.1, collected data as section 2, no tracking) and `KiwiTunnel/PrivacyInfo.xcprivacy` (boot time 35F9.1, file timestamp C617.1 for the Go runtime). Not yet compiled |
+| Screenshots | 6.9" iPhone (1320 x 2868 or 1290 x 2796): from a TestFlight install, after the test plan |
+| Version | 0.2.0; App Store builds take the next build number automatically (`kiwi-appstore-ipa`) |

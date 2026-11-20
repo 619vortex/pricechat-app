@@ -1,5 +1,7 @@
 # Cloud Mac builds of Kiwi VPN for iPhone.
-# No workflow has a trigger: each starts only when asked. No workflow has a publishing section: nothing goes to TestFlight, the App Store or anywhere else.
+# No workflow has a trigger: each starts only when someone presses Start in Codemagic.
+# Only kiwi-testflight has a publishing section: it uploads to App Store Connect for TestFlight. Start it ONLY with the owner's approval.
+# It never submits for App Review, and never sends the build to external testers.
 definitions:
   mac: &mac
     instance_type: mac_mini_m2
@@ -80,3 +82,66 @@ workflows:
             --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO KIWI_COMMIT=$(awk '{print $2}' BUILD-INFO.txt | cut -c1-12)"
       - name: Check what was signed
         script: bash tools/verify-ipa.sh build/ios/ipa/*.ipa
+
+  # Needs the organization Apple Developer account, the App Store Connect key named kiwi, the kiwi_signing group (CERTIFICATE_PRIVATE_KEY), and
+  # the app record in App Store Connect (KIWI_APP_STORE_APPLE_ID in kiwi_signing: the app's Apple ID number, App Information page).
+  # Makes an App Store-signed IPA with the next free build number, checks it, and uploads it NOWHERE.
+  kiwi-appstore-ipa:
+    name: Kiwi VPN App Store IPA (no upload)
+    <<: *mac
+    integrations:
+      app_store_connect: kiwi
+    environment:
+      xcode: 26.6
+      groups:
+        - kiwi_signing
+    artifacts: &appstore_artifacts
+      - build/ios/ipa/*.ipa
+      - build/logs/*.log
+      - /tmp/xcodebuild_logs/*.log
+    scripts: &appstore_scripts
+      - *go
+      - name: Source and project checks
+        script: python3 tools/check_sources.py
+      - name: App IDs and Network Extensions
+        script: bash tools/apple-setup.sh
+      - name: Keychain
+        script: keychain initialize
+      - name: Distribution certificate and App Store profiles for the app and its tunnel
+        script: |
+          # Without --strict-match-identifier, this also covers live.pricechat.kiwivpn.tunnel
+          app-store-connect fetch-signing-files live.pricechat.kiwivpn --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Next build number
+        script: |
+          : "${KIWI_APP_STORE_APPLE_ID:?Add KIWI_APP_STORE_APPLE_ID (the app's Apple ID number) to kiwi_signing}"
+          LATEST=$(app-store-connect get-latest-build-number "$KIWI_APP_STORE_APPLE_ID" 2>/dev/null || echo 2)
+          case "$LATEST" in ''|*[!0-9]*) LATEST=2;; esac
+          echo "KIWI_BUILD_NUMBER=$((LATEST + 1))" >> "$CM_ENV"
+          echo "Build number: $((LATEST + 1))"
+      - name: Build the App Store IPA
+        script: |
+          xcode-project build-ipa --project KiwiVPN.xcodeproj --scheme KiwiVPN --config Release             --archive-xcargs "COMPILER_INDEX_STORE_ENABLE=NO CURRENT_PROJECT_VERSION=$KIWI_BUILD_NUMBER KIWI_COMMIT=$(awk '{print $2}' BUILD-INFO.txt | cut -c1-12)"
+      - name: Check what was signed
+        script: KIWI_IPHONE_UDID= bash tools/verify-ipa.sh build/ios/ipa/*.ipa  # App Store mode, even though kiwi_signing holds the UDID
+
+  # THE ONLY WORKFLOW THAT SENDS ANYTHING TO APPLE. Owner's approval first. The same build as kiwi-appstore-ipa, then an upload to App
+  # Store Connect: after Apple's processing it is available to TestFlight INTERNAL testers (team members) only. No external testers, no
+  # beta review, no App Review submission.
+  kiwi-testflight:
+    name: Kiwi VPN TestFlight upload (internal testers only, owner approval)
+    <<: *mac
+    integrations:
+      app_store_connect: kiwi
+    environment:
+      xcode: 26.6
+      groups:
+        - kiwi_signing
+    artifacts: *appstore_artifacts
+    scripts: *appstore_scripts
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false

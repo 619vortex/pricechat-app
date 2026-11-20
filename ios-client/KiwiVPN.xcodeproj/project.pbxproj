@@ -150,6 +150,7 @@
 				88B3970228241B8A1AE80BB4,
 				EB3EDBD2C0B2AD8E6B6B4A2F,
 				10AECB3E9B758442F2365135,
+				C9F601A7DE15D92D0B9FD600,
 				D6AD9B506F544742164351C1,
 			);
 			path = KiwiVPN;
@@ -176,6 +177,14 @@
 			productName = KiwiTunnel;
 			productReference = E57B7D33115734EEC34D09A3;
 			productType = "com.apple.product-type.app-extension";
+		};
+		407C801E885DCDEDD012CC37 = {
+			isa = PBXBuildFile;
+			fileRef = BC88DC1E6A4867E53BFE2E6A;
+		};
+		429235655F743DECE7517671 = {
+			isa = PBXBuildFile;
+			fileRef = C9F601A7DE15D92D0B9FD600;
 		};
 		43327175E3C0E96DAA29407D = {
 			isa = PBXGroup;
@@ -234,6 +243,7 @@
 				0335EC1CEBCCFB069204C8E5,
 				C795006E9B9D5F4224368303,
 				B327496DAF37FD8A0ABDF3FC,
+				BC88DC1E6A4867E53BFE2E6A,
 			);
 			path = KiwiTunnel;
 			sourceTree = "<group>";
@@ -354,6 +364,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				407C801E885DCDEDD012CC37,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -394,6 +405,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CA5D693991B853A3262EEA90,
+				429235655F743DECE7517671,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -474,6 +486,12 @@
 			isa = PBXBuildFile;
 			productRef = 222E63E27CA3362D0C2DA826;
 		};
+		BC88DC1E6A4867E53BFE2E6A = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xml;
+			path = PrivacyInfo.xcprivacy;
+			sourceTree = "<group>";
+		};
 		BD57D638DBCD75582130C009 = {
 			isa = PBXFileReference;
 			lastKnownFileType = sourcecode.swift;
@@ -490,6 +508,12 @@
 			isa = PBXFileReference;
 			lastKnownFileType = text.plist.xml;
 			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		C9F601A7DE15D92D0B9FD600 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.xml;
+			path = PrivacyInfo.xcprivacy;
 			sourceTree = "<group>";
 		};
 		CA5D693991B853A3262EEA90 = {

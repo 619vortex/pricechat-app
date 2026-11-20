@@ -30,7 +30,7 @@ def swift_files(folder: str) -> list[Path]:
 
 def file_ref(path: Path) -> str:
     rel = path.relative_to(ROOT).as_posix()
-    kind = {".swift": "sourcecode.swift", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements", ".xcassets": "folder.assetcatalog"}[path.suffix]
+    kind = {".swift": "sourcecode.swift", ".plist": "text.plist.xml", ".entitlements": "text.plist.entitlements", ".xcassets": "folder.assetcatalog", ".xcprivacy": "text.xml"}[path.suffix]
     return add(oid("ref", rel), "PBXFileReference", lastKnownFileType=kind, path=path.name, sourceTree="<group>")
 
 
@@ -86,8 +86,8 @@ def dependency(owner: str, target_key: str, name: str) -> str:
 
 # --- files --------------------------------------------------------------------------------------------------------
 assets = ROOT / "KiwiVPN/Assets.xcassets"
-app_group = tree("KiwiVPN", ["Info.plist", "KiwiVPN.entitlements", "Assets.xcassets"])
-ext_group = tree("KiwiTunnel", ["Info.plist", "KiwiTunnel.entitlements"])
+app_group = tree("KiwiVPN", ["Info.plist", "KiwiVPN.entitlements", "Assets.xcassets", "PrivacyInfo.xcprivacy"])
+ext_group = tree("KiwiTunnel", ["Info.plist", "KiwiTunnel.entitlements", "PrivacyInfo.xcprivacy"])
 app_product = add(oid("product", "app"), "PBXFileReference", explicitFileType="wrapper.application", includeInIndex="0", path="KiwiVPN.app", sourceTree="BUILT_PRODUCTS_DIR")
 ext_product = add(oid("product", "ext"), "PBXFileReference", explicitFileType="wrapper.app-extension", includeInIndex="0", path="KiwiTunnel.appex", sourceTree="BUILT_PRODUCTS_DIR")
 products = group("Products", [app_product, ext_product], name="Products")
@@ -131,12 +131,12 @@ add(GO, "PBXLegacyTarget", buildArgumentsString="$(ACTION)", buildConfigurationL
     buildWorkingDirectory=f"$(SRCROOT)/{WG_PATH}/Sources/WireGuardKitGo", dependencies=[], name="WireGuardGoBridgeiOS", passBuildSettingsInEnvironment="1", productName="WireGuardGoBridgeiOS")
 
 add(EXT, "PBXNativeTarget", buildConfigurationList=configs("ext", ext_settings, ext_settings),
-    buildPhases=[sources("ext", "KiwiTunnel"), frameworks("ext", [kit, core_ext]), add(oid("res", "ext"), "PBXResourcesBuildPhase", buildActionMask="2147483647", files=[], runOnlyForDeploymentPostprocessing="0")],
+    buildPhases=[sources("ext", "KiwiTunnel"), frameworks("ext", [kit, core_ext]), add(oid("res", "ext"), "PBXResourcesBuildPhase", buildActionMask="2147483647", files=[build_file("ext", ref=oid("ref", "KiwiTunnel/PrivacyInfo.xcprivacy"))], runOnlyForDeploymentPostprocessing="0")],
     buildRules=[], dependencies=[dependency("ext", GO, "WireGuardGoBridgeiOS")], name="KiwiTunnel", packageProductDependencies=[kit, core_ext], productName="KiwiTunnel", productReference=ext_product, productType="com.apple.product-type.app-extension")
 
 embed = add(oid("embed", "app"), "PBXCopyFilesBuildPhase", buildActionMask="2147483647", dstPath="", dstSubfolderSpec="13",
             files=[build_file("embed", ref=ext_product, attrs={"ATTRIBUTES": ["RemoveHeadersOnCopy"]})], name="Embed Foundation Extensions", runOnlyForDeploymentPostprocessing="0")
-resources = add(oid("res", "app"), "PBXResourcesBuildPhase", buildActionMask="2147483647", files=[build_file("app", ref=oid("ref", "KiwiVPN/Assets.xcassets"))], runOnlyForDeploymentPostprocessing="0")
+resources = add(oid("res", "app"), "PBXResourcesBuildPhase", buildActionMask="2147483647", files=[build_file("app", ref=oid("ref", "KiwiVPN/Assets.xcassets")), build_file("app", ref=oid("ref", "KiwiVPN/PrivacyInfo.xcprivacy"))], runOnlyForDeploymentPostprocessing="0")
 add(APP, "PBXNativeTarget", buildConfigurationList=configs("app", app_settings, app_settings),
     buildPhases=[sources("app", "KiwiVPN"), frameworks("app", [core_app]), resources, embed],
     buildRules=[], dependencies=[dependency("app", EXT, "KiwiTunnel")], name="KiwiVPN", packageProductDependencies=[core_app], productName="KiwiVPN", productReference=app_product, productType="com.apple.product-type.application")
