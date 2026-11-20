@@ -94,6 +94,113 @@ def owner_chat(db: Session) -> str | None:
     return (row.telegram_chat.strip() or None) if row is not None and row.enabled else None
 
 
+# --- finding the owner's chat by itself (2026-11-20: every owner alert since the feature shipped was "logged only": the owner never pressed
+# Admin > Settings > Owner alerts > Link my Telegram, so a missed News Desk post on 2026-11-20 04:00 UTC told nobody) -------------------------
+DISCOVER_KEY = "owner_discover"  # the OwnerAlert row that throttles the attempts (last_sent_at) and keeps the last outcome (last_text)
+DISCOVER_EVERY = timedelta(minutes=30)
+CONNECTED_KEY = "owner:connected"
+
+
+def owner_candidates_chats(db: Session) -> list[str]:
+    """Price Chat's own Telegram chats: the main community chat, Bot Chat (the signal group) and the news channel."""
+    out: list[str] = []
+    try:
+        from app.tradingos import signals
+
+        st = signals.settings(db)
+        out += [str(st.main_chat or "").strip(), str(st.publish_chat or "").strip()]
+    except Exception:  # noqa: BLE001 - a missing table on an old database: the channel alone
+        db.rollback()
+    try:
+        from app.members.telegram_missions import channel_handle
+
+        out.append(channel_handle(db) or "")
+    except Exception:  # noqa: BLE001
+        db.rollback()
+    seen: list[str] = []
+    for c in out:
+        if c and c.lower() not in [x.lower() for x in seen]:
+            seen.append(c)
+    return seen
+
+
+async def discover_owner_chat(db: Session, *, settings: Settings | None = None, transport: Any = None, now: datetime | None = None,
+                              force: bool = False) -> str | None:
+    """No owner chat is set: the person who CREATED Price Chat's own Telegram chats is the owner. When every one of those chats that names
+    a creator names the same person, and the bot can message them (they pressed Start with the bot once), their private chat becomes the
+    alerts' chat and a confirmation is sent there. Never overrides a chat set in Admin, never turns alerts back on after the owner turned
+    them off, at most every DISCOVER_EVERY (force: now). Returns the chat, or None. Never raises."""
+    now = now or utcnow()
+    s = settings_row(db)
+    if s.telegram_chat.strip() or not s.enabled:
+        return owner_chat(db)
+    row = db.get(OwnerAlert, DISCOVER_KEY)
+    if not force and row is not None and row.last_sent_at is not None and now - _aware(row.last_sent_at) < DISCOVER_EVERY:
+        return None
+    if row is None:
+        row = OwnerAlert(key=DISCOVER_KEY)
+        db.add(row)
+    row.last_sent_at = now
+    db.commit()
+
+    def outcome(text: str, level: int = logging.WARNING) -> None:
+        row.last_text = text[:2000]
+        db.commit()
+        logger.log(level, "owner alerts: %s", text)
+
+    from app.telegram.errors import TelegramError
+    from app.telegram.service import make_client
+
+    try:
+        client = make_client(settings or get_settings(), transport)
+    except Exception as e:  # noqa: BLE001 - no bot token
+        outcome(f"can't look for the owner: {type(e).__name__}")
+        return None
+    try:
+        creators: dict[str, dict[str, Any]] = {}
+        for chat in owner_candidates_chats(db):
+            try:
+                admins = await client.get_chat_administrators(chat)
+            except TelegramError as e:
+                logger.info("owner alerts: %s: no administrator list (%s)", chat, str(e)[:120])
+                continue
+            for a in admins:
+                user = a.get("user") or {}
+                if a.get("status") == "creator" and not user.get("is_bot") and user.get("id"):
+                    creators[chat] = user
+        ids = {int(u["id"]) for u in creators.values()}
+        if len(ids) != 1:
+            outcome(f"can't tell who the owner is: the chats' creators are {sorted(ids) or 'not visible to the bot'} "
+                    f"({', '.join(creators) or 'no chat answered'}). Link it in Admin > Settings > Owner alerts > Link my Telegram.")
+            return None
+        user = next(iter(creators.values()))
+        uid = int(user["id"])
+        who = f"@{user['username']}" if user.get("username") else str(user.get("first_name") or uid)
+        where = ", ".join(creators)
+        text = (f"Price Chat: owner alerts are connected to this chat.\nYou created {where}, so this private chat now gets the owner alerts "
+                "that until now were only written to the server log: a News Desk post that was missed or not delivered to Telegram or X, a "
+                "background job failing, a backup problem, a LIVE position without a stop-loss.\nTo use another chat or turn them off: Admin > "
+                f"Settings > Owner alerts.\nTime: {_when(now)}")
+        try:
+            await client.send_message(uid, text)
+        except TelegramError as e:
+            outcome(f"the owner looks like {who} (id {uid}, creator of {where}), but the bot can't message them yet ({str(e)[:120]}): "
+                    "press Start in a private chat with the bot, or Admin > Settings > Owner alerts > Link my Telegram.")
+            return None
+        s.telegram_chat, s.enabled = str(uid), True
+        done = db.get(OwnerAlert, CONNECTED_KEY) or OwnerAlert(key=CONNECTED_KEY)
+        done.last_sent_at, done.sent_count, done.last_text = now, (done.sent_count or 0) + 1, text[:2000]
+        db.merge(done)
+        outcome(f"linked to {who} (id {uid}), the creator of {where}; confirmation sent", logging.INFO)
+        return str(uid)
+    except Exception as e:  # noqa: BLE001 - finding the owner never breaks the alert that asked
+        db.rollback()
+        logger.warning("owner alerts: looking for the owner failed (%s)", type(e).__name__)
+        return None
+    finally:
+        await client.aclose()
+
+
 def _when(now: datetime) -> str:
     return now.strftime("%Y-%m-%d %H:%M UTC")
 
@@ -123,7 +230,7 @@ async def notify_owner(db: Session, key: str, text: str, *, settings: Settings |
         row = db.get(OwnerAlert, key)
         if cooldown and row is not None and row.last_sent_at is not None and now - _aware(row.last_sent_at) < window:
             return False
-        chat = owner_chat(db)
+        chat = owner_chat(db) or await discover_owner_chat(db, settings=settings, transport=transport, now=now)
         if chat is None:
             logger.warning("Owner alert (no owner Telegram chat set, logged only) [%s]: %s", key, text)
             return False
@@ -132,10 +239,12 @@ async def notify_owner(db: Session, key: str, text: str, *, settings: Settings |
         except Exception as exc:  # noqa: BLE001 - Telegram down / no bot token / owner never pressed Start: log only
             logger.warning("Owner alert [%s] not sent (%s: %s): %s", key, type(exc).__name__, str(exc)[:200], text)
             return False
+        row = db.get(OwnerAlert, key)  # read again: finding the owner's chat committed in between
         if row is None:
             row = OwnerAlert(key=key)
             db.add(row)
         row.last_sent_at, row.sent_count, row.last_text = now, (row.sent_count or 0) + 1, text[:2000]
+        logger.info("Owner alert sent [%s] to the owner's chat", key)
         if open_ is not None:
             row.open = open_
         db.commit()

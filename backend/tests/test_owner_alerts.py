@@ -27,6 +27,8 @@ class Bot:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         if self.down:
             raise httpx.ConnectError("down")
+        if request.url.path.endswith("/getChatAdministrators"):  # finding the owner's chat (alerts.discover_owner_chat): no creator here
+            return httpx.Response(200, json={"ok": True, "result": []})
         self.sent.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True, "result": {"message_id": len(self.sent)}})
 

@@ -586,8 +586,11 @@ async def discover(client: httpx.AsyncClient, queries: list[str], subject_terms:
     return out[:limit]
 
 
-async def fetch(client: httpx.AsyncClient, photo: LicensedPhoto, min_width: int = MIN_WIDTH) -> Image.Image | None:
-    """The photograph itself, or None when the pixels fail the rules the metadata could not check (black and white, too small)."""
+async def fetch(client: httpx.AsyncClient, photo: LicensedPhoto, min_width: int = MIN_WIDTH, colour: bool = True) -> Image.Image | None:
+    """The photograph itself, or None when the pixels fail the rules the metadata could not check (black and white, too small).
+    colour=False: the editor's own library (app/newsdesk/photography), where a photo was looked at before it went in. Silver is grey by
+    nature: the black-and-white rule (meant for archive pictures in search results) refused every silver bar in the library, so the only
+    silver photo that ever passed was the collector coins on a colourful carpet (X post 142, 2026-11-20)."""
     try:
         r = await client.get(photo.url, headers=UA, timeout=30, follow_redirects=True)
         r.raise_for_status()
@@ -596,7 +599,7 @@ async def fetch(client: httpx.AsyncClient, photo: LicensedPhoto, min_width: int 
     except Exception as e:  # noqa: BLE001
         logger.warning("newsdesk photos: download failed for %s (%s)", photo.url[:120], type(e).__name__)
         return None
-    if img.width < min_width * 0.9 or not is_colour(img) or looks_like_graphic(img):  # a 1920 rendition can be a little narrower
+    if img.width < min_width * 0.9 or (colour and not is_colour(img)) or looks_like_graphic(img):  # a 1920 rendition can be a little narrower
         return None
     return img
 

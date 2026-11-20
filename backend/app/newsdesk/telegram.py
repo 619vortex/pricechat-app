@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.newsdesk import NdEvent, NdStory, NdTelegramPost, NdTelegramSettings
-from app.newsdesk import brief, card, chaos, checks, engine, events, moves, sources, writer
+from app.newsdesk import brief, card, chaos, checks, engine, events, livedata, moves, sources, writer
 from app.security import credentials
 from app.telegram.errors import TelegramError, TelegramRateLimitError, TelegramRequestError, TelegramUnavailableError
 
@@ -92,7 +92,7 @@ def over_limit(db: Session, s: NdTelegramSettings, now: datetime, slot: str = "r
     if slot == "slot":
         cap = max(s.max_per_day, len(plan.slot_hours) + 1)
     elif slot == "breaking":  # between-slot breaking news is part of the plan too (at most breaking_per_day): a full day of slots never blocks it
-        cap = max(s.max_per_day, len(plan.slot_hours) + 1 + plan.breaking_per_day)
+        cap = max(s.max_per_day, len(plan.slot_hours) + 1 + plan.breaking_per_day + plan.market_breaking_per_day)
     else:
         cap = s.max_per_day
     if day >= cap:
@@ -295,11 +295,9 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     from app.newsdesk import quality
 
     problems += quality.event_problems(ev, rows)  # owner, 2026-11-16: still worth a post, and one story only, right before it goes
-    if ev.kind == "data":  # owner, 2026-11-19: an intraday figure is posted only while it is still the current one
-        from app.newsdesk import datapost
-
-        if (stale := datapost.fresh_problem(f.get("data") or {}, now)):
-            problems.append(f"stale market data: {stale}")
+    # owner, 2026-11-19/20: a live figure is posted only while it is the current one, by the one rule every platform runs (app/newsdesk/livedata)
+    if (stale := livedata.problem(ev, now)):
+        problems.append(f"stale market data: {stale}")
     if db is not None and (told := quality.already_posted(db, ev, now)):
         problems.append(told)
     if problems:
@@ -499,6 +497,20 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
     for ev in due[:3]:
         if render_queue.waiting(db, ev, now):  # its background is being painted on the GPU PC: a few minutes at most
             return done(skipped=f"event {ev.id}: waiting for its picture from the GPU PC")
+        # owner, 2026-11-20: a market post's price, change, time and headline are re-read right before it is written (app/newsdesk/livedata);
+        # no fresh price: it waits (never the old figures); the move gone: it isn't published
+        state, detail = await livedata.refresh(db, ev, now, transport=transport)
+        if state == livedata.FADED:
+            events.mark(ev, "telegram", "skipped", f"the move no longer stands: {detail}")
+            logger.info("tgnews: event %s not posted: the move no longer stands: %s", ev.id, detail)
+            db.commit()
+            continue
+        if state == livedata.HOLD:
+            ev.tg_note = f"waiting for a fresh live price: {detail}"[:300]
+            logger.warning("tgnews: event %s held: waiting for a fresh live price: %s", ev.id, detail)
+            db.commit()
+            return done(skipped=f"event {ev.id}: waiting for a fresh live price ({detail})")
+        db.commit()
         message, reason = await compose(settings, ev, writer_transport, db=db, s=s, now=now)
         if message is None:  # remembered, so it isn't tried again every run
             db.add(NdTelegramPost(story_link=f"event:{ev.id}", title=ev.title[:300], headline=ev.headline[:200], text="", source=((ev.sources or [{}])[0].get("name") or "Price Chat")[:60],

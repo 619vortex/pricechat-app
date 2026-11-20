@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.newsdesk import NdEvent, NdStory
-from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, moves, newsworthy, quality, sources, virality
+from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, livedata, moves, newsworthy, quality, sources, urgency, virality
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +84,20 @@ class Policy:
     market_bar: int = 70  # a price move or liquidation flush on its own needs this to take a slot: no small "price alert" posts
     experiments: bool = True  # about one story in five tries its runner-up factual hook (app/newsdesk/viral)
     priority_bonus: int = 6  # ranking only, never the bar: Bitcoin, Ethereum, Hyperliquid, macro, commodities, geopolitics come first
-    priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC"}))
+    # owner, 2026-11-20: the desk's own canonical names too (editorial.canon: GOLD, SILVER, OIL, SPX, IXIC). A silver move is filed as
+    # "SILVER", so before this a silver crash never counted as a priority subject
+    priority_assets: frozenset[str] = field(default_factory=lambda: frozenset({"BTC", "ETH", "HYPE", "$BTC", "$ETH", "$HYPE", "BTC-USD", "ETH-USD", "GC=F", "CL=F", "SI=F", "^GSPC", "^IXIC",
+                                                                             "GOLD", "SILVER", "OIL", "SPX", "IXIC"}))
     # the wire style (app/newsdesk/wire, network.post_style "wire"): exceptional market moves and material updates may break between slots
     # too, under a rolling cap (breaking_per_6h) as well as the daily one; slot ranking favours surprising stories and downranks filler
     wire: bool = False
     breaking_per_6h: int = 0  # 0 = no rolling cap (the older styles)
     breaking_market_age: timedelta = timedelta(minutes=30)  # a measured move breaks only while it is happening
+    # owner, 2026-11-20 ("allow significant market moves to publish promptly without waiting hours"): a MAJOR or SIGNIFICANT measured move
+    # on a priority asset (app/newsdesk/urgency) goes promptly, between slots, in every style, majors first. Its own lane: at most
+    # market_breaking_per_day in 24 h (the backtest's busiest days had 4 majors at once: a few posts a market day are enough), never within
+    # min_gap of another post, never a second post on the same asset inside asset_cooldown (a deeper move is an update)
+    market_breaking_per_day: int = 3
 
 
 # the wire style's breaking lane (owner, 2026-11-14: "publish meaningful breaking updates quickly ... a sane rate limit so breaking can't
@@ -263,8 +271,26 @@ def latency(ev: NdEvent, now: datetime) -> dict[str, int | None]:
 
 def priority(ev: NdEvent, p: Policy) -> bool:
     f = ev.facts or {}
-    assets = {str(a).upper() for a in (f.get("assets") or [])} | {str(t).upper() for t in (f.get("tickers") or [])}
+    assets = {str(a).upper() for a in (f.get("assets") or [])} | {str(t).upper() for t in (f.get("tickers") or [])} | canon_assets(ev)
     return bool(assets & p.priority_assets or ev.topic in PRIORITY_TOPICS or ev.category in PRIORITY_CATEGORIES or PRIORITY_WORDS.search(ev.headline or ""))
+
+
+def canon_assets(ev: NdEvent) -> set[str]:
+    """The event's assets by the desk's canonical names (editorial.canon), so a move filed as "SILVER" and a data post filed as "SI=F" are
+    the same asset (owner, 2026-11-20: silver went out as two events, #870 the 24-hour move and #880 the one-day drop, and the asset
+    cooldown compared "SILVER" with "SI=F"). Liquidation flushes keep their own "LIQ:" key: a flush is its own story."""
+    return {(str(a).upper() if str(a).upper().startswith("LIQ:") else editorial.canon(str(a))) for a in ((ev.facts or {}).get("assets") or []) if a}
+
+
+def urgency_of(ev: NdEvent) -> str:
+    return str(((ev.facts or {}).get("urgency") or {}).get("level") or "")
+
+
+def _shares_asset(ev: NdEvent, others: list[NdEvent], now: datetime, within: timedelta) -> NdEvent | None:
+    mine = canon_assets(ev)
+    if not mine:
+        return None
+    return next((e for e in others if mine & canon_assets(e) and now - _utc(e.released_at, now) < within), None)
 
 
 def _utc(at: datetime | None, now: datetime) -> datetime | None:
@@ -442,12 +468,21 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     ready, held = chaos.candidates(rows, quotes, now, max_age=p.news_ttl, categories=categories)
     for v in [*ready, *important(held, rows, now)]:
         out["stories"] += _offer_story(db, v, recent, quotes, now, adj, p)
-    # market moves
+    # market moves, judged against each asset's own daily history (app/newsdesk/urgency): the daily closes are read first (cached 20 min)
     enabled = categories or {}
+    from app.newsdesk import datapost
+
+    if daily is None:
+        try:
+            daily = await datapost.fetch_all()
+        except Exception as e:  # noqa: BLE001 - without history a move is judged on its alert line alone (routine unless 1.5x / 2x)
+            logger.info("newsdesk events: daily closes: %s", type(e).__name__)
+            daily = {}
+    livedata.remember(quotes, daily)  # a post made from these seconds later uses them as its re-read (app/newsdesk/livedata)
     for m in moves.detect(quotes, sources.DEFAULT_WATCHLIST if watchlist is None else watchlist, now):
         if not enabled.get(str(m.item.get("category") or "crypto"), True):
             continue
-        out["markets"] += await _offer_move(db, m, recent, now, adj, p, second_opinion, market)
+        out["markets"] += await _offer_move(db, m, recent, now, adj, p, second_opinion, market, daily)
     if liquidations and enabled.get("crypto", True):
         try:
             out["markets"] += _offer_liquidations(db, recent, now, adj, p)
@@ -457,11 +492,10 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
             recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - timedelta(hours=36))))
     # Viral Engine 2.0: data posts and MARKETS GONE MAD, from daily closes we measure (app/newsdesk/datapost). Admin can switch them off.
     if (desk_state or {}).get("data_posts", True) is not False and enabled.get("stocks", True) is not False:
-        from app.newsdesk import datapost
-
         try:
-            got = daily if daily is not None else await datapost.fetch_all()
-            out["data"] = len(datapost.offer(db, now, got, recent, p.regular_bar))
+            db.flush()
+            recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - TRACK)))  # with this pass's moves (one story per move)
+            out["data"] = len(datapost.offer(db, now, daily or {}, recent, p.regular_bar))
         except Exception as e:  # noqa: BLE001 - the optional source never stops the rest
             logger.info("newsdesk events: data posts: %s", type(e).__name__)
     db.commit()
@@ -708,14 +742,17 @@ def _fill(ev: NdEvent, v: chaos.Verdict, score: virality.Score, facts: dict[str,
         _angle(ev, v, quotes, now, adj, experiments)
 
 
-async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy, second_opinion: Any, market: Any) -> int:
+async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy, second_opinion: Any, market: Any,
+                      daily: dict[str, Any] | None = None) -> int:
     assets = sorted({moves.KEYS.get(sym, sym) for sym in ([m.symbol] if m.kind != "wide" else [])} | ({"BTC", "ETH", "SOL", "XRP"} if m.symbol == "CRYPTO" else set())
                     | ({"SPX", "IXIC", "DJI"} if m.symbol == "US-STOCKS" else set()))
     direction = "up" if m.up else "down"
     if m.kind == "milestone" and any((e.facts or {}).get("kind") == "milestone" and (e.facts or {}).get("symbol") == m.symbol and (e.facts or {}).get("level") == m.level for e in recent):
         return 0  # one post per level per asset in three days, whichever way it crossed
     # the same asset: nothing new for six hours, and the same way for a day unless the move escalates ("oil -9.5% in 24h" again at -9.8% isn't news)
-    same = [e for e in recent if e.kind in ("market", "update", "news") and set((e.facts or {}).get("assets") or []) & set(assets)
+    # (the data posts' one-day anomaly is the same story: owner, 2026-11-20, never two crash posts for one move)
+    mine = {editorial.canon(a) for a in assets}
+    same = [e for e in recent if e.kind in ("market", "update", "news", "data") and canon_assets(e) & mine
             and _utc(e.created_at, now) >= now - (timedelta(hours=24) if (e.facts or {}).get("direction", direction) == direction else p.asset_cooldown)]
     live = [e for e in same if e.status == "candidate" and e.kind == "market"]
     out_already = [e for e in same if e.status == RELEASED]
@@ -743,27 +780,33 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
     round_level = m.kind == "milestone" and m.level > 0 and (m.level / (m.item.get("step") or m.level)) % 10 == 0
     score = virality.market(kind=m.kind, group=str(m.item.get("group") or "stock"), ratio=m.ratio, two_sources=two, symbol_key=m.key, round_level=round_level,
                             engagement=_engagement_points(adj, "move"))
+    # the move against the asset's own history (owner, 2026-11-20): its urgency, ranking points for the context, and the verified line
+    # "Daily closes show no one-day drop this large for Silver since May 2026" when it is that rare
+    u = livedata.assess(m.symbol, m.change, m.ratio, now, daily) if m.kind in ("move", "wide") else None
+    if u is not None and u.points:
+        score.parts["context"] = u.points
+        score.total = max(0, min(100, int(round(score.total + u.points))))
+    extra = livedata.since_line(m, u) if u is not None else ""
     head = headline.market(m)
-    stamp = m.as_of.strftime("%d %b %H:%M")
-    told = f"{head} {stamp} {m.price} {m.change} {m.level} " + " ".join(f"{n} {c:.1f}" for n, c in m.members)
+    told = livedata.market_told(m, head, extra)
     tk = moves.CASHTAG.get(m.symbol)
     names = {"Bitcoin": "BTC", "Ethereum": "ETH", "Solana": "SOL", "XRP": "XRP"}
     tickers = [tk] if tk else [names[n] for n, _ in m.members if n in names][:3]
     facts = {"symbol": m.symbol, "assets": assets, "kind": m.kind, "window": m.window, "change_pct": round(m.change, 2), "ratio": round(m.ratio, 2), "price": m.price,
              "as_of": m.as_of.isoformat(), "level": m.level, "members": m.members, "direction": direction, "verified": verified, "tickers": tickers, "falling": not m.up,
              "risk": False, "told": told, "spark": m.spark, "stat": f"{'+' if m.change > 0 else '-'}{abs(m.change):.1f}%" if m.kind in ("move", "wide") else writer_money(m),
-             "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else ""}
+             "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else "", **({"urgency": u.out()} if u is not None else {})}
     url = f"https://finance.yahoo.com/quote/{m.symbol}" if m.symbol not in ("CRYPTO", "US-STOCKS") else "https://finance.yahoo.com/markets/"
     src = [{"name": "Yahoo Finance", "url": url, "at": m.as_of.isoformat()}]
     if live:
         ev = max(live, key=lambda e: e.virality)  # the move is still on: the waiting post always carries the latest price and time
         ev.title = ev.headline = head
         ev.virality, ev.parts, ev.facts, ev.sources = float(score.total), score.parts, {**facts, "development": (ev.facts or {}).get("development", "")}, src
-        ev.summary = _market_summary(facts, m)
+        ev.summary = livedata.market_summary(m, verified, extra)
         ev.expires_at = now + p.market_ttl
         return 0
     key = f"move:{m.key}:{m.kind}:{direction}:{now:%Y%m%d%H}" if parent is None else f"move-update:{m.key}:{parent.id}:{m.window}:{now:%Y%m%d%H%M}"
-    ev = NdEvent(key=key[:200], kind="update" if parent else "market", parent_id=parent.id if parent else None, title=head, headline=head, summary=_market_summary(facts, m),
+    ev = NdEvent(key=key[:200], kind="update" if parent else "market", parent_id=parent.id if parent else None, title=head, headline=head, summary=livedata.market_summary(m, verified, extra),
                  topic="move", label="", evidence="price data", category=str(m.item.get("category") or "crypto"), virality=float(score.total), parts=score.parts, sources=src,
                  facts={**facts, "development": "the move has deepened" if parent and not m.up else "the move has extended" if parent else ""}, status="candidate",
                  first_seen=now, expires_at=now + p.market_ttl)
@@ -852,8 +895,7 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
             if now - (_utc(parent.released_at, now) or now) < p.update_gap:
                 ev.why = "too soon after the original"
                 continue
-        assets = set(f.get("assets") or [])
-        if ev.kind != "update" and assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
+        if ev.kind != "update" and _shares_asset(ev, out, now, p.asset_cooldown) is not None:
             ev.why = "this asset's move went out within six hours"
             continue
         topical = sum(1 for e in out if e.topic == ev.topic and now - _utc(e.released_at, now) < p.topic_window)
@@ -960,8 +1002,7 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             if parent is None or parent.status != RELEASED:
                 ev.why = "its original never went out"
                 continue
-        assets = set(f.get("assets") or [])
-        if ev.kind != "update" and assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
+        if ev.kind != "update" and _shares_asset(ev, out, now, p.asset_cooldown) is not None:
             ev.why = "this asset's move went out within six hours"
             continue
         standing = held_score(ev, now, p)
@@ -983,10 +1024,14 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             # first report, hours after the outage ended. An outage is news while it happens (the breaking lane, Trending), not slots later
             ev.why = f"an infrastructure incident first reported {int(_age(ev, now))} min ago: news while it happens, not at a later slot"
             continue
-        if ev.kind == "market" and ev.virality < p.market_bar:
-            ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot"
-            continue
-        if ev.kind == "market":
+        # owner, 2026-11-20: a move's urgency comes from its size against the asset's own history (app/newsdesk/urgency), not the fixed
+        # line alone. A major or significant move takes the slot on its context; a routine one still needs market_bar and the line.
+        level = urgency_of(ev)
+        context = ((ev.facts or {}).get("urgency") or {}).get("why") or ""
+        if ev.kind == "market" and level not in (urgency.MAJOR, urgency.SIGNIFICANT):
+            if ev.virality < p.market_bar:
+                ev.why = f"a price move scoring {ev.virality:g}: a move on its own needs {p.market_bar} to take a slot" + (f" (routine: {context})" if context else "")
+                continue
             big, detail = editorial.exceptional(ev)
             if not big:
                 ev.why = f"a routine market move, not exceptional: {detail}"
@@ -1081,6 +1126,9 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     within breaking_max_age, scoring breaking_bar now, and every rule a slot post meets (repeats, diversity, the checks). At most
     breaking_per_day, never within breaking_gap of another post. Just before a slot (breaking_before_slot) it no longer waits: it goes now
     AS that slot's post (facts.slot_at, slot_filled), so the day's number of posts is unchanged; min_gap from the last post still applies."""
+    moved = _release_market_major(db, now, p, out, waiting)
+    if moved is not None:
+        return moved
     upcoming = next_slot(now, p)
     early = upcoming - now < p.breaking_before_slot
     day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
@@ -1099,9 +1147,10 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
         elif last is not None and now - last < p.min_gap:
             closed = "under 20 minutes since the last post"
     else:
-        if sum(1 for e in day if e.slot == "breaking") >= p.breaking_per_day:
+        if sum(1 for e in day if e.slot == "breaking" and not (e.facts or {}).get("market_major")) >= p.breaking_per_day:
             closed = f"{p.breaking_per_day} breaking posts in 24 hours already"
-        elif p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
+        elif p.breaking_per_6h and sum(1 for e in day if e.slot == "breaking" and not (e.facts or {}).get("market_major")
+                                        and now - _utc(e.released_at, now) < timedelta(hours=6)) >= p.breaking_per_6h:
             closed = f"{p.breaking_per_6h} breaking posts in six hours already"
         elif last is not None and now - last < p.breaking_gap:
             closed = f"under {int(p.breaking_gap.total_seconds() // 60)} minutes since the last post"
@@ -1190,6 +1239,62 @@ def _release_breaking(db: Session, now: datetime, p: Policy, out: list[NdEvent],
     return None
 
 
+def _release_market_major(db: Session, now: datetime, p: Policy, out: list[NdEvent], waiting: list[NdEvent]) -> NdEvent | None:
+    """Between slots: a MAJOR or SIGNIFICANT measured move on a priority asset goes now, majors first (owner, 2026-11-20: "significant
+    market moves publish promptly without waiting hours"). Production: the silver crash (-6.4% in 24 h, then -6.75% on the day, its biggest
+    one-day drop in 189 days) waited from before the 00:00 UTC slot to the 04:00 one and was then stale. Every repeat, diversity, newsworthiness and accuracy check still applies; its own
+    caps (Policy.market_breaking_per_day, min_gap, the asset cooldown) keep a market-wide day from flooding the channel. Close to a slot it
+    goes AS that slot's post, so the day's count is unchanged."""
+    majors = [e for e in waiting if e.kind == "market" and urgency_of(e) in (urgency.MAJOR, urgency.SIGNIFICANT) and priority(e, p)]
+    if not majors:
+        return None
+    day = [e for e in out if now - _utc(e.released_at, now) < timedelta(hours=24)]
+    last = max((_utc(e.released_at, now) for e in day), default=None)
+    upcoming = next_slot(now, p)
+    early = upcoming - now < p.breaking_before_slot and slot_filled(db, upcoming, p) is None
+    closed = ""
+    taken = sum(1 for e in day if (e.facts or {}).get("market_major"))
+    if taken >= p.market_breaking_per_day:
+        closed = f"{taken} major market moves went out in 24 hours already (the most is {p.market_breaking_per_day}, major and significant together)"
+    elif last is not None and now - last < p.min_gap:
+        closed = f"under {int(p.min_gap.total_seconds() // 60)} minutes since the last post"
+    covered = editorial.coverage(db, now)
+    for ev in sorted(majors, key=lambda e: (urgency_of(e) != urgency.MAJOR, -e.virality, e.id)):
+        u = (ev.facts or {}).get("urgency") or {}
+        if closed:
+            _note_breaking_miss(ev, f"{urgency_of(ev)} market move held: {closed}", now)
+            continue
+        same = _shares_asset(ev, out, now, p.asset_cooldown)
+        if same is not None:
+            ev.why = f"this asset went out at {_utc(same.released_at, now):%H:%M} UTC (#{same.id}): a deeper move is an update, not a new post"
+            continue
+        if _repeat(ev, covered, now) or _blocked(ev):
+            continue
+        if editorial.diversity(ev, covered, now)[1]:
+            continue
+        label = virality.label_for(int(ev.virality), topic=ev.topic, strong=True, age_minutes=_age(ev, now), risk=False)
+        nw_why, label = _newsworthy(db, ev, label, now)
+        if nw_why:
+            ev.why = nw_why
+            continue
+        f = ev.facts or {}
+        problem = preflight(ev, label, now)
+        if problem:
+            ev.status, ev.why = "rejected", f"failed the checks: {problem}"
+            continue
+        ev.status, ev.slot, ev.released_at, ev.label = RELEASED, ("slot" if early else "breaking"), now, label
+        ev.facts = {**f, "latency": latency(ev, now), "market_major": u.get("why") or "major move", **({"slot_at": upcoming.isoformat(), "early": True} if early else {})}
+        editorial.stamp(ev, now)
+        ev.why = (f"{urgency_of(ev)} market move ({u.get('why')}): scores {ev.virality:g} ({virality.describe(ev.parts or {})}); "
+                  + (f"posted now as the {slot_label(upcoming)} Dubai slot's post" if early else f"posted now instead of waiting for the {slot_label(upcoming)} Dubai slot"))
+        ev.x_status = ev.tg_status = "pending"
+        logger.info("newsdesk events: released #%s as a %s MARKET MOVE%s [%s, %s] (event %s min, seen %s min ago): %s", ev.id, urgency_of(ev).upper(),
+                    f" for the {slot_label(upcoming)} Dubai slot" if early else "", int(ev.virality), u.get("why"),
+                    ev.facts["latency"]["event_to_release_min"], ev.facts["latency"]["detect_to_release_min"], ev.headline[:100])
+        return ev
+    return None
+
+
 _MISSES_LOGGED: dict[tuple[int, str, str], None] = {}
 
 
@@ -1224,8 +1329,7 @@ def _wire_breaking(db: Session, ev: NdEvent, now: datetime, p: Policy, out: list
         big, detail = editorial.exceptional(ev)
         if not big:
             return ""
-        assets = set(f.get("assets") or [])
-        if assets and any(assets & set((e.facts or {}).get("assets") or []) and now - _utc(e.released_at, now) < p.asset_cooldown for e in out):
+        if _shares_asset(ev, out, now, p.asset_cooldown) is not None:
             return ""
         return f"exceptional market move: {detail}"
     if ev.kind == "update":
@@ -1381,8 +1485,22 @@ async def alert_slots(db: Session, now: datetime, p: Policy) -> int:
                                        "or the server was down. Check Admin > X > News Desk.", now=now)
         for platform, status in (("Telegram", sl["telegram"]), ("X", sl["x"])):
             if sl["event"] and status in FAILED and _fresh(f"newsdesk:delivery:{sl['event']}:{platform}", now):
+                ev = db.get(NdEvent, sl["event"])
+                note = (ev.tg_note if platform == "Telegram" else ev.x_note) if ev is not None else ""
                 sent += await notify_owner(db, f"newsdesk:delivery:{sl['event']}:{platform}", f"News Desk: the {sl['dubai']} Dubai post (event #{sl['event']}) "
-                                           f"was not delivered to {platform}: {status}. Check Admin > X > News Desk.", now=now)
+                                           f"was not delivered to {platform}: {status}" + (f" ({note[:240]})" if note else "") + "."
+                                           + (f"\n{(ev.headline or '')[:160]}" if ev is not None else "") + "\nCheck Admin > Terminal.", now=now)
+    # owner, 2026-11-20: posts released between slots (breaking news, major market moves) are owed too: one that a platform didn't deliver
+    # is told the same way
+    for ev in db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.slot.in_(("breaking", "extra")),
+                                               NdEvent.released_at >= now - timedelta(hours=ALERT_HOURS))):
+        for platform, status, note in (("Telegram", ev.tg_status, ev.tg_note), ("X", ev.x_status, ev.x_note)):
+            key = f"newsdesk:delivery:{ev.id}:{platform}"
+            if status in FAILED and _fresh(key, now):
+                at = _utc(ev.released_at, now)
+                sent += await notify_owner(db, key, f"News Desk: the {at.astimezone(DUBAI):%H:%M} Dubai {(urgency_of(ev) or 'major') + ' market move' if (ev.facts or {}).get('market_major') else 'breaking post'} "
+                                           f"(event #{ev.id}) was not delivered to {platform}: {status}" + (f" ({(note or '')[:240]})" if note else "") + "."
+                                           f"\n{(ev.headline or '')[:160]}\nCheck Admin > Terminal.", now=now)
     return sent
 
 

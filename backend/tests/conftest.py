@@ -228,6 +228,18 @@ def _no_live_photo_search(request: pytest.FixtureRequest, monkeypatch: pytest.Mo
     monkeypatch.setattr(clean, "fetch_bars", no_bars)  # the clean style's charts never read Yahoo in tests
 
     monkeypatch.setattr(datapost, "fetch_all", no_prices)  # nor Yahoo's daily closes: data-post tests pass their own
+    from app.newsdesk import livedata
+
+    async def no_quote(*_: object, **__: object) -> None:
+        return None
+
+    async def no_daily(*_: object, **__: object) -> tuple[list[object], None]:
+        return [], None
+
+    # the re-read before sending (app/newsdesk/livedata) never reaches Yahoo in tests: it uses what the test's desk pass read, else holds
+    monkeypatch.setattr(livedata, "_fetch_quote", no_quote)
+    monkeypatch.setattr(livedata, "_fetch_daily", no_daily)
+    livedata.forget()
 
 
 @pytest.fixture(autouse=True)

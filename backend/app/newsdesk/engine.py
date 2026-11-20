@@ -20,7 +20,7 @@ from app.connectors.x import XRuntime
 from app.connectors.x.errors import XAuthError, XCreditsError, XError, XForbiddenError, XRateLimitError, XUnavailableError
 from app.db.base import utcnow
 from app.models.newsdesk import NdEvent, NdPost, NdSettings, NdStory
-from app.newsdesk import brief, chaos, checks, engagement, events, incidents, moves, sources, writer
+from app.newsdesk import brief, chaos, checks, engagement, events, incidents, livedata, moves, sources, writer
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +412,7 @@ def _sync(ev: NdEvent, post: NdPost) -> None:
     events.mark(ev, "x", X_STATUS.get(post.status, post.status), post.error or "", post_id=post.id)
 
 
-async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime) -> str | None:
+async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime, transport: Any = None) -> str | None:
     """The next released event X still owes: written for X, checked, queued and sent (or recorded, in dry run). X's own failures stay X's:
     Telegram's delivery of the same event is untouched. Returns the publish result, or None if there was nothing to send."""
     posts = _recent_posts(db, now)
@@ -428,7 +428,8 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
                 continue
             result = await publish(db, s, post, settings, runtime, agent_id, now)
             db.refresh(post)
-            _sync(ev, post)
+            if result != STALE:
+                _sync(ev, post)
             db.commit()
             return result
         following = events.X_FOLLOWS_TELEGRAM
@@ -461,6 +462,22 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             events.mark(ev, "x", "skipped", covered)
             db.commit()
             continue
+        # owner, 2026-11-20: X re-reads the live price too, right before it writes (production: X's own-text path posted a 2h15m-old silver
+        # figure that Telegram had refused). New figures drop Telegram's caption, so X then writes its own headline from the fresh ones
+        state, detail = await livedata.refresh(db, ev, now, transport=transport)
+        if state == livedata.FADED:
+            events.mark(ev, "x", "skipped", f"the move no longer stands: {detail}")
+            logger.info("newsdesk: event %s not posted on X: the move no longer stands: %s", ev.id, detail)
+            db.commit()
+            continue
+        if state == livedata.HOLD:
+            ev.x_note = f"waiting for a fresh live price: {detail}"[:300]
+            logger.warning("newsdesk: event %s held on X: waiting for a fresh live price: %s", ev.id, detail)
+            db.commit()
+            continue
+        if own is False and network_stored_missing(ev):
+            own = True  # the figures changed after Telegram's caption was written: X writes its own text from the fresh ones
+        db.commit()
         b = events.brief_of(ev, now)
         f = ev.facts or {}
         named = list(dict.fromkeys(x["name"] for x in ev.sources or []))[:2]
@@ -484,10 +501,21 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
         db.commit()
         result = await publish(db, s, post, settings, runtime, agent_id, now)
         db.refresh(post)
-        _sync(ev, post)
+        if result != STALE:
+            _sync(ev, post)
         db.commit()
         return result
     return None
+
+
+STALE = "stale"
+
+
+def network_stored_missing(ev: NdEvent) -> bool:
+    """Telegram's caption (the package X reuses) is gone: livedata dropped it because the figures changed after it was written."""
+    from app.newsdesk import network
+
+    return livedata.needs_live(ev) and not network.stored(ev)
 
 
 def _trend_covered(db: Session, ev: NdEvent, now: datetime) -> str:
@@ -615,6 +643,13 @@ def _editorial_hold(db: Session, post: NdPost, now: datetime | None = None) -> s
     return "; ".join(problems)
 
 
+def _stale_market(db: Session, post: NdPost, now: datetime) -> str:
+    """The one freshness rule (app/newsdesk/livedata.problem), at the moment X sends an event's market post."""
+    event_id = (post.facts or {}).get("event_id")
+    ev = db.get(NdEvent, event_id) if event_id else None
+    return livedata.problem(ev, now) if ev is not None else ""
+
+
 async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime, *, force_live: bool = False) -> str:
     """Send one post, or record what a dry run would have sent. Returns its final status. One post's failure never raises: it is recorded on the
     post (and in the desk's x_last_error) so the next tick goes on. force_live: the owner's one test post, sent even while the desk is in dry run."""
@@ -627,6 +662,15 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     if checks.cashtag_count(post.text) > checks.X_MAX_CASHTAGS:  # X answers 403 to an API post with more than one cashtag
         post.text = checks.one_cashtag(post.text)
         db.commit()
+    stale = _stale_market(db, post, now) if not force_live else ""
+    if stale:  # owner, 2026-11-20: the post waited (a retry, a pause) and its figures are no longer current: it is written again from fresh ones
+        post.status, post.error = "expired", f"stale market data: {stale}"[:500]
+        ev = db.get(NdEvent, (post.facts or {}).get("event_id"))
+        if ev is not None:
+            ev.x_status, ev.x_post_id, ev.x_note = "pending", None, f"re-reading the live price: {stale}"[:300]
+        db.commit()
+        logger.info("newsdesk: post %s not sent with stale figures (%s): X writes it again from a fresh price", post.id, stale)
+        return STALE
     held = _editorial_hold(db, post, now)
     if held and not force_live:  # the final editorial check (owner, 2026-11-16), in dry run too: what would never go out is never recorded as sent
         post.status, post.error = "rejected", f"Final editorial check: {held}"
@@ -793,7 +837,7 @@ async def tick(db: Session, settings: Settings, runtime: XRuntime | None, agent_
     await chief.tick(db, now, settings=settings)  # the AI editor's shadow review: does nothing unless the owner switched it on
     result = None
     if why is None:
-        result = await deliver_x(db, s, settings, runtime, agent_id, now)
+        result = await deliver_x(db, s, settings, runtime, agent_id, now, transport)
         if result is None:
             post = choose(db, s, now)  # a person's own posts, and anything queued before the shared desk
             if post is not None:

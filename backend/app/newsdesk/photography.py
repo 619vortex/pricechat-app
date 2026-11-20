@@ -59,9 +59,16 @@ LIBRARY: tuple[Subject, ...] = (
         "File:Gold bar of Banque de France.jpg",
         "File:Gold fluvial pebbles (placer gold) (Washington State, USA) 4 (16846562679).jpg",
     )),
+    # owner, 2026-11-20: "beautiful, real, properly licensed bullion bars, silver stacks and metal photography. Reject cluttered
+    # collector-coin images." Each looked at in both frames (X 16:9, Telegram 5:4) and run through this module's own checks on 2026-11-20:
+    # licence (CC BY / BY-SA, live), size (2,400-5,760 px), sharpness. The Rostov collector coins (owls, a lynx, a cheque, a carpet) are out.
     Subject("silver", "Silver", r"\bsilver\b(?! ?(?:lake|lining|screen|spring|legacy))", (
-        "File:100 Troy oz. Silver Bullion Bar from Johnson Matthey.jpg",
-        "File:Silver coins, Rostov-on-Don, Russia.jpg",
+        "File:Scottsdale Mint 100 Troy Ounce Silver Bar.jpg",  # a 100 oz bar standing on stacked cast bars, dark and lit
+        "File:Two five ounce silver APMEX bars by Gage Skidmore.jpg",  # two minted bars on deep red
+        "File:Five five ounce silver APMEX bars by Gage Skidmore.jpg",  # five bars fanned on red
+        "File:Silver Bar 01.jpg",  # a heavy cast fine-silver bar
+        "File:Three five ounce silver APMEX bars by Gage Skidmore.jpg",  # three bars side by side on dark red
+        "File:100 Troy oz. Silver Bullion Bar from Johnson Matthey.jpg",  # a 100 oz Johnson Matthey bar
     )),
     Subject("bitcoin", "Bitcoin", r"\b(bitcoin|btc)\b(?! (?:depot|magazine|suisse|core))", (
         "File:Bitcoin \"challenge coin\".jpg",
@@ -297,6 +304,18 @@ SYMBOLS = {"GC=F": "gold", "XAU": "gold", "GOLD": "gold", "PAXG": "gold", "SI=F"
 
 _cache: dict[str, tuple[float, Any]] = {}
 
+# photographs that are never a metal's picture, from the library or from search (owner, 2026-11-20: "reject cluttered collector-coin
+# images"): coin collections, commemoratives, medals, numismatic displays. A metal story shows the metal: bars, stacks, the metal itself.
+CLUTTERED = re.compile(r"\b(coins?|numismatic\w*|commemorative|medals?|proof sets?|banknotes?|collect(?:ion|or|ors|ible|ibles))\b", re.I)
+METALS = ("silver", "gold")
+
+
+def refused(subject_key: str, title: str, description: str = "") -> str:
+    """Why this photograph is never the picture of `subject_key`'s story, or ""."""
+    if subject_key.lower() in METALS and CLUTTERED.search(f"{title} {description}"):
+        return f"a coin or collection picture, not {subject_key} itself (bars, stacks or the metal only)"
+    return ""
+
 
 def subject_of(text: str) -> Subject | None:
     """The library subject a headline is about: the one it names first ("Tesla merger talks put 30,000 bitcoin in focus" is Tesla)."""
@@ -350,6 +369,9 @@ async def _records(client: Any, subject: Subject) -> list[Any]:
         p = photos.record_from_commons(page, query=f"library:{subject.key}")
         if p is None:
             continue
+        if (no := refused(subject.key, title)):
+            logger.warning("photography: library file %s refused: %s", title, no)
+            continue
         why = photos.verify_licence(p)
         if why or max(p.width, p.height) < MIN_SOURCE:
             logger.warning("photography: library file %s refused: %s", title, why or "too small")
@@ -388,7 +410,7 @@ async def library_photo(subject: Subject, *, transport: Any = None, records: lis
             by_url = {p.url: p for p in recs}
             for url in rotation(records or [], list(by_url)):
                 p = by_url[url]
-                img = await photos.fetch(client, p, min_width=MIN_SOURCE if p.width >= p.height else 0)
+                img = await photos.fetch(client, p, min_width=MIN_SOURCE if p.width >= p.height else 0, colour=False)
                 if img is None or editor.pixel_problem(img, ui=False, sharp_min=LIBRARY_SHARP_MIN):  # an editor looked at it: only blur and fading can change
                     continue
                 meta = p.to_meta()

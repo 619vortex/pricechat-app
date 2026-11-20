@@ -994,6 +994,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         """Owner alerts that aren't a failed job: a Brand Manager TikTok sign-in lost / publishing stalled while AUTO is on (app/alerts.py)."""
         from app import alerts
 
+        await alerts.discover_owner_chat(ctx.db, settings=s, transport=runtime.telegram.transport, now=ctx.now)  # no chat set: find it (30 min)
         return await alerts.check_brand_accounts(ctx.db, settings=s, transport=runtime.telegram.transport, now=ctx.now)
 
     async def system_retention(ctx: JobContext) -> dict[str, Any]:

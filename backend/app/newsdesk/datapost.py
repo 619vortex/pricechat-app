@@ -166,9 +166,10 @@ def parse_daily(payload: dict[str, Any]) -> list[tuple[datetime, float]]:
     return [(datetime.fromtimestamp(t, tz=timezone.utc), float(c)) for t, c in zip(ts, closes) if c is not None and c > 0]
 
 
-async def fetch_daily(client: httpx.AsyncClient, symbol: str, range_: str = "2y") -> list[tuple[datetime, float]]:
+async def fetch_daily(client: httpx.AsyncClient, symbol: str, range_: str = "2y", max_age: float = TTL) -> list[tuple[datetime, float]]:
+    """The daily closes (cached for max_age seconds; app/newsdesk/livedata re-reads them right before a post goes out)."""
     hit = _cache.get(f"{symbol}:{range_}")
-    if hit and time.time() - hit[0] < TTL:
+    if hit and time.time() - hit[0] < max_age:
         return hit[1]
     try:
         r = await client.get(sources.CHART.format(symbol=symbol), params={"range": range_, "interval": "1d"}, headers=sources.UA, timeout=15)
@@ -423,6 +424,13 @@ def offer(db: Any, now: datetime, data: dict[str, list[tuple[datetime, float]]],
 
     data_events = [e for e in recent if e.kind == "data"]
     shown = {((e.facts or {}).get("data") or {}).get("subject") for e in data_events if e.status == "released" and when(e) >= week_ago}
+    # owner, 2026-11-20 (no duplicate crash stories): a one-day anomaly of an asset whose live move the desk already has (waiting or out in
+    # the last 24 h) is the same story told twice. Production: silver went out as #870 "falls 6.4% in 24 hours" and #880 "biggest one-day drop"
+    from app.newsdesk import editorial
+
+    moving = {editorial.canon(a) for e in recent if e.kind in ("market", "update") and e.status in ("candidate", "released") and when(e) >= day_ago
+              for a in ((e.facts or {}).get("assets") or [])}
+    posts = [p for p in posts if not (p.kind == "anomaly" and {editorial.canon(s) for s in p.symbols} & moving)]
     today = now.date().isoformat()
     mgm = markets_gone_mad(posts)
     us_day = (now - timedelta(hours=4)).date().isoformat()  # the US session's date: 21:00-03:59 UTC belongs to the day that just closed
