@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.launch
+import live.pricechat.kiwivpn.account.AccountDeletion
 import live.pricechat.kiwivpn.autocall.AutoCallController
 import live.pricechat.kiwivpn.log.Diag
 import live.pricechat.kiwivpn.model.ServerRef
@@ -52,6 +53,12 @@ class KiwiApp : Application() {
     }
 
     val autoCall: AutoCallController by lazy { AutoCallController(this, scope, vault, connection) }
+    val accountDeletion by lazy {
+        AccountDeletion(api, vault) {
+            userDisconnect()
+            autoCall.disabled()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()

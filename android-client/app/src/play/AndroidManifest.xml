@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Google Play build has no Auto-Call VPN: the notification listener is removed from the merged manifest, so the app can't ask for notification access at all. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <service
+            android:name=".autocall.CallListenerService"
+            tools:node="remove" />
+    </application>
+</manifest>

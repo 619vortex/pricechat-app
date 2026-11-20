@@ -18,8 +18,8 @@ android {
         applicationId = "live.pricechat.kiwivpn"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.0-rc1"
+        versionCode = 4
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
     }
@@ -31,6 +31,10 @@ android {
                 storePassword = System.getenv("KIWI_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KIWI_KEY_ALIAS")
                 keyPassword = System.getenv("KIWI_KEY_PASSWORD")
+                // v2 is what Android 7+ checks; v3 adds key rotation support on Android 9+. With minSdk 26 the Android Gradle plugin leaves v1 (JAR) signing out even when asked: apksigner reports v1 false.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
@@ -45,6 +49,22 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+        }
+    }
+
+    // Two builds of the same app (same package, same key), differing only in Auto-Call VPN:
+    //  direct: the APK from pricechat.live, with Auto-Call VPN (reads call notifications, with consent).
+    //  play:   for Google Play, without it. Its manifest has no notification listener at all, because a VPN asking to read notifications is a review risk: docs/PLAY-SUBMISSION.md.
+    flavorDimensions += "store"
+    productFlavors {
+        create("direct") {
+            dimension = "store"
+            isDefault = true
+            buildConfigField("boolean", "AUTO_CALL", "true")
+        }
+        create("play") {
+            dimension = "store"
+            buildConfigField("boolean", "AUTO_CALL", "false")
         }
     }
 
@@ -86,4 +106,7 @@ dependencies {
 
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

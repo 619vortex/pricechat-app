@@ -108,6 +108,11 @@ class FakeApi(var current: Account = account()) : KiwiApi {
     override suspend fun exchangeCode(code: String, verifier: String) = "kd.token"
     override suspend fun refresh(token: String) = "kd.fresh"
     override suspend fun logout(token: String) { calls += "logout" }
+    var deleteFails: ApiException? = null
+    override suspend fun deleteAccount(token: String, confirmUsername: String) {
+        calls += "delete-account $confirmUsername"
+        deleteFails?.let { throw it }
+    }
     override suspend fun myIp() = "5.75.10.20"
     override fun dropConnections() { calls += "drop" }
 }

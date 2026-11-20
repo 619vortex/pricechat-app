@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="23" failures="0" errors="0" skipped="2" time="0.000" timestamp="2026-11-20T06:50:58" hostname="localhost">
+  <testsuite name="live.pricechat.kiwivpn.ChooseAppsScreenTest" tests="2" failures="0" errors="0" skipped="0" time="6.981" timestamp="2026-11-20T06:50:58" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="only_apps_i_choose_with_quick_picks_search_and_save" classname="live.pricechat.kiwivpn.ChooseAppsScreenTest" time="5.457" />
+    <testcase name="all_apps_saves_all_apps" classname="live.pricechat.kiwivpn.ChooseAppsScreenTest" time="1.524" />
+  </testsuite>
+  <testsuite name="live.pricechat.kiwivpn.LockdownRoutingTest" tests="2" failures="0" errors="0" skipped="2" time="3.081" timestamp="2026-11-20T06:50:58" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="lockdown_with_only_selected_cuts_off_an_unselected_app" classname="live.pricechat.kiwivpn.LockdownRoutingTest" time="1.565">
+      <skipped>org.junit.AssumptionViolatedException: Always-on is set for this app
+	at org.junit.Assume.assumeTrue(Assume.java:68)
+	at live.pricechat.kiwivpn.LockdownRoutingTest.onlyWithLockdown(SelectiveRoutingTest.kt:291)
+</skipped>
+    </testcase>
+    <testcase name="lockdown_with_all_except_cuts_off_the_excluded_app" classname="live.pricechat.kiwivpn.LockdownRoutingTest" time="1.516">
+      <skipped>org.junit.AssumptionViolatedException: Always-on is set for this app
+	at org.junit.Assume.assumeTrue(Assume.java:68)
+	at live.pricechat.kiwivpn.LockdownRoutingTest.onlyWithLockdown(SelectiveRoutingTest.kt:291)
+</skipped>
+    </testcase>
+  </testsuite>
+  <testsuite name="live.pricechat.kiwivpn.OnDeviceTest" tests="3" failures="0" errors="0" skipped="0" time="0.075" timestamp="2026-11-20T06:50:58" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="the_library_reads_each_routing_mode_from_the_config" classname="live.pricechat.kiwivpn.OnDeviceTest" time="0.029" />
+    <testcase name="the_libraries_keys_and_parser_accept_what_the_app_renders" classname="live.pricechat.kiwivpn.OnDeviceTest" time="0.005" />
+    <testcase name="the_keystore_seals_and_opens" classname="live.pricechat.kiwivpn.OnDeviceTest" time="0.041" />
+  </testsuite>
+  <testsuite name="live.pricechat.kiwivpn.RealVpnInterfaceTest" tests="7" failures="0" errors="0" skipped="0" time="50.570" timestamp="2026-11-20T06:50:58" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="the_foreground_service_type_is_accepted_for_a_vpn_app" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="7.807" />
+    <testcase name="all_apps_covers_this_app_and_others" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="1.725" />
+    <testcase name="only_selected_covers_the_chosen_app_and_kiwi_and_nothing_else" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="1.640" />
+    <testcase name="switching_mode_replaces_the_interface_with_the_new_lists" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="3.919" />
+    <testcase name="ten_rounds_of_up_and_down_with_no_pause_stay_up_and_end_clean" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="28.173" />
+    <testcase name="no_handshake_is_reported_when_the_server_doesnt_answer" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="5.582" />
+    <testcase name="all_except_covers_everything_but_the_excluded_app" classname="live.pricechat.kiwivpn.RealVpnInterfaceTest" time="1.724" />
+  </testsuite>
+  <testsuite name="live.pricechat.kiwivpn.SelectiveRoutingTest" tests="9" failures="0" errors="0" skipped="0" time="79.332" timestamp="2026-11-20T06:50:58" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="the_picker_lists_only_launchable_apps" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="1.711" />
+    <testcase name="changing_the_selection_rebuilds_the_interface_and_traffic_follows" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="14.498" />
+    <testcase name="the_vpn_network_reports_ipv4_and_ipv6_default_routes_into_the_tunnel" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="4.798" />
+    <testcase name="a_selected_app_sends_its_traffic_and_dns_into_the_tunnel" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="18.832" />
+    <testcase name="all_apps_puts_shell_in_the_tunnel_and_all_except_lets_it_out" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="8.756" />
+    <testcase name="reconnecting_ten_times_leaves_the_same_routing_each_time_and_nothing_after" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="13.874" />
+    <testcase name="an_unselected_app_keeps_its_normal_connection_and_dns" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="6.529" />
+    <testcase name="the_foreground_service_starts_as_system_exempted" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="7.995" />
+    <testcase name="baseline_without_vpn_shell_and_kiwi_both_reach_the_internet" classname="live.pricechat.kiwivpn.SelectiveRoutingTest" time="2.339" />
+  </testsuite>
+</testsuites>

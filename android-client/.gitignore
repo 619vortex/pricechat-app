@@ -12,3 +12,6 @@ captures/
 keystore.properties
 *.apk
 *.aab
+# Release build log and local build outputs
+app/build-release.log
+build-out/

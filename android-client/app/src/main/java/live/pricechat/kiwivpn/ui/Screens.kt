@@ -150,7 +150,7 @@ fun LocationsScreen(ui: UiState, state: ConnectionState, onSelect: (Server) -> U
 // --- Account ---------------------------------------------------------------------------------------------------------
 
 @Composable
-fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, openUrl: (String) -> Unit) {
+fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, openUrl: (String) -> Unit, onDeleteAccount: () -> Unit) {
     val context = LocalContext.current
     val status = accountStatus(ui.account)
     var confirm by remember { mutableStateOf<Long?>(null) }
@@ -209,6 +209,7 @@ fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, open
         OutlinedButton(onClick = model::signOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
         Spacer(Modifier.height(10.dp))
         LinkRow("Manage on pricechat.live") { openUrl("$BASE_URL/vpn") }
+        LinkRow("Delete account", "Deletes your Price Chat account and everything tied to it", onClick = onDeleteAccount)
     }
     confirm?.let { id ->
         AlertDialog(
@@ -224,7 +225,17 @@ fun AccountScreen(model: AppViewModel, ui: UiState, state: ConnectionState, open
 // --- Settings --------------------------------------------------------------------------------------------------------
 
 @Composable
-fun SettingsScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, openIntent: (Intent) -> Unit, onDiagnostics: () -> Unit, onAppRouting: () -> Unit, onSignOut: () -> Unit) {
+fun SettingsScreen(
+    model: AppViewModel,
+    ui: UiState,
+    openUrl: (String) -> Unit,
+    openIntent: (Intent) -> Unit,
+    onDiagnostics: () -> Unit,
+    onAppRouting: () -> Unit,
+    onChooseApps: () -> Unit,
+    onDeleteAccount: () -> Unit,
+    onSignOut: () -> Unit,
+) {
     val s = ui.settings
     Page("Settings") {
         Card {
@@ -241,15 +252,21 @@ fun SettingsScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> Unit, 
         if (ui.capabilities["app_routing_enabled"] != false) {
             Card {
                 LinkRow("App-Based VPN", RoutingPolicy.modeName(s.routing.mode) + if (s.routing.mode == RoutingMode.ALL_APPS) "" else ": " + RoutingPolicy.countText(s.routing), onClick = onAppRouting)
+                LinkRow("Choose what uses Kiwi VPN", "Quick setup: all apps, or only apps you choose, such as WhatsApp, Telegram or Signal", onClick = onChooseApps)
             }
         }
-        if (ui.capabilities["auto_call_enabled"] != false) AutoCallCard(model, ui, openIntent)
+        // Not in the Google Play build at all: see the "play" flavor in app/build.gradle.kts
+        if (BuildConfig.AUTO_CALL && ui.capabilities["auto_call_enabled"] != false) AutoCallCard(model, ui, openIntent)
         Card {
             LinkRow("Connection diagnostics", onClick = onDiagnostics)
             LinkRow("Privacy policy") { openUrl("$BASE_URL/vpn/privacy") }
             LinkRow("Support") { openUrl("$BASE_URL/contact") }
             Fact("App version", BuildConfig.VERSION_NAME)
             Fact("Build", BuildConfig.GIT_COMMIT.take(12))
+        }
+        Card {
+            Text("Account", style = MaterialTheme.typography.titleMedium)
+            LinkRow("Delete account", "Deletes your Price Chat account, Kiwi VPN devices and trial, and erases this phone's copy", onClick = onDeleteAccount)
         }
         OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) { Text("Sign out") }
     }
@@ -367,7 +384,7 @@ fun DiagnosticsScreen(model: AppViewModel, ui: UiState, state: ConnectionState, 
                 ui.testReport?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = Kiwi.Soft) }
             }
         }
-        Card {
+        if (BuildConfig.AUTO_CALL) Card {
             Text("What Auto-Call VPN saw", style = MaterialTheme.typography.titleMedium)
             Text("In memory on this phone, for testing. Only Android's call signals: no names, numbers or messages.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
             if (traces.isEmpty()) Text("Nothing yet.", color = Kiwi.Soft)

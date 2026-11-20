@@ -28,6 +28,8 @@ data class AppSettings(
     val autoCallConsented: Boolean = false,
     /** Which apps use the VPN. On this phone only: never sent to Price Chat. */
     val routing: RoutingPrefs = RoutingPrefs(),
+    /** "Choose what uses Kiwi VPN" has been answered on this phone. Kept across signing out, so it's asked once per install; Settings opens it again. */
+    val routingOnboarded: Boolean = false,
 )
 
 @Serializable
@@ -67,6 +69,9 @@ class Vault(private val file: File, private val sealer: Sealer) {
 
     /** Signed out: the keys and session go, and the settings stay. */
     fun forgetAccount(): VaultData = update { VaultData(settings = it.settings, autoCallOwned = false, fallbackDeviceId = it.fallbackDeviceId) }
+
+    /** The account was deleted: nothing it left on this phone stays. Session, device keys, saved servers and every setting go, so the next person to sign in starts fresh. */
+    fun eraseEverything(): VaultData = update { VaultData() }
 
     private fun load(): VaultData {
         if (!file.exists()) return VaultData()

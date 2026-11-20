@@ -59,9 +59,9 @@ if (Test-Path "$Here\BUILD-INFO.txt") { $Commit = ((Get-Content "$Here\BUILD-INF
 Set-Location $Here
 if (-not $NoTests) {
   Write-Host "=== Unit tests" -ForegroundColor Cyan
-  & gradle.bat --no-daemon "-PkiwiCommit=$Commit" :app:testDebugUnitTest
+  & gradle.bat --no-daemon "-PkiwiCommit=$Commit" :app:testDirectDebugUnitTest
   $TestExit = $LASTEXITCODE
-  $Reports = Get-ChildItem "$Here\app\build\test-results\testDebugUnitTest\*.xml" -ErrorAction SilentlyContinue
+  $Reports = Get-ChildItem "$Here\app\build\test-results\testDirectDebugUnitTest\*.xml" -ErrorAction SilentlyContinue
   $Total = 0; $Bad = 0
   foreach ($r in $Reports) { $x = [xml](Get-Content $r.FullName); $Total += [int]$x.testsuite.tests; $Bad += [int]$x.testsuite.failures + [int]$x.testsuite.errors }
   Write-Host "Unit tests: $Total run, $Bad failed"
@@ -69,15 +69,15 @@ if (-not $NoTests) {
 }
 
 Write-Host "=== Debug APK" -ForegroundColor Cyan
-& gradle.bat --no-daemon "-PkiwiCommit=$Commit" :app:assembleDebug
+& gradle.bat --no-daemon "-PkiwiCommit=$Commit" :app:assembleDirectDebug
 if ($LASTEXITCODE -ne 0) { throw "The debug build failed. Send this output." }
-$Out = @("$Here\app\build\outputs\apk\debug\app-debug.apk")
+$Out = @("$Here\app\build\outputs\apk\direct\debug\app-direct-debug.apk")
 
 if ($Release) {
   Write-Host "=== Release APK" -ForegroundColor Cyan
-  & gradle.bat --no-daemon "-PkiwiCommit=$Commit" :app:assembleRelease
+  & gradle.bat --no-daemon "-PkiwiCommit=$Commit" :app:assembleDirectRelease
   if ($LASTEXITCODE -ne 0) { throw "The release build failed. Send this output." }
-  $Out += (Get-ChildItem "$Here\app\build\outputs\apk\release\*.apk" | Select-Object -First 1).FullName
+  $Out += (Get-ChildItem "$Here\app\build\outputs\apk\direct\release\*.apk" | Select-Object -First 1).FullName
 }
 
 $Dist = "$Here\dist-apk"
