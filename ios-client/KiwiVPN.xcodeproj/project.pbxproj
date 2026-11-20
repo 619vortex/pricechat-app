@@ -47,6 +47,10 @@
 			};
 			name = Debug;
 		};
+		0D28910A8A490B3D0A845EBD = {
+			isa = PBXBuildFile;
+			fileRef = 26397992FD65944C4E5556C9;
+		};
 		0E3453A75A52F7510E7820C8 = {
 			isa = PBXBuildFile;
 			fileRef = E57B7D33115734EEC34D09A3;
@@ -106,6 +110,13 @@
 				4C3C720303147DD2F20E10EF,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
+		};
+		26397992FD65944C4E5556C9 = {
+			isa = PBXFileReference;
+			lastKnownFileType = wrapper.framework;
+			name = AppIntents.framework;
+			path = System/Library/Frameworks/AppIntents.framework;
+			sourceTree = SDKROOT;
 		};
 		27AAAF9B23E4EF0136D30903 = {
 			isa = XCSwiftPackageProductDependency;
@@ -274,6 +285,7 @@
 			children = (
 				3693A4C6488425001E4829F4,
 				475DF17AFC221A8992C785E1,
+				6C04955F1B3371B54DEF0D99,
 				43327175E3C0E96DAA29407D,
 			);
 			sourceTree = "<group>";
@@ -306,6 +318,14 @@
 		6B397B7A3E4828CDE12E8C58 = {
 			isa = PBXBuildFile;
 			fileRef = BFB21ECBD60A6243A71985D9;
+		};
+		6C04955F1B3371B54DEF0D99 = {
+			isa = PBXGroup;
+			children = (
+				26397992FD65944C4E5556C9,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
 		};
 		70D20EB0B956A2BB43CD2380 = {
 			isa = PBXFileReference;
@@ -550,6 +570,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B82AF21432B8B6B5705D0236,
+				0D28910A8A490B3D0A845EBD,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
