@@ -87,3 +87,30 @@ def test_the_names_the_device_is_given_are_ones_the_backend_accepts(client: Test
 def test_an_iphone_session_stays_as_limited_as_every_other_app(client: TestClient, app_headers: dict[str, str]) -> None:
     for path in ("/api/members/me/referrals", "/api/members/me/xp", "/api/members/leaderboard"):
         assert client.get(path, headers=app_headers).status_code == 403, path
+
+
+def test_the_iphone_app_can_delete_the_account_it_signed_in_with(client: TestClient, db: Session, fake: FakeNode, app_headers: dict[str, str]) -> None:
+    """App Store Guideline 5.1.1(v): Settings > Delete account calls DELETE /api/members/me with the app's own limited session, as the website does."""
+    from sqlalchemy import func, select
+
+    from app.models.members import Member
+    from app.models.vpn import VpnAccount, VpnDevice
+
+    server = add_server(db, fake)
+    made = client.post("/api/members/vpn/devices", json={"name": "iPhone abcd1234 (2)", "server_id": server.id, "public_key": PUBLIC_KEY}, headers=app_headers)
+    assert made.status_code == 201
+    wrong = client.request("DELETE", "/api/members/me", json={"confirm_username": "IOSUSER"}, headers=app_headers)
+    assert wrong.status_code == 400
+    assert wrong.json()["detail"] == "Type your username exactly to confirm.", "the app shows this text as it is"
+    assert client.request("DELETE", "/api/members/me", json={"confirm_username": "iosuser"}, headers=app_headers).json() == {"deleted": True}
+    assert db.scalar(select(func.count()).select_from(Member).where(Member.username == "iosuser")) == 0
+    assert db.scalar(select(func.count()).select_from(VpnAccount)) == 0, "the Kiwi VPN account goes with it"
+    assert db.scalar(select(func.count()).select_from(VpnDevice)) == 0, "and its devices, whose peers leave the servers at the next sync"
+    assert client.get("/api/members/vpn", headers=app_headers).status_code == 401, "the app's session is gone too"
+
+
+def test_version_0_2_0_keeps_what_the_iphone_has_and_nothing_it_cant_do(client: TestClient) -> None:
+    caps = client.get("/api/members/vpn/v1/capabilities", params={"platform": "ios", "version": "0.2.0"}).json()
+    assert caps["passport_enabled"] is True
+    assert caps["app_routing_enabled"] is False, "per-app VPN on iOS needs MDM: docs/SELECTIVE-VPN-IOS.md"
+    assert caps["auto_call_enabled"] is False
