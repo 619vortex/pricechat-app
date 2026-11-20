@@ -237,6 +237,8 @@ fun SettingsScreen(
     onSignOut: () -> Unit,
 ) {
     val s = ui.settings
+    var licences by remember { mutableStateOf(false) }
+    if (licences) LicencesDialog { licences = false }
     Page("Settings") {
         Card {
             Toggle("Connect when the app opens", "Connects to your last country each time you open Kiwi VPN.", s.autoConnect) { on -> model.changeSettings { it.copy(autoConnect = on) } }
@@ -261,6 +263,7 @@ fun SettingsScreen(
             LinkRow("Connection diagnostics", onClick = onDiagnostics)
             LinkRow("Privacy policy") { openUrl("$BASE_URL/vpn/privacy") }
             LinkRow("Support") { openUrl("$BASE_URL/contact") }
+            LinkRow("Open-source licences") { licences = true }
             Fact("App version", BuildConfig.VERSION_NAME)
             Fact("Build", BuildConfig.GIT_COMMIT.take(12))
         }
