@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only, for the on-device routing tests: lets the test put Android's shell (com.android.shell, UID 2000) in or out of the VPN, so traffic it sends shows which path a selected or
+     unselected app really takes. Never in a release build. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.android.shell" />
+    </queries>
+</manifest>
