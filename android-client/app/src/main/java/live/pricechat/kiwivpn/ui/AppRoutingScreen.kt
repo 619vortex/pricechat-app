@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import live.pricechat.kiwivpn.AppViewModel
+import live.pricechat.kiwivpn.BuildConfig
 import live.pricechat.kiwivpn.UiState
 import live.pricechat.kiwivpn.routing.AppCatalog
 import live.pricechat.kiwivpn.routing.QuickPicks
@@ -72,7 +73,7 @@ fun AppRoutingScreen(model: AppViewModel, ui: UiState, state: ConnectionState, o
     val problem = RoutingPolicy.saveProblem(draft)
     val choosing = draft.mode != RoutingMode.ALL_APPS
     val warnings = remember(draft, ui.settings) {
-        if (!ui.settings.autoCallEnabled) emptyList()
+        if (!BuildConfig.AUTO_CALL || !ui.settings.autoCallEnabled) emptyList()
         else RoutingPolicy.autoCallWarnings(draft, ui.settings.autoCallWhatsApp, ui.settings.autoCallTelegram) { AppCatalog.isInstalled(context, it) }
     }
 

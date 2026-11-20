@@ -255,7 +255,8 @@ fun SettingsScreen(
                 LinkRow("Choose what uses Kiwi VPN", "Quick setup: all apps, or only apps you choose, such as WhatsApp, Telegram or Signal", onClick = onChooseApps)
             }
         }
-        if (ui.capabilities["auto_call_enabled"] != false) AutoCallCard(model, ui, openIntent)
+        // Not in the Google Play build at all: see the "play" flavor in app/build.gradle.kts
+        if (BuildConfig.AUTO_CALL && ui.capabilities["auto_call_enabled"] != false) AutoCallCard(model, ui, openIntent)
         Card {
             LinkRow("Connection diagnostics", onClick = onDiagnostics)
             LinkRow("Privacy policy") { openUrl("$BASE_URL/vpn/privacy") }
@@ -383,7 +384,7 @@ fun DiagnosticsScreen(model: AppViewModel, ui: UiState, state: ConnectionState, 
                 ui.testReport?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = Kiwi.Soft) }
             }
         }
-        Card {
+        if (BuildConfig.AUTO_CALL) Card {
             Text("What Auto-Call VPN saw", style = MaterialTheme.typography.titleMedium)
             Text("In memory on this phone, for testing. Only Android's call signals: no names, numbers or messages.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
             if (traces.isEmpty()) Text("Nothing yet.", color = Kiwi.Soft)
