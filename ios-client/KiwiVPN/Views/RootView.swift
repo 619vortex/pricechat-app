@@ -95,7 +95,7 @@ struct DeclarationView: View {
                 bullet("Requests to pricechat.live, such as signing in and checking your plan, appear with your IP address in our hosting providers' request logs (Railway and Vercel).")
                 bullet("Your traffic, while the VPN is on. DNS lookups are answered by the server's own resolver or by Cloudflare (1.1.1.1), depending on the server, unless you set your own.")
                 Text("What it doesn't do").font(.headline)
-                bullet("No record of the sites you visit or of what you send.")
+                bullet("We don't keep a history of the sites you visit or of the content of your traffic.")
                 bullet("Your device's private key is made on this iPhone and never leaves it.")
                 bullet("Kiwi VPN doesn't sell your data, use it for advertising, or disclose it to third parties. The infrastructure companies named in the privacy policy handle it only to run the service for us.")
                 bullet("No ads, analytics or tracking in the app.")
