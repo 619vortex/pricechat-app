@@ -26,6 +26,8 @@ public protocol KiwiAPI: Sendable {
     func exchangeCode(code: String, verifier: String) async throws -> String
     func refresh(token: String) async throws -> String
     func logout(token: String) async throws
+    /// DELETE /members/me: the whole Price Chat account, not only Kiwi VPN. The backend refuses it unless `confirmUsername` is exactly the account's username.
+    func deleteAccount(token: String, confirmUsername: String) async throws
     func myIP() async throws -> String
 }
 
@@ -64,6 +66,7 @@ private struct IPReply: Decodable { let ip: String }
 private struct DetailReply: Decodable { let detail: String }
 private struct TokenInput: Encodable { let code: String; let verifier: String }
 private struct DeviceInput: Encodable { let name: String; let server_id: Int64; let public_key: String }
+private struct DeleteInput: Encodable { let confirm_username: String }
 
 public struct HTTPKiwiAPI: KiwiAPI {
     private let base: String
@@ -163,6 +166,11 @@ public struct HTTPKiwiAPI: KiwiAPI {
 
     public func logout(token: String) async throws {
         _ = try await send(request("/members/logout", token: token, method: "POST"))
+    }
+
+    public func deleteAccount(token: String, confirmUsername: String) async throws {
+        let body = try JSONEncoder().encode(DeleteInput(confirm_username: confirmUsername))
+        _ = try await send(request("/members/me", token: token, method: "DELETE", body: body))
     }
 
     public func myIP() async throws -> String {

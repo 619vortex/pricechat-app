@@ -20,6 +20,8 @@ public protocol SecretStore: AnyObject, Sendable {
     func installID() -> String
     /// Signed out: the session and keys go.
     func wipeAccount()
+    /// Account deleted: everything this app keeps in the Keychain goes, including the install ID and any key a crash left behind.
+    func wipeAll()
 }
 
 public struct KeyPairText: Equatable, Sendable {
