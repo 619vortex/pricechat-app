@@ -36,6 +36,7 @@ try {
   # --no-daemon, so no long-lived process keeps the password in its environment
   $gradleArgs = "/c `"gradle.bat --no-daemon --console=plain -PkiwiCommit=$Commit :app:clean :app:assembleDirectRelease :app:bundlePlayRelease > `"$Log`" 2>&1`""
   $proc = Start-Process -FilePath cmd.exe -ArgumentList $gradleArgs -WorkingDirectory $Project -NoNewWindow -PassThru
+  $null = $proc.Handle # without this, Windows PowerShell can lose the exit code of a process started this way
   if (-not $proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
     & taskkill /T /F /PID $proc.Id | Out-Null
     throw "The release build took longer than $TimeoutMinutes minutes and was stopped. See $Log"
