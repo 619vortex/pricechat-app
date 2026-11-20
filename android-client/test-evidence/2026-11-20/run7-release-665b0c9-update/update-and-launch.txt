@@ -1,0 +1,25 @@
+﻿uninstall (clean start): Failure [DELETE_FAILED_INTERNAL_ERROR]
+install 0.1.0-rc1: Performing Streamed Install
+Success
+rc1 version:     versionCode=3 minSdk=26 targetSdk=36     versionName=0.1.0-rc1
+launch rc1: Starting: Intent { cmp=live.pricechat.kiwivpn/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: live.pricechat.kiwivpn/.MainActivity
+TotalTime: 818
+WaitTime: 820
+Complete
+install 0.2.0 over it (install -r): Performing Streamed Install
+Success
+now:     versionCode=4 minSdk=26 targetSdk=36     versionName=0.2.0
+launch 0.2.0: Starting: Intent { cmp=live.pricechat.kiwivpn/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: live.pricechat.kiwivpn/.MainActivity
+TotalTime: 739
+WaitTime: 742
+Complete
+pid after 8 s: 6031
+crash buffer: 
+debuggable flag:     pkgFlags=[ HAS_CODE ALLOW_CLEAR_USER_DATA ]
+uninstall afterwards: Success
