@@ -14,6 +14,9 @@ The test's own process runs as Kiwi VPN's UID, so it also shows Kiwi itself stay
 |---|---|---|
 | `connectedDirectDebugAndroidTest` | `run2-connected/junit-results.xml` | **19 passed, 0 failed, 2 skipped** (the lockdown pair, which skip unless lockdown is set) |
 | `LockdownRoutingTest` with always-on + lockdown set | `run3-lockdown/am-instrument-output.txt` | **2 passed** |
+| Release 0.2.0 installed over 0.1.0-rc1, then opened | `run4-release-update/` | `install -r` Success (same key), versionCode 3 to 4, process alive after 8 s, crash buffer empty, sign-in screen shown. No sign-in |
+| `ChooseAppsScreenTest` (the real onboarding screen, real apps and icons) | `run5-onboarding-ui/` | **2 passed**, 3 screenshots. The stand-in WhatsApp and Telegram here are test fixtures with those package names. Tapping an app row by injected touch failed once on the emulator right after the keyboard closed; the test clicks rows through their accessibility action |
+| Final `connectedDirectDebugAndroidTest` at commit 87ea14a | `run6-final-connected/` | **21 passed, 0 failed, 2 skipped** (lockdown pair) |
 
 ### Per-app allowlisting (`run2-connected/kiwi-evidence-logcat.txt`)
 - **Only Selected = [shell]**: VPN network `Uids: <{2000-2000, 10221-10221, 20221-20221}>` (shell, Kiwi, and Kiwi's SDK-sandbox UID), `DnsAddresses: [ /10.66.0.1 ]`. Shell ping 1.1.1.1: `1 packets transmitted, 0 received`. `ping dns.google`: no output (name didn't resolve). Kiwi's own TCP connect to 1.1.1.1:443: failed. **The selected app's traffic and DNS entered the tunnel.**
