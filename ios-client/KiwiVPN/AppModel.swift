@@ -13,6 +13,7 @@ enum Kiwi {
     static let settingsKey = "advanced-settings"
     static let lastServerKey = "last-server"
     static let declarationKey = "data-declaration-accepted"
+    static let routingExplainedKey = "iphone-routing-explained"
 
     /// Settings hold no secret, so they're ordinary preferences.
     static func loadSettings() -> AdvancedSettings {
@@ -47,6 +48,11 @@ final class AppModel: ObservableObject {
     @Published var capabilities: [String: Bool] = [:]
     @Published var settings: AdvancedSettings
     @Published var declarationAccepted: Bool
+    @Published var routingExplained: Bool
+    /// The account's username, from GET /members/me: what account deletion asks the person to type.
+    @Published var username: String?
+    /// Good news to show on the Welcome screen, such as a finished deletion.
+    @Published var notice: String?
 
     let connection: ConnectionCoordinator
     private let api: KiwiAPI
@@ -62,6 +68,7 @@ final class AppModel: ObservableObject {
         signedIn = Kiwi.store.session() != nil
         settings = Kiwi.loadSettings()
         declarationAccepted = UserDefaults.standard.bool(forKey: Kiwi.declarationKey)
+        routingExplained = UserDefaults.standard.bool(forKey: Kiwi.routingExplainedKey)
         connection = ConnectionCoordinator(
             driver: Kiwi.driver,
             source: Provisioner(api: api, store: Kiwi.store),
@@ -75,6 +82,11 @@ final class AppModel: ObservableObject {
         declarationAccepted = true
     }
 
+    func finishRoutingExplanation() {
+        UserDefaults.standard.set(true, forKey: Kiwi.routingExplainedKey)
+        routingExplained = true
+    }
+
     /// A failed check keeps the last good answer: a brief network gap, as while the tunnel changes, mustn't take away the countries and Connect. A real sign-out still applies.
     func load() async {
         guard let token = store.session() else { return }
@@ -85,6 +97,7 @@ final class AppModel: ObservableObject {
             let member = try? await api.me(token: current).member
             account = fetched
             who = member?.displayName ?? member?.username ?? who
+            username = member?.username ?? username
             checked = true
             error = nil
             if selected == nil || !fetched.servers.contains(where: { $0.id == selected?.id && $0.online }) {
@@ -101,6 +114,7 @@ final class AppModel: ObservableObject {
             signedIn = false
             account = nil
             who = nil
+            username = nil
             passport = nil
             checked = true
             error = "Your session ended. Please sign in again."
@@ -137,6 +151,7 @@ final class AppModel: ObservableObject {
             store.setSession(try await api.exchangeCode(code: result.code, verifier: result.verifier))
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.refreshedKey)
             signedIn = true
+            notice = nil
             await load()
         } catch SignInError.cancelled {
             // The person chose this: nothing to report.
@@ -205,11 +220,40 @@ final class AppModel: ObservableObject {
         }
         await Kiwi.driver.uninstall()
         store.wipeAccount()
+        clearSignedInState()
+    }
+
+    private func clearSignedInState() {
         signedIn = false
         account = nil
         who = nil
+        username = nil
         passport = nil
         missions = []
         capabilities = [:]
+    }
+
+    /// Settings > Delete account. Returns a message to show if it didn't happen. See AccountDeletion for the order of the steps.
+    func deleteAccount(typed: String) async -> String? {
+        let connection = self.connection
+        let deletion = AccountDeletion(api: api, store: store, stopVPN: { await connection.disconnect() }, removeVPN: { await Kiwi.driver.uninstall() })
+        do {
+            try await deletion.run(typed: typed, username: username)
+        } catch let e as ApiError where e.signedOut {
+            store.setSession(nil)
+            clearSignedInState()
+            error = "Your session ended, so the account wasn't deleted. Sign in again, then delete it from Settings."
+            return error
+        } catch {
+            return error.localizedDescription
+        }
+        // Preferences hold no secret, but they belong to the deleted account. The declaration and the routing explanation are about the app, so they stay read.
+        for key in [Kiwi.settingsKey, Kiwi.lastServerKey, Self.refreshedKey] { UserDefaults.standard.removeObject(forKey: key) }
+        settings = AdvancedSettings()
+        selected = nil
+        clearSignedInState()
+        error = nil
+        notice = "Your Price Chat account has been deleted, and Kiwi VPN has been removed from this iPhone."
+        return nil
     }
 }

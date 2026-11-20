@@ -1,6 +1,6 @@
 # Apple signing, entitlements and App Store checklist
 
-Checked 2026-11-05. Re-read Apple's pages just before submitting.
+Checked 2026-11-05, updated 2026-11-20 for 0.2.0. Re-read Apple's pages just before submitting. **The full submission pack, with App Privacy answers, review notes, storefronts and export compliance, is `APP-STORE-SUBMISSION.md`.**
 
 ## Blockers to decide first
 1. **An organization account.** App Store Review Guideline 5.4, as published: VPN apps "may only be offered by developers enrolled as an organization". An individual account can test on your own phones and can't ship this to the App Store. This needs a registered legal entity, with a D-U-N-S number for enrolment. **Is "Price Chat" a registered company?** It's the same question as for the Windows certificate.
@@ -28,17 +28,21 @@ The extension has only the shared group, so it can read WireGuard keys and can't
 **To confirm on the first device run:** that `$(AppIdentifierPrefix)` expands inside `Info.plist`. If the app can't store its session, this is the first thing to check, and Keychain errors would show it.
 
 ## App Store Connect, when you get there
-- [ ] Organization enrolment complete
-- [ ] Data declaration before use. Guideline 5.4 requires "a clear declaration of what user data will be collected and how it will be used on an app screen prior to any user action". **`DeclarationView` is that screen. You must confirm every line is true.** I checked its use of device name, key, address, last handshake and data use against the code. "Doesn't sell or share" is your commitment to make
-- [ ] Privacy policy link, in the app and in App Store Connect
-- [ ] App Privacy details, matching the declaration
-- [ ] Account deletion in the app. Guideline 5.1.1(v) expects apps with accounts to offer it. **This app doesn't yet:** it can sign out, and a person would go to the website. Check what the backend supports
-- [ ] Export compliance: the app uses encryption. Answer it in App Store Connect
-- [ ] Payments: the app sells nothing and has no purchase button. If paid access is sold in an iOS app later, read the in-app purchase rules first. Nothing's implemented
-- [ ] Licence notices: WireGuardKit is MIT. Show the notice in the app. **Not done yet**
-- [ ] App Review notes: a test account, and how to connect
+- [ ] Organization enrolment complete, with the entity's D-U-N-S number
+- [x] Data declaration before use (5.4): `DeclarationView`, rechecked 2026-11-20 against the backend models and `/vpn/privacy`, with trial fingerprints, hosting logs, DNS resolvers and account deletion added. **You must still confirm every line is true,** and "doesn't sell, use or disclose" is your commitment to make
+- [ ] Privacy policy complete: the `[OWNER: ...]` facts filled in, the 5.4 commitment in so many words, and the iPhone section on this branch deployed
+- [x] Privacy policy link in the app (declaration screen and Settings). [ ] And in App Store Connect
+- [ ] App Privacy details: answers in `APP-STORE-SUBMISSION.md` section 2
+- [x] Account deletion in the app (5.1.1(v)): Settings > Delete account, built in 0.2.0, with unit tests and a backend test. **Not yet run on an iPhone:** test plan 32 and 33
+- [x] No per-app or "messaging only" claims: `SELECTIVE-VPN-IOS.md`. Keep the App Store description and screenshots consistent with it
+- [ ] Export compliance: `APP-STORE-SUBMISSION.md` section 7. Decide France (exclude, or file the French declaration), then set `ITSAppUsesNonExemptEncryption`
+- [ ] Storefronts: exclude China mainland and the UAE until legal advice; ask about the others listed in section 6
+- [ ] Payments: the app sells nothing and has no purchase button. If paid access is sold in an iOS app later, read the in-app purchase rules first
+- [x] Licence notices: Settings > Licences (WireGuard MIT, Go BSD). Check the texts against the shipped versions
+- [ ] App Review notes and a **review account that can make a WireGuard device**: today's reviewer account can't (`APP-STORE-SUBMISSION.md` section 4)
+- [ ] App Store Connect API key for Codemagic (integration `kiwi`), after enrolment
 - [ ] Screenshots from a real device
-- [ ] Beta testing through TestFlight rather than sending an IPA
+- [ ] Beta testing through TestFlight internal testing, with your approval to upload
 
 ## Not done, and not to be done without your approval
 Nothing has been submitted or uploaded, and no certificate or App ID has been made.

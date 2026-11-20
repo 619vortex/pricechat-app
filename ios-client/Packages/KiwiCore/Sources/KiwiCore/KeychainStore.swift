@@ -124,4 +124,13 @@ public final class KeychainStore: SecretStore, @unchecked Sendable {
         item("devices").delete()
         item("session").delete()
     }
+
+    /// Every item of this app's two services, whatever its name: on iOS, SecItemDelete removes all the items a query matches.
+    public func wipeAll() {
+        lock.lock(); defer { lock.unlock() }
+        for (group, service) in [(appGroup, "live.pricechat.kiwivpn.app"), (sharedGroup, wireGuardKeyService)] {
+            let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccessGroup as String: group, kSecAttrService as String: service, kSecUseDataProtectionKeychain as String: true]
+            SecItemDelete(query as CFDictionary)
+        }
+    }
 }

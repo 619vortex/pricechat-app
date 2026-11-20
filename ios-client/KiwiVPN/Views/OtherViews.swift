@@ -141,17 +141,22 @@ struct SettingsView: View {
                 autoCallSection
                 advancedSection
                 Section {
+                    NavigationLink("What uses Kiwi VPN on iPhone") { RoutingExplainerView() }
                     NavigationLink("Connection diagnostics") { DiagnosticsView(connection: connection) }
                     if model.capabilities[Capability.gamingMode] == true {
                         NavigationLink("Gaming Mode") { GamingModeView() }
                     }
                     Link("Privacy policy", destination: URL(string: "\(kiwiBaseURL)/vpn/privacy")!)
                     Link("Support", destination: URL(string: "\(kiwiBaseURL)/contact")!)
+                    NavigationLink("Licences") { LicencesView() }
                     Fact(name: "App version", value: Kiwi.version)
                     if !Kiwi.commit.isEmpty { Fact(name: "Build", value: String(Kiwi.commit.prefix(12))) }
                 }
                 Section {
                     Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+                    NavigationLink("Delete account") { DeleteAccountView(model: model) }
+                } footer: {
+                    Text("Deleting removes your Price Chat account, Passport and Kiwi VPN devices for good.")
                 }
             }
             .scrollContentBackground(.hidden)

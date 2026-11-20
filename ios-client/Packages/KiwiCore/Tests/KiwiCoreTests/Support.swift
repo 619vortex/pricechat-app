@@ -40,6 +40,12 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         devices = [:]
         keys = [:]
     }
+    var wipedAll = false
+    func wipeAll() {
+        wipeAccount()
+        id = ""
+        wipedAll = true
+    }
 }
 
 struct FakeKeys: KeyMaker {
@@ -55,6 +61,7 @@ final class FakeAPI: KiwiAPI, @unchecked Sendable {
     var peerAnswer = KiwiCoreTests.peer()
     var addError: ApiError?
     var nextId: Int64 = 50
+    var deleteAccountError: ApiError?
 
     func account(token: String) async throws -> Account {
         calls.append("account")
@@ -85,6 +92,10 @@ final class FakeAPI: KiwiAPI, @unchecked Sendable {
     func exchangeCode(code: String, verifier: String) async throws -> String { "kd.token" }
     func refresh(token: String) async throws -> String { "kd.fresh" }
     func logout(token: String) async throws { calls.append("logout") }
+    func deleteAccount(token: String, confirmUsername: String) async throws {
+        calls.append("delete-account \(confirmUsername)")
+        if let deleteAccountError { throw deleteAccountError }
+    }
     func myIP() async throws -> String { "5.75.10.20" }
 }
 

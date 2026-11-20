@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = "live.pricechat.kiwivpn"
 WG_PATH = "Vendor/wireguard-apple"  # the official source, with two small changes: see its KIWI-PATCHES.md
 DEPLOYMENT = "17.0"
-VERSION = "0.1.0"
-BUILD = "1"
+VERSION = "0.2.0"
+BUILD = "2"
 
 objects: dict[str, dict] = {}
 

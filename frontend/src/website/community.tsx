@@ -466,6 +466,11 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "We keep the device's name, public key and private address, as for any device, and mark its sign-in as coming from the app. To show your public address it asks our own server, which sends the address back and doesn't store it. Our hosting providers' request logs can record it, as with any visit.",
         "It's a beta: it's code signed and has an optional kill switch in Settings. If something doesn't work, tell us here.",
       ]],
+      ["The iPhone app (in development)", [
+        "It keeps your sign-in and each device's private key in the iPhone's Keychain, on that iPhone only and without iCloud sync. The private key is made on the iPhone and never sent to us. The part of the app that runs the VPN can read the keys but not your sign-in.",
+        "We keep the device's name, public key and private address, as for any device, and mark its sign-in as coming from the app. To show your public address it asks our own server, which sends the address back and doesn't store it. Our hosting providers' request logs can record it, as with any visit. The app has no ads or analytics.",
+        "While it's on, every app on the iPhone uses the VPN: iOS doesn't let a VPN app choose which apps use it on a personal iPhone. You can delete your Price Chat account in the app, under Settings, Delete account.",
+      ]],
       ["Who else is involved", [
         "These companies provide infrastructure for us and handle your data only to do that, not for their own use:",
         "Hetzner (Germany): our VPN servers, and on some servers the DNS resolvers the browser extension uses. Railway: our accounts service and its database. Vercel: this website, which passes account requests on to our service. NOWPayments: USDT payments; it receives the amount, the network and a random order reference, never your name, email address or Passport. Resend: our reminder emails, if your Passport has an email address. Telegram: tells the Price Chat team that a support report has arrived, with your username but not your message.",

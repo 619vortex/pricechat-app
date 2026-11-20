@@ -6,7 +6,7 @@
 
 | # | Test | Pass means |
 |---|---|---|
-| 1 | Install and open | The declaration screen comes first. Continue, then Welcome |
+| 1 | Install and open | The declaration screen comes first. Continue, then "What uses Kiwi VPN on iPhone", whose "How this differs from Android" opens. Continue, then Welcome |
 | 2 | Sign in by email | Sheet opens; after Allow, it closes by itself and shows your name. **Note exactly what happens at the end:** see `SIGN-IN.md` |
 | 3 | Sign out, then sign in with Google | Same. Note if iOS asks about Local Network |
 | 4 | Account with no trial: press Start free trial. Then one that started on Windows or Android | First starts it; second shows the same days left as the website, with no new trial. Signing in alone starts nothing |
@@ -36,5 +36,8 @@
 | 28 | Passport, once the shared API is deployed | XP, level and invite link match the website. **Until then it shows a link, which is expected** |
 | 29 | Sign out | Devices gone from My Devices, the VPN configuration gone from iOS Settings, and the session gone |
 | 30 | Console.app on a Mac, filtered to the app, during 5 to 9 | No key, token or config in the log |
+| 31 | Shortcuts app: search for Kiwi VPN | Connect Kiwi VPN and Disconnect Kiwi VPN are listed |
+| 32 | Settings > Delete account, with a throwaway account: type the username in capitals, then correctly | Capitals keep the button off. Correctly: the confirmation, then Welcome with the deleted message. The VPN configuration is gone from iOS Settings, the account can't sign in on the website, and its devices are gone from the servers within minutes |
+| 33 | Delete account with the network off | An error, still signed in, and the VPN configuration still there, disconnected |
 
 **Send back:** iPhone and iOS version, the build, each result, and any on-screen message.
