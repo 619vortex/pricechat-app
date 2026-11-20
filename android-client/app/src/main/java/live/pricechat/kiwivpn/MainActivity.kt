@@ -8,7 +8,9 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Color
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,7 +30,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Kiwi VPN is always dark: light status and navigation bar icons whatever the phone's own theme (the default follows it, and gave dark icons on dark)
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
         setContent {
             KiwiTheme {
                 KiwiRoot(model = model, openBrowser = ::openBrowser, openUrl = ::openUrl, openIntent = ::openIntent, connect = ::connectWithConsent)
