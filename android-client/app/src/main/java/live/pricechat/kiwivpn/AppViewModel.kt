@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import live.pricechat.kiwivpn.account.DeletionResult
 import live.pricechat.kiwivpn.auth.LoopbackListener
 import live.pricechat.kiwivpn.auth.SignInAttempt
 import live.pricechat.kiwivpn.autocall.AutoCallController
@@ -31,6 +32,8 @@ data class UiState(
     val signedIn: Boolean = false,
     val signingIn: Boolean = false,
     val who: String? = null,
+    /** The Price Chat username, exactly as the server has it: deleting the account asks for it to be typed. */
+    val username: String? = null,
     val account: Account? = null,
     val selected: Server? = null,
     val checked: Boolean = false,
@@ -40,6 +43,10 @@ data class UiState(
     val passport: Passport? = null,
     /** Empty until the shared API answers. A feature is hidden only if the server explicitly says no. */
     val capabilities: Map<String, Boolean> = emptyMap(),
+    val deleting: Boolean = false,
+    val deleteError: String? = null,
+    /** Shown on the sign-in screen after the account was deleted. */
+    val notice: String? = null,
 )
 
 private const val SIGN_IN_MS = 5 * 60 * 1000L
@@ -86,7 +93,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (shared != null) _ui.update { it.copy(passport = shared.passport ?: it.passport, capabilities = shared.capabilities) }
                 _ui.update { s ->
                     val keep = s.selected?.let { old -> account.servers.firstOrNull { it.id == old.id && it.online } }
-                    s.copy(account = account, who = who?.displayName ?: who?.username ?: s.who, selected = keep ?: suggestedServer(account.servers, app.vault.read().lastServer?.id), checked = true, error = null)
+                    s.copy(account = account, who = who?.displayName ?: who?.username ?: s.who, username = who?.username ?: shared?.passport?.username?.ifBlank { null } ?: s.username, selected = keep ?: suggestedServer(account.servers, app.vault.read().lastServer?.id), checked = true, error = null)
                 }
                 maybeAutoConnect()
             } catch (e: ApiException) {
@@ -129,7 +136,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun signIn(open: (String) -> Unit) {
         signIn?.cancel()
         signIn = viewModelScope.launch {
-            _ui.update { it.copy(signingIn = true, error = null) }
+            _ui.update { it.copy(signingIn = true, error = null, notice = null) }
             val attempt = SignInAttempt.create()
             try {
                 LoopbackListener().use { listener ->
@@ -224,6 +231,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _ui.update { it.copy(settings = after) }
         if (before.autoCallEnabled && !after.autoCallEnabled) app.autoCall.disabled()
     }
+
+    /** "Choose what uses Kiwi VPN" answered: saved into the same setting Settings edits, and not asked again on this phone. */
+    fun finishRoutingOnboarding(prefs: RoutingPrefs) {
+        saveRouting(prefs)
+        changeSettings { it.copy(routingOnboarded = true) }
+    }
+
+    /** Deletes the Price Chat account on the server, then erases this phone's copy of everything. Nothing local changes unless the server confirms. */
+    fun deleteAccount(typed: String) {
+        if (_ui.value.deleting) return
+        viewModelScope.launch {
+            _ui.update { it.copy(deleting = true, deleteError = null) }
+            when (val result = app.accountDeletion.delete(typed, _ui.value.username)) {
+                is DeletionResult.Deleted -> {
+                    Diag.event("account_deleted")
+                    _ui.update { UiState(notice = "Your Price Chat account was deleted, and Kiwi VPN erased what it kept on this phone.") }
+                }
+                is DeletionResult.Failed -> {
+                    if (result.signedOut) {
+                        app.vault.forgetAccount()
+                        _ui.update { UiState(settings = it.settings, error = result.message) }
+                    } else {
+                        _ui.update { it.copy(deleting = false, deleteError = result.message) }
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearDeleteError() = _ui.update { it.copy(deleteError = null) }
+
+    fun canConfirmDeletion(typed: String): Boolean = app.accountDeletion.canConfirm(typed, _ui.value.username)
 
     /** Saved first, so the choice survives whatever happens next. If a VPN is running, it's rebuilt with the new lists. If not, they apply on the next connection. */
     fun saveRouting(prefs: RoutingPrefs) {

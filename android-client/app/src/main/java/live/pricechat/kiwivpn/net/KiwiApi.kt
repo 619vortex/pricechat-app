@@ -27,6 +27,9 @@ import java.util.concurrent.TimeUnit
 const val BASE_URL = "https://pricechat.live"
 const val UNREACHABLE = "Couldn't reach Price Chat. Check your connection and try again."
 
+/** Where a person can delete their account without the app, for Google Play's account-deletion rule. It's the Passport page, whose Settings section has "Delete my Price Chat account" (sign-in needed). */
+const val ACCOUNT_DELETION_WEB_URL = "$BASE_URL/passport"
+
 /** status 0: the request never got an answer. */
 class ApiException(val status: Int, override val message: String) : Exception(message) {
     val signedOut get() = status == 401
@@ -46,6 +49,8 @@ interface KiwiApi {
     suspend fun exchangeCode(code: String, verifier: String): String
     suspend fun refresh(token: String): String
     suspend fun logout(token: String)
+    /** DELETE /members/me with {"confirm_username"}: deletes the Price Chat account and everything tied to it. An app ("kd.") session may call it. 400 when the username doesn't match. */
+    suspend fun deleteAccount(token: String, confirmUsername: String)
     suspend fun myIp(): String
     fun dropConnections()
 }
@@ -54,6 +59,8 @@ interface KiwiApi {
 @Serializable private data class IpReply(val ip: String)
 @Serializable private data class TokenInput(val code: String, val verifier: String)
 @Serializable private data class DeviceInput(val name: String, val server_id: Long, val public_key: String)
+@Serializable private data class DeleteAccountInput(val confirm_username: String)
+@Serializable private data class DeleteAccountReply(val deleted: Boolean = false)
 
 /** Never logs a request, a header or a body. Redirects are refused, so the session cookie can't be sent anywhere but BASE_URL. */
 class HttpKiwiApi(base: String = BASE_URL, client: OkHttpClient? = null, private val userAgent: String = "KiwiVPN-Android") : KiwiApi {
@@ -137,6 +144,11 @@ class HttpKiwiApi(base: String = BASE_URL, client: OkHttpClient? = null, private
 
     override suspend fun logout(token: String) {
         send(request("/members/logout", token).post(empty).build())
+    }
+
+    override suspend fun deleteAccount(token: String, confirmUsername: String) {
+        val reply = parse<DeleteAccountReply>(serializer(), send(request("/members/me", token).delete(bodyOf(DeleteAccountInput(confirmUsername))).build()))
+        if (!reply.deleted) throw ApiException(0, "Price Chat didn't confirm the deletion. Please try again.")
     }
 
     override suspend fun myIp(): String = parse<IpReply>(serializer(), send(request("/members/vpn/ip", null).get().build())).ip

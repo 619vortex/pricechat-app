@@ -1,9 +1,7 @@
 package live.pricechat.kiwivpn.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,36 +17,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.core.graphics.drawable.toBitmap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import live.pricechat.kiwivpn.AppViewModel
 import live.pricechat.kiwivpn.UiState
 import live.pricechat.kiwivpn.routing.AppCatalog
-import live.pricechat.kiwivpn.routing.InstalledApp
+import live.pricechat.kiwivpn.routing.QuickPicks
 import live.pricechat.kiwivpn.routing.RoutingMode
 import live.pricechat.kiwivpn.routing.RoutingPolicy
 import live.pricechat.kiwivpn.vpn.ConnectionState
@@ -73,13 +59,14 @@ private fun activeLine(state: ConnectionState): String = when (state) {
 }
 
 @Composable
-fun AppRoutingScreen(model: AppViewModel, ui: UiState, state: ConnectionState, onBack: () -> Unit) {
+fun AppRoutingScreen(model: AppViewModel, ui: UiState, state: ConnectionState, onBack: () -> Unit, onChooseAgain: () -> Unit) {
     val context = LocalContext.current
     val saved = ui.settings.routing
     var draft by remember(saved) { mutableStateOf(saved) }
     var query by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf(false) }
-    val apps by produceState<List<InstalledApp>?>(null) { value = withContext(Dispatchers.IO) { AppCatalog.load(context) } }
+    val apps = rememberInstalledApps()
+    val picks = remember(apps) { QuickPicks.available(apps.orEmpty().map { it.packageName }) }
     val shown = remember(apps, query) { RoutingPolicy.search(apps.orEmpty(), query) }
     val changed = draft != saved
     val problem = RoutingPolicy.saveProblem(draft)
@@ -94,7 +81,10 @@ fun AppRoutingScreen(model: AppViewModel, ui: UiState, state: ConnectionState, o
             item {
                 Spacer(Modifier.height(18.dp))
                 Text("App-Based VPN", style = MaterialTheme.typography.headlineSmall)
-                TextButton(onClick = onBack) { Text("Back to Settings") }
+                Row {
+                    TextButton(onClick = onBack) { Text("Back to Settings") }
+                    TextButton(onClick = onChooseAgain) { Text("Quick setup") }
+                }
                 Text(activeLine(state), style = MaterialTheme.typography.bodySmall, color = Kiwi.Soft)
                 Spacer(Modifier.height(12.dp))
             }
@@ -124,7 +114,12 @@ fun AppRoutingScreen(model: AppViewModel, ui: UiState, state: ConnectionState, o
                     )
                     Text("Kiwi VPN itself always stays on the VPN, so it can check your connection.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search applications") })
+                    if (draft.mode == RoutingMode.ONLY_SELECTED && picks.isNotEmpty()) {
+                        Text("Messaging apps on this phone", style = MaterialTheme.typography.titleSmall, color = Kiwi.LimeBright)
+                        QuickPickChips(picks, draft.selected) { draft = draft.copy(selected = it) }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                    AppSearchField(query) { query = it }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(RoutingPolicy.countText(draft), style = MaterialTheme.typography.labelSmall, color = Kiwi.LimeBright)
                         Row {
@@ -166,33 +161,6 @@ fun AppRoutingScreen(model: AppViewModel, ui: UiState, state: ConnectionState, o
                 }) { Text("Save and reconnect") }
             },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Not now") } },
-        )
-    }
-}
-
-@Composable
-private fun AppRow(app: InstalledApp, usesVpn: Boolean, onChange: (Boolean) -> Unit) {
-    val context = LocalContext.current
-    val icon by produceState<ImageBitmap?>(null, app.packageName) {
-        value = withContext(Dispatchers.IO) {
-            runCatching { AppCatalog.icon(context, app.packageName)?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()
-        }
-    }
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp)) {
-            icon?.let { Image(it, contentDescription = null, Modifier.size(40.dp)) }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(app.label, style = MaterialTheme.typography.titleMedium)
-            Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
-            Text(if (usesVpn) "Uses VPN" else "Normal connection", style = MaterialTheme.typography.labelSmall, color = if (usesVpn) Kiwi.LimeBright else Kiwi.Soft)
-        }
-        Switch(
-            usesVpn,
-            onChange,
-            modifier = Modifier.semantics { contentDescription = "Use VPN for ${app.label}" },
-            colors = SwitchDefaults.colors(checkedTrackColor = Kiwi.Lime, checkedThumbColor = Kiwi.Ink),
         )
     }
 }
