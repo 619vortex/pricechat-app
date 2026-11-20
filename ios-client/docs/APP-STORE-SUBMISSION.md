@@ -4,8 +4,8 @@ Prepared 2026-11-20. **Nothing here has been submitted or uploaded, and no Apple
 
 ## 1. Before anything else: what only the owner can do
 1. **Enrol in the Apple Developer Program as an organization.** Guideline 5.4: VPN apps "may only be offered by developers enrolled as an organization". That needs a registered legal entity, a **D-U-N-S number** for it (free from Dun & Bradstreet through Apple's lookup, and it can take days), a website on the entity's domain, and someone with legal authority to bind it. An individual account can test on your own iPhone and can't publish this app.
-2. **Fill in the privacy policy's owner facts.** `/vpn/privacy` still shows notices for the legal entity, address, business email and transfer safeguard (`OWNER` in `frontend/src/website/community.tsx`). Guideline 5.1.1(i) needs a complete policy, linked in the app and in App Store Connect. The iPhone section added on this branch also needs deploying.
-3. **A review account that works in the app** (see section 4). Today's reviewer account can't make a WireGuard device.
+2. **Fill in the privacy policy's owner facts.** `/vpn/privacy` still shows notices for the legal entity, address, business email and transfer safeguard (`OWNER` in `frontend/src/website/community.tsx`). Guideline 5.1.1(i) needs a complete policy, linked in the app and in App Store Connect. The mobile disclosures (Android and iPhone sections, Deleting your account, and the 5.4 commitment) were added on `feat/kiwi-mobile` on 2026-11-20 and need deploying.
+3. **Set up the review account** (section 4). The code was built on `feat/kiwi-mobile` on 2026-11-20 and tested, but it isn't deployed and the Railway variables aren't set. Steps: `docs/KIWI-STORE-REVIEW-ACCOUNT.md`.
 4. **App Store Connect API key for Codemagic**, created by the Account Holder or an Admin (Users and Access > Integrations > App Store Connect API), role App Manager, stored in Codemagic as the integration named `kiwi`. Only after enrolment.
 5. **A real iPhone test through TestFlight internal testing,** before any review: `docs/IPHONE-TEST-PLAN.md`. Uploading to TestFlight needs your approval, since it sends the build to Apple.
 6. **Legal advice on storefronts** (section 6) and the **encryption answers** (section 7).
@@ -59,7 +59,7 @@ Fill the gaps and paste into App Review Information > Notes.
 > Kiwi VPN is a WireGuard VPN for members of Price Chat (pricechat.live), provided by [LEGAL ENTITY], enrolled as an organization.
 >
 > **Sign in:** tap Sign in. A secure browser sheet (ASWebAuthenticationSession) opens pricechat.live. Use the review account below, then tap Allow. The app never sees the password.
-> Review account: [EMAIL] / [PASSWORD]. [HOW THE REVIEWER REACHES PASSWORD SIGN-IN IN THE SHEET]
+> Review account: [EMAIL] / [PASSWORD]. In the sheet, tap "App Store or Google Play reviewer? Use the review account", sign in with these, then tap Allow. This account uses the Helsinki server only.
 >
 > **Connect:** choose a country on Locations, then tap Connect on Home. iOS asks to add a VPN configuration: tap Allow. The status reads Protected once the server has answered.
 >
@@ -67,19 +67,23 @@ Fill the gaps and paste into App Review Information > Notes.
 >
 > **Every app on the iPhone uses the VPN.** The app doesn't offer per-app selection, which iOS reserves for MDM-managed devices; the screen "What uses Kiwi VPN on iPhone" explains this before sign-in.
 >
-> **Account deletion:** Settings > Delete account. Type the username shown to confirm. This deletes the Price Chat account on our server, removes the VPN configuration and the keys from the iPhone, and returns to the sign-in screen.
+> **Account deletion:** Settings > Delete account. Type the username shown to confirm. This deletes the Price Chat account on our server, removes the VPN configuration and the keys from the iPhone, and returns to the sign-in screen. You can delete the review account: signing in again with the same email and password creates a fresh one. Deletion is also available on the web at https://pricechat.live/vpn/delete-account.
 >
 > **Purchases:** the app sells nothing and has no purchase screen.
 >
 > **Licences:** [LICENCE INFORMATION FOR ANY TERRITORY THAT REQUIRES ONE, OR "NONE"]
 
-**The review account is a blocker.** `backend/app/vpn/reviewer.py` makes one account for the **browser extension's** store reviewers: email and password through `/vpn/reviewer`, Helsinki 1 only, one device, and `device_precheck` refuses WireGuard devices with "This review account is for the browser extension only." The iPhone app signs in through `/vpn/desktop`, which offers the normal Passport sign-in (email code, Google, and so on), and its sign-in makes WireGuard devices. So an App Reviewer today can't sign in with a password, and couldn't connect if they did. Options, each needing your decision and a deploy:
-1. Let the review account make **one** WireGuard device from an app session on Helsinki 1, and give `/vpn/desktop` a way to reach the password sign-in. Smallest change, and it keeps the time limit and the single server.
-2. A separate tester account (Admin's tester access) with an email-code sign-in to a mailbox Apple can reach. Apple asks for credentials that work without extra steps, so this is weaker.
+**The review account (built 2026-11-20, not deployed).** Option 1 from the earlier version of this section was built, on `feat/kiwi-mobile`:
+- `/vpn/desktop` shows **"App Store or Google Play reviewer? Use the review account"** on a phone's sign-in. `/vpn/reviewer` then returns to the app's sign-in page, where the reviewer taps Allow.
+- From a Kiwi VPN app session, the review account can make **one** WireGuard device, with the key made on the iPhone, on **Helsinki 1** only. A new install replaces the last device. The website still can't make one.
+- The password sign-in's browser session is restricted (`kr.`): VPN, who's signed in, deletion, sign-out, and handing the app its session. Nothing else of Price Chat's, and no linking another sign-in to the shared account.
+- Deleting it works. The next sign-in makes a fresh review account.
+- Tests: `backend/tests/test_vpn_reviewer_mobile.py` (12) and `frontend/src/website/vpnDesktop.test.tsx`. **Not yet tried on a real iPhone against Helsinki 1:** owner setup step 4 in `docs/KIWI-STORE-REVIEW-ACCOUNT.md`.
+- Before submitting: deploy (with your approval), run `vpn-extension/store/reviewer_account.py` with a dedicated mailbox, and keep `VPN_REVIEWER_UNTIL` valid through every review.
 
 ## 5. Guideline 5.4, the rest of it
 - **NEVPNManager API:** the app uses `NETunnelProviderManager`, a subclass of `NEVPNManager`, with a Packet Tunnel Provider. Correct for a custom protocol such as WireGuard.
-- **"May not sell, use, or disclose to third parties any data for any purpose, and must commit to this in their privacy policy."** The policy says "we don't sell your data or use it for advertising". **Add the 5.4 commitment in so many words** before submitting, and have someone check the processors section reads as processing on your behalf, not disclosure.
+- **"May not sell, use, or disclose to third parties any data for any purpose, and must commit to this in their privacy policy."** Added to `/vpn/privacy` (The short version) on `feat/kiwi-mobile`, not deployed: "we don't sell, use or disclose to third parties any data from Kiwi VPN for any purpose other than providing and securing Kiwi VPN as this page describes", with the named providers acting on our behalf. Have a lawyer confirm the wording.
 - **"Must not violate local laws"** and licence information for territories that need one: section 6.
 
 ## 6. Storefronts

@@ -110,7 +110,7 @@ class AccountDeletionTest {
         assertTrue(text.contains("trial"))
         assertTrue(text.contains("XP"))
         assertTrue(AccountDeletion.ON_THIS_PHONE.contains("erases"))
-        assertEquals("https://pricechat.live/passport", ACCOUNT_DELETION_WEB_URL)
+        assertEquals("https://pricechat.live/vpn/delete-account", ACCOUNT_DELETION_WEB_URL)
     }
 }
 

@@ -123,7 +123,7 @@ def create_device(payload: DeviceInput, request: Request, db: DbSession, pc_sess
                 raise _fail(e) from e
     preview = _preview(db, request)
     try:
-        service.device_precheck(db, member, payload.name, payload.server_id, preview)  # refused for free: nothing charged (audit M1)
+        service.device_precheck(db, member, payload.name, payload.server_id, preview, _via(pc_session), payload.public_key)  # refused for free: nothing charged (audit M1)
     except VpnError as e:
         raise _fail(e) from e
     _too_many(rate_limit.device_charge(str(member.id), payload.server_id, payload.name), "Too many new devices. Please wait a few minutes.")

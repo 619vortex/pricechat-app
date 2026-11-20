@@ -7,6 +7,7 @@ import { site } from "./websiteData";
 import { ANDROID_BETA, PLAN, STORE_LINKS, WINDOWS_BETA, configQr, hostedDownload, saveConfig, signInFor, storeLink, visitorBrowser, visitorOs } from "./vpnConfig";
 import { AndroidIcon, AppleIcon, ChromeIcon, EdgeIcon, LinuxIcon, WindowsIcon, WireGuardIcon } from "./vpnIcons";
 import { HeroArt } from "./vpnArt";
+import { desktopSignInToResume } from "./vpnDesktop";
 import { Flag, NetworkMap, place, placeLine, type MapServer } from "./vpnMap";
 import "./vpn.css";
 
@@ -848,7 +849,7 @@ function PaymentHistory({ s, reload }: { s: VpnState; reload: () => Promise<void
 }
 
 /** The store-review account's sign-in: a plain email and password. Everyone else signs in at /join. */
-export function VpnReviewerPage() {
+export function VpnReviewerPage({ go = (url: string) => location.assign(url) }: { go?: (url: string) => void } = {}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -860,6 +861,8 @@ export function VpnReviewerPage() {
     setError(null);
     try {
       await memberApi("/members/auth/reviewer", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+      const back = desktopSignInToResume();  // came from the Android or iPhone app's sign-in: back there to press Allow
+      if (back) { go(back); return; }
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't sign in. Please try again.");
@@ -868,15 +871,15 @@ export function VpnReviewerPage() {
     }
   };
   return (
-    <SitePage title="Kiwi VPN store review" description="Sign-in for browser store reviewers." path="/vpn/reviewer" noindex>
+    <SitePage title="Kiwi VPN store review" description="Sign-in for app and browser store reviewers." path="/vpn/reviewer" noindex>
       <section className="vpn">
         <section className="vpn-card vpn-start" aria-labelledby="vpn-reviewer">
           <h2 id="vpn-reviewer">Kiwi VPN store review</h2>
           {done ? (
-            <p className="site-muted" role="status">You're signed in. Click the Kiwi VPN icon in your browser's toolbar and press the switch to connect.</p>
+            <p className="site-muted" role="status">You're signed in. In the browser extension, click the Kiwi VPN icon in your browser's toolbar and press the switch to connect. For the Android or iPhone app, go back to the app and press Sign in.</p>
           ) : (
             <form className="vpn-form" onSubmit={(e) => void submit(e)}>
-              <p className="site-muted">For browser store reviewers. Everyone else, <a className="vpn-privacy" href="/join">sign in here</a>.</p>
+              <p className="site-muted">For app and browser store reviewers. Everyone else, <a className="vpn-privacy" href="/join">sign in here</a>.</p>
               <label className="site-field"><span>Email</span>
                 <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
               <label className="site-field"><span>Password</span>

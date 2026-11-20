@@ -693,7 +693,22 @@ def device_peer(db: Session, who: Who, device_id: int) -> dict[str, Any]:
     return peer_out(dev, server)
 
 
-def device_precheck(db: Session, who: Who, name: str, server_id: int, preview: bool = False) -> None:
+REVIEW_APP_ONLY = "This review account adds devices from the Kiwi VPN app only."
+REVIEW_SERVER_ONLY = "That server isn't available for the review account."
+
+
+def _review_device_check(db: Session, server_id: int, via: str | None, own_public_key: str | None = "") -> None:
+    """The store-review account's WireGuard rules (app/vpn/reviewer.py): only from a Kiwi VPN app session, so the key is
+    made on the phone and never seen here, and only on the review server."""
+    if via != "app" or own_public_key is None:
+        raise VpnError(REVIEW_APP_ONLY, 403)
+    server = db.get(VpnServer, server_id)
+    if server is None or server.name != reviewer.SERVER:
+        raise VpnError(REVIEW_SERVER_ONLY, 404)
+
+
+def device_precheck(db: Session, who: Who, name: str, server_id: int, preview: bool = False, via: str | None = None,
+                    own_public_key: str | None = "") -> None:
     """Everything create_device refuses for before it touches a node, without writing anything: routes call this BEFORE
     charging the rate limit, so an account that can't add a device never spends a token (security audit M1)."""
     name = clean_name(name)
@@ -703,7 +718,13 @@ def device_precheck(db: Session, who: Who, name: str, server_id: int, preview: b
     if not ok:
         raise VpnError(reason or "Kiwi VPN isn't available.", 403)
     if _reviewing(db, acct):
-        raise VpnError("This review account is for the browser extension only.", 403)
+        _review_device_check(db, server_id, via, own_public_key)
+        _over_cap(db, acct, settings(db))
+        server = db.get(VpnServer, server_id)
+        if not server.enabled or not sees(acct, server):
+            raise VpnError("Server not found.", 404)
+        db.commit()
+        return  # one device: create_device replaces the one it has
     s = settings(db)
     max_devices = OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
     _over_cap(db, acct, s)
@@ -754,10 +775,14 @@ def create_device(db: Session, who: Who, name: str, server_id: int, preview: boo
     ok, reason = eligibility(db, acct, preview)
     if not ok:
         raise VpnError(reason or "Kiwi VPN isn't available.", 403)
-    if _reviewing(db, acct):
-        raise VpnError("This review account is for the browser extension only.", 403)
     s = settings(db)
     max_devices = OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
+    if _reviewing(db, acct):
+        _review_device_check(db, server_id, via, own_public_key)
+        for old in list(db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct_id))):
+            _remove(db, old)  # one WireGuard device at a time: the reviewer's latest install replaces the last one
+        db.commit()
+        max_devices = 1
     if s.monthly_cap_gb > 0 and not acct.is_owner:
         use = usage_out(db, acct, s)
         if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:

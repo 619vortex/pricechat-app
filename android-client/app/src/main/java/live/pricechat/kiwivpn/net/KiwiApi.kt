@@ -28,7 +28,7 @@ const val BASE_URL = "https://pricechat.live"
 const val UNREACHABLE = "Couldn't reach Price Chat. Check your connection and try again."
 
 /** Where a person can delete their account without the app, for Google Play's account-deletion rule. It's the Passport page, whose Settings section has "Delete my Price Chat account" (sign-in needed). */
-const val ACCOUNT_DELETION_WEB_URL = "$BASE_URL/passport"
+const val ACCOUNT_DELETION_WEB_URL = "$BASE_URL/vpn/delete-account"  // the public page Google Play's form links to
 
 /** status 0: the request never got an answer. */
 class ApiException(val status: Int, override val message: String) : Exception(message) {

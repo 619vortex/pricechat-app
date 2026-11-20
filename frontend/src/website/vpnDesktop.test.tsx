@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VpnDesktopPage, callbackUrl, desktopSignInToResume, forgetDesktopSignIn, readRequest, rememberDesktopSignIn } from "./vpnDesktop";
 import { ProfilePage } from "./passport";
+import { VpnReviewerPage } from "./vpn";
 
 const CHALLENGE = "a".repeat(43), STATE = "s".repeat(24);
 const GOOD = `?challenge=${CHALLENGE}&port=49152&state=${STATE}`;
@@ -88,6 +89,36 @@ describe("signing in to the desktop app", () => {
     await settle();
     expect(document.querySelector(".vpn button")!.textContent).toBe("Sign in");
     expect(screen.queryByRole("button", { name: "Allow" })).toBeNull();
+  });
+
+  it("offers app store reviewers the review sign-in, only on a phone's sign-in", async () => {
+    serve(false);
+    render(<VpnDesktopPage search={`${GOOD}&client=ios`} go={vi.fn()} />);
+    await settle();
+    expect(screen.getByRole("link", { name: "Use the review account" }).getAttribute("href")).toBe("/vpn/reviewer");
+    cleanup();
+    serve(false);
+    render(<VpnDesktopPage search={GOOD} go={vi.fn()} />);
+    await settle();
+    expect(screen.queryByRole("link", { name: "Use the review account" })).toBeNull();
+  });
+
+  it("a reviewer's password sign-in goes back to the phone's sign-in, which still needs Allow", async () => {
+    serve(false);
+    const shown = render(<VpnDesktopPage search={`${GOOD}&client=android`} go={vi.fn()} />);
+    await settle();
+    shown.unmount();
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => input.endsWith("/members/auth/reviewer")
+      ? new Response(JSON.stringify({ signed_in: true }), { status: 200 })
+      : new Response(JSON.stringify({ sections: {}, latest: [], trending: [], whats_it_worth: [], originals: [], price_board: [], categories: [], links: { telegram: null, x: null, youtube: null }, site_url: null }), { status: 200 })));
+    const go = vi.fn();
+    const { container } = render(<VpnReviewerPage go={go} />);
+    fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: "r@example.com" } });
+    fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await settle();
+    expect(go).toHaveBeenCalledWith(`${PAGE}&client=android`);
+    expect(desktopSignInToResume()).toBeNull();  // once
   });
 
   it("gives no code until the person presses Allow, then hands it to the app", async () => {

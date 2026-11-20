@@ -71,11 +71,12 @@ From what the app and backend really do. "Collected" means sent off the phone to
 
 ## 5. Account deletion
 - **In-app path:** Settings > Account > **Delete account** (also Account tab > Delete account). Lists what's deleted and kept, asks for the username typed exactly, calls `DELETE /api/members/me`, and on success erases everything Kiwi VPN stored on the phone and returns to sign-in. Unit-tested with a fake API and the real HTTP client; a backend test proves an app session can delete the account and that its VPN account and devices cascade.
-- **Web URL for the Play form:** `https://pricechat.live/passport` (constant `ACCOUNT_DELETION_WEB_URL`). The page has **Settings > Delete my Price Chat account**, which needs sign-in.
-- **Website item for the owner (not changed by Claude):** Play asks for a link that "prominently features" deletion and names the app. `/passport` hides it in a collapsed Settings section and doesn't mention Kiwi VPN. **Recommended:** a public page such as `pricechat.live/vpn/delete-account` that says "Delete your Kiwi VPN / Price Chat account", lists the steps (app path and web path), what's deleted and kept (the same lists as the app's screen), and links to `/passport`. Then use that URL in the form.
+- **Web URL for the Play form: `https://pricechat.live/vpn/delete-account`** (built 2026-11-20 on `feat/kiwi-mobile`, **not deployed**; the app's `ACCOUNT_DELETION_WEB_URL` now points there). It's a public page titled "Delete your Kiwi VPN account" that names the app and Price Chat. It gives the Android and iPhone in-app paths, and lists what's deleted and kept, the same lists as the app's screen. It deletes in place once signed in (the same `DELETE /api/members/me` with the typed username), and has a request path for people who can't sign in (contact page, ownership checked, answer within one month). Tests: `frontend/src/website/vpnDelete.test.tsx`.
 - **What's deleted** (from `backend/app/members/service.py` `delete_member` and the database's `ON DELETE CASCADE`): the member, sign-in identities, sessions, XP history, badges, missions, referral code; the VPN account (plan, trial, time), all VPN devices (servers drop their peers at the next sync), browser-extension logins, support reports. **Kept:** salted one-way hashes that a trial or one-time reward was used (`vpn_trial_claims`, `xp_claims`), payment records with the account link set to null, an audit line with no identity.
 
 ## 6. Privacy policy: what pricechat.live/vpn/privacy must add or confirm
+**Status 2026-11-20 (`feat/kiwi-mobile`, not deployed):** items 1-3, 5 (the Private DNS part), 7 and 8 are now in the policy's new **The Android app (beta)** and **Deleting your account** sections. Item 4 was already in What we keep and How long we keep it. The 5.4 commitment is in The short version. **Still open:** item 5's resolver logging (the policy says honestly that it isn't verified yet), item 6 (rate limiting is in memory only, `security/rate_limit.py`, so nothing to add beyond hosting logs), and item 9 (the owner facts: entity, address, email, transfer safeguard).
+
 1. Name the **Android app** and say it uses Android's VpnService.
 2. **App-Based VPN:** the installed-app list is read on the phone only to let you choose; the choice stays encrypted on the phone and is never sent; apps you don't choose use your normal connection and get no protection.
 3. **Device identity:** the device name includes the phone model and a short one-way hash of an Android app-scoped ID.
@@ -102,14 +103,14 @@ From what the app and backend really do. "Collected" means sent off the phone to
 - **Licences:** show Apache-2.0 notices for the WireGuard library and other dependencies in the app (still to do).
 - **Target SDK:** 36. Lint notes 37 is available; Play's yearly target-API deadline should be checked on the day.
 - **Store assets:** 512 px icon, 1024x500 feature graphic, phone screenshots (onboarding, Home connected, App-Based VPN, Locations, Delete account), short and full descriptions. **No claims about kill switch, leak protection or "military-grade"** until the phone tests (DNS, IPv6, lockdown) pass.
-- **Reviewer access:** Google needs a working sign-in that can really connect. The backend's existing store-review account (`app/vpn/reviewer.py`) is **for the browser extension only: it has no WireGuard devices**, so it can't be used for the Android app as it stands. Needed: a Passport test account with VPN access (e.g. an Admin-granted tester period) and a sign-in a reviewer can complete in the browser (email code or password), described under App access. That may need a small backend change; it wasn't made here. Never use the owner's own account.
+- **Reviewer access (built 2026-11-20, not deployed):** the store-review account now works in the app: one WireGuard device from the app session, key made on the phone, Helsinki 1 only, restricted browser session. Setup and limits: `docs/KIWI-STORE-REVIEW-ACCOUNT.md`. **App access** text for Play Console: "All functionality requires sign-in. Tap Sign in; in the browser tab, tap 'App Store or Google Play reviewer? Use the review account', enter [EMAIL] / [PASSWORD], then tap Allow. Tap Connect and accept Android's VPN prompt. The account uses the Helsinki server only. You may delete it (Settings > Account > Delete account); signing in again with the same details creates a fresh one." Never use the owner's own account.
 
 ## Owner checklist
 1. Create the legal entity, get a D-U-N-S, open an **organization** Play Console account.
 2. Decide adblock on servers (section 2).
 3. Decide Play App Signing: upload the existing key (recommended) before the first upload.
-4. Add the public deletion page and the privacy-policy items (sections 5 and 6) on the website.
+4. Approve deploying the public deletion page and the privacy-policy items (sections 5 and 6), built on `feat/kiwi-mobile`, and fill in the owner facts.
 5. Confirm DNS resolver logging, then fill the Data safety form from section 4.
 6. Run `docs/PHONE-TEST-2026-11.md` on at least one real phone (Android 14+), and record the demo video.
-7. Set up the reviewer account.
+7. Set up the reviewer account: deploy, then `docs/KIWI-STORE-REVIEW-ACCOUNT.md` owner setup.
 8. Only then upload the play AAB to an internal test track.

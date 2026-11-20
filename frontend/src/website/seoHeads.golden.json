@@ -52,7 +52,7 @@
   },
   "vpn/privacy": {
     "title": "Kiwi VPN Privacy · Price Chat",
-    "description": "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions."
+    "description": "What Kiwi VPN, its Android, iPhone and Windows apps and its browser extension store, what they don't, and why they need their permissions."
   },
   "vpn/terms": {
     "title": "Kiwi VPN Terms · Price Chat",
@@ -61,6 +61,10 @@
   "vpn/refunds": {
     "title": "Kiwi VPN Refund Policy · Price Chat",
     "description": "When a Kiwi VPN payment can be corrected or refunded, and what to do if a payment goes wrong."
+  },
+  "vpn/delete-account": {
+    "title": "Delete your Kiwi VPN account · Price Chat",
+    "description": "How to delete your Kiwi VPN and Price Chat account in the Android and iPhone apps or on the web, and what's deleted and kept."
   },
   "vpn/acceptable-use": {
     "title": "Kiwi VPN Acceptable Use · Price Chat",

@@ -108,6 +108,7 @@ export function VpnDesktopPage({ search = location.search, go = (url: string) =>
               <>
                 <p className="site-muted">Sign in with your Price Chat account to use Kiwi VPN on this {device}.</p>
                 <button className="site-button" onClick={openLogin}>Sign in</button>
+                {request.client && <p className="site-muted vpn-review-link">App Store or Google Play reviewer? <a className="vpn-privacy" href="/vpn/reviewer">Use the review account</a>.</p>}
               </>
             ) : (
               <>

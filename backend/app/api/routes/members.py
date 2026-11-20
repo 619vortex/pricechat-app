@@ -549,7 +549,7 @@ def reviewer_sign_in(payload: ReviewerSignIn, request: Request, response: Respon
         raise HTTPException(401, str(exc)) from exc
     if pc_session:
         service.end_session(db, pc_session)
-    _set_session(response, runtime.settings, service.new_session(db, member, 30))
+    _set_session(response, runtime.settings, service.new_session(db, member, 30, reviewer.REVIEW_TOKEN_PREFIX, kind="reviewer"))  # scoped: reviewer.review_token_may
     return {"signed_in": True}
 
 

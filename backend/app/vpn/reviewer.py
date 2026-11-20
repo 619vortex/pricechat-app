@@ -1,8 +1,19 @@
-"""One store-review account for the Kiwi VPN browser extension. Off unless all three VPN_REVIEWER_* variables are set.
+"""One store-review account for Kiwi VPN's store reviewers: the browser extension stores, Google Play and the App Store.
+Off unless all three VPN_REVIEWER_* variables are set.
 
 Store reviewers need a plain email and password, and need the VPN to work while it's closed to everyone else. This account gets
-exactly that: until VPN_REVIEWER_UNTIL (UTC), no payment needed, one browser login, one server, no WireGuard devices. It has no Admin
-rights, and Admin's block still wins. Only a scrypt hash of the password is on the server. Remove the variables to end it sooner.
+exactly that: until VPN_REVIEWER_UNTIL (UTC), no payment needed, one server (SERVER), one browser login and one WireGuard device.
+It has no Admin rights, and Admin's block still wins. Only a scrypt hash of the password is on the server. Remove the variables
+to end it sooner: sync then takes its logins and devices off the servers.
+
+Restricted (2026-11-20, mobile store review):
+- The password sign-in gives a "kr." session that reaches only the VPN routes, who's signed in, deleting the account, signing
+  out, signing in again and handing the Kiwi VPN app its own session (REVIEW_SCOPE, enforced in main.admin_guard). It can't
+  touch XP, rewards, trading, wallets or anything else of Price Chat's.
+- A WireGuard device only from a Kiwi VPN app session ("kd.", itself scoped by app.members.desktop_scope), with a key made on
+  the phone, on SERVER only, one at a time (app.vpn.service.create_device). Never from the website, so no config with a
+  private key is ever handed out for it.
+- Deleting the account works as for anyone. The next password sign-in makes and binds a fresh review member.
 
 The rights belong to one stored member (vpn_settings.reviewer_member_id, security audit L9), bound on the first password
 sign-in: never to whoever holds the address, so no other way of setting a member's email can make someone the reviewer.
@@ -23,10 +34,24 @@ from app.config.settings import Settings, get_settings
 from app.db.base import utcnow
 from app.members import xp as ledger
 from app.members.service import MemberError, create_member
-from app.models.members import Member, MemberAuditLog
+from app.models.members import Member, MemberAuditLog, MemberSession
 from app.models.vpn import VpnSettings
 
 SERVER = "Helsinki 1"
+REVIEW_TOKEN_PREFIX = "kr."  # not in token_urlsafe's alphabet either, so no other session can start this way
+# never the other sign-in routes: their "link" purpose would attach a Google, X, Telegram or email identity to this shared account
+_EXACT = {"/api/members/vpn", "/api/members/me", "/api/members/logout", "/api/members/desktop/code", "/api/members/auth/reviewer",
+          "/api/members/auth/providers"}
+_UNDER = ("/api/members/vpn/",)
+
+
+def review_token_may(path: str, method: str = "GET") -> bool:
+    """What a review account's browser session may reach (see the module note). Never a profile change: renaming the shared
+    account or putting it on the leaderboard (PATCH /api/members/me)."""
+    clean = path.rstrip("/") or "/"
+    if clean == "/api/members/me" and method.upper() not in ("GET", "HEAD", "DELETE"):
+        return False
+    return clean in _EXACT or clean.startswith(_UNDER)
 FAIL = "That email or password isn't right, or this account has ended."
 _N, _R, _P = 2**14, 8, 1
 
@@ -106,6 +131,8 @@ def sign_in(db: Session, s: Settings, email: str, password: str) -> Member:
             ledger.audit(db, member.id, "member", "vpn_reviewer_created", {})
     if member.status != "active":
         raise MemberError(FAIL)
+    # browser sessions from before the scoped "kr." ones could reach all of Price Chat: they end here (app sessions stay)
+    db.query(MemberSession).filter(MemberSession.member_id == member.id, MemberSession.kind.is_(None)).delete(synchronize_session=False)
     _bind(db, member)  # idempotent: also uses up the trial of a review account bound by migration 0116
     db.commit()
     return member

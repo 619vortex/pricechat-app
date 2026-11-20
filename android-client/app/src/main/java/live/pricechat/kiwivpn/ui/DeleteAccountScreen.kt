@@ -80,8 +80,8 @@ fun DeleteAccountScreen(model: AppViewModel, ui: UiState, openUrl: (String) -> U
             if (ui.deleting) CircularProgressIndicator(Modifier.height(20.dp), color = Kiwi.Ink, strokeWidth = 2.dp) else Text("Delete my account")
         }
         Spacer(Modifier.height(16.dp))
-        Text("You can also delete it on the website: sign in at pricechat.live/passport, open Settings, and choose Delete my Price Chat account.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
-        TextButton(onClick = { openUrl(ACCOUNT_DELETION_WEB_URL) }) { Text("Open pricechat.live/passport") }
+        Text("You can also delete it on the website: open pricechat.live/vpn/delete-account and sign in.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
+        TextButton(onClick = { openUrl(ACCOUNT_DELETION_WEB_URL) }) { Text("Open pricechat.live/vpn/delete-account") }
     }
 }
 

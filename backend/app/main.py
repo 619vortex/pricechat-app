@@ -74,6 +74,7 @@ from app.db.seed import seed_defaults
 from app.db.session import SessionLocal, init_db
 from app.jobs import build_jobs
 from app.members.desktop_scope import DESKTOP_TOKEN_PREFIX, desktop_token_may
+from app.vpn.reviewer import REVIEW_TOKEN_PREFIX, review_token_may
 from app.providers.base import EmbeddingProvider, LLMProvider
 from app.providers.errors import (
     ModelNotFoundError,
@@ -285,6 +286,8 @@ def create_app(
         if method != "OPTIONS" and path.startswith("/api/"):
             if request.cookies.get("pc_session", "").startswith(DESKTOP_TOKEN_PREFIX) and not desktop_token_may(path):
                 return JSONResponse(status_code=403, content={"detail": "The Kiwi VPN app can't do that.", "code": "desktop_scope"})
+            if request.cookies.get("pc_session", "").startswith(REVIEW_TOKEN_PREFIX) and not review_token_may(path, method):
+                return JSONResponse(status_code=403, content={"detail": "The store-review account can't do that.", "code": "review_scope"})
             if app_settings.is_production and method in ("POST", "PUT", "PATCH", "DELETE"):
                 origin = request.headers.get("origin")
                 extension = origin in app_settings.vpn_extension_origins and path.startswith("/api/members/vpn/browser")  # our own extension, this one route

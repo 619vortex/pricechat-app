@@ -39,7 +39,7 @@ The extension has only the shared group, so it can read WireGuard keys and can't
 - [ ] Storefronts: exclude China mainland and the UAE until legal advice; ask about the others listed in section 6
 - [ ] Payments: the app sells nothing and has no purchase button. If paid access is sold in an iOS app later, read the in-app purchase rules first
 - [x] Licence notices: Settings > Licences (WireGuard MIT, Go BSD). Check the texts against the shipped versions
-- [ ] App Review notes and a **review account that can make a WireGuard device**: today's reviewer account can't (`APP-STORE-SUBMISSION.md` section 4)
+- [ ] App Review notes and the **review account**: built and tested on `feat/kiwi-mobile` (one WireGuard device from the app, Helsinki 1, scoped session). Still to do: deploy, set the variables, try it once on a real iPhone (`docs/KIWI-STORE-REVIEW-ACCOUNT.md`)
 - [ ] App Store Connect API key for Codemagic (integration `kiwi`), after enrolment
 - [ ] Screenshots from a real device
 - [ ] Beta testing through TestFlight internal testing, with your approval to upload

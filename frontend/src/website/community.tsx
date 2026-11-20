@@ -376,7 +376,7 @@ export function withoutOwnerGaps(text: string): string {
 }
 
 /** When the Kiwi VPN pages' text last changed. */
-const VPN_UPDATED = "17 November 2026";
+const VPN_UPDATED = "20 November 2026";
 
 /** The checkout box, word for word (vpn.tsx START_NOW): the refund page quotes it. */
 const START_NOW_TEXT = "Start my Kiwi VPN time as soon as my payment is confirmed. I understand that if I cancel within 14 days, I get back only the part of my payment for time I haven't used, and that I can't cancel once all the time I paid for has been used.";
@@ -415,11 +415,13 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
   },
   vpnprivacy: {
     title: "Kiwi VPN privacy",
-    description: "What Kiwi VPN and its browser extension store, what they don't, and why they need their permissions.",
+    description: "What Kiwi VPN, its Android, iPhone and Windows apps and its browser extension store, what they don't, and why they need their permissions.",
     updated: VPN_UPDATED,
     sections: [
       ["The short version", [
         "Kiwi VPN is run by Price Chat. It carries your traffic so websites see our server's address instead of yours. We don't keep a history of the sites you visit, and we don't sell your data or use it for advertising. Some things do pass through other companies, such as your DNS lookups: this page names them.",
+        "Our commitment: we don't sell, use or disclose to third parties any data from Kiwi VPN for any purpose other than providing and securing Kiwi VPN as this page describes. The only companies that handle it are the providers named under Who else is involved, on our behalf, and we'd only go further if the law requires it.",
+        "This page covers the Kiwi VPN website, the browser extension and the Android, iPhone and Windows apps.",
       ]],
       ["Who is responsible for your data", [
         `${OWNER.entity}, ${OWNER.address}, decides how the personal data on this page is used (the “controller”, “we” on this page). For privacy questions and requests, write to ${OWNER.email}.`,
@@ -428,7 +430,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
       ["What we keep", [
         "Your account: your Kiwi Passport member id, or a one-way fingerprint of your key if you use an anonymous key. Your Price Chat privacy page covers the Passport itself.",
         "For each browser using the extension: a random login for one server. We keep only a one-way fingerprint of its password, and the password itself is kept only in your browser's memory while it runs. After the browser restarts, the extension makes a new login with your Price Chat sign-in and the old one is removed.",
-        "For each WireGuard device: the name you gave it, its public key and the private address we assigned it. Its private key is created on our server, handed to you once in its config, and not stored.",
+        "For each WireGuard device: the name you gave it (the apps name it after the device), its public key and the private address we assigned it. Its private key is created on the device by the Android, iPhone and Windows apps and never sent to us. For a device you add on this website, it's created on our server, handed to you once in its config, and not stored.",
         "Usage: how many bytes each login or device used this month, and when it was last active (for a WireGuard device, the time of its last handshake with the server). We use this to show you your usage, apply any monthly limit and keep the service fair.",
         "If payments are switched on and you pay: the amount, date, network and status of each payment, and the address and provider reference it used, and a record that you ticked the box at checkout asking for your time to start straight away. Payment providers handle the payment itself. For an anonymous key, the link between a payment and your key, and its address and reference, are removed once the payment is settled and at least 7 days old, and the amount and date stay for our accounts.",
         "If your paid time or free trial is ending and you use a Kiwi Passport: a reminder in your notifications, and by email if your Passport has an email address. An anonymous key has no way to be reached, so only the Kiwi VPN page shows it.",
@@ -466,10 +468,23 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
         "We keep the device's name, public key and private address, as for any device, and mark its sign-in as coming from the app. To show your public address it asks our own server, which sends the address back and doesn't store it. Our hosting providers' request logs can record it, as with any visit.",
         "It's a beta: it's code signed and has an optional kill switch in Settings. If something doesn't work, tell us here.",
       ]],
+      ["The Android app (beta)", [
+        "It uses Android's VPN service (VpnService) to run WireGuard. It keeps your sign-in, each device's private key and your settings in one file on the phone, encrypted with a key held by the Android Keystore. The private key is made on the phone and never sent to us.",
+        "Device name: the app names each device after the phone's model plus a short one-way code made from an ID Android gives this app on this phone (ANDROID_ID), so two identical phones can be told apart under My Devices. The ID itself never leaves the phone, and the code can't be turned back into it.",
+        "Choosing apps (App-Based VPN): to let you pick which apps use Kiwi VPN, the app reads the list of apps on the phone that have an icon in your launcher, on the phone. Your choice is stored encrypted on the phone and never sent to us. Apps you don't choose use your normal connection: they aren't protected by the VPN and the sites they reach see your real IP address. If Android's Block connections without VPN setting is on, apps you don't choose have no connection at all.",
+        "DNS: while connected, the apps you choose look names up through the server, as described under Your DNS lookups. If you've set Private DNS in Android's settings, Android may send lookups to that provider instead.",
+        "Auto-Call VPN, only in the version downloaded from this website (not the Google Play version): if you switch it on and give it notification access, Android hands it the phone's notifications. It ignores every app except WhatsApp and Telegram, and for those it looks only at whether a notification is a call, never at the names, messages or pictures in it. It stores nothing it reads and sends nothing to us: it only switches the VPN on for the call.",
+        "To show your public address it asks our own server, which sends the address back and doesn't store it. Our hosting providers' request logs can record it, as with any visit. The app has no ads or analytics. You can delete your Price Chat account in the app, under Settings, Account, Delete account.",
+      ]],
       ["The iPhone app (in development)", [
         "It keeps your sign-in and each device's private key in the iPhone's Keychain, on that iPhone only and without iCloud sync. The private key is made on the iPhone and never sent to us. The part of the app that runs the VPN can read the keys but not your sign-in.",
         "We keep the device's name, public key and private address, as for any device, and mark its sign-in as coming from the app. To show your public address it asks our own server, which sends the address back and doesn't store it. Our hosting providers' request logs can record it, as with any visit. The app has no ads or analytics.",
         "While it's on, every app on the iPhone uses the VPN: iOS doesn't let a VPN app choose which apps use it on a personal iPhone. You can delete your Price Chat account in the app, under Settings, Delete account.",
+      ]],
+      ["Deleting your account", [
+        "In the Android app: Settings, Account, Delete account. In the iPhone app: Settings, Delete account. On the web: /vpn/delete-account, which also says what to do if you can't sign in any more. Each asks you to type your username, then deletes your Price Chat account and your Kiwi VPN account straight away.",
+        "Deleted: your Kiwi Passport and its sign-in methods, XP, badges and referral code, your Kiwi VPN account with any time left on it, every device and browser login (servers drop them at their next check), support reports and every signed-in session. Kept: the one-way free-trial and one-time-reward codes, payment records with the link to you removed, and a log line with no name, as described under How long we keep it.",
+        "Uninstalling an app doesn't delete your account. Deleting it in an app also erases what that app saved on the device.",
       ]],
       ["Who else is involved", [
         "These companies provide infrastructure for us and handle your data only to do that, not for their own use:",
@@ -488,7 +503,7 @@ const LEGAL: Record<LegalKind, { title: string; description: string; note?: stri
       ]],
       ["Your rights", [
         "Data protection law, such as the GDPR and the UK GDPR, lets you ask for a copy of your data, have it corrected or deleted, restrict or object to how we use it, and get the data you gave us in a portable form.",
-        `You can do much of this yourself: delete devices under My Devices, remove a browser in the extension, and delete your whole Price Chat account from your Kiwi Passport. For anything else, write to ${OWNER.email}. We'll answer within one month.`,
+        `You can do much of this yourself: delete devices under My Devices, remove a browser in the extension, and delete your whole Price Chat account in the Android or iPhone app or at /vpn/delete-account. For anything else, write to ${OWNER.email}. We'll answer within one month.`,
         "For an anonymous key we can only find your data with the key, so we'll ask you to show it's yours privately. Never post your key in a public message.",
         "You can also complain to the data protection authority in the country where you live or work.",
       ]],

@@ -42,6 +42,7 @@ const VpnPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.Vpn
 const VpnDesktopPage = lazy(() => import("./website/vpnDesktop").then((m) => ({ default: m.VpnDesktopPage })));
 const VpnDevicesPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.VpnDevicesPage })));
 const VpnReviewerPage = lazy(() => import("./website/vpn").then((m) => ({ default: m.VpnReviewerPage })));
+const VpnDeleteAccountPage = lazy(() => import("./website/vpnDelete").then((m) => ({ default: m.VpnDeleteAccountPage })));
 
 const page = (el: React.ReactNode) => <Suspense fallback={null}>{el}</Suspense>;
 
@@ -74,6 +75,7 @@ function PublicSite() {
         <Route path="vpn/desktop" element={page(<VpnDesktopPage />)} />
         <Route path="vpn/devices" element={page(<VpnDevicesPage />)} />
         <Route path="vpn/reviewer" element={page(<VpnReviewerPage />)} />
+        <Route path="vpn/delete-account" element={page(<VpnDeleteAccountPage />)} />
         <Route path="arena" element={<Navigate to="/passport#realm" replace />} />
         <Route path="realm" element={<Navigate to="/passport#realm" replace />} />
         <Route path="pokemon/*" element={page(<PublicMarket />)} />
