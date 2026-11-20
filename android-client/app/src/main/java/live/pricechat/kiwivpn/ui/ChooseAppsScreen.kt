@@ -19,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,7 +65,8 @@ fun ChooseAppsScreen(saved: RoutingPrefs, firstRun: Boolean, connected: Boolean,
     val shown = remember(apps, query) { RoutingPolicy.search(apps.orEmpty(), query) }
     val problem = if (onlyChosen) RoutingPolicy.saveProblem(draft) else null
 
-    Column(Modifier.fillMaxSize()) {
+    // Its own surface: on first run it is shown outside the Scaffold, where text would otherwise default to black on the dark ground.
+    Surface(Modifier.fillMaxSize(), color = Kiwi.Ground, contentColor = Kiwi.Text) { Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp)) {
             item {
                 Spacer(Modifier.height(18.dp))
@@ -128,7 +130,7 @@ fun ChooseAppsScreen(saved: RoutingPrefs, firstRun: Boolean, connected: Boolean,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
             ) { Text(RoutingOnboarding.saveLabel(draft)) }
         }
-    }
+    } }
 }
 
 @Composable

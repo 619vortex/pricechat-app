@@ -31,7 +31,7 @@ android {
                 storePassword = System.getenv("KIWI_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("KIWI_KEY_ALIAS")
                 keyPassword = System.getenv("KIWI_KEY_PASSWORD")
-                // minSdk 26 doesn't need v1 (JAR) signing, but it costs nothing and helps older tools. v2 is what Android 7+ checks; v3 adds key rotation support on Android 9+.
+                // v2 is what Android 7+ checks; v3 adds key rotation support on Android 9+. With minSdk 26 the Android Gradle plugin leaves v1 (JAR) signing out even when asked: apksigner reports v1 false.
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
@@ -106,4 +106,7 @@ dependencies {
 
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
