@@ -1,5 +1,7 @@
 # Google Play readiness
 
+**Superseded for 0.2.0 by `PLAY-SUBMISSION.md`,** which has the form answers. Kept for its sources and history.
+
 **Not submitted, and not compliant yet.** This is what the rules ask for as read on 2026-11-05. Google's VpnService page carries no date, and policy changes, so re-read each page just before submitting. Sources are listed at the end.
 
 ## VpnService declaration

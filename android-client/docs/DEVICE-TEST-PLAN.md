@@ -78,7 +78,7 @@ Use an outside site in Chrome, such as ipleak.net, to see each app's address. Ch
 
 | # | Test | Pass means |
 |---|---|---|
-| 47 | **First, on Android 14 or later:** connect with any mode, and watch for a crash | Stays running with the notification showing. If it crashes, send the Android version: see the open risk in `APP-ROUTING.md` |
+| 47 | (Emulator, Android 16, 2026-11-20: Android logged the start with type 1024 and allowed it. Still run it on a phone.) **First, on Android 14 or later:** connect with any mode, and watch for a crash | Stays running with the notification showing. If it crashes, send the Android version: see the open risk in `APP-ROUTING.md` |
 | 48 | All Apps: Chrome | Server's address |
 | 49 | Only Selected, Chrome selected | Server's address |
 | 50 | Only Selected, Chrome not selected, another app selected | Your own address |

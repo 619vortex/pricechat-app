@@ -28,7 +28,7 @@ Keep the keystore and the password in different places.
 ```powershell
 powershell -ExecutionPolicy Bypass -File android-client\tools\build-release.ps1
 ```
-It refuses to run with uncommitted changes, and refuses to keep a debuggable APK. It decrypts the password into its own process only, and saves the APK, its hash, the commit it came from, and the R8 mapping to `C:\AI\pc-wt\kiwi-release\android`.
+It refuses to run with uncommitted changes, and refuses to keep a debuggable APK. It decrypts the password into its own process only. Since 0.2.0 it builds the `direct` APK and the `play` App Bundle, signs the APK with v1, v2 and v3 schemes, checks with `apksigner`, `keytool` and `jarsigner` that both carry the release certificate (SHA-256 `6564545155fbb8acee4b920cb46d1e13eb6616951e9001f04ebc49083a34ebb2`, the one 0.1.0-rc1 has, so updates install over it), and saves both files, their hashes, `BUILD-INFO.txt` with the verification output, and the R8 mappings to `C:\AI\pc-wt\kiwi-release\android\<version>\`.
 
 **The mapping file is private.** It's needed to read crash reports from that exact build. Don't publish it.
 
