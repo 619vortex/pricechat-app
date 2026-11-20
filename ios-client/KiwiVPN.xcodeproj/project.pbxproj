@@ -1,0 +1,604 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+		00744381AD8675313B4B2D85 = {
+			isa = PBXBuildFile;
+			fileRef = 081EBE35AB7FFFB85D84EC80;
+		};
+		0335EC1CEBCCFB069204C8E5 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = PacketTunnelProvider.swift;
+			sourceTree = "<group>";
+		};
+		081EBE35AB7FFFB85D84EC80 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = NETunnelDriver.swift;
+			sourceTree = "<group>";
+		};
+		08A8D745E6D2F7503EE67BD5 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_BITCODE = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				MARKETING_VERSION = 0.1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				VALIDATE_PRODUCT = NO;
+				KIWI_COMMIT = "";
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		0E3453A75A52F7510E7820C8 = {
+			isa = PBXBuildFile;
+			fileRef = E57B7D33115734EEC34D09A3;
+			settings = {
+				ATTRIBUTES = (
+					RemoveHeadersOnCopy,
+				);
+			};
+		};
+		0EA12BEE2B9907D3AC495CAD = {
+			isa = PBXBuildFile;
+			fileRef = AD8EB3682857AD3B33F29B18;
+		};
+		10AECB3E9B758442F2365135 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder.assetcatalog;
+			path = Assets.xcassets;
+			sourceTree = "<group>";
+		};
+		1BDDC549EE756754F9606F0A = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0;
+			proxyType = 1;
+			remoteGlobalIDString = 3D17845273900D63FF7E9FAC;
+			remoteInfo = KiwiTunnel;
+		};
+		222E63E27CA3362D0C2DA826 = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KiwiCore;
+		};
+		230C7BACC486753105570DD8 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B48C0E62FEF052AA98E83CA4;
+			buildPhases = (
+				6AF517C66311C630D2D19CEB,
+				EC7D32DE92CE58F18E46FEC1,
+				961A337E37B0DD3FA0A24616,
+				34EED38C088929D885D3BC0E,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B1ABE3A7773183E8F223499E,
+			);
+			name = KiwiVPN;
+			packageProductDependencies = (
+				222E63E27CA3362D0C2DA826,
+			);
+			productName = KiwiVPN;
+			productReference = 70D20EB0B956A2BB43CD2380;
+			productType = "com.apple.product-type.application";
+		};
+		2316F0716A09EF90F4794FBC = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4C3C720303147DD2F20E10EF,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		27AAAF9B23E4EF0136D30903 = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KiwiCore;
+		};
+		28CDD3492866832B7E825945 = {
+			isa = PBXBuildFile;
+			fileRef = BD57D638DBCD75582130C009;
+		};
+		28DF8C1679680E7D9CEDB955 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = iphoneos;
+			};
+			name = Debug;
+		};
+		34C71FBDE2E2E792BF6A036E = {
+			isa = PBXBuildFile;
+			fileRef = 94869267FDD180FB7FED8D96;
+		};
+		34EED38C088929D885D3BC0E = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0E3453A75A52F7510E7820C8,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3693A4C6488425001E4829F4 = {
+			isa = PBXGroup;
+			children = (
+				BFB21ECBD60A6243A71985D9,
+				F8600FC9C4CD43B680AC35CF,
+				081EBE35AB7FFFB85D84EC80,
+				94869267FDD180FB7FED8D96,
+				4B203BD507C1E253527F0F83,
+				88B3970228241B8A1AE80BB4,
+				EB3EDBD2C0B2AD8E6B6B4A2F,
+				10AECB3E9B758442F2365135,
+				D6AD9B506F544742164351C1,
+			);
+			path = KiwiVPN;
+			sourceTree = "<group>";
+		};
+		3D17845273900D63FF7E9FAC = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 61B4CD820975A200543F6B82;
+			buildPhases = (
+				2316F0716A09EF90F4794FBC,
+				7F811C15B3ADC97FE98586E3,
+				7FC887C3EF99B07522E047BB,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DDB5C908E74AFD30682B7091,
+			);
+			name = KiwiTunnel;
+			packageProductDependencies = (
+				6627E7BA2FEAEE220FF53293,
+				27AAAF9B23E4EF0136D30903,
+			);
+			productName = KiwiTunnel;
+			productReference = E57B7D33115734EEC34D09A3;
+			productType = "com.apple.product-type.app-extension";
+		};
+		43327175E3C0E96DAA29407D = {
+			isa = PBXGroup;
+			children = (
+				70D20EB0B956A2BB43CD2380,
+				E57B7D33115734EEC34D09A3,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		44D3323D9E0FBC44342D5AD1 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_BITCODE = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				MARKETING_VERSION = 0.1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				VALIDATE_PRODUCT = YES;
+				KIWI_COMMIT = "";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		45AD5623E78184A564124DBD = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = KiwiVPN/KiwiVPN.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = KiwiVPN/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = live.pricechat.kiwivpn;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		475DF17AFC221A8992C785E1 = {
+			isa = PBXGroup;
+			children = (
+				0335EC1CEBCCFB069204C8E5,
+				C795006E9B9D5F4224368303,
+				B327496DAF37FD8A0ABDF3FC,
+			);
+			path = KiwiTunnel;
+			sourceTree = "<group>";
+		};
+		4B203BD507C1E253527F0F83 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = SignInService.swift;
+			sourceTree = "<group>";
+		};
+		4C3C720303147DD2F20E10EF = {
+			isa = PBXBuildFile;
+			fileRef = 0335EC1CEBCCFB069204C8E5;
+		};
+		4E6630FDB074D5B941601907 = {
+			isa = PBXBuildFile;
+			fileRef = CE23E85235BABB044F985DC6;
+		};
+		61B4CD820975A200543F6B82 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EFEBF9033AABA4135EC719CB,
+				F9173CE1F3CEEEB973F397D1,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6627E7BA2FEAEE220FF53293 = {
+			isa = XCSwiftPackageProductDependency;
+			package = ACDC82C364CFE9E97B00C3F6;
+			productName = WireGuardKit;
+		};
+		66ADC382DA4DC6DC7D4A96AB = {
+			isa = PBXGroup;
+			children = (
+				3693A4C6488425001E4829F4,
+				475DF17AFC221A8992C785E1,
+				43327175E3C0E96DAA29407D,
+			);
+			sourceTree = "<group>";
+		};
+		69AE83E080C49F9FB08A7CE0 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = iphoneos;
+			};
+			name = Release;
+		};
+		6AF517C66311C630D2D19CEB = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6B397B7A3E4828CDE12E8C58,
+				97BB815CC18E3D77B45B45A6,
+				00744381AD8675313B4B2D85,
+				34C71FBDE2E2E792BF6A036E,
+				914FF9CE1E7223CEBD7F0224,
+				28CDD3492866832B7E825945,
+				0EA12BEE2B9907D3AC495CAD,
+				4E6630FDB074D5B941601907,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6B397B7A3E4828CDE12E8C58 = {
+			isa = PBXBuildFile;
+			fileRef = BFB21ECBD60A6243A71985D9;
+		};
+		70D20EB0B956A2BB43CD2380 = {
+			isa = PBXFileReference;
+			explicitFileType = wrapper.application;
+			includeInIndex = 0;
+			path = KiwiVPN.app;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		72EB3EA4BC4828CFBAA1DC50 = {
+			isa = PBXBuildFile;
+			productRef = 6627E7BA2FEAEE220FF53293;
+		};
+		7702D2A9D140D463C1F2EE99 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = KiwiVPN/KiwiVPN.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = KiwiVPN/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = live.pricechat.kiwivpn;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		79015C765A3410E5EDD7F4B9 = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/KiwiCore;
+		};
+		7F811C15B3ADC97FE98586E3 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				72EB3EA4BC4828CFBAA1DC50,
+				B28C29D4745924BAE6EFA429,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7FC887C3EF99B07522E047BB = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		812314D856B639773231C926 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				08A8D745E6D2F7503EE67BD5,
+				44D3323D9E0FBC44342D5AD1,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		85B0C0D830CE31EBB52678BD = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0;
+			proxyType = 1;
+			remoteGlobalIDString = DBFF7C9045EC8CE9DF24B978;
+			remoteInfo = WireGuardGoBridgeiOS;
+		};
+		88B3970228241B8A1AE80BB4 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		914FF9CE1E7223CEBD7F0224 = {
+			isa = PBXBuildFile;
+			fileRef = 4B203BD507C1E253527F0F83;
+		};
+		94869267FDD180FB7FED8D96 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = Shortcuts.swift;
+			sourceTree = "<group>";
+		};
+		961A337E37B0DD3FA0A24616 = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CA5D693991B853A3262EEA90,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		97BB815CC18E3D77B45B45A6 = {
+			isa = PBXBuildFile;
+			fileRef = F8600FC9C4CD43B680AC35CF;
+		};
+		98F54143AB4E86B28C3AFEE0 = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 812314D856B639773231C926;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 66ADC382DA4DC6DC7D4A96AB;
+			packageReferences = (
+				ACDC82C364CFE9E97B00C3F6,
+				79015C765A3410E5EDD7F4B9,
+			);
+			productRefGroup = 43327175E3C0E96DAA29407D;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				230C7BACC486753105570DD8,
+				3D17845273900D63FF7E9FAC,
+				DBFF7C9045EC8CE9DF24B978,
+			);
+		};
+		ACDC82C364CFE9E97B00C3F6 = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://git.zx2c4.com/wireguard-apple";
+			requirement = {
+				kind = revision;
+				revision = 2fec12a6e1f6e3460b6ee483aa00ad29cddadab1;
+			};
+		};
+		AD8EB3682857AD3B33F29B18 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = OtherViews.swift;
+			sourceTree = "<group>";
+		};
+		B1ABE3A7773183E8F223499E = {
+			isa = PBXTargetDependency;
+			target = 3D17845273900D63FF7E9FAC;
+			targetProxy = 1BDDC549EE756754F9606F0A;
+		};
+		B28C29D4745924BAE6EFA429 = {
+			isa = PBXBuildFile;
+			productRef = 27AAAF9B23E4EF0136D30903;
+		};
+		B327496DAF37FD8A0ABDF3FC = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.entitlements;
+			path = KiwiTunnel.entitlements;
+			sourceTree = "<group>";
+		};
+		B48C0E62FEF052AA98E83CA4 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7702D2A9D140D463C1F2EE99,
+				45AD5623E78184A564124DBD,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B82AF21432B8B6B5705D0236 = {
+			isa = PBXBuildFile;
+			productRef = 222E63E27CA3362D0C2DA826;
+		};
+		BD57D638DBCD75582130C009 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = HomeView.swift;
+			sourceTree = "<group>";
+		};
+		BFB21ECBD60A6243A71985D9 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = AppModel.swift;
+			sourceTree = "<group>";
+		};
+		C795006E9B9D5F4224368303 = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			path = Info.plist;
+			sourceTree = "<group>";
+		};
+		CA5D693991B853A3262EEA90 = {
+			isa = PBXBuildFile;
+			fileRef = 10AECB3E9B758442F2365135;
+		};
+		CE23E85235BABB044F985DC6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = RootView.swift;
+			sourceTree = "<group>";
+		};
+		D6AD9B506F544742164351C1 = {
+			isa = PBXGroup;
+			children = (
+				BD57D638DBCD75582130C009,
+				AD8EB3682857AD3B33F29B18,
+				CE23E85235BABB044F985DC6,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		DBFF7C9045EC8CE9DF24B978 = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "$(ACTION)";
+			buildConfigurationList = FCD7B490F67ACF6600BE78F9;
+			buildPhases = (
+			);
+			buildToolPath = /usr/bin/make;
+			buildWorkingDirectory = "${BUILD_DIR%Build/*}SourcePackages/checkouts/wireguard-apple/Sources/WireGuardKitGo";
+			dependencies = (
+			);
+			name = WireGuardGoBridgeiOS;
+			passBuildSettingsInEnvironment = 1;
+			productName = WireGuardGoBridgeiOS;
+		};
+		DDB5C908E74AFD30682B7091 = {
+			isa = PBXTargetDependency;
+			target = DBFF7C9045EC8CE9DF24B978;
+			targetProxy = 85B0C0D830CE31EBB52678BD;
+		};
+		E57B7D33115734EEC34D09A3 = {
+			isa = PBXFileReference;
+			explicitFileType = "wrapper.app-extension";
+			includeInIndex = 0;
+			path = KiwiTunnel.appex;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		EB3EDBD2C0B2AD8E6B6B4A2F = {
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.entitlements;
+			path = KiwiVPN.entitlements;
+			sourceTree = "<group>";
+		};
+		EC7D32DE92CE58F18E46FEC1 = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B82AF21432B8B6B5705D0236,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EFEBF9033AABA4135EC719CB = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = KiwiTunnel/KiwiTunnel.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = KiwiTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = live.pricechat.kiwivpn.tunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		F8600FC9C4CD43B680AC35CF = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = KiwiVPNApp.swift;
+			sourceTree = "<group>";
+		};
+		F9173CE1F3CEEEB973F397D1 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = KiwiTunnel/KiwiTunnel.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = KiwiTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = live.pricechat.kiwivpn.tunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		FCD7B490F67ACF6600BE78F9 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				28DF8C1679680E7D9CEDB955,
+				69AE83E080C49F9FB08A7CE0,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0;
+}
