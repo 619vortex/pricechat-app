@@ -1,6 +1,6 @@
 # Kiwi VPN for iPhone
 
-Native Swift and SwiftUI, with a Packet Tunnel Provider extension using the official WireGuardKit, and the same Price Chat backend as Windows and Android. Version `0.1.0`, iOS 17 or later. **No part of it has been compiled yet, no IPA exists, and nothing has run on an iPhone.** Windows can't compile Swift for iOS.
+Native Swift and SwiftUI, with a Packet Tunnel Provider extension using the official WireGuardKit, and the same Price Chat backend as Windows and Android. Version `0.2.0` (build 2), iOS 17 or later. **It compiles, unsigned, in Codemagic's cloud, and its logic tests pass there. No signed IPA exists, and nothing has run on an iPhone.** Windows can't compile Swift for iOS.
 
 ## Layout
 | Folder | What it is |
@@ -47,4 +47,6 @@ Codemagic's Macs build it, from `codemagic.yaml`. `kiwi-compile` needs no Apple 
 | `backend/tests/test_ios_contract.py` | The test fixtures match the real backend's answers |
 | Website tests | The sign-in page handles `client=ios` |
 
-Docs: `docs/API-CONTRACT.md`, `SIGN-IN.md`, `IOS-RESTRICTIONS.md`, `APPLE-CHECKLIST.md`, `IPHONE-TEST-PLAN.md`.
+Docs: `docs/API-CONTRACT.md`, `SIGN-IN.md`, `IOS-RESTRICTIONS.md`, `SELECTIVE-VPN-IOS.md`, `APPLE-CHECKLIST.md`, `APP-STORE-SUBMISSION.md`, `IPHONE-TEST-PLAN.md`, `CLOUD-BUILD.md`.
+
+**Every app on the iPhone uses the VPN.** iOS allows per-app VPN only on MDM-managed devices, so there's no app list as on Android: `docs/SELECTIVE-VPN-IOS.md`.

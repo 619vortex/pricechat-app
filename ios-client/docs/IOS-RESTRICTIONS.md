@@ -2,7 +2,8 @@
 
 | Feature | Result | Why |
 |---|---|---|
-| Per-app VPN | **Not built, and no toggles shown** | Apple's documentation says it needs a device enrolled in MDM with managed apps. A consumer app can't set it up |
+| Per-app VPN | **Not built, and no toggles shown.** The "What uses Kiwi VPN on iPhone" screen says every app uses it, before sign-in and in Settings | Apple's documentation: "The only way to configure Per-App VPN is by enrolling the device in a Mobile Device Management (MDM) system". A consumer app can't set it up. Sources and the alternatives considered: `SELECTIVE-VPN-IOS.md` |
+| Telegram-only, WhatsApp-only, Signal-only | **Not built** | Telegram's published ranges miss peer-to-peer calls and CDN media; WhatsApp and Signal publish no address lists. `SELECTIVE-VPN-IOS.md` |
 | Auto-Call VPN | **Not built, not promised, and Settings says why** | No public iOS API tells an app that WhatsApp or Telegram is in a call, and apps can't read another app's notifications. `CXCallObserver` is the nearest API: it's for the app while it's running, it doesn't say which app a call belongs to, and it doesn't wake a suspended app, so it can't start a VPN for a call that begins while Kiwi VPN isn't on screen |
 | Kill switch | **Not claimed** | See "Send all traffic" below |
 | Quantum resistance, obfuscation | **Not built, not shown** | Need server support that doesn't exist |

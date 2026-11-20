@@ -15,7 +15,8 @@ Read from the code, not assumed from another client. The full contract, with err
 | Peer | `GET /api/members/vpn/devices/{id}/peer` | Yes | |
 | Remove device | `DELETE /api/members/vpn/devices/{id}` | Yes | |
 | Exit address | `GET /api/members/vpn/ip` | Yes | Not stored |
-| Name | `GET /api/members/me` | Yes | |
+| Name | `GET /api/members/me` | Yes | `member.username` is also what account deletion asks for |
+| Delete account | `DELETE /api/members/me {confirm_username}` | Yes | The whole Price Chat account. The `kd.` session may call it (`desktop_scope` allows `/api/members/me`). 400 with the server's own message if the username isn't exact |
 | **Passport, capabilities** | **`GET /api/members/vpn/v1/state?platform=ios&version=`** | **No: 404 until deployed** | The app shows a link to the website until then |
 
 **Session:** `Cookie: pc_session=kd.<token>`, limited by `members/desktop_scope.py` to VPN routes, so a stolen iPhone token can't spend or change an account. It's recorded as a `desktop` session, which is cosmetic wording on the website.
