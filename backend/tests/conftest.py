@@ -437,6 +437,15 @@ def _classic_post_style(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _market_posts_not_paused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: production starts with desk-measured market posts PAUSED until the owner resumes them (events.MARKET_PAUSE_DEFAULT,
+    2026-11-21); the delivery tests are about what happens when they are allowed. tests/test_phase0_20261121.py tests the default."""
+    from app.newsdesk import events
+
+    monkeypatch.setattr(events, "MARKET_PAUSE_DEFAULT", False)
+
+
+@pytest.fixture(autouse=True)
 def _no_learned_casing(monkeypatch: pytest.MonkeyPatch) -> None:
     """TEST FIXTURE: the casing vocabulary the desk learns from its feeds (app/newsdesk/wire.learn_vocabulary) starts empty in every test."""
     from app.newsdesk import wire

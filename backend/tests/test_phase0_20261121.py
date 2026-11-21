@@ -353,3 +353,19 @@ async def test_the_watchdog_runs_the_desks_delivery_alerts_even_while_telegram_i
     lane.settings_row(db).enabled = False  # the lane that used to be the only caller
     db.commit()
     assert await newsdesk_delivery_alerts(db, NOW) == 1 and called == [NOW]
+
+
+async def test_production_starts_with_market_posts_paused_until_the_owner_resumes(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Phase 0 deployment: the pause is new, so it couldn't be switched on before the deploy; unset means paused."""
+    monkeypatch.setattr(events, "MARKET_PAUSE_DEFAULT", True)  # production's value (the test suite runs unpaused: conftest)
+    desk = engine.settings_row(db)
+    desk.state = {}
+    db.commit()
+    assert events.market_paused(db) and engine.settings_out(desk)["market_pause"] is True
+    move = market_event(db, "bitcoin falls 4.0% in an hour", symbol="BTC-USD")
+    assert events.pending(db, "x", NOW) == [] and events.pending(db, "telegram", NOW) == []
+    db.refresh(move)
+    assert (move.tg_status, move.x_status) == ("skipped", "skipped")
+    desk.state = {"market_pause": False}  # the owner's explicit resume
+    db.commit()
+    assert not events.market_paused(db)

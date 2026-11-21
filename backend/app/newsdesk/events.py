@@ -1578,12 +1578,22 @@ def market_post(ev: NdEvent) -> bool:
     return ev.kind in ("market", "data", "recap") or bool(f.get("symbol")) or (ev.topic or "") == "liquidations"
 
 
+# owner, 2026-11-21 (Phase 0 deployment): desk-measured market posts stay paused from the moment this code runs until the owner explicitly
+# resumes them (PUT /newsdesk/settings {"market_pause": false}). There was no way to pause them before the deploy (the switch is new),
+# so the safe default is "paused": no window in which a market post can go out unreviewed.
+MARKET_PAUSE_DEFAULT = True
+
+
 def market_paused(db: Session) -> bool:
-    """Owner's switch (Admin > News Desk settings, market_pause): no desk-measured market post is released or delivered while it is on."""
+    """Owner's switch (News Desk settings, market_pause): no desk-measured market post is released or delivered while it is on. Unset:
+    MARKET_PAUSE_DEFAULT."""
     from app.models.newsdesk import NdSettings
 
     s = db.get(NdSettings, 1)
-    return bool(s is not None and (s.state or {}).get("market_pause"))
+    if s is None:
+        return MARKET_PAUSE_DEFAULT
+    value = (s.state or {}).get("market_pause")
+    return MARKET_PAUSE_DEFAULT if value is None else bool(value)
 
 
 def pending(db: Session, platform: str, now: datetime) -> list[NdEvent]:
