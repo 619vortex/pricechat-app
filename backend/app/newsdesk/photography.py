@@ -298,7 +298,7 @@ def people_of(text: str) -> tuple[Subject, int] | None:
 BY_KEY = {s.key: s for s in (*LIBRARY, *PEOPLE, *(p[0] for p in PAIRS))}
 # a data post's or market move's symbol -> its subject
 SYMBOLS = {"GC=F": "gold", "XAU": "gold", "GOLD": "gold", "PAXG": "gold", "SI=F": "silver", "SILVER": "silver", "BTC-USD": "bitcoin", "BTC": "bitcoin",
-           "ETH-USD": "ether", "ETH": "ether", "CL=F": "oil", "BZ=F": "oil", "CL": "oil", "OIL": "oil", "^GSPC": "stocks", "^IXIC": "stocks",
+           "ETH-USD": "ether", "ETH": "ether", "CL=F": "oil", "BZ=F": "oil", "CL": "oil", "OIL": "oil", "^GSPC": "stocks", "^IXIC": "stocks", "US-STOCKS": "stocks",
            "^DJI": "stocks", "NG=F": "natgas", "HG=F": "copper", "ZW=F": "grains", "DOGE-USD": "dogecoin", "DOGE": "dogecoin",
            "AMZN": "amazon", "GOOGL": "google", "GOOG": "google", "TSM": "tsmc", "JPM": "jpmorgan", "MSFT": "microsoft", "NVDA": "nvidia", "AAPL": "apple", "TSLA": "tesla"}
 

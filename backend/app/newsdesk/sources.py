@@ -166,6 +166,12 @@ class Quote:
     low_52w: float | None
     # (unix seconds, close, volume), oldest first
     bars: list[tuple[int, float, float]] = field(default_factory=list)
+    # the exchange session, from Yahoo's own metadata (stocks and indices): the official previous close a day's change is measured from,
+    # the regular session the price belongs to, and when the previous session closed (its weekday names the reference: "Thursday's close")
+    previous_close: float | None = None
+    session_open: datetime | None = None
+    session_close: datetime | None = None
+    previous_session_close: datetime | None = None
 
     def change(self, window: str, now: datetime) -> float | None:
         """Percent change over the window, or None if there's no bar close enough to compare with (a closed market, a holiday)."""
@@ -201,7 +207,35 @@ def parse_chart(symbol: str, payload: dict[str, Any]) -> Quote | None:
         return None
     if abs(price - bars[-1][1]) / price * 100 > CROSS_CHECK_PCT:
         return None  # the headline price and the chart disagree
-    return Quote(symbol, float(price), datetime.fromtimestamp(int(at), tz=timezone.utc), meta.get("fiftyTwoWeekHigh"), meta.get("fiftyTwoWeekLow"), bars)
+    return Quote(symbol, float(price), datetime.fromtimestamp(int(at), tz=timezone.utc), meta.get("fiftyTwoWeekHigh"), meta.get("fiftyTwoWeekLow"), bars,
+                 **_session(meta, float(price)))
+
+
+def _utc_ts(v: Any) -> datetime | None:
+    return datetime.fromtimestamp(int(v), tz=timezone.utc) if isinstance(v, (int, float)) and v > 0 else None
+
+
+def _session(meta: dict[str, Any], price: float) -> dict[str, Any]:
+    """Yahoo's previousClose (the official close of the session before the current one: 23,879.20 for the Nasdaq on 2026-11-20, where
+    the last 5-minute bar of 11-19 said 23,882.10) and the regular session times. A previous close that disagrees wildly with the price is
+    not believed (a day's move over 50% on a watchlist instrument is a data error, not a story)."""
+    out: dict[str, Any] = {}
+    prev = meta.get("previousClose")
+    if isinstance(prev, (int, float)) and prev > 0 and abs(price - prev) / prev < 0.5:
+        out["previous_close"] = float(prev)
+    regular = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
+    start, end = _utc_ts(regular.get("start")), _utc_ts(regular.get("end"))
+    if start and end and end > start:
+        out["session_open"], out["session_close"] = start, end
+        ends = []
+        for day in meta.get("tradingPeriods") or []:
+            for p in day if isinstance(day, list) else [day]:
+                e = _utc_ts(p.get("end")) if isinstance(p, dict) else None
+                if e is not None and e <= start:
+                    ends.append(e)
+        if ends:
+            out["previous_session_close"] = max(ends)
+    return out
 
 
 async def fetch_quote(client: httpx.AsyncClient, symbol: str) -> Quote | None:

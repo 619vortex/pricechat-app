@@ -112,7 +112,8 @@ def test_market_words_are_earned_and_a_market_wide_move_reads_right() -> None:
 def test_a_market_wide_move_counts_only_members_that_really_moved() -> None:
     now = T0
     wl = [w for w in sources.DEFAULT_WATCHLIST if w["symbol"] in ("^GSPC", "^IXIC", "^DJI")]
-    q = {"^IXIC": quote("^IXIC", 100, 97, now, hours=1), "^GSPC": quote("^GSPC", 100, 98.6, now, hours=1), "^DJI": quote("^DJI", 100, 99.99, now, hours=1)}
+    # two hours of bars: a US index's hour is measured between bar ENDS (moves.price_near), so the bar ending an hour ago must exist
+    q = {"^IXIC": quote("^IXIC", 103, 97, now, hours=2), "^GSPC": quote("^GSPC", 101.4, 98.6, now, hours=2), "^DJI": quote("^DJI", 100.01, 99.99, now, hours=2)}
     found = moves.detect(q, wl, now)
     wide = next(m for m in found if m.kind == "wide")
     assert [n for n, _ in wide.members] == ["Nasdaq", "S&P 500"]  # the Dow's -0.0% isn't part of a sell-off

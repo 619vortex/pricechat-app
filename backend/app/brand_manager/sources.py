@@ -10,6 +10,7 @@ Every number in a brief comes straight from the source; a brief also carries `st
 scene shows) and `chart` (verified points only)."""
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -126,6 +127,11 @@ def hyperliquid(db: Session, md: Any, now: datetime) -> list[Any]:
 
 
 LIQ_HOUR_USD = 1_000_000  # reported in one hour by the exchanges Price Chat records: a story
+# Above this, one coin's hour on the recorded feeds is not believed automatically: it is logged and held for a person. The
+# recorded feeds are a lower bound (Binance shows one liquidation per market per second), and Telegram 204 (2026-11-21) published
+# "$10.1B on Binance in an hour" from a unit error; the real figure was about $17M.
+LIQ_REVIEW_USD = 500_000_000
+LIQ_COIN = re.compile(r"[A-Z0-9]{2,15}")  # a coin symbol; "BTCUSD_PERP" is a contract and means the record was mis-keyed
 
 
 def liquidation_topics(db: Session, now: datetime, listed: set[str] | None = None) -> list[Any]:
@@ -150,6 +156,12 @@ def liquidation_topics(db: Session, now: datetime, listed: set[str] | None = Non
         where = " + ".join(sorted(venues[coin]))
         total = sum(sides.values())
         if total < LIQ_HOUR_USD:
+            continue
+        if not LIQ_COIN.fullmatch(coin or ""):
+            logger.warning("liquidations: %s on %s refused: %r is not a coin symbol (mis-keyed contract records)", _usd(total), where, coin)
+            continue
+        if total > LIQ_REVIEW_USD:
+            logger.warning("liquidations: %s of %s on %s in an hour held for review: above the %s automatic ceiling", _usd(total), coin, where, _usd(LIQ_REVIEW_USD))
             continue
         side = max(sides, key=lambda k: sides[k])
         out.append(Topic("crypto_derivatives", f"{_usd(total)} of {coin} positions liquidated on {where} in an hour, mostly {side}s",

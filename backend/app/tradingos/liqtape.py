@@ -7,6 +7,7 @@ Binance's stream shows at most one liquidation per market per second (the latest
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -20,11 +21,25 @@ OKX_WS = "wss://ws.okx.com:8443/ws/v5/public"
 BINANCE_WS = "wss://fstream.binance.com/market/ws/!forceOrder@arr"  # the /ws/ route no longer delivers (checked 2026-10-20)
 BYBIT_WS = "wss://stream.bybit.com/v5/public/linear"
 MAX_BUFFER = 50_000
+# Binance COIN-M (inverse) futures: BTCUSD_PERP, ETHUSD_261225. Their quantity is a number of USD contracts, not coins:
+# 100 USD each for BTC, 10 USD for every other coin (dapi /exchangeInfo, checked 2026-11-21: 3 BTC contracts at 100, 27 others
+# at 10). Pricing them as coins (price x contracts) published "$10.1B of BTCUSD_PERP longs liquidated on Binance in an hour"
+# (Telegram 204, 2026-11-21) when the whole hour's BTCUSD_PERP trading was $286M.
+COIN_M = re.compile(r"^([A-Z0-9]+)USD_(?:PERP|\d{6})$")
+COIN_M_CONTRACT_USD = {"BTC": 100.0}
+COIN_M_DEFAULT_USD = 10.0
+
+
+def coin_m_contract_usd(symbol: str) -> float | None:
+    """USD per contract of a Binance COIN-M symbol, or None when the symbol is not COIN-M (USDⓈ-M quantities are coins)."""
+    m = COIN_M.match(symbol.upper())
+    return None if m is None else COIN_M_CONTRACT_USD.get(m.group(1), COIN_M_DEFAULT_USD)
 
 
 def base_of(symbol: str) -> str:
-    """BTC-USDT-SWAP / BTCUSDT / 1000PEPEUSDT -> BTC / PEPE (the coin, as structure.symbols() maps it back)."""
-    s = symbol.upper().split("-")[0]
+    """BTC-USDT-SWAP / BTCUSDT / 1000PEPEUSDT / BTCUSD_PERP / BTCUSDT_261225 -> BTC / PEPE (the coin, as structure.symbols()
+    maps it back)."""
+    s = symbol.upper().split("-")[0].split("_")[0]  # "_PERP" / "_261225": the contract, not the coin
     for suffix in ("USDT", "USDC", "USD"):
         if s.endswith(suffix) and len(s) > len(suffix):
             s = s[: -len(suffix)]
@@ -83,7 +98,13 @@ class LiqTape:
         o = msg.get("o") or {}
         px, q = float(o.get("ap") or o.get("p") or 0), float(o.get("z") or o.get("q") or 0)
         side = "long" if o.get("S") == "SELL" else "short" if o.get("S") == "BUY" else ""  # a forced SELL closes a long
-        self.push("binance", str(o.get("s", "")), int(o.get("T") or 0), side, px, q, px * q)
+        symbol = str(o.get("s", ""))
+        contract = coin_m_contract_usd(symbol)
+        if contract is not None:  # COIN-M: q is contracts of `contract` USD each
+            usd = q * contract
+            self.push("binance", symbol, int(o.get("T") or 0), side, px, usd / px if px else 0.0, usd)
+            return
+        self.push("binance", symbol, int(o.get("T") or 0), side, px, q, px * q)
 
     def on_bybit(self, msg: dict[str, Any]) -> None:
         for d in msg.get("data") or []:

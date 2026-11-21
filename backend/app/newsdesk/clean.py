@@ -282,18 +282,22 @@ def _source_links(links: list[Any], outlets: list[str] | None) -> tuple[str, str
 
 
 def telegram_caption(c: Any, links: list[Any], *, prefix: str = "", outlets: list[str] | None = None, case_source: str = "",
-                     chart: bool = False) -> tuple[str, str, str]:
+                     chart: bool = False, data_note: str = "") -> tuple[str, str, str]:
     """(HTML, plain with the signature, plain without it: what the checks read). Picture first; then the story in 1-3 sentences (a chart
     post: the headline and at most one takeaway, each on its own line for a phone screen, no cashtags), each cashtag once and one at most,
-    and the sources with @thepricechat on one last line."""
+    and the sources with @thepricechat on one last line. data_note: a measured market post's reference and source line ("Change from
+    Thursday's close: Nasdaq 23,879.20 ... Market data: Yahoo Finance, 20:00 UTC, intraday (US market open)."), always printed, on its own
+    line above the sources: the figures in the headline can be checked (owner, 2026-11-21: Telegram 203 printed percentages only)."""
     sents = sentences_of(c, case_source, chart=chart)
+    if data_note:  # the note carries the measured figures: the story sentences never repeat them
+        sents = sents[:1]
     while True:
         words = tagged(sents, 0 if chart else TG_CASHTAGS)
         first, rest = words[0], words[1:]
         lead = f"<b>{_esc(prefix)}</b> {_esc(first)}" if prefix else _esc(first)
         sep = "\n\n" if chart else " "  # a chart post: the takeaway on its own line, easy to read under the chart on a phone
-        body_html = lead + (sep + _esc(sep.join(rest)) if rest else "")
-        body_plain = (f"{prefix} {first}" if prefix else first) + (sep + sep.join(rest) if rest else "")
+        body_html = lead + (sep + _esc(sep.join(rest)) if rest else "") + (f"\n\n{_esc(data_note)}" if data_note else "")
+        body_plain = (f"{prefix} {first}" if prefix else first) + (sep + sep.join(rest) if rest else "") + (f"\n\n{data_note}" if data_note else "")
         src_html, src_plain = _source_links(links, outlets)
         sig_html = f'<a href="{HANDLE_URL}">{HANDLE}</a>'
         footer_html = f"{src_html} · {sig_html}" if src_html else sig_html
@@ -305,15 +309,22 @@ def telegram_caption(c: Any, links: list[Any], *, prefix: str = "", outlets: lis
 
 
 def x_caption(c: Any, links: list[Any], *, prefix: str = "", with_links: bool = True, outlets: list[str] | None = None, case_source: str = "",
-              chart: bool = False) -> str:
+              chart: bool = False, data_note: str = "") -> str:
     """The same story for X: the hook (prefix + the headline with its cashtag), a second sentence when it fits, one source link. One
-    cashtag at most (X refuses API posts with more)."""
-    from app.newsdesk.network import x_length
+    cashtag at most (X refuses API posts with more). data_note (see telegram_caption): the whole note when it fits, else its last sentence
+    (the "Market data: ..." line, which never gives way)."""
+    from app.newsdesk.network import _sentences, x_length
 
     sents = tagged(sentences_of(c, case_source, chart=chart), 1)
     head = f"{prefix} {sents[0]}" if prefix else sents[0]
     srcs = [x for x in links if getattr(x, "kind", "article") != "pricechat"]
     link = f"{srcs[0].name}: {srcs[0].url}" if (with_links and srcs) else (f"Via {' · '.join([x.name for x in srcs][:2] or (outlets or [])[:2])}" if (srcs or outlets) else "")
+    if data_note:
+        notes = [data_note] + ([_sentences(data_note)[-1]] if len(_sentences(data_note)) > 1 else [])
+        for note in notes:
+            text = "\n\n".join(p for p in [head, note, link] if p)
+            if x_length(text) <= X_LIMIT:
+                return text
     for extra in (sents[1:2], []):
         text = "\n\n".join(p for p in [" ".join([head, *extra]), link] if p)
         if x_length(text) <= X_LIMIT:
@@ -867,6 +878,18 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
             return got or text_only(base, "the comparison's figures did not check out")
         syms = list(post.get("symbols") or (post.get("series") or {}).keys())
         subject = photography.subject_for_symbol(syms[0] if syms else "", str(post.get("headline") or ""))
+    elif kind == "market" and visual.yahoo_equity(ev):
+        # a US stock or index move: its figures against Yahoo's own quote (there are no Hyperliquid candles for the Nasdaq), then the
+        # subject's photograph (Wall Street for the indices). Before 2026-11-21 every such post went out as text: Telegram 199 and 203.
+        check = await _quote_check(ev, transport, now, db)
+        if check is None:
+            return text_only(base, "no Yahoo quote to check the figures against")
+        ev.facts = {**(ev.facts or {}), "number_check": check.out()}
+        if not check.ok:
+            logger.warning("visual editor: event %s refused, its figures don't match Yahoo: %s", getattr(ev, "id", None), "; ".join(check.reasons))
+            raise visual.NumbersRefused("; ".join(check.reasons))  # a market post IS its numbers: unverified, it doesn't go
+        f = ev.facts
+        subject = photography.subject_for_symbol(str(f.get("symbol") or ""), str(ev.headline or ""))
     elif kind in ("market", "recap"):
         chosen = visual.plan(ev, [])
         checked = await visual._chart_for(ev, chosen, market, now)  # raises NumbersRefused when the numbers don't check out
@@ -913,6 +936,30 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
         if got:
             return got
     return text_only(base, f"no photograph shows this {b.cls} story's subject")
+
+
+async def _quote_check(ev: Any, transport: Any, now: datetime | None, db: Any) -> Any:
+    """visual.verify_quote_move against the quotes the live re-read just used (app/newsdesk/livedata keeps them 90 s), else read now.
+    None when no quote at all could be read (the post's text was already re-read before sending; it goes without a picture)."""
+    from app.newsdesk import livedata, sources, visual
+
+    f = ev.facts or {}
+    watchlist: list[dict[str, Any]] = sources.DEFAULT_WATCHLIST
+    if db is not None:
+        try:
+            from app.newsdesk import engine
+
+            watchlist = engine.settings_row(db).watchlist or sources.DEFAULT_WATCHLIST
+        except Exception:  # noqa: BLE001 - the default list has every index
+            watchlist = sources.DEFAULT_WATCHLIST
+    try:
+        quotes = await livedata._fetch(livedata._item_for(str(f.get("symbol") or ""), watchlist), transport)
+    except Exception as e:  # noqa: BLE001
+        logger.info("visual editor: no Yahoo quote for event %s (%s)", getattr(ev, "id", None), type(e).__name__)
+        return None
+    if not quotes:
+        return None
+    return visual.verify_quote_move(ev, quotes, now)
 
 
 def _photo_out(got: tuple[Image.Image, dict[str, Any]], base: dict[str, Any], platform: str) -> tuple[bytes, dict[str, Any]]:

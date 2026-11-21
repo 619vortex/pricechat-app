@@ -26,6 +26,11 @@ def plain(price: float) -> str:
     return f"{price:,.2f}" if price < 1000 else f"{price:,.0f}"
 
 
+def level(price: float) -> str:
+    """An index level as it is quoted: to two decimals at any size (Nasdaq 22,617.73, S&P 500 6,910.39)."""
+    return f"{price:,.2f}"
+
+
 def pct(value: float) -> str:
     return f"{abs(value):.1f}%"
 

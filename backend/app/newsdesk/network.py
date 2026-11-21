@@ -700,6 +700,13 @@ def _wire_draft_problems(c: Copy, source_text: str) -> list[str]:
     return problems
 
 
+def data_note(ev: Any) -> str:
+    """A measured market move's reference and source line (app/newsdesk/livedata.move_facts), printed by every style."""
+    if getattr(ev, "kind", "") not in ("market", "update"):
+        return ""
+    return str((ev.facts or {}).get("data_note") or "")
+
+
 async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = None, transport: Any = None, x_links: bool = True,
                   style: str = "classic") -> Package:
     """Everything both platforms post for an event, checked. Stored on the event (facts.package) so X uses exactly what Telegram used."""
@@ -719,8 +726,9 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
         flag = wire.flag_for(ev, tag)
         said = wire.case_source(ev, rows)
         told = source_text_of(ev, rows)  # the sources' own qualifiers ("at least six") go back on a figure the copy states bare
-        x = wire.x_caption(c, links, tag=tag, flag=flag, with_links=x_links, outlets=outs, case_source=said, source_text=told)
-        html, plain, checked = wire.telegram_caption(c, links, tag=tag, flag=flag, outlets=outs, case_source=said, source_text=told)
+        note = data_note(ev)
+        x = wire.x_caption(c, links, tag=tag, flag=flag, with_links=x_links, outlets=outs, case_source=said, source_text=told, data_note=note)
+        html, plain, checked = wire.telegram_caption(c, links, tag=tag, flag=flag, outlets=outs, case_source=said, source_text=told, data_note=note)
         breaking = tag == wire.BREAKING
     elif style == "clean":  # app/newsdesk/clean: the label earned, the story in 1-3 sentences with cashtags, the sources, @thepricechat
         from app.newsdesk import clean
@@ -728,10 +736,18 @@ async def package(ev: Any, *, settings: Any = None, rows: list[Any] | None = Non
         pre = clean.prefix_for(ev)
         said = " ".join([str(getattr(ev, "summary", "") or ""), *(str(getattr(r, "summary", "") or "") for r in rows or [])])
         chart = clean.is_chart_post(ev)
-        x = clean.x_caption(c, links, prefix=pre, with_links=x_links, outlets=outs, case_source=said, chart=chart)
-        html, plain, checked = clean.telegram_caption(c, links, prefix=pre, outlets=outs, case_source=said, chart=chart)
+        note = data_note(ev)
+        x = clean.x_caption(c, links, prefix=pre, with_links=x_links, outlets=outs, case_source=said, chart=chart, data_note=note)
+        html, plain, checked = clean.telegram_caption(c, links, prefix=pre, outlets=outs, case_source=said, chart=chart, data_note=note)
     else:
-        x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs, kicker=kicker)
+        note = data_note(ev)
+        if note:  # classic: the measured figures' reference and "Market data:" line are the context paragraph
+            from app.newsdesk import clean
+
+            c = Copy(**{**c.out(), "context": note})
+            x = clean.x_caption(c, links, with_links=x_links, outlets=outs, data_note=note)  # the note whole, or its "Market data:" line
+        else:
+            x = x_caption(c, links, with_links=x_links, breaking=breaking, outlets=outs, kicker=kicker)
         html, plain = telegram_caption(c, links, line, breaking=breaking, outlets=outs, kicker=kicker)
         checked = plain
     src = f"{source_text_of(ev, rows)} {line}"

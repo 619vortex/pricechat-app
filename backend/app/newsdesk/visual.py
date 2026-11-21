@@ -770,6 +770,84 @@ def verify_series(points: list[tuple[int, float]], *, window: str, headline: str
     return NumberCheck(not reasons, reasons, series, detail)
 
 
+QUOTE_PRICE_TOL = 0.0005  # 0.05%: a printed level against the quote it came from (the same Yahoo answer, so normally exact)
+
+
+def yahoo_equity(ev: Any) -> bool:
+    """A move the desk measured on a US stock or index from Yahoo (app/newsdesk/moves): its numbers are checked against Yahoo's own quote,
+    not Hyperliquid candles (there are none for the Nasdaq): before 2026-11-21 every such post went out as text, "no verified series"."""
+    from app.newsdesk import moves, sources
+
+    f = ev.facts or {}
+    if getattr(ev, "kind", "") not in ("market", "update") or f.get("kind") not in ("move", "wide"):
+        return False
+    sym = str(f.get("symbol") or "")
+    if sym == "US-STOCKS":
+        return True
+    item = next((x for x in moves.watch_items(sources.DEFAULT_WATCHLIST) if x["symbol"] == sym), None)
+    return item is not None and item.get("group") in moves.EQUITY_GROUPS
+
+
+def verify_quote_move(ev: Any, quotes: dict[str, Any], now: Any = None, max_age_minutes: float = 90) -> NumberCheck:
+    """Every figure a US stock or index post prints, against the Yahoo quote it was measured from: each level is the quote's price at the
+    post's moment, each reference is the official previous close ("today") or the price the window ago, each percent is the one those two
+    give and is the one the headline prints, and the moment is fresh. One wrong figure and the post doesn't go (NumbersRefused)."""
+    from app.newsdesk import moves
+
+    f = ev.facts or {}
+    window = str(f.get("window") or "")
+    figs = [dict(x) for x in (f.get("figures") or [])]
+    if f.get("kind") == "move" and not figs:
+        figs = [{"name": str(f.get("symbol")), "symbol": str(f.get("symbol")), "price": f.get("price"), "ref": f.get("ref"), "change": f.get("change_pct"),
+                 "as_of": f.get("as_of")}]
+    if not figs:
+        return NumberCheck(False, ["the post carries no figures to check"])
+    head = f"{getattr(ev, 'headline', '') or ''}"
+    reasons: list[str] = []
+    for x in figs:
+        sym, name = str(x.get("symbol") or ""), str(x.get("name") or x.get("symbol"))
+        price, ref, change = float(x.get("price") or 0), float(x.get("ref") or 0), float(x.get("change") or 0)
+        if price <= 0 or ref <= 0:
+            reasons.append(f"{name}: no level or no reference price")
+            continue
+        if abs((price - ref) / ref * 100 - change) > 0.01:
+            reasons.append(f"{name}: {change:+.2f}% is not what {price} against {ref} gives")
+        if f"{abs(change):.1f}%" not in head:
+            reasons.append(f"{name}: the headline doesn't print {abs(change):.1f}%")
+        q = quotes.get(sym)
+        if q is None:
+            reasons.append(f"{name}: no Yahoo quote to check against")
+            continue
+        at = datetime_of(x.get("as_of") or f.get("as_of"))
+        seen = [q.price] if at is not None and abs(q.as_of.timestamp() - at.timestamp()) <= 300 else []
+        if at is not None:  # the bar of that moment, whether the move stamped it with the bar's start (no live price) or its end
+            width, ts = moves.bar_seconds(q), at.timestamp()
+            seen += [c for t, c, _ in q.bars if abs(t - ts) <= 1 or abs(t + width - ts) <= 1]
+        if not any(abs(price - s) / s <= QUOTE_PRICE_TOL for s in seen if s):
+            reasons.append(f"{name}: {price} is not Yahoo's price at {at:%H:%M} UTC" if at else f"{name}: the post's moment is unknown")
+        if window == "day":
+            if not q.previous_close or abs(ref - q.previous_close) / q.previous_close > QUOTE_PRICE_TOL:
+                reasons.append(f"{name}: {ref} is not Yahoo's previous close ({q.previous_close})")
+        elif at is not None:
+            then = moves.price_near(q, at.timestamp() - moves.WINDOWS.get(window, 0), before=at.timestamp())
+            if not then or abs(ref - then) / then > QUOTE_PRICE_TOL:
+                reasons.append(f"{name}: {ref} is not Yahoo's price {window} earlier ({then})")
+        if at is not None and now is not None and (now - at).total_seconds() / 60 > max_age_minutes:
+            reasons.append(f"{name}: the price is {(now - at).total_seconds() / 60:.0f} min old")
+    lead = float(figs[0].get("change") or 0)
+    detail = "Yahoo quote check: " + ", ".join(f"{x.get('name')} {float(x.get('price') or 0):,.2f} vs {float(x.get('ref') or 0):,.2f} ({float(x.get('change') or 0):+.2f}%)" for x in figs)
+    return NumberCheck(not reasons, reasons, lead, detail)
+
+
+def datetime_of(v: Any) -> Any:
+    from datetime import datetime, timezone
+
+    if not v:
+        return None
+    t = v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
 class NumbersRefused(ValueError):
     """A chart the numbers gate refused: the post goes without it, or not at all."""
 

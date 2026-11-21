@@ -263,7 +263,7 @@ async def test_a_public_figure_story_gets_their_licensed_photo_and_nothing_gener
         return [photos.LicensedPhoto(title="File:Jerome Powell.jpg", url="https://upload.wikimedia.org/powell.jpg", page="https://commons.wikimedia.org/wiki/File:Powell.jpg",
                                      creator="Federal Reserve", provider="wikimedia", licence="Public domain", source="wikimedia", width=1600, height=1200)]
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         return Image.new("RGB", (1600, 1200), (90, 90, 90))
 
     monkeypatch.setattr(photos, "discover", discover)

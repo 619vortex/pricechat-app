@@ -442,15 +442,18 @@ def lead(c: Any, *, tag: str = "", flag: str = "", case_source: str = "", source
 
 
 def telegram_caption(c: Any, links: list[Any], *, tag: str = "", flag: str = "", outlets: list[str] | None = None, case_source: str = "",
-                     source_text: str = "") -> tuple[str, str, str]:
-    """(HTML, plain as sent, plain the checks read). Tag + story, a blank line, then the sources and @thepricechat."""
+                     source_text: str = "", data_note: str = "") -> tuple[str, str, str]:
+    """(HTML, plain as sent, plain the checks read). Tag + story, a blank line, then the sources and @thepricechat. data_note: a measured
+    market post's reference and "Market data:" line (app/newsdesk/clean.telegram_caption), on its own line above the sources."""
     body_html, body_plain = lead(c, tag=tag, flag=flag, case_source=case_source, source_text=source_text)
+    if data_note:
+        body_html, body_plain = f"{body_html}\n\n{_esc(data_note)}", f"{body_plain}\n\n{data_note}"
     f_html, f_plain, f_checked = footer(links, outlets)
     return f"{body_html}\n\n{f_html}", f"{body_plain}\n\n{f_plain}", (f"{body_plain}\n\n{f_checked}" if f_checked else body_plain)
 
 
 def x_caption(c: Any, links: list[Any], *, tag: str = "", flag: str = "", with_links: bool = True, outlets: list[str] | None = None,
-              case_source: str = "", source_text: str = "") -> str:
+              case_source: str = "", source_text: str = "", data_note: str = "") -> str:
     """The same words on X: tag + story, then one source link (or the sources named). The second sentence goes first if it doesn't fit."""
     from app.newsdesk import network
 
@@ -462,6 +465,12 @@ def x_caption(c: Any, links: list[Any], *, tag: str = "", flag: str = "", with_l
     else:
         named = [x.name for x in srcs][:2] or list(outlets or [])[:2]
         tail = f"Via {' · '.join(named)}" if named else ""
+    if data_note:  # the measured figures' reference and source: the whole note when it fits, else its "Market data:" sentence
+        story = clean.cashtag(raw[0])[0]
+        for note in dict.fromkeys([data_note, network._sentences(data_note)[-1]]):
+            text = "\n\n".join(p for p in (" ".join(x for x in (pre, story) if x), note, tail) if p)
+            if network.x_length(text) <= network.X_LIMIT:
+                return text
     for n in (len(raw), 1):
         story = clean.cashtag(" ".join(raw[:n]))[0]  # one tag per asset, at its first mention
         text = "\n\n".join(p for p in (" ".join(x for x in (pre, story) if x), tail) if p)

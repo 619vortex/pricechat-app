@@ -121,7 +121,7 @@ async def test_a_war_story_without_an_event_photo_goes_as_text(monkeypatch: pyte
     async def discover(client: Any, queries: list[str], terms: list[str], **kw: Any) -> list[Any]:
         return [KNESSET]
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         return photo_like()
 
     monkeypatch.setattr(photos, "discover", discover)

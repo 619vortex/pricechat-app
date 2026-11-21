@@ -440,7 +440,7 @@ async def test_a_major_incident_at_a_named_site_gets_that_sites_credited_photo(m
         return [_photo("File:Gamal Abdel Nasser Hospital 1.jpg", "Gamal Abdel Nasser Hospital in Alexandria, Egypt"),  # real Commons result, wrong site
                 _photo("File:Nasser Hospital entrance.jpg", "The entrance of Nasser Hospital, Khan Younis, Gaza Strip")]
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         return Image.new("RGB", (1800, 1200), (90, 90, 90))
 
     monkeypatch.setattr(photos, "discover", discover)

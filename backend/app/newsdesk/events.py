@@ -747,6 +747,8 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
     assets = sorted({moves.KEYS.get(sym, sym) for sym in ([m.symbol] if m.kind != "wide" else [])} | ({"BTC", "ETH", "SOL", "XRP"} if m.symbol == "CRYPTO" else set())
                     | ({"SPX", "IXIC", "DJI"} if m.symbol == "US-STOCKS" else set()))
     direction = "up" if m.up else "down"
+    if m.kind == "wide" and not m.figures:
+        return 0  # a market-wide post prints every member's level (Telegram 203, 2026-11-20, printed percentages only): no levels, no post
     if m.kind == "milestone" and any((e.facts or {}).get("kind") == "milestone" and (e.facts or {}).get("symbol") == m.symbol and (e.facts or {}).get("level") == m.level for e in recent):
         return 0  # one post per level per asset in three days, whichever way it crossed
     # the same asset: nothing new for six hours, and the same way for a day unless the move escalates ("oil -9.5% in 24h" again at -9.8% isn't news)
@@ -795,7 +797,8 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
     facts = {"symbol": m.symbol, "assets": assets, "kind": m.kind, "window": m.window, "change_pct": round(m.change, 2), "ratio": round(m.ratio, 2), "price": m.price,
              "as_of": m.as_of.isoformat(), "level": m.level, "members": m.members, "direction": direction, "verified": verified, "tickers": tickers, "falling": not m.up,
              "risk": False, "told": told, "spark": m.spark, "stat": f"{'+' if m.change > 0 else '-'}{abs(m.change):.1f}%" if m.kind in ("move", "wide") else writer_money(m),
-             "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else "", **({"urgency": u.out()} if u is not None else {})}
+             "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else "", **({"urgency": u.out()} if u is not None else {}),
+             **livedata.move_facts(m, verified, extra)}
     url = f"https://finance.yahoo.com/quote/{m.symbol}" if m.symbol not in ("CRYPTO", "US-STOCKS") else "https://finance.yahoo.com/markets/"
     src = [{"name": "Yahoo Finance", "url": url, "at": m.as_of.isoformat()}]
     if live:
@@ -817,13 +820,6 @@ def writer_money(m: moves.Move) -> str:
     from app.newsdesk import writer
 
     return writer.plain(m.price) if m.item.get("group") == "index" else writer.usd(m.price)
-
-
-def _market_summary(facts: dict[str, Any], m: moves.Move) -> str:
-    stamp = m.as_of.strftime("%H:%M")
-    if "Hyperliquid" in str(facts.get("verified") or ""):
-        return f"Price as of {stamp} UTC from Yahoo Finance, matched against Hyperliquid."
-    return f"Price from Yahoo Finance as of {stamp} UTC."
 
 
 def _offer_liquidations(db: Session, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy) -> int:

@@ -52,16 +52,25 @@ def _money(item: dict, price: float) -> str:
     return writer.plain(price) if item.get("group") == "index" else writer.usd(price)
 
 
+def _price(item: dict, price: float) -> str:
+    """A price as the market quotes it: an index level to the cent (22,810.57), a dollar price as money."""
+    return writer.level(price) if item.get("group") == "index" else writer.usd(price)
+
+
 def market(m: moves.Move) -> str:
     name = str(m.item.get("name", m.symbol)).upper()
     if m.kind == "wide":
-        figures = ", ".join(f"{n.upper()} {'+' if c > 0 else '-'}{abs(c):.1f}%" for n, c in m.members)
         verb = move_verb(m.change, m.ratio)
         if name.endswith("STOCKS"):  # they plunge; the market plunges
             verb = verb[:-2] if verb.endswith("ES") and verb[:-2].endswith(("SH", "CH")) else verb[:-1]
+        if m.figures:  # each member's level beside its change (owner, 2026-11-21: Telegram 203 printed percentages only)
+            figures = ", ".join(f"{str(f['name']).upper()} {'+' if f['change'] > 0 else '-'}{abs(f['change']):.1f}% TO {_price(m.item, float(f['price']))}"
+                                for f in m.figures)
+        else:
+            figures = ", ".join(f"{n.upper()} {'+' if c > 0 else '-'}{abs(c):.1f}%" for n, c in m.members)
         return f"{name} {verb}: {figures} {moves.WINDOW_WORDS[m.window].upper()}"
     if m.kind == "move":
-        return f"{name} {move_verb(m.change, m.ratio)} {abs(m.change):.1f}% {moves.WINDOW_WORDS[m.window].upper()} TO {_money(m.item, m.price)}"
+        return f"{name} {move_verb(m.change, m.ratio)} {abs(m.change):.1f}% {moves.WINDOW_WORDS[m.window].upper()} TO {_price(m.item, m.price)}"
     if m.kind in ("high", "low"):
         return f"{name} HITS A NEW 52-WEEK {'HIGH' if m.kind == 'high' else 'LOW'} AT {_money(m.item, m.price)}"
     return f"{name} {'BREAKS ABOVE' if m.change > 0 else 'FALLS BELOW'} {_money(m.item, m.level)}, NOW {_money(m.item, m.price)}"

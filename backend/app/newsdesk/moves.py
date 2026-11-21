@@ -12,14 +12,21 @@ from typing import Any
 from app.newsdesk import sources
 
 WINDOWS = {"15m": 900, "1h": 3600, "4h": 14400, "24h": 86400}
-WINDOW_WORDS = {"15m": "in 15 minutes", "1h": "in an hour", "4h": "in 4 hours", "24h": "in 24 hours"}
+# "day": a US stock or index against its official previous close (the way every exchange and outlet reports a session), never a rolling
+# 24 hours. Production 2026-11-20 (Telegram 203): "Nasdaq -4.6%, S&P 500 -3.1% in 24 hours" at 20:00 UTC was the same-time-yesterday
+# change; against Thursday's close it was -4.5% / -3.0%, and the session closed an hour later at -5.3% / -3.7%.
+WINDOW_WORDS = {"15m": "in 15 minutes", "1h": "in an hour", "4h": "in 4 hours", "24h": "in 24 hours", "day": "today"}
 LINES: dict[str, dict[str, float]] = {
-    "crypto_major": {"15m": 2.0, "1h": 3.0, "4h": 5.0, "24h": 8.0},
-    "crypto_alt": {"15m": 4.0, "1h": 6.0, "4h": 10.0, "24h": 15.0},
-    "index": {"15m": 0.9, "1h": 1.2, "4h": 1.8, "24h": 2.5},
-    "stock": {"15m": 3.0, "1h": 4.5, "4h": 6.0, "24h": 8.0},
-    "commodity": {"15m": 1.5, "1h": 2.5, "4h": 3.5, "24h": 5.0},
+    "crypto_major": {"15m": 2.0, "1h": 3.0, "4h": 5.0, "24h": 8.0, "day": 8.0},
+    "crypto_alt": {"15m": 4.0, "1h": 6.0, "4h": 10.0, "24h": 15.0, "day": 15.0},
+    "index": {"15m": 0.9, "1h": 1.2, "4h": 1.8, "24h": 2.5, "day": 2.5},
+    "stock": {"15m": 3.0, "1h": 4.5, "4h": 6.0, "24h": 8.0, "day": 8.0},
+    "commodity": {"15m": 1.5, "1h": 2.5, "4h": 3.5, "24h": 5.0, "day": 5.0},
 }
+# US stocks and indices trade a 6.5-hour session: a sudden burst (15 minutes, an hour, inside the session: price_at finds no bar across the
+# overnight gap) or the day against the previous close. 4 hours and 24 hours would straddle the close and the open.
+EQUITY_GROUPS = ("index", "stock")
+EQUITY_WINDOWS = ("15m", "1h")
 FRESH = 1200  # the latest bar must be this recent
 # assets watched for moves beyond the desk's own watchlist: the names whose moves the market talks about
 EXTRA_MOVERS: list[dict[str, Any]] = [
@@ -50,6 +57,11 @@ class Move:
     level: float = 0.0
     members: list[tuple[str, float]] = field(default_factory=list)  # a wide move: (name, change)
     spark: list[float] = field(default_factory=list)  # the last day's prices, for the card
+    ref: float = 0.0  # the price the change is measured from: the previous close ("day") or the price `window` ago
+    ref_at: datetime | None = None  # when `ref` was set: the previous session's close, or the bar `window` ago
+    session: str = ""  # a US stock or index: "intraday" (the session is open) or "close" (the price is the session's close)
+    # a wide move, each member's own figures: {"name", "symbol", "price", "ref", "change", "as_of"} (the levels the post prints)
+    figures: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def symbol(self) -> str:
@@ -95,6 +107,8 @@ def measure(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | Non
         return None
     price = last[-1][1]
     lines = LINES.get(item.get("group", "stock"), LINES["stock"])
+    if item.get("group") in EQUITY_GROUPS:
+        return _measure_session(q, item, now, last[-1], lines)
     best: Move | None = None
     for window, secs in WINDOWS.items():
         then = price_at(q, last[-1][0] - secs, tolerance=max(600, int(secs * 0.05)))
@@ -103,8 +117,74 @@ def measure(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | Non
         change = (price - then) / then * 100
         ratio = abs(change) / lines[window]
         if ratio >= 1 and (best is None or ratio > best.ratio):
-            best = Move("move", item, price, datetime.fromtimestamp(last[-1][0], tz=now.tzinfo), window, change, ratio)
+            best = Move("move", item, price, datetime.fromtimestamp(last[-1][0], tz=now.tzinfo), window, change, ratio, ref=then,
+                        ref_at=datetime.fromtimestamp(last[-1][0] - secs, tz=now.tzinfo))
     return best
+
+
+def bar_seconds(q: sources.Quote) -> int:
+    gaps = sorted(b[0] - a[0] for a, b in zip(q.bars[-13:], q.bars[-12:]) if b[0] > a[0])
+    return gaps[len(gaps) // 2] if gaps else 300
+
+
+def price_near(q: sources.Quote, ts: float, *, before: float, tolerance: int = 150) -> float | None:
+    """The price at moment ts: the bar whose END (Yahoo stamps a bar with its start; its close is the last trade before start + width) is
+    nearest ts, within `tolerance` seconds, and completed before `before`. The window between the two prices is then the window it claims
+    (Telegram 199's "in 15 minutes" mixed a bar start with a live price: anything from 10 to 20 minutes)."""
+    width = bar_seconds(q)
+    best = None
+    for t, close, _ in q.bars:
+        end = t + width
+        if end > before or close <= 0:
+            continue
+        if abs(end - ts) <= tolerance and (best is None or abs(end - ts) < best[0]):
+            best = (abs(end - ts), close)
+    return best[1] if best else None
+
+
+def live_point(q: sources.Quote, last_bar: tuple[int, float, float], now: datetime) -> tuple[float, datetime]:
+    """The price and the moment it was struck: Yahoo's regularMarketPrice at regularMarketTime when that is the newest reading (it is the
+    in-progress bar's latest trade, or the official close), else the newest bar's close at its start time."""
+    at = q.as_of if q.as_of.tzinfo else q.as_of.replace(tzinfo=now.tzinfo)
+    if q.price > 0 and last_bar[0] <= at.timestamp() <= now.timestamp() + 60:
+        return q.price, at
+    return last_bar[1], datetime.fromtimestamp(last_bar[0], tz=now.tzinfo)
+
+
+def session_of(q: sources.Quote, at: datetime) -> str:
+    if q.session_open is None or q.session_close is None:
+        return ""
+    if at >= q.session_close:
+        return "close"
+    return "intraday" if at >= q.session_open else ""
+
+
+def _measure_session(q: sources.Quote, item: dict[str, Any], now: datetime, last_bar: tuple[int, float, float], lines: dict[str, float]) -> Move | None:
+    """A US stock or index: a burst inside the session, or the day against the official previous close. Without Yahoo's previous close
+    there is no day figure at all (never a rolling 24 hours in its place)."""
+    price, at = live_point(q, last_bar, now)
+    session = session_of(q, at)
+    best: Move | None = None
+    for window in EQUITY_WINDOWS:
+        secs = WINDOWS[window]
+        then = price_near(q, at.timestamp() - secs, before=at.timestamp())
+        if not then:
+            continue
+        change = (price - then) / then * 100
+        ratio = abs(change) / lines[window]
+        if ratio >= 1 and (best is None or ratio > best.ratio):
+            best = Move("move", item, price, at, window, change, ratio, ref=then, ref_at=datetime.fromtimestamp(int(at.timestamp()) - secs, tz=now.tzinfo),
+                        session=session)
+    if q.previous_close:
+        change = (price - q.previous_close) / q.previous_close * 100
+        ratio = abs(change) / lines["day"]
+        if ratio >= 1 and (best is None or ratio > best.ratio):
+            best = Move("move", item, price, at, "day", change, ratio, ref=q.previous_close, ref_at=q.previous_session_close, session=session)
+    return best
+
+
+def figure(m: Move) -> dict[str, Any]:
+    return {"name": str(m.item.get("name") or m.symbol), "symbol": m.symbol, "price": m.price, "ref": m.ref, "change": m.change, "as_of": m.as_of.isoformat()}
 
 
 def biggest(q: sources.Quote, item: dict[str, Any], now: datetime) -> tuple[str, float, float] | None:
@@ -176,16 +256,24 @@ def detect(quotes: dict[str, sources.Quote], watchlist: list[dict[str, Any]], no
             if len(same) >= (3 if symbol == "CRYPTO" else 2) and any(m.item.get("group") in ("crypto_major", "index") for m in same):
                 lead = max(same, key=lambda m: (m.item.get("group") in ("crypto_major", "index"), m.ratio))
                 together = []  # every member over the lead's window, so the figures side by side mean the same thing
+                figs = []
                 for m in sorted(same, key=lambda m: -m.ratio):
-                    then = price_at(quotes[m.symbol], lead.as_of.timestamp() - WINDOWS[lead.window], tolerance=max(600, int(WINDOWS[lead.window] * 0.05)))
+                    if lead.window == "day":  # each index against its own official previous close
+                        then = quotes[m.symbol].previous_close
+                    elif m.item.get("group") in EQUITY_GROUPS:
+                        then = price_near(quotes[m.symbol], lead.as_of.timestamp() - WINDOWS[lead.window], before=lead.as_of.timestamp())
+                    else:
+                        then = price_at(quotes[m.symbol], lead.as_of.timestamp() - WINDOWS[lead.window], tolerance=max(600, int(WINDOWS[lead.window] * 0.05)))
                     change = (m.price - then) / then * 100 if then else 0.0
                     line = LINES.get(m.item.get("group", "stock"), LINES["stock"])[lead.window]
                     if then and (change > 0) == (direction > 0) and abs(change) >= line * 0.5:  # a real part of the move, not "+0.0%"
                         together.append((m.item["name"], change))
+                        figs.append({**figure(m), "ref": then, "change": change})
                 if len(together) < 2:
                     continue
                 wide = Move("wide", {"symbol": symbol, "name": name, "group": lead.item.get("group"), "category": lead.item.get("category")}, lead.price, lead.as_of,
-                            lead.window, lead.change, max(m.ratio for m in same), members=together[:4], spark=lead.spark)
+                            lead.window, lead.change, max(m.ratio for m in same), members=together[:4], spark=lead.spark, ref=lead.ref, ref_at=lead.ref_at,
+                            session=lead.session, figures=figs[:4])
                 found = [m for m in found if m not in same] + [wide]
     return sorted(found, key=lambda m: -m.ratio)
 

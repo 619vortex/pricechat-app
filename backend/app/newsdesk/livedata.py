@@ -136,14 +136,61 @@ def since_line(m: moves.Move, u: urgency.Urgency) -> str:
 
 def market_told(m: moves.Move, head: str, extra: str = "") -> str:
     stamp = m.as_of.strftime("%d %b %H:%M")
-    return f"{head} {stamp} {m.price} {m.change} {m.level} " + " ".join(f"{n} {c:.1f}" for n, c in m.members) + (f" {extra}" if extra else "")
+    levels = " ".join(f"{f['name']} {headline._price(m.item, float(f['price']))} {headline._price(m.item, float(f['ref']))} {float(f['change']):.2f}"
+                      for f in m.figures if f.get("ref"))
+    return (f"{head} {stamp} {m.price} {m.change} {m.level} " + " ".join(f"{n} {c:.1f}" for n, c in m.members) + (f" {levels}" if levels else "")
+            + (f" {m.ref}" if m.ref else "") + (f" {extra}" if extra else ""))
+
+
+def _close_name(at: datetime | None) -> str:
+    """ "Thursday's close": the weekday of the previous session's close in New York (where the session is)."""
+    if at is None:
+        return "the previous close"
+    from zoneinfo import ZoneInfo
+
+    return f"{_utc(at).astimezone(ZoneInfo('America/New_York')):%A}'s close"
+
+
+def reference_line(m: moves.Move) -> str:
+    """What the change is measured from, with the level, so the reader can check every figure (owner, 2026-11-21: Telegram 203 gave
+    "Nasdaq -4.6%, S&P 500 -3.1%" with no level at all). Empty when the move has no reference price (a level or an extreme)."""
+    if m.kind not in ("move", "wide"):
+        return ""
+    figs = m.figures if m.kind == "wide" else ([moves.figure(m)] if m.ref else [])
+    figs = [f for f in figs if f.get("ref")]
+    if not figs:
+        return ""
+    if m.window == "day":
+        frm = f"Change from {_close_name(m.ref_at)}"
+    elif m.window == "24h":
+        frm = "Change from 24 hours earlier"
+    else:
+        start = m.ref_at or (m.as_of - timedelta(seconds=moves.WINDOWS.get(m.window, 0)))
+        frm = f"Change from {_utc(start):%H:%M} UTC"
+    if m.kind == "wide":
+        return f"{frm}: " + ", ".join(f"{f['name']} {headline._price(m.item, float(f['ref']))}" for f in figs) + "."
+    return f"{frm}, {headline._price(m.item, float(figs[0]['ref']))}."
+
+
+def data_label(m: moves.Move, verified: str) -> str:
+    """The source line every market post ends with: "Market data: Yahoo Finance, 20:03 UTC, intraday (US market open)." The time is when
+    the printed price was struck (Yahoo's regularMarketTime), and a US stock or index says whether its session is still trading."""
+    stamp = f"{_utc(m.as_of):%H:%M} UTC"
+    src = "Yahoo Finance, matched against Hyperliquid" if "Hyperliquid" in verified else "Yahoo Finance"
+    when = {"intraday": ", intraday (US market open)", "close": ", at the close"}.get(m.session, "")
+    return f"Market data: {src}, {stamp}{when}."
 
 
 def market_summary(m: moves.Move, verified: str, extra: str = "") -> str:
-    stamp = m.as_of.strftime("%H:%M")
-    base = (f"Price as of {stamp} UTC from Yahoo Finance, matched against Hyperliquid." if "Hyperliquid" in verified
-            else f"Price from Yahoo Finance as of {stamp} UTC.")
-    return f"{base} {extra}".strip()
+    return " ".join(x for x in (reference_line(m), data_label(m, verified), extra) if x).strip()
+
+
+def move_facts(m: moves.Move, verified: str = "", extra: str = "") -> dict[str, Any]:
+    """The figures a market post prints, kept on the event: each member's level and reference, what the change is measured from, whether
+    the US session was open, and the caption's data note (the reference and the "Market data:" line every style prints). The picture's
+    number check and X's re-read use the same ones."""
+    note = " ".join(x for x in (reference_line(m), extra, data_label(m, verified)) if x)  # the "Market data:" line last: X keeps it when short
+    return {"figures": [dict(f) for f in m.figures], "ref": m.ref, "ref_at": _iso(m.ref_at) if m.ref_at else None, "session": m.session, "data_note": note}
 
 
 def stat_of(m: moves.Move) -> str:
@@ -213,7 +260,12 @@ async def _fetch(items: list[dict[str, Any]], transport: Any) -> dict[str, sourc
     out: dict[str, sources.Quote] = {}
     for it in items:
         seen = _seen_quotes.get(it["symbol"])
-        q = seen[1] if seen is not None and time.monotonic() - seen[0] <= SEEN_FOR else await _fetch_quote(it["symbol"], transport)
+        if seen is not None and time.monotonic() - seen[0] <= SEEN_FOR:
+            q = seen[1]
+        else:
+            q = await _fetch_quote(it["symbol"], transport)
+            if q is not None:  # the picture's number check (visual.verify_quote_move) moments later reads this same answer
+                _seen_quotes[it["symbol"]] = (time.monotonic(), q)
         if q is not None:
             out[it["symbol"]] = q
     return out
@@ -248,7 +300,7 @@ async def _refresh_market(ev: Any, now: datetime, transport: Any, watchlist: lis
     ev.title = ev.headline = head
     ev.summary = market_summary(m, str(f.get("verified") or ""), extra)
     nf = {**f, "change_pct": round(m.change, 2), "ratio": round(m.ratio, 2), "price": m.price, "as_of": m.as_of.isoformat(), "window": m.window,
-          "members": m.members, "spark": m.spark or f.get("spark") or [], "stat": stat_of(m), "told": market_told(m, head, extra)}
+          "members": m.members, "spark": m.spark or f.get("spark") or [], "stat": stat_of(m), "told": market_told(m, head, extra), **move_facts(m, str(f.get("verified") or ""), extra)}
     if u is not None:
         nf["urgency"] = u.out()
     ev.facts = nf

@@ -59,7 +59,7 @@ def library(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     async def records(client: Any, subject: Any) -> list[Any]:
         return list(REAL.get(subject.key, []))
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         fetched.append(p.title)
         return pic()
 

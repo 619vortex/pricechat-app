@@ -48,7 +48,7 @@ def library(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         asked.append(subject.key)
         return [rec(t) for t in subject.files]
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         return pic()
 
     async def nothing(*a: Any, **k: Any) -> list[Any]:

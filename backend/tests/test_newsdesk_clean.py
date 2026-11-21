@@ -172,7 +172,7 @@ def found(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
                                      creator="Jane Doe", licence="CC BY-SA 4.0", licence_url="https://creativecommons.org/licenses/by-sa/4.0/",
                                      provider="wikimedia", source="wikimedia", width=1200, height=1500)]
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         return photo()
 
     monkeypatch.setattr(photos, "discover", discover)
@@ -210,7 +210,7 @@ async def test_a_controversy_shows_its_public_figure_only_in_a_neutral_photo(mon
             return [shot("Jensen Huang leaving court"), shot("Jensen Huang at Computex 2025")]
         return []
 
-    async def fetch(client: Any, p: Any, min_width: int = 0) -> Image.Image:
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
         return photo()
 
     monkeypatch.setattr(photos, "discover", discover)
