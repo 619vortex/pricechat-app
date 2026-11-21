@@ -243,6 +243,32 @@ class XClient:
         out = await self._post(f"/2/users/{user_id}/following", {"target_user_id": target_user_id}, endpoint="follows/create")
         return out.get("data") or {}
 
+    async def delete_post(self, post_id: str, *, permit: "ExecutionPermit") -> dict[str, Any]:
+        """Delete one of the account's own posts (DELETE /2/tweets/:id). Only for the owner's confirmed retraction of a News Desk post."""
+        from app.models.enums import SocialAction
+        from app.social.guard import require_permit
+
+        require_permit(permit, SocialAction.DELETE, post_id)
+        c = self._creds
+        if not c.user_context:
+            raise XNotConfiguredError("X write actions need user-context credentials (Access Token and Access Token Secret).")
+        if self.budget_check is not None:
+            self.budget_check(self.write_cost_estimate)
+        url = f"{self.api_base}/2/tweets/{post_id}"
+        headers = {"User-Agent": "PriceChat/0.5",
+                   "Authorization": authorization_header("DELETE", url, {}, c.api_key, c.api_secret, c.access_token, c.access_token_secret)}  # type: ignore[arg-type]
+        try:
+            response = await self._client.delete(url, headers=headers)
+        except httpx.TimeoutException:
+            raise XUnavailableError("X did not answer the delete in time; check X before retrying") from None
+        except httpx.TransportError as exc:
+            raise XUnavailableError(f"Cannot reach X ({type(exc).__name__})") from None
+        self._record_rate_limit("posts/delete", response)
+        out = self._parse(response, "posts/delete")
+        if self.on_usage is not None:
+            self.on_usage("write/posts/delete", 0, 0, self.write_cost_estimate)
+        return out.get("data") or {}
+
     async def _post(self, path: str, body: dict[str, Any], *, endpoint: str) -> dict[str, Any]:
         c = self._creds
         if not c.user_context:
