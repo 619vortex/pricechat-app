@@ -121,6 +121,7 @@ class SocialAction(StrEnum):
     REPOST = "repost"
     FOLLOW = "follow"
     DIRECT_MESSAGE = "direct_message"
+    DELETE = "delete"  # only the owner's confirmed correction of the News Desk's own post (app/newsdesk/corrections)
 
 
 class ReviewStatus(StrEnum):

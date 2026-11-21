@@ -220,6 +220,60 @@ async def publish_now(post_id: int, db: DbSession, runtime: Runtime) -> dict[str
     return engine.post_out(post)
 
 
+class CorrectionInput(StrictInput):
+    action: Literal["tg_edit", "tg_reply", "tg_delete", "x_delete", "x_reply"]
+    text: str | None = Field(None, max_length=8000)
+
+
+class CorrectionConfirm(CorrectionInput):
+    confirm_token: str = Field(min_length=1, max_length=200)
+
+
+def _event(db: DbSession, event_id: int) -> Any:
+    from app.models.newsdesk import NdEvent
+
+    ev = db.get(NdEvent, event_id)
+    if ev is None:
+        raise HTTPException(404, "No such event.")
+    return ev
+
+
+@router.post("/events/{event_id}/corrections/preview")
+async def correction_preview(event_id: int, payload: CorrectionInput, db: DbSession) -> dict[str, Any]:
+    """Step one of a correction (owner, 2026-11-21, after Telegram post 204): exactly what would be edited, replied or deleted, and a token
+    to confirm it with (10 minutes, once). Sends nothing."""
+    from app.newsdesk import corrections
+
+    return await corrections.preview(db, _event(db, event_id), payload.action, payload.text)
+
+
+@router.post("/events/{event_id}/corrections")
+async def correction_confirm(event_id: int, payload: CorrectionConfirm, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+    """Step two: do it, only with the preview's token. Every attempt is in the audit log, done or not."""
+    from app.newsdesk import corrections
+
+    ev = _event(db, event_id)
+    try:
+        return await corrections.execute(db, ev, payload.action, payload.text, payload.confirm_token, settings=runtime.settings, x_runtime=runtime.x)
+    except corrections.CorrectionError as e:
+        raise HTTPException(e.status, str(e)) from None
+
+
+@router.get("/corrections")
+def corrections_log(db: DbSession) -> list[dict[str, Any]]:
+    """Every correction attempt, newest first."""
+    from app.newsdesk import corrections
+
+    return corrections.audit_list(db)
+
+
+@router.get("/events/{event_id}/corrections")
+def event_corrections(event_id: int, db: DbSession) -> list[dict[str, Any]]:
+    from app.newsdesk import corrections
+
+    return corrections.audit_list(db, event_id)
+
+
 @router.get("/test-post")
 async def test_post_preview(db: DbSession, event_id: int | None = None) -> dict[str, Any]:
     """What one test post to X would carry (text and picture) for the latest event Telegram delivered, or the one named. Sends nothing."""

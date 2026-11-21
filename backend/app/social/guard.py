@@ -144,6 +144,15 @@ class SocialActionGuard:
             raise PermissionError(problem)
         return ExecutionPermit(req.action, None, req.text_hash, 0, secrets.token_hex(8), _PERMIT_KEY)
 
+    def issue_correction_permit(self, req: ActionRequest) -> ExecutionPermit:
+        """The owner's confirmed correction of a News Desk post (app/newsdesk/corrections): a reply under, or the deletion of, the desk's own
+        post. The owner approved this exact request with a confirmation token; the kill switch, outbound switch and X blocks still hold."""
+        if req.action not in (SocialAction.REPLY, SocialAction.DELETE) or not req.target_external_id:
+            raise PermissionError("A correction may only reply under or delete the News Desk's own post")
+        if (problem := self.news_problem(req)) is not None:
+            raise PermissionError(problem)
+        return ExecutionPermit(req.action, req.target_external_id, req.text_hash, 0, secrets.token_hex(8), _PERMIT_KEY)
+
     def issue_permit(self, req: ActionRequest, decision: GuardDecision, approval_id: int) -> ExecutionPermit:
         if not (decision.allowed and decision.executable):
             raise PermissionError(f"Not executable: {decision.reason}")
