@@ -263,9 +263,54 @@ async def fetch_quotes(client: httpx.AsyncClient, watchlist: list[dict[str, Any]
     return out
 
 
-async def second_opinion(item: dict[str, Any], price: float, market: Any = None) -> tuple[bool, str]:
-    """Crypto must agree with Hyperliquid. Others have one source, and say so in the checks."""
+# an independent second price for what Yahoo measures outside crypto (owner, 2026-11-21, Phase 1: "independent price verification"):
+# Hyperliquid's trade.xyz markets, whose oracle price follows the index, the stock or the commodity. Checked 2026-11-21 against Yahoo:
+# SP500 6,960.6 vs ^GSPC, GOLD 3,533.9 vs GC=F 3,515.4 (both on a Saturday, after Friday's close). There is no trade.xyz market for the Dow
+# or the Nasdaq Composite (XYZ100 is the Nasdaq-100, another index): those keep one source and say so.
+XYZ = {"^GSPC": "xyz:SP500", "NVDA": "xyz:NVDA", "TSLA": "xyz:TSLA", "AAPL": "xyz:AAPL", "COIN": "xyz:COIN", "MSTR": "xyz:MSTR", "META": "xyz:META",
+       "AMZN": "xyz:AMZN", "MSFT": "xyz:MSFT", "GOOGL": "xyz:GOOGL", "GC=F": "xyz:GOLD", "SI=F": "xyz:SILVER", "CL=F": "xyz:CL", "BZ=F": "xyz:BRENTOIL",
+       "HG=F": "xyz:COPPER"}
+XYZ_TOLERANCE = {"index": 1.0, "stock": 1.5, "commodity": 1.5}  # percent: a perpetual's oracle and a futures front month or a quote a minute old
+XYZ_TTL = 60.0
+_xyz: tuple[float, dict[str, tuple[float, float]]] | None = None
+
+
+async def xyz_prices(transport: Any = None) -> dict[str, tuple[float, float]]:
+    """{trade.xyz market: (oracle price, mark price)}, read at most once a minute."""
+    global _xyz
+    import time
+
+    if _xyz is not None and time.monotonic() - _xyz[0] <= XYZ_TTL:
+        return _xyz[1]
+    async with httpx.AsyncClient(transport=transport, timeout=8) as c:
+        r = await c.post("https://api.hyperliquid.xyz/info", json={"type": "metaAndAssetCtxs", "dex": "xyz"})
+        r.raise_for_status()
+        meta, ctxs = r.json()
+    out = {str(a.get("name")): (float(x.get("oraclePx") or 0), float(x.get("markPx") or 0)) for a, x in zip(meta["universe"], ctxs)}
+    _xyz = (time.monotonic(), out)
+    return out
+
+
+def has_second(item: dict[str, Any]) -> bool:
+    return bool(item.get("hl")) or str(item.get("symbol") or "") in XYZ
+
+
+async def second_opinion(item: dict[str, Any], price: float, market: Any = None, transport: Any = None) -> tuple[bool, str]:
+    """Crypto must agree with Hyperliquid; indices, stocks and commodities with a trade.xyz market must agree with its oracle price. A
+    disagreement is a refusal. An instrument with no second market, or one that can't be read right now, keeps one source and says so."""
     name = item.get("hl")
+    symbol = str(item.get("symbol") or "")
+    if not name and symbol in XYZ:
+        try:
+            got = (await xyz_prices(transport)).get(XYZ[symbol])
+        except Exception as e:  # noqa: BLE001 - unreadable: one source, said so (the plausibility limits still apply)
+            return True, f"one price source (Yahoo Finance): Hyperliquid trade.xyz couldn't be read ({type(e).__name__})"
+        if not got or got[0] <= 0:
+            return True, "one price source (Yahoo Finance): no trade.xyz price"
+        other = got[0]
+        diff = abs(other - price) / price * 100
+        tol = XYZ_TOLERANCE.get(str(item.get("group") or ""), 1.5)
+        return diff <= tol, f"Hyperliquid trade.xyz {XYZ[symbol][4:]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart"
     if not name:
         return True, "one price source (Yahoo Finance)"
     try:

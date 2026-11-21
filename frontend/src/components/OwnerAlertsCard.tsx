@@ -28,7 +28,7 @@ export function OwnerAlertsCard() {
   return (
     <Card title="Owner alerts" actions={<Badge tone={data.delivers === false ? "bad" : data.enabled && data.telegram_chat ? "good" : "neutral"}>{data.delivers === false ? "Go nowhere" : data.enabled && data.telegram_chat ? "On" : "Log only"}</Badge>}>
       {data.delivers === false && data.problem && (
-        <p className="small" role="alert" style={{ color: "var(--bad)" }}><b>Alerts go nowhere.</b> {data.problem.replace(/^Owner alerts go nowhere: /, "")}</p>
+        <p className="small" role="alert" style={{ color: "var(--bad)" }}><b>Alerts are not being delivered.</b> {data.problem.replace(/^Owner alerts are not being delivered: /, "")}</p>
       )}
       <p className="muted">
         A private Telegram message from the bot when a background job fails 3 runs in a row (the nightly backup and the weekly restore test: their first failure),

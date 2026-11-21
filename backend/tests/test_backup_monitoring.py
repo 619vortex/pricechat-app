@@ -187,7 +187,7 @@ def test_backup_jobs_skip_without_a_bucket(client: TestClient) -> None:
 
 def test_admin_says_alerts_go_nowhere_until_a_chat_is_set(client: TestClient) -> None:
     r = client.get("/api/system/alerts").json()
-    assert r["delivers"] is False and r["problem"].startswith("Owner alerts go nowhere")
+    assert r["delivers"] is False and r["problem"].startswith("Owner alerts are not being delivered")
     r = client.put("/api/system/alerts", json={"telegram_chat": "424242"}).json()
     assert ("bot token" in (r["problem"] or "")) or r["delivers"] is True  # tests may run without a bot token
     checks = client.get("/api/health").json()["checks"]
@@ -201,12 +201,12 @@ def test_the_startup_self_check_says_alerts_go_nowhere(db: Session, caplog: Any)
     caplog.set_level(logging.INFO, logger="pricechat.ops")
     s = prod_settings(telegram_bot_token="123:abc")
     text = "; ".join(observability.startup_self_check(s, [], db))
-    assert "OWNER ALERTS GO NOWHERE" in text and "no owner Telegram chat" in text
+    assert "OWNER ALERTS ARE NOT BEING DELIVERED" in text and "no owner Telegram chat" in text and "kept" in text
     from app import alerts
 
     alerts.settings_row(db).telegram_chat = "424242"
     db.commit()
-    assert "GO NOWHERE" not in "; ".join(observability.startup_self_check(s, [], db))
+    assert "NOT BEING DELIVERED" not in "; ".join(observability.startup_self_check(s, [], db))
     alerts.settings_row(db).enabled = False
     db.commit()
     assert "turned off" in "; ".join(observability.startup_self_check(s, [], db))

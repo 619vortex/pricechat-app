@@ -197,7 +197,7 @@ export async function request<T>(path: string, init: RequestInit = {}, timeoutMs
 export type OwnerAlerts = {
   enabled: boolean;
   telegram_chat: string;
-  /** false: an alert would only reach the server logs right now; `problem` says why ("Owner alerts go nowhere: ...") */
+  /** false: an alert can't be sent right now (it is kept and sent later); `problem` says why ("Owner alerts are not being delivered: ...") */
   delivers?: boolean;
   problem?: string | null;
   recent: { key: string; last_sent_at: string | null; sent_count: number; open: boolean; text: string }[];

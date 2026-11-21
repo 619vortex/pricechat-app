@@ -176,7 +176,8 @@ def data_label(m: moves.Move, verified: str) -> str:
     """The source line every market post ends with: "Market data: Yahoo Finance, 20:03 UTC, intraday (US market open)." The time is when
     the printed price was struck (Yahoo's regularMarketTime), and a US stock or index says whether its session is still trading."""
     stamp = f"{_utc(m.as_of):%H:%M} UTC"
-    src = "Yahoo Finance, matched against Hyperliquid" if "Hyperliquid" in verified else "Yahoo Finance"
+    src = ("Yahoo Finance, matched against Hyperliquid's trade.xyz market" if "trade.xyz" in verified and "apart" in verified
+           else "Yahoo Finance, matched against Hyperliquid" if "Hyperliquid" in verified and "apart" in verified else "Yahoo Finance")
     when = {"intraday": ", intraday (US market open)", "close": ", at the close"}.get(m.session, "")
     return f"Market data: {src}, {stamp}{when}."
 
@@ -293,6 +294,9 @@ async def _refresh_market(ev: Any, now: datetime, transport: Any, watchlist: lis
     if not found:
         return FADED, f"{sym}'s {kind} no longer stands at {now:%H:%M} UTC (re-measured from the live price)"
     m = max(found, key=lambda x: x.ratio)
+    disagree = await second_market(m, items)
+    if disagree:  # the re-read price and an independent market disagree now: it waits; never sent on one side of a disagreement
+        return HOLD, disagree
     u = assess(sym, m.change, m.ratio, now) if kind in ("move", "wide") else None
     extra = since_line(m, u) if u is not None else ""
     head = headline.market(m)
@@ -308,6 +312,31 @@ async def _refresh_market(ev: Any, now: datetime, transport: Any, watchlist: lis
     q = quotes.get(sym) or max(fresh, key=lambda x: x.as_of)
     _stamp(ev, now, m.price, None, m.as_of if kind != "milestone" else _utc(q.as_of), m.change, "Yahoo Finance 5-minute", window=m.window)
     return OK, f"{head} ({m.as_of:%H:%M} UTC)"
+
+
+SECOND = sources.second_opinion  # the independent second market (tests stub it: no network)
+
+
+async def second_market(m: moves.Move, items: list[dict[str, Any]]) -> str:
+    """The re-read figures against an independent market, at the moment of sending (app/newsdesk/sources.second_opinion: Hyperliquid for
+    crypto, trade.xyz for the S&P 500, large stocks and commodities). "" when they agree or no second market can say; else why not."""
+    from app.newsdesk import safety
+
+    by_symbol = {it["symbol"]: it for it in items}
+    figs = m.figures if m.kind == "wide" else [moves.figure(m)]
+    for fig in figs:
+        it = by_symbol.get(str(fig["symbol"])) or {"symbol": fig["symbol"]}
+        if not sources.has_second(it):
+            continue
+        try:
+            ok, detail = await SECOND(it, float(fig["price"]))
+        except Exception as e:  # noqa: BLE001 - unreadable: no disagreement to report
+            logger.info("livedata: second market for %s unreadable (%s)", fig["symbol"], type(e).__name__)
+            continue
+        if not ok and "apart" in detail:
+            safety.note("second_source", str(fig["symbol"]), detail, price=fig["price"])
+            return f"{fig['name']} disagrees with an independent market: {detail}"
+    return ""
 
 
 async def refresh(db: Any, ev: Any, now: datetime, *, transport: Any = None, fetch: Any = None) -> tuple[str, str]:

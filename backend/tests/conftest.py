@@ -446,6 +446,23 @@ def _market_posts_not_paused(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_second_market_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: the independent second market (Hyperliquid trade.xyz, sources.xyz_prices; the re-read's livedata.SECOND) is never read
+    over the network in tests: unreadable means one source, and the re-read's check agrees. Tests of disagreement set their own."""
+    from app.newsdesk import livedata, safety, sources
+
+    async def unreadable(*_: object, **__: object) -> dict[str, tuple[float, float]]:
+        raise RuntimeError("no network in tests")
+
+    async def agrees(item: dict[str, object], price: float, *_: object, **__: object) -> tuple[bool, str]:
+        return True, "second market not read in tests"
+
+    monkeypatch.setattr(sources, "xyz_prices", unreadable)
+    monkeypatch.setattr(livedata, "SECOND", agrees)
+    safety._pending.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_learned_casing(monkeypatch: pytest.MonkeyPatch) -> None:
     """TEST FIXTURE: the casing vocabulary the desk learns from its feeds (app/newsdesk/wire.learn_vocabulary) starts empty in every test."""
     from app.newsdesk import wire

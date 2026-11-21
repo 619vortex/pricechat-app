@@ -395,5 +395,5 @@ async def test_the_urgency_line_survives_beside_the_market_data_line(db: Session
     [ev] = released(db)
     text = tg.sent[0]["text"]
     assert out["sent"] and "6.4%" in text and "since June 2026" in text, text
-    assert "Change from 24 hours earlier, $44.82." in text and "Market data: Yahoo Finance, 01:45 UTC." in text, text  # SI=F: no Hyperliquid market
+    assert "Change from 24 hours earlier, $44.82." in text and "Market data: Yahoo Finance, matched against Hyperliquid, 01:45 UTC." in text, text  # SI=F has a second market since Phase 1
     assert ev.facts["data_note"].endswith("UTC.")  # the "Market data:" line closes the note (X keeps it when space is short)

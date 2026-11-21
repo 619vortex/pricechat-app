@@ -617,17 +617,17 @@ async def _check_vpn_fleet(db: Session, *, settings: Settings | None, transport:
 # --- admin -------------------------------------------------------------------------------------------------------------
 
 
-NOWHERE = "Owner alerts go nowhere"
+NOWHERE = "Owner alerts are not being delivered"  # kept (pending:) and sent as one digest once they can be (2026-11-21)
 
 
 def delivery_problem(db: Session, settings: Settings | None = None) -> str | None:
-    """Why an owner alert would only reach the logs right now, or None when it would be sent. Read-only."""
+    """Why an owner alert can't be sent right now (it is kept for later), or None when it would be sent. Read-only."""
     settings = settings or get_settings()
     row = db.get(OwnerAlertSettings, 1)
     if row is None or not row.telegram_chat.strip():
-        return f"{NOWHERE}: no owner Telegram chat is set (Admin › Settings › Background jobs › Owner alerts), so backup, VPN server and job alerts are only logged"
+        return f"{NOWHERE}: no owner Telegram chat is set (Admin › Settings › Background jobs › Owner alerts), so they are kept and sent as one digest once a chat is linked or found automatically"
     if not row.enabled:
-        return f"{NOWHERE}: owner alerts are turned off (Admin › Settings › Background jobs › Owner alerts), so they are only logged"
+        return f"{NOWHERE}: owner alerts are turned off (Admin › Settings › Background jobs › Owner alerts): they are kept and sent once alerts are turned back on"
     if not settings.telegram_configured:
         return f"{NOWHERE}: no Telegram bot token on this server, so alerts can't be sent"
     return None

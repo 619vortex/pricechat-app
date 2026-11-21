@@ -192,7 +192,7 @@ def test_owner_alerts_self_check_at_every_restart_sends_nothing(db: Session, out
 
     s = prod_settings(telegram_bot_token="123:abc")
     for _ in range(5):
-        assert any("OWNER ALERTS GO NOWHERE" in p for p in observability.startup_self_check(s, [], db))
+        assert any("OWNER ALERTS ARE NOT BEING DELIVERED" in p for p in observability.startup_self_check(s, [], db))
     assert outbox == []  # one log line per start, never a Telegram message (there is nowhere to send it)
 
 

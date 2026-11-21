@@ -732,7 +732,7 @@ def startup_self_check(settings: Any, job_names: list[str], db: Session | None =
                     prefix = job.split(".")[0] + "."
                     problems.append(f"SCHEDULER_ONLY_JOBS leaves out {job} although {why} (add '{job}' or '{prefix}')")
         if settings.is_production and not settings.telegram_configured:
-            problems.append("OWNER ALERTS GO NOWHERE: no Telegram bot token, owner alerts can't be delivered")
+            problems.append("OWNER ALERTS ARE NOT BEING DELIVERED: no Telegram bot token on this server (alerts are kept until one is set)")
         elif db is not None and settings.is_production:
             from app.alerts import delivery_problem
 

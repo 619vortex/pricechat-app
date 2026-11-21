@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.newsdesk import NdEvent, NdStory
-from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, livedata, moves, newsworthy, quality, sources, urgency, virality
+from app.newsdesk import brief, chaos, checks, editorial, engagement, headline, livedata, moves, newsworthy, quality, safety, sources, urgency, virality
 
 logger = logging.getLogger(__name__)
 
@@ -505,6 +505,9 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
             logger.info("newsdesk events: data posts: %s", type(e).__name__)
     db.commit()
     out["updates"] = sum(1 for e in recent if e.kind == "update" and e.status == "candidate")
+    # held figures (implausible, contradicted by a second market) are recorded and reported, and enough of them pause market posts,
+    # before anything is released in this pass (app/newsdesk/safety)
+    out["held"] = await safety.settle(db, now)
     _prerender(db, now, p)
     released = release(db, now, p)
     db.commit()
@@ -773,10 +776,26 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
         if db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.parent_id == last.id, NdEvent.status.in_(("candidate", RELEASED)))) >= p.updates_per_story:
             return 0
         parent = last
-    if second_opinion is not None and m.item.get("hl"):
+    if second_opinion is not None and m.kind == "wide" and any(sources.has_second(_item_of(f["symbol"])) for f in m.figures):
+        # a market-wide move: every member with a second market is checked against it (the S&P 500 always is)
+        details = []
+        for fig in m.figures:
+            it = _item_of(fig["symbol"])
+            if not sources.has_second(it):
+                continue
+            ok, detail = await second_opinion(it, float(fig["price"]), market)
+            if not ok:
+                logger.info("newsdesk events: %s not verified (%s): %s", m.symbol, fig["name"], detail)
+                safety.note("second_source", str(fig["symbol"]), detail, price=fig["price"])
+                return 0
+            details.append(f"{fig['name']}: {detail}")
+        verified = "; ".join(details)
+    elif second_opinion is not None and sources.has_second(m.item):
         ok, detail = await second_opinion(m.item, m.price, market)
         if not ok:
             logger.info("newsdesk events: %s not verified: %s", m.symbol, detail)
+            if "apart" in detail:  # a real disagreement between two markets, not a source that couldn't be read
+                safety.note("second_source", m.symbol, detail, price=m.price)
             return 0
         verified = detail
     elif m.symbol == "CRYPTO":
@@ -819,6 +838,10 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
                  facts={**facts, "development": "the move has deepened" if parent and not m.up else "the move has extended" if parent else ""}, status="candidate",
                  first_seen=now, expires_at=now + p.market_ttl)
     return 1 if _insert(db, recent, ev) else 0
+
+
+def _item_of(symbol: str) -> dict[str, Any]:
+    return next((x for x in moves.watch_items(sources.DEFAULT_WATCHLIST) if x["symbol"] == symbol), {"symbol": symbol})
 
 
 def writer_money(m: moves.Move) -> str:

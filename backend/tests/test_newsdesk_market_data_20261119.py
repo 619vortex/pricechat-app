@@ -69,7 +69,9 @@ def test_a_quote_that_disagrees_with_its_bar_or_missing_metadata_makes_no_claim(
 def test_a_live_figure_is_not_posted_once_it_is_old() -> None:
     at = datetime(2026, 11, 18, 20, 0, tzinfo=timezone.utc)
     post = {"last": {"kind": "intraday", "price": 3724.8, "prev": 3864.2, "at": at.isoformat()}}
-    assert datapost.fresh_problem(post, at + timedelta(minutes=30)) is None
+    assert datapost.fresh_problem(post, at + timedelta(minutes=15)) is None
+    # one freshness limit on every path since 2026-11-21 (app/newsdesk/markethours.FRESH, 20 min; data posts allowed 90 before)
+    assert datapost.fresh_problem(post, at + timedelta(minutes=30)) == "its live price is from 20:00 UTC, 30 min ago"
     assert datapost.fresh_problem(post, at + timedelta(hours=3)) == "its live price is from 20:00 UTC, 180 min ago"
     assert datapost.fresh_problem({"last": {**post["last"], "kind": "close"}}, at + timedelta(days=1)) is None  # a close stays a close
 

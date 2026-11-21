@@ -123,7 +123,7 @@ export function NewsDesk() {
             : <button className="btn btn-sm btn-primary" disabled={busy || !data.x.can_write} title={data.x.can_write ? "" : "X isn't connected with posting access"}
                       onClick={() => { if (window.confirm(`Go live? From now on the desk posts to @${data.x.account ?? "your account"} on its own, up to ${s.target_per_day + s.max_breaking_per_day} times a day, at about $${data.cost.per_post_usd} a post.`)) void save({ mode: "live" }); }}>Go live</button>}
           {s.kill_switch ? <button className="btn btn-sm" disabled={busy} onClick={() => void save({ kill_switch: false })}>Release emergency stop</button>
-            : <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => void save({ kill_switch: true })}>Emergency stop</button>}
+            : <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => void save({ kill_switch: true })} title="Stops all automatic posting on the Telegram channel and on X">Emergency stop (Telegram + X)</button>}
           {s.pause_reason && <button className="btn btn-sm" disabled={busy} onClick={() => void save({ resume: true })}>Resume</button>}
         </div>
         {data.blocked && <p className="banner banner-warn" role="status">{data.blocked}</p>}

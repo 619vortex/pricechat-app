@@ -174,7 +174,7 @@ describe("Terminal 2.0", () => {
     const drawer = screen.getByRole("dialog", { name: "Settings" });
     expect(within(drawer).getAllByRole("tab").map((t) => t.textContent)).toEqual(["General", "News Desk", "Trending", "X Intelligence", "World Monitor", "Validation", "Diagnostics"]);
     expect(within(drawer).getByText("Live")).toBeTruthy();
-    expect(within(drawer).getByRole("button", { name: "Stop all X posting" })).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "Stop all Telegram and X posting" })).toBeTruthy();
   });
 
   it("filters the feed with one tap", async () => {

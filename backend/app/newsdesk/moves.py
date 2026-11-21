@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from app.newsdesk import sources
+from app.newsdesk import markethours, safety, sources
 
 WINDOWS = {"15m": 900, "1h": 3600, "4h": 14400, "24h": 86400}
 # "day": a US stock or index against its official previous close (the way every exchange and outlet reports a session), never a rolling
@@ -27,7 +27,7 @@ LINES: dict[str, dict[str, float]] = {
 # overnight gap) or the day against the previous close. 4 hours and 24 hours would straddle the close and the open.
 EQUITY_GROUPS = ("index", "stock")
 EQUITY_WINDOWS = ("15m", "1h")
-FRESH = 1200  # the latest bar must be this recent
+FRESH = int(markethours.FRESH.total_seconds())  # the latest bar must be this recent: the one limit (app/newsdesk/markethours)
 # assets watched for moves beyond the desk's own watchlist: the names whose moves the market talks about
 EXTRA_MOVERS: list[dict[str, Any]] = [
     {"symbol": "COIN", "name": "Coinbase", "group": "stock", "category": "stocks", "emoji": "📈"},
@@ -115,6 +115,8 @@ def measure(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | Non
         if not then:
             continue
         change = (price - then) / then * 100
+        if _implausible(item, window, change, price, then):
+            continue
         ratio = abs(change) / lines[window]
         if ratio >= 1 and (best is None or ratio > best.ratio):
             best = Move("move", item, price, datetime.fromtimestamp(last[-1][0], tz=now.tzinfo), window, change, ratio, ref=then,
@@ -171,6 +173,8 @@ def _measure_session(q: sources.Quote, item: dict[str, Any], now: datetime, last
         if not then:
             continue
         change = (price - then) / then * 100
+        if _implausible(item, window, change, price, then):
+            continue
         ratio = abs(change) / lines[window]
         if ratio >= 1 and (best is None or ratio > best.ratio):
             best = Move("move", item, price, at, window, change, ratio, ref=then, ref_at=datetime.fromtimestamp(int(at.timestamp()) - secs, tz=now.tzinfo),
@@ -178,9 +182,19 @@ def _measure_session(q: sources.Quote, item: dict[str, Any], now: datetime, last
     if q.previous_close:
         change = (price - q.previous_close) / q.previous_close * 100
         ratio = abs(change) / lines["day"]
+        if _implausible(item, "day", change, price, q.previous_close):
+            ratio = 0.0
         if ratio >= 1 and (best is None or ratio > best.ratio):
             best = Move("move", item, price, at, "day", change, ratio, ref=q.previous_close, ref_at=q.previous_session_close, session=session)
     return best
+
+
+def _implausible(item: dict[str, Any], window: str, change: float, price: float, ref: float) -> bool:
+    """A change beyond the asset group's plausibility limit (app/newsdesk/safety): never measured as a move, held and reported instead."""
+    why = safety.plausible_move(str(item.get("group") or "stock"), window, change)
+    if why:
+        safety.note("implausible_move", str(item.get("symbol")), why, window=window, change=round(change, 3), price=price, ref=ref)
+    return bool(why)
 
 
 def figure(m: Move) -> dict[str, Any]:
@@ -199,6 +213,8 @@ def biggest(q: sources.Quote, item: dict[str, Any], now: datetime) -> tuple[str,
         then = price_at(q, ts - secs, tolerance=1800)
         if then:
             change = (price - then) / then * 100
+            if safety.plausible_move(str(item.get("group") or "stock"), window, change):
+                continue  # a broken bar never becomes a story's price tag
             ratio = abs(change) / lines[window]
             if out is None or ratio > out[2]:
                 out = (window, change, ratio)
@@ -211,7 +227,7 @@ def extreme(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | Non
     price, before = price_at(q, ts, tolerance=FRESH), price_at(q, ts - 3600, tolerance=1800)
     if not price or not before:
         return None
-    at = datetime.fromtimestamp(ts, tz=now.tzinfo)
+    at = _bar_time(q, ts, now)  # when the price was, not when the desk looked
     if q.high_52w and price >= q.high_52w * 0.9995 and before < q.high_52w * 0.995:
         return Move("high", item, price, at, level=float(q.high_52w))
     if q.low_52w and price <= q.low_52w * 1.0005 and before > q.low_52w * 1.005:
@@ -233,7 +249,13 @@ def milestone(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | N
     level = float(max(above, below) * step)
     if abs(price - level) / level < 0.005:
         return None
-    return Move("milestone", item, price, datetime.fromtimestamp(ts, tz=now.tzinfo), change=1.0 if up else -1.0, level=level)
+    return Move("milestone", item, price, _bar_time(q, ts, now), change=1.0 if up else -1.0, level=level)
+
+
+def _bar_time(q: sources.Quote, ts: float, now: datetime) -> datetime:
+    """The time of the bar a price was read from (the newest at or before ts); the post's "Market data: ... HH:MM UTC" is this moment."""
+    t = max((b[0] for b in q.bars if b[0] <= ts and b[1] > 0), default=int(ts))
+    return datetime.fromtimestamp(t, tz=now.tzinfo)
 
 
 def detect(quotes: dict[str, sources.Quote], watchlist: list[dict[str, Any]], now: datetime) -> list[Move]:

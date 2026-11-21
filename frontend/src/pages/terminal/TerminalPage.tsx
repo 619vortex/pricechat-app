@@ -197,7 +197,7 @@ function TopBar({ data, onSettings, run }: { data: T2Overview | null; onSettings
     }
   }
   async function stopAll() {
-    if (!window.confirm("EMERGENCY STOP: stop all automatic X posting from both desks now?\n\nNothing is deleted. You can lift it from this page.")) return;
+    if (!window.confirm("EMERGENCY STOP: stop all automatic posting now, on the Telegram channel and on X (News Desk and Trending)?\n\nNothing is deleted. You can lift it from this page.")) return;
     await run(() => post("/terminal/stop", { which: "newsdesk", on: true }), "Emergency stop is on. Nothing posts.");
   }
   return (
@@ -521,7 +521,7 @@ function SettingsDrawer({ data, onClose, run }: { data: T2Overview | null; onClo
   const [tab, setTab] = useState<TabKey>("general");
   const c = data?.controls;
   async function stop(which: "newsdesk" | "trending", on: boolean) {
-    const what = which === "newsdesk" ? "the News Desk emergency stop (stops ALL X posting)" : "the Trending stop";
+    const what = which === "newsdesk" ? "the News Desk emergency stop (stops all automatic Telegram and X posting)" : "the Trending stop";
     if (!window.confirm(`${on ? "Turn on" : "Lift"} ${what}?`)) return;
     await run(() => post("/terminal/stop", { which, on }), on ? "Stop is on." : "Stop lifted.");
   }
@@ -541,7 +541,7 @@ function SettingsDrawer({ data, onClose, run }: { data: T2Overview | null; onClo
             </Section>
             <Section title="Emergency stops">
               <div className="t2-actions">
-                <button className={`t2-btn ${c.newsdesk_stop ? "" : "danger"}`} onClick={() => void stop("newsdesk", !c.newsdesk_stop)}>{c.newsdesk_stop ? "Lift News Desk stop" : "Stop all X posting"}</button>
+                <button className={`t2-btn ${c.newsdesk_stop ? "" : "danger"}`} onClick={() => void stop("newsdesk", !c.newsdesk_stop)}>{c.newsdesk_stop ? "Lift News Desk stop" : "Stop all Telegram and X posting"}</button>
                 <button className={`t2-btn ${c.trending_stop ? "" : "danger"}`} onClick={() => void stop("trending", !c.trending_stop)}>{c.trending_stop ? "Lift Trending stop" : "Stop Trending only"}</button>
               </div>
             </Section>

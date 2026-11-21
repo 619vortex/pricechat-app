@@ -80,7 +80,7 @@ export function TerminalClassic() {
   }, [qs]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function stop(which: "trending" | "newsdesk", on: boolean) {
-    if (on && !window.confirm(`Turn on the ${which === "newsdesk" ? "News Desk emergency stop (stops ALL X posting)" : "Trending stop"}?`)) return;
+    if (on && !window.confirm(`Turn on the ${which === "newsdesk" ? "News Desk emergency stop (stops all automatic Telegram and X posting)" : "Trending stop"}?`)) return;
     try { await request("/terminal/stop", { method: "POST", body: JSON.stringify({ which, on }) }); setMsg(null); reload(); } catch (e) { setMsg(String((e as Error).message)); }
   }
 

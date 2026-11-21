@@ -161,7 +161,8 @@ class StopInput(StrictInput):
 
 @router.post("/stop")
 def stop(payload: StopInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
-    """The emergency stops, from the Terminal: Trending's stop or the News Desk's emergency stop (which stops both desks' X posting)."""
+    """The emergency stops, from the Terminal: Trending's stop, or the News Desk's emergency stop (all automatic posting: the Telegram channel,
+    the News Desk on X and Trending on X; app/newsdesk/engine.emergency_stop)."""
     from app.models.newsdesk import NdSettings
     from app.trending import engine
 

@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.newsdesk import NdEvent
-from app.newsdesk import checks, sources
+from app.newsdesk import checks, markethours, sources
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,8 @@ def rows(hl: dict[str, Any], quotes: dict[str, sources.Quote], now: datetime) ->
     for symbol, name, emoji in MACRO:
         q = quotes.get(symbol)
         change = q.change("24h", now) if q is not None else None
+        if q is not None and symbol.startswith("^"):  # a US index: its session against the official previous close, never a rolling 24 h
+            change = (q.price - q.previous_close) / q.previous_close * 100 if q.previous_close and markethours.fresh(q.as_of, now) else None
         if q is None or change is None:  # closed or late: not today's move
             continue
         out.append({"tag": name, "name": name, "emoji": emoji, "price": q.price, "pct": change, "source": "Yahoo Finance"})
@@ -275,7 +277,8 @@ async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local
     if second is None:
         second = mover["pct"]  # the source's own summary figure, from a different call than the series
     head = visual.move_headline(mover["name"], series)
-    check = visual.verify_series(points, window="24H", headline=head, as_of=now, now=now, max_age_minutes=90, second_pct=second, second_name=second_name)
+    check = visual.verify_series(points, window="24H", headline=head, as_of=now, now=now, max_age_minutes=markethours.FRESH.total_seconds() / 60,
+                                 second_pct=second, second_name=second_name)
     cls = editorial.asset_class({_subject(mover)})
     if not check.ok or not editorial.exceptional_pct(cls, series):
         why = "; ".join(check.reasons) or f"the chart's own series says {series:+.2f}%, not exceptional"

@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from app.newsdesk import sources
+from app.newsdesk import markethours, safety, sources
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class DataPost:
 # --- prices -----------------------------------------------------------------------------------------------------------------------
 
 
-LIVE_MAX_AGE = timedelta(minutes=90)  # an intraday figure older than this at the moment it is posted is not posted
+LIVE_MAX_AGE = markethours.FRESH  # an intraday figure older than this is not posted: the one limit every path uses (was 90 minutes)
 
 
 @dataclass
@@ -255,6 +255,11 @@ def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime, la
         return None
     rets = [(series[i][0], (series[i][1] / series[i - 1][1] - 1) * 100) for i in range(1, len(series))]
     day, r = rets[-1]
+    group = markethours.group_of(symbol)
+    why = safety.plausible_move(group, "day", r)
+    if why:  # a broken daily bar is a data error, never a record move
+        safety.note("implausible_move", symbol, why, window="day", change=round(r, 3), price=quote.price, ref=quote.prev)
+        return None
     sd = statistics.pstdev([x for _, x in rets[-91:-1]]) or 1.0
     z = abs(r) / sd
     if z < 2.5:
@@ -266,8 +271,10 @@ def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime, la
     since = f"since {month(last)}" if last else "in at least two years"
     days = (day - last).days if last else 730
     so_far = quote.kind in ("intraday", "utc_day")  # a live price: the day isn't over, and the words say so
-    head = f"{cap(name)}'s biggest one-day {move} {since}{', so far today' if so_far else ''}: {pct(r)}"
-    lines = [f"A typical day over the last 90 moved it {sd:.1f}%: today {'is' if so_far else 'was'} {z:.1f} times that."]
+    # a session that has ended is named as the session it was: Friday's close read on Saturday is "on Friday", never "today"
+    when = "today" if so_far else markethours.day_word(quote.at, now, group)
+    head = f"{cap(name)}'s biggest one-day {move} {since}{', so far today' if so_far else ('' if when == 'today' else f', {when}')}: {pct(r)}"
+    lines = [f"A typical day over the last 90 moved it {sd:.1f}%: {when} {'is' if so_far else 'was'} {z:.1f} times that."]
     table = [quote.words(name, symbol)]
     why = {"rarity": round(min(60.0, 12 * z), 1), "since": 25.0 if days >= 365 else 15.0 if days >= 180 else 5.0 if days >= 60 else 0.0, "reach": 15.0 if symbol in ("BTC-USD", "^GSPC", "^IXIC", "NVDA", "GC=F") else 8.0}
     return DataPost("anomaly", f"anomaly:{symbol}", head, lines, int(min(100, sum(why.values()))), why, {symbol: _pts(series, 120)}, symbols=[symbol],

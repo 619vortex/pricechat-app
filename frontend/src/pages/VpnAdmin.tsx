@@ -667,7 +667,7 @@ export function AlertsGoNowhere() {
     );
   }
   return (
-    <p className="vpna-warn" role="alert"><b>Alerts go nowhere.</b> {(a.data.problem ?? "").replace(/^Owner alerts go nowhere: /, "")}{" "}
+    <p className="vpna-warn" role="alert"><b>Alerts are not being delivered.</b> {(a.data.problem ?? "").replace(/^Owner alerts are not being delivered: /, "")}{" "}
       <Link to="/settings?tab=jobs">Set the alert chat</Link></p>
   );
 }

@@ -887,6 +887,9 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
         ev.facts = {**(ev.facts or {}), "number_check": check.out()}
         if not check.ok:
             logger.warning("visual editor: event %s refused, its figures don't match Yahoo: %s", getattr(ev, "id", None), "; ".join(check.reasons))
+            from app.newsdesk import safety
+
+            safety.note("figures_mismatch", str((ev.facts or {}).get("symbol") or ""), "; ".join(check.reasons)[:300])
             raise visual.NumbersRefused("; ".join(check.reasons))  # a market post IS its numbers: unverified, it doesn't go
         f = ev.facts
         subject = photography.subject_for_symbol(str(f.get("symbol") or ""), str(ev.headline or ""))

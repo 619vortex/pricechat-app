@@ -130,8 +130,21 @@ LIQ_HOUR_USD = 1_000_000  # reported in one hour by the exchanges Price Chat rec
 # Above this, one coin's hour on the recorded feeds is not believed automatically: it is logged and held for a person. The
 # recorded feeds are a lower bound (Binance shows one liquidation per market per second), and Telegram 204 (2026-11-21) published
 # "$10.1B on Binance in an hour" from a unit error; the real figure was about $17M.
-LIQ_REVIEW_USD = 500_000_000
+LIQ_REVIEW_USD = 500_000_000  # kept for reference: the ceilings and the history rule now live in app/newsdesk/safety (Phase 1)
 LIQ_COIN = re.compile(r"[A-Z0-9]{2,15}")  # a coin symbol; "BTCUSD_PERP" is a contract and means the record was mis-keyed
+
+
+def _liq_implausible(db: Session, coin: str, total: float, since_ms: int) -> str:
+    """app/newsdesk/safety.liquidation_problem against the coin's recorded hours of the last week (before this hour)."""
+    from app.models.tradingos import TsLiquidation
+    from app.newsdesk import safety
+
+    week = since_ms - 7 * 24 * 3600 * 1000
+    hours: dict[int, float] = {}
+    for t, usd in db.execute(select(TsLiquidation.t, TsLiquidation.usd).where(TsLiquidation.coin == coin, TsLiquidation.t >= week,
+                                                                             TsLiquidation.t < since_ms)).all():
+        hours[int(t) // 3_600_000] = hours.get(int(t) // 3_600_000, 0.0) + float(usd or 0)
+    return safety.liquidation_problem(coin, total, [v for v in hours.values() if v > 0])
 
 
 def liquidation_topics(db: Session, now: datetime, listed: set[str] | None = None) -> list[Any]:
@@ -160,8 +173,12 @@ def liquidation_topics(db: Session, now: datetime, listed: set[str] | None = Non
         if not LIQ_COIN.fullmatch(coin or ""):
             logger.warning("liquidations: %s on %s refused: %r is not a coin symbol (mis-keyed contract records)", _usd(total), where, coin)
             continue
-        if total > LIQ_REVIEW_USD:
-            logger.warning("liquidations: %s of %s on %s in an hour held for review: above the %s automatic ceiling", _usd(total), coin, where, _usd(LIQ_REVIEW_USD))
+        why = _liq_implausible(db, coin, total, since)
+        if why:  # held for a person (app/newsdesk/safety): logged, recorded on the desk, the owner told
+            from app.newsdesk import safety
+
+            logger.warning("liquidations: %s of %s on %s in an hour held for review: %s", _usd(total), coin, where, why)
+            safety.note("implausible_liquidations", coin, f"{where}: {why}", usd=round(total))
             continue
         side = max(sides, key=lambda k: sides[k])
         out.append(Topic("crypto_derivatives", f"{_usd(total)} of {coin} positions liquidated on {where} in an hour, mostly {side}s",

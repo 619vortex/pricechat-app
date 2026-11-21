@@ -39,6 +39,7 @@ import httpx
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from app import price_axis
+from app.newsdesk import markethours
 
 logger = logging.getLogger(__name__)
 
@@ -1060,7 +1061,8 @@ async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any, now: Any = No
     as_of = datetime.fromisoformat(stamp) if stamp else (now or datetime.now(timezone.utc))
     as_of = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)  # now None (X re-rendering what Telegram checked): no age limit
     check = verify_series(points, window=window, headline=post_headline(ev), as_of=as_of, now=now,
-                          max_age_minutes=90 if ev.kind in ("recap", "market") else 360, second_pct=f.get("second_pct"), second_name=str(f.get("second_source") or ""),
+                          max_age_minutes=markethours.FRESH.total_seconds() / 60 if ev.kind in ("recap", "market") else 360,
+                          second_pct=f.get("second_pct"), second_name=str(f.get("second_source") or ""),
                           headline_pp=CROSS_SOURCE_PP if other_source else SAME_SERIES_PP,
                           synthetic=bool(f.get("synthetic")))
     ev.facts = {**f, "number_check": check.out()}

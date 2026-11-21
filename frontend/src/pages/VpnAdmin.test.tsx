@@ -410,11 +410,11 @@ describe("VPN admin: support reports", () => {
 describe("VPN admin: owner alerts that go nowhere", () => {
   it("says loudly when server and backup alerts go nowhere, with a link to set the chat", async () => {
     serve((key) => key === "GET /api/system/alerts"
-      ? [200, { enabled: true, telegram_chat: "", delivers: false, problem: "Owner alerts go nowhere: no owner Telegram chat is set", recent: [] }]
+      ? [200, { enabled: true, telegram_chat: "", delivers: false, problem: "Owner alerts are not being delivered: no owner Telegram chat is set", recent: [] }]
       : [200, overview()]);
     const { container } = render(<MemoryRouter><AlertsGoNowhere /></MemoryRouter>);
     await flush();
-    expect(container.textContent).toMatch(/Alerts go nowhere\. no owner Telegram chat is set/);
+    expect(container.textContent).toMatch(/Alerts are not being delivered\. no owner Telegram chat is set/);
     expect(screen.getByRole("link", { name: /Set the alert chat/ }).getAttribute("href")).toBe("/settings?tab=jobs");
   });
 
