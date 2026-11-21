@@ -32,7 +32,7 @@ LIMITS: dict[str, dict[str, float]] = {
     "crypto_alt": {"15m": 40.0, "1h": 50.0, "4h": 60.0, "24h": 80.0, "day": 80.0},
     "index": {"15m": 8.0, "1h": 12.0, "4h": 15.0, "24h": 25.0, "day": 25.0},
     "stock": {"15m": 40.0, "1h": 50.0, "4h": 60.0, "24h": 80.0, "day": 80.0},
-    "commodity": {"15m": 15.0, "1h": 20.0, "4h": 25.0, "24h": 40.0, "day": 40.0},
+    "commodity": {"15m": 15.0, "1h": 20.0, "4h": 25.0, "24h": 50.0, "day": 50.0},  # silver fell 31% in a day within the 2 years
 }
 LIQ_CEILING = {"BTC": 500_000_000.0, "ETH": 500_000_000.0}  # one coin's hour on the recorded venues, above which a person looks first
 LIQ_CEILING_OTHER = 150_000_000.0

@@ -14,6 +14,7 @@ source of a correction, so the figure and source checks don't run on it; only th
 """
 
 import hashlib
+import html
 import logging
 import re
 import secrets
@@ -57,9 +58,34 @@ def _norm(action: str, text: str | None) -> str:
     return (text or "").strip() if action in WITH_TEXT else ""
 
 
+_TG_TAG = re.compile(r"</?(b|i|s|u|code)>|<a href=\"https://[^\"<>]+\">|</a>")
+
+
+def tg_html(text: str) -> bool:
+    """A correction written with Telegram's own formatting (bold, italic, strikethrough, underline, code, https links) is sent as HTML, so
+    "<s>the wrong line</s>" is shown struck through, not as tags. Only those tags, balanced, and no other "<" or "&" markup; anything
+    else is sent as plain text, exactly as written."""
+    if "<" not in text:
+        return False
+    rest = _TG_TAG.sub("", text)
+    if "<" in rest or ">" in rest:
+        return False
+    stack: list[str] = []
+    for m in _TG_TAG.finditer(text):
+        tag = m.group(0)
+        name = "a" if tag.startswith(("<a ", "</a")) else (m.group(1) or "")
+        if tag.startswith("</"):
+            if not stack or stack.pop() != name:
+                return False
+        else:
+            stack.append(name)
+    return not stack
+
+
 def tg_length(text: str) -> int:
-    """Telegram counts UTF-16 units (an emoji is two)."""
-    return len(text.encode("utf-16-le")) // 2
+    """Telegram counts UTF-16 units (an emoji is two) of what the reader sees: formatting tags don't count."""
+    shown = html.unescape(_TG_TAG.sub("", text)) if tg_html(text) else text
+    return len(shown.encode("utf-16-le")) // 2
 
 
 def safe(message: str) -> str:
@@ -241,26 +267,27 @@ async def _telegram(db: Session, ev: NdEvent, p: dict[str, Any], client: Any, no
     message_id = p["target"]["message_id"]
     new = p["new_text"] or ""
     action = p["action"]
-    result: dict[str, Any] = {}
+    fmt = tg_html(new)  # Telegram formatting tags in the owner's text: sent as HTML (see tg_html)
+    result: dict[str, Any] = {"html": fmt}
     if action == "tg_edit":
         # the stored format is a good guess, not a promise (a refused card goes out as text): Telegram's own answer settles it
         caption_first = p["format"] == "photo"
         try:
             if caption_first:
-                await client.edit_caption(chat, message_id, new)
+                await client.edit_caption(chat, message_id, new, html=fmt)
             else:
-                await client.edit_message_text(chat, message_id, new)
+                await client.edit_message_text(chat, message_id, new, html=fmt)
         except TelegramRequestError as e:
             words = str(e).lower()
             if caption_first and "no caption" in words and tg_length(new) <= TG_TEXT:
-                await client.edit_message_text(chat, message_id, new)
+                await client.edit_message_text(chat, message_id, new, html=fmt)
             elif not caption_first and "no text" in words and tg_length(new) <= TG_CAPTION:
-                await client.edit_caption(chat, message_id, new)
+                await client.edit_caption(chat, message_id, new, html=fmt)
             else:
                 raise
         result["edited"] = message_id
     elif action == "tg_reply":
-        sent = await client.send_message(chat, new, reply_to=message_id)
+        sent = await client.send_message(chat, new, reply_to=message_id, html=fmt)
         result["reply_message_id"] = sent.get("message_id") if isinstance(sent, dict) else None
     else:
         await client.delete_message(chat, message_id)

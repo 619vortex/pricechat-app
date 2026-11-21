@@ -317,6 +317,24 @@ async def _refresh_market(ev: Any, now: datetime, transport: Any, watchlist: lis
 SECOND = sources.second_opinion  # the independent second market (tests stub it: no network)
 
 
+def drop_stale_tag(ev: Any, now: datetime) -> str:
+    """A news story's price tag was measured when the story broke (events.score_story): past markethours.TAG_MAX it is no longer the
+    market now, so it leaves the headline (never re-measured or guessed here). Returns what was done ("" = nothing)."""
+    from app.newsdesk import markethours
+
+    f = ev.facts or {}
+    tag = str(f.get("price_tag") or "")
+    if not tag or getattr(ev, "kind", "") not in ("news", "update") or not f.get("published_at"):
+        return ""
+    if now - _utc(datetime.fromisoformat(str(f["published_at"]))) <= markethours.TAG_MAX:
+        return ""
+    before = ev.headline or ""
+    ev.headline = headline.news(ev.title or "")
+    ev.facts = {**f, "price_tag": "", "stat": "" if str(f.get("stat") or "") in tag else f.get("stat"), "tag_dropped": tag}
+    _forget_old_figures(ev, before)
+    return f"price tag {tag} dropped: measured over {int(markethours.TAG_MAX.total_seconds() // 60)} min ago"
+
+
 async def second_market(m: moves.Move, items: list[dict[str, Any]]) -> str:
     """The re-read figures against an independent market, at the moment of sending (app/newsdesk/sources.second_opinion: Hyperliquid for
     crypto, trade.xyz for the S&P 500, large stocks and commodities). "" when they agree or no second market can say; else why not."""
@@ -342,7 +360,8 @@ async def second_market(m: moves.Move, items: list[dict[str, Any]]) -> str:
 async def refresh(db: Any, ev: Any, now: datetime, *, transport: Any = None, fetch: Any = None) -> tuple[str, str]:
     """(OK | HOLD | FADED, what was read): see the module docstring. Events that print no live price are OK untouched."""
     if not needs_live(ev):
-        return OK, ""
+        dropped = drop_stale_tag(ev, now)
+        return OK, dropped
     live = (ev.facts or {}).get("live") or {}
     if live.get("checked_at") and now - _utc(datetime.fromisoformat(str(live["checked_at"]))) <= REUSE_FOR and not problem(ev, now):
         return OK, f"re-read at {live['checked_at'][11:19]} UTC"

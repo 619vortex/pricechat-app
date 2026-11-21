@@ -98,7 +98,13 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
     if data.pop("resume", False):
         s.paused_until, s.pause_reason = None, None
     if "market_pause" in data:
-        s.state = {**(s.state or {}), "market_pause": bool(data.pop("market_pause"))}
+        on = bool(data.pop("market_pause"))
+        state = {**(s.state or {}), "market_pause": on}
+        if not on:  # the owner resumed: the safety stop counts afresh from now, and its automatic reason is cleared
+            state["breaker_reset_at"] = utcnow().isoformat()
+            state.pop("market_pause_reason", None)
+            state.pop("market_pause_at", None)
+        s.state = state
     if "categories" in data:
         data["categories"] = {c: bool(data["categories"].get(c, False)) for c in sources.CATEGORIES}
     for k, v in data.items():

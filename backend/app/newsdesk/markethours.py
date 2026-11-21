@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 FRESH = timedelta(minutes=20)
+TAG_MAX = timedelta(hours=1)  # a news story's measured price tag ("(BTC -5.4% IN 24H)") is only printed this long after it was measured
 NEW_YORK = ZoneInfo("America/New_York")
 CRYPTO_GROUPS = ("crypto_major", "crypto_alt")
 

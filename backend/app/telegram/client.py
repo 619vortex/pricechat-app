@@ -225,8 +225,11 @@ class TelegramBotClient:
         result = await self._call("editMessageText", params)
         return _sent(result) if isinstance(result, dict) else {}
 
-    async def edit_caption(self, chat_id: int | str, message_id: int, caption: str, buttons: list[list[dict[str, str]]] | None = None) -> None:
-        params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "caption": fit_text(caption, CAPTION_LIMIT, False)}
+    async def edit_caption(self, chat_id: int | str, message_id: int, caption: str, buttons: list[list[dict[str, str]]] | None = None,
+                           html: bool = False) -> None:
+        params: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "caption": fit_text(caption, CAPTION_LIMIT, html)}
+        if html:
+            params["parse_mode"] = "HTML"
         params["reply_markup"] = {"inline_keyboard": buttons or []}
         await self._call("editMessageCaption", params)
 

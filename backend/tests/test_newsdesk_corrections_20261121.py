@@ -221,7 +221,7 @@ async def test_a_token_is_bound_to_its_text_and_action(db: Session) -> None:
 async def test_edit_a_text_post_keeps_the_original_in_the_audit(db: Session) -> None:
     ev, tg = tg_event(db), Tg()
     out = await confirm(db, ev, "tg_edit", FIXED_204, tg=tg)
-    assert tg.calls == [{"method": "edit_message_text", "chat": CHANNEL_ID, "message_id": 204, "text": FIXED_204}]
+    assert tg.calls == [{"method": "edit_message_text", "chat": CHANNEL_ID, "message_id": 204, "text": FIXED_204, "html": False}]  # plain text
     assert out["outcome"] == "done" and out["old_text"] == POST_204 and out["new_text"] == FIXED_204 and out["actor"] == "owner"
     db.expire_all()
     row = db.get(NdTelegramPost, ev.tg_post_id)
@@ -423,3 +423,11 @@ def test_the_admin_api_previews_confirms_and_lists(client: Any, db: Session, mon
     r = client.post(f"/api/x/newsdesk/events/{no_tg.id}/corrections", json={"action": "tg_delete", "confirm_token": "x"})
     assert r.status_code == 409
     assert db.scalars(select(NdValidation).where(NdValidation.kind == "correction")).all()
+
+
+async def test_a_correction_with_telegram_formatting_strikes_the_wrong_line_through(db: Session) -> None:
+    """The owner's 204 draft: the wrong line struck through, the correction under it (sent as Telegram HTML, not as visible tags)."""
+    ev, tg = tg_event(db), Tg()
+    struck = "<s>JUST IN: BTCUSD_PERP longs liquidated: $10.1B on Binance in an hour.</s>\n\nCORRECTION: the $10.1B figure was wrong."
+    out = await confirm(db, ev, "tg_edit", struck, tg=tg)
+    assert tg.calls[0]["html"] is True and tg.calls[0]["text"] == struck and out["outcome"] == "done"

@@ -932,7 +932,10 @@ def post_out(p: NdPost) -> dict[str, Any]:
 def settings_out(s: NdSettings) -> dict[str, Any]:
     return {"automation": s.automation, "mode": s.mode, "kill_switch": s.kill_switch, "paused_until": s.paused_until.isoformat() if s.paused_until else None, "pause_reason": s.pause_reason, "target_per_day": s.target_per_day,
             "max_breaking_per_day": s.max_breaking_per_day, "breaking_gap_minutes": s.breaking_gap_minutes, "sensitivity": s.sensitivity, "categories": s.categories, "feeds": s.feeds, "watchlist": s.watchlist,
-            "market_pause": events.MARKET_PAUSE_DEFAULT if (s.state or {}).get("market_pause") is None else bool((s.state or {}).get("market_pause"))}
+            "market_pause": events.MARKET_PAUSE_DEFAULT if (s.state or {}).get("market_pause") is None else bool((s.state or {}).get("market_pause")),
+            "market_pause_reason": (s.state or {}).get("market_pause_reason") or ("not resumed by the owner since the 2026-11-21 deploy"
+                                                                                  if (s.state or {}).get("market_pause") is None and events.MARKET_PAUSE_DEFAULT else None),
+            "held_figures": list((s.state or {}).get("anomalies") or [])[-10:]}
 
 
 def overview(db: Session, settings: Settings) -> dict[str, Any]:
