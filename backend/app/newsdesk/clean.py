@@ -637,6 +637,7 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
                 logger.info("clean: photo discovery failed (%s)", type(e).__name__)
                 continue
             passed: list[tuple[float, Any, Any, Any]] = []
+            found = [p for p in found if not photography.refused(str(terms[0]), p.title, p.description)]  # a metal is never a coin collection
             for p in found[:4]:
                 fit = editor.depiction(p.title, p.tags, p.description, terms[0], b, person=is_person)
                 if not fit.ok and fit.depiction != "weak":

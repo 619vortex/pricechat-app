@@ -85,7 +85,8 @@ async def test_markets_gone_mad_takes_the_slot_after_the_close_once_a_day(client
     data = {"BTC-USD": daily(60000, [-9.0], AT - timedelta(hours=1)), "GC=F": daily(3000, [0.2], AT - timedelta(hours=1))}
     btc = data["BTC-USD"]
     # what Yahoo's metadata says about the last value (2026-11-19): crypto never closes, so the day so far, from 00:00 UTC
-    datapost._last["BTC-USD"] = datapost.Last("utc_day", btc[-1][1], btc[-2][1], AT - timedelta(hours=1), "CRYPTOCURRENCY")
+    # (2026-11-20: a live price is re-read right before sending and must be under 20 minutes old then, so the price here is 5 minutes old)
+    datapost._last["BTC-USD"] = datapost.Last("utc_day", btc[-1][1], btc[-2][1], AT - timedelta(minutes=5), "CRYPTOCURRENCY")
     await _decide(db, AT, daily_data=data)
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
     assert ev.kind == "data" and ev.key.startswith("mgm:") and ev.facts["kicker"] == "MARKETS GONE MAD"
