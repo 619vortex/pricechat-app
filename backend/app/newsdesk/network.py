@@ -366,7 +366,7 @@ def desk_copy(ev: Any) -> Copy:
 def source_text_of(ev: Any, rows: list[Any] | None = None) -> str:
     f = ev.facts or {}
     parts = [str(f.get("told") or ""), getattr(ev, "title", "") or "", getattr(ev, "headline", "") or "", getattr(ev, "summary", "") or "",
-             str(f.get("price_tag") or ""), str(f.get("price_check") or ""), str(f.get("stat") or ""), "24 hours"]
+             str(f.get("price_tag") or ""), str(f.get("price_check") or ""), str(f.get("stat") or "")]
     parts += [str(x) for x in ((f.get("viral") or {}).get("measured") or {}).values()]  # our measured market reaction (app/newsdesk/money)
     parts.append(str((f.get("data") or {}).get("told") or ""))  # a data post's figures, all measured (app/newsdesk/datapost)
     parts.append(str(f.get("kicker") or ""))  # "UPDATE · first reported 10 Nov": the date of our own first post

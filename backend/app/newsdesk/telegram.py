@@ -255,7 +255,7 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
 
         wire_html, plain = wire.fallback_caption(ev, src, network.source_text_of(ev, rows))
     if pkg is None:
-        told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours"
+        told = f"{f.get('told') or ev.title} {ev.headline} {ev.summary}"  # never a figure the text itself doesn't have ("24 hours" was)
         result = checks.check_post(plain, source_text=told, source_names=[src], max_len=MAX_LEN)
         if not result.ok:
             return None, result.reason
@@ -267,7 +267,7 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     except Exception as e:  # noqa: BLE001 - no picture, no post (the wire style's text-only post is b"", not an error)
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"
-    ev.facts = {**f, "visual": meta}
+    ev.facts = f = {**(ev.facts or {}), "visual": meta}  # the picture's own record (number_check) is kept, not the facts from before it
     if s is not None:  # what the picture looked like, so the next ones look different
         seen = {k: meta.get(k) for k in ("kind", "motif", "palette", "layout", "tone", "design")}
         s.state = {**(s.state or {}), "recent_visuals": [*recent, {**seen, "event": ev.id, "at": now.isoformat()}][-visual.RECENT * 2:]}
@@ -359,6 +359,9 @@ async def _deliver(client: Any, chat_id: int, message: dict[str, Any]) -> dict[s
 
 async def send(db: Session, s: NdTelegramSettings, client: Any, message: dict[str, Any], handle: str, rights: dict[str, Any], now: datetime) -> NdTelegramPost | None:
     """The unique link is the claim: two runs can't both send one story. Returns the row only if Telegram confirmed the message."""
+    if engine.emergency_stop(db):  # the last moment before Telegram: a stop switched on during this run still holds the post
+        logger.warning("tgnews: not sent, %s: %s", engine.emergency_stop(db), message.get("headline"))
+        return None
     post = NdTelegramPost(story_link=message["link"][:500], title=message["title"][:300], headline=message["headline"][:200], text=message["plain"], source=message["source"][:60],
                           sources=message["sources"], fingerprint=message["fingerprint"], status="publishing", writer=message["writer"], chat=handle, created_at=now, updated_at=now)
     db.add(post)
@@ -471,6 +474,9 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
     why = _paused(s, now)
     if why:
         return done(skipped=why)
+    stop = engine.emergency_stop(db)
+    if stop:  # the News Desk's emergency stop holds Telegram too, and this lane never takes over the desk's decisions while it is on
+        return done(skipped=stop)
     await _decide_if_desk_is_not(db, now, transport, quotes)
     await events.alert_slots(db, now, events.policy(engine.settings_row(db).state or {}))
     handle = channel_handle(db)

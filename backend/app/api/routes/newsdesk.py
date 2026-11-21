@@ -64,6 +64,7 @@ class SettingsInput(StrictInput):
     automation: bool | None = None
     mode: Literal["dry_run", "live"] | None = None
     kill_switch: bool | None = None
+    market_pause: bool | None = None  # no desk-measured market post (moves, data posts, market checks, liquidations) released or delivered
     resume: bool | None = None
     target_per_day: int | None = Field(None, ge=1, le=48)
     max_breaking_per_day: int | None = Field(None, ge=0, le=24)
@@ -96,6 +97,8 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
         _watch_ok(data["watchlist"])
     if data.pop("resume", False):
         s.paused_until, s.pause_reason = None, None
+    if "market_pause" in data:
+        s.state = {**(s.state or {}), "market_pause": bool(data.pop("market_pause"))}
     if "categories" in data:
         data["categories"] = {c: bool(data["categories"].get(c, False)) for c in sources.CATEGORIES}
     for k, v in data.items():

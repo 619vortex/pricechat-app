@@ -355,7 +355,12 @@ def score_story(v: chaos.Verdict, quotes: dict[str, sources.Quote], now: datetim
     if claim is not None and claim.at < lead and published is not None:
         q = quotes.get(claim.symbol)
         if q is not None and chaos.verify(claim, q, published)[0] == "confirmed":
-            measured = moves.biggest(q, {"group": chaos.GROUP.get(claim.symbol, "stock")}, published)
+            group = chaos.GROUP.get(claim.symbol, "stock")
+            # a US stock or index is never tagged with a rolling window (Telegram 203: a session is measured from the previous close), and a
+            # tag is a real part of the move: half its alert line at least, never "(BTC -0.4% IN 1H)"
+            measured = None if group in moves.EQUITY_GROUPS else moves.biggest(q, {"group": group}, published)
+            if measured and measured[2] < 0.5:
+                measured = None
             if measured and (claim.direction == 0 or (measured[1] > 0) == (claim.direction > 0)):
                 tag = headline.price_tag(claim.asset, measured[0], measured[1])
                 spark = moves.spark(q, published)
@@ -864,6 +869,8 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
     """At most one event per pass. The best candidate that fits the plan goes; the others say why they wait."""
     out = list(db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.released_at >= now - timedelta(hours=24))))
     waiting = sorted(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")), key=lambda e: (-e.virality, e.id))
+    if market_paused(db):  # the owner paused desk-measured market posts: they wait (and expire); news goes on
+        waiting = [e for e in waiting if not market_post(e)]
     if not waiting:
         return None
     if sched(p) == "slots":
@@ -1565,12 +1572,31 @@ def _age(ev: NdEvent, now: datetime) -> float:
 # --- what each platform delivers -----------------------------------------------------------------------------------
 
 
+def market_post(ev: NdEvent) -> bool:
+    """A post made of the desk's own measured market data: a price move, a level, a data post, a market check or a liquidation flush."""
+    f = ev.facts or {}
+    return ev.kind in ("market", "data", "recap") or bool(f.get("symbol")) or (ev.topic or "") == "liquidations"
+
+
+def market_paused(db: Session) -> bool:
+    """Owner's switch (Admin > News Desk settings, market_pause): no desk-measured market post is released or delivered while it is on."""
+    from app.models.newsdesk import NdSettings
+
+    s = db.get(NdSettings, 1)
+    return bool(s is not None and (s.state or {}).get("market_pause"))
+
+
 def pending(db: Session, platform: str, now: datetime) -> list[NdEvent]:
     """Released events this platform still owes, oldest first. One it can no longer deliver in time is marked missed, for this platform only."""
     col = NdEvent.x_status if platform == "x" else NdEvent.tg_status
     rows = list(db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, col.in_(("pending", "queued")), NdEvent.released_at >= now - timedelta(hours=12)).order_by(NdEvent.released_at, NdEvent.id)))
     out = []
+    paused = market_paused(db)
     for ev in rows:
+        if paused and market_post(ev):
+            mark(ev, platform, "skipped", "market-data posts are paused (owner)")
+            logger.info("newsdesk events: %s won't deliver #%s: market-data posts are paused", platform, ev.id)
+            continue
         limit = POLICY.deliver_market if ev.kind == "market" or (ev.facts or {}).get("symbol") else POLICY.deliver_news
         if platform == "x" and X_FOLLOWS_TELEGRAM and ev.tg_status in ("delivered", "uncertain"):
             limit += X_AFTER_TELEGRAM  # Telegram posted it near the end of its window: X still follows

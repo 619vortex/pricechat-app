@@ -137,9 +137,10 @@ async def test_unset_owner_or_telegram_down_never_crashes() -> None:
     for _ in range(3):
         out = await s.run_job("pokemon.sync")
         assert out.status == "failed"
-    assert bot.sent == []  # no owner chat: logged only
+    assert bot.sent == []  # no owner chat: nothing sent, the alert is KEPT (2026-11-21), not only logged
     with SessionLocal() as db:
         assert db.get(OwnerAlert, "job:pokemon.sync") is None  # not marked sent: the owner hears once it is set
+        assert [r.key for r in alerts.pending_alerts(db)] == ["pending:job:pokemon.sync"]
 
     _owner()
     bot.down = True
@@ -148,8 +149,12 @@ async def test_unset_owner_or_telegram_down_never_crashes() -> None:
     with SessionLocal() as db:
         assert not await alerts.notify_owner(db, "x", "y", settings=Settings(telegram_bot_token=""), transport=bot.transport)  # no bot token
     bot.down = False
-    await s.run_job("pokemon.sync")  # Telegram back: the owner is told now
-    assert len(bot.sent) == 1
+    await s.run_job("pokemon.sync")  # Telegram back: the other kept alerts first (one digest), then this one in its newest wording
+    assert len(bot.sent) == 2
+    assert "could not reach you" in bot.sent[0]["text"] and "y" in bot.sent[0]["text"] and "pokemon" not in bot.sent[0]["text"].lower()
+    assert "pokemon" in bot.sent[1]["text"].lower() or "test job" in bot.sent[1]["text"].lower()
+    with SessionLocal() as db:
+        assert alerts.pending_alerts(db) == []  # delivered: nothing kept any more
 
 
 async def test_tiktok_expired_while_auto_on() -> None:

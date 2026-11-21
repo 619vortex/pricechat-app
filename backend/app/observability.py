@@ -227,6 +227,47 @@ TG_HOURS = range(9, 23)  # UTC hours the Telegram silence is judged in (stories 
 BACKUP_MAX_AGE = timedelta(hours=26)  # the nightly backup runs every 24 h
 FAILING_RUNS = 3  # an enabled job failing this many runs in a row (its own alert comes from app/alerts.job_outcome)
 KEY_SILENCE = "ops:silence:"
+KEY_FEEDS = "ops:newsdesk_feeds"
+DEAD_FEED_AFTER = timedelta(hours=24)
+
+
+def dead_feeds(db: Session, now: datetime) -> list[str]:
+    """The News Desk feeds that have failed every read for DEAD_FEED_AFTER (the desk records each feed's last good read: engine.collect)."""
+    from app.models.newsdesk import NdSettings
+
+    s = db.get(NdSettings, 1)
+    if s is None or not s.automation:
+        return []
+    health = ((s.state or {}).get("feed_health") or {})
+    feeds = health.get("feeds") or {}
+    out = []
+    for url, h in feeds.items():
+        if not h.get("problem"):
+            continue
+        last = h.get("last_ok")
+        since = datetime.fromisoformat(last) if last else None
+        if since is not None and since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        if (since is None and int(h.get("fails") or 0) >= 288) or (since is not None and now - since >= DEAD_FEED_AFTER):
+            tier = " (official source)" if h.get("tier") == 0 else ""
+            out.append(f"{h.get('name') or url}{tier}: {str(h.get('problem'))[:80]}" + (f", last good read {since:%d %b %H:%M} UTC" if since else ""))
+    return sorted(out)
+
+
+async def newsdesk_delivery_alerts(db: Session, now: datetime, settings: Any = None, transport: Any = None) -> int:
+    """events.alert_slots from the watchdog, whatever state the Telegram lane is in. Never raises."""
+    try:
+        from app.models.newsdesk import NdSettings
+        from app.newsdesk import events
+
+        s = db.get(NdSettings, 1)
+        if s is None:
+            return 0
+        return await events.alert_slots(db, now, events.policy(s.state or {}))
+    except Exception as e:  # noqa: BLE001 - a monitor never breaks the watchdog
+        db.rollback()
+        logger.warning("watchdog: News Desk delivery alerts failed (%s)", type(e).__name__)
+        return 0
 
 
 def _runs_here(db: Session, sched: Any, name: str) -> bool:
@@ -437,6 +478,20 @@ class Watchdog:
                     from app import alerts
 
                     alerts._close(db, KEY_SILENCE + m["key"])  # switched off: nothing is expected any more
+            # 5) the News Desk's delivery alerts (missed slots, a platform that didn't deliver), here as well as in the lanes: a paused or
+            # switched-off Telegram lane never ran them (owner, 2026-11-21: "reliable owner alerts and watchdog monitoring")
+            out["alerts"] += await newsdesk_delivery_alerts(db, now, self.settings, self.transport)
+            # 6) news feeds failing for a day (the Federal Reserve's feed answered 404 for days, unnoticed)
+            dead = dead_feeds(db, now)
+            if dead:
+                out["alerts"] += await self._problem(db, KEY_FEEDS, "Price Chat alert: News Desk feeds not working for 24 h or more\n"
+                                                     + "\n".join(f"- {d}" for d in dead[:12]) + f"\nAdmin > X > News Desk > Feeds.\nTime: {_when(now)}")
+            else:
+                out["recovered"] += await self._fixed(db, KEY_FEEDS, f"Price Chat: recovered\nEvery News Desk feed is answering again.\nTime: {_when(now)}")
+            # 7) alerts kept while no chat was linked or Telegram failed: delivered as soon as they can be
+            from app import alerts
+
+            out["kept_delivered"] = await alerts.flush_pending(db, settings=self.settings, transport=self.transport, now=now)
         return out
 
     async def _loop(self) -> None:

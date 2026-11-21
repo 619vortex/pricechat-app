@@ -282,7 +282,7 @@ async def test_x_and_telegram_deliver_the_same_event_and_one_failing_doesn_t_tou
     hack(db, "Bybaz", T0, "$300 million", hours=0)
     await decide(db, T0)
     desk = engine.settings_row(db)
-    desk.kill_switch = True  # X stopped: Telegram goes on
+    desk.automation = False  # X switched off: Telegram goes on (the emergency stop holds both: tests/test_price_updates_20261121.py)
     db.commit()
     tg = Tg()
     await lane.tick(db, get_settings(), tg, T0, quotes={})
@@ -293,7 +293,7 @@ async def test_x_and_telegram_deliver_the_same_event_and_one_failing_doesn_t_tou
     assert ev.x_status == "missed" and ev.tg_status == "delivered"  # recorded, per platform
 
     hack(db, "Qorvex", T0 + timedelta(hours=6), "$300 million", hours=0)
-    desk.kill_switch = False
+    desk.automation = True
     db.commit()
     await decide(db, T0 + timedelta(hours=6))
     tg2 = Tg(fail=TelegramUnavailableError("Telegram did not respond in time"))

@@ -42,6 +42,31 @@ Branch `fix/price-updates`, worktree `D:/pc-wt/price-updates`. Based on the prod
 - Its test stubs were out of date (`photos.fetch(..., colour=False)`), which made 9 photography tests fail on that branch. The stubs are
   updated here. The production code was fine.
 
+### 5. Phase 0 of the engine roadmap (owner approved 2026-11-21)
+- **The emergency stop holds everything.** `engine.emergency_stop` (the News Desk stop from Admin or Terminal, or the network emergency
+  pause) is checked in the Telegram tick, at the moment of each Telegram send, in X's `deliver_x`, and in `publish`, including the
+  owner's test post. Before this, the stop held X only. Telegram kept posting and even took over the desk's decisions.
+  X's automation switch alone still stops X only.
+- **Market-data pause (new owner switch, off by default):** `PUT /newsdesk/settings {"market_pause": true}`. No desk-measured market
+  post (moves, data posts, market checks, liquidations) is released or delivered. News goes on. There is no Admin button yet; it is API
+  only.
+- **Accuracy firewall:**
+  - `checks.unit_problems` runs in `check_post` and `claim_problems`. A figure with a unit, scale or sign must match the source.
+  - The "24 hours" words handed to every caption's source text are removed (telegram, queue, network).
+  - News price tags: never a rolling window for US stocks or indices, and never under half the alert line.
+  - A headline whose verb contradicts the measured sign is refused (`visual.direction_problem`), and "1.5%" no longer matches inside
+    "11.5%".
+- **Crypto 15m/1h/4h moves:** the chart check uses candles that cover exactly the move's window (1m/5m/15m) and compares the Yahoo
+  headline with the Hyperliquid series at the two-source tolerance (0.5 points). These moves were all refused before.
+- **Commodities** (gold, silver, oil, copper) get the Yahoo quote check and then their library photo, instead of unchecked text.
+- **X's own text after a re-read** keeps the reference and "Market data:" line.
+- **Owner alerts are never only logged.**
+  - An alert with no linked chat, or one Telegram refused, is kept (`owner_alerts` rows `pending:<key>`). Kept alerts are delivered as
+    one digest before the next alert, or by the watchdog.
+  - The watchdog now also runs the desk's slot/delivery alerts, whatever state the Telegram lane is in, and alerts on news feeds that
+    have been dead for 24 h.
+- Telegram keeps the picture's `number_check` record (it was overwritten).
+
 ## Tests
 - New: `backend/tests/test_price_updates_20261121.py` (22 tests, real Yahoo answers in `price_updates_yahoo_20261121.json`, Binance
   data in `2026-11-21-telegram-204/raw/`).

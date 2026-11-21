@@ -86,7 +86,7 @@ def claim_owner_link(db: Session, code: str, user_id: int, now: datetime | None 
     s.telegram_chat, s.enabled = str(int(user_id)), True
     row.open, row.last_text = False, ""
     db.commit()
-    return True
+    return True  # the kept alerts go out on the next alert or the next watchdog pass (flush_pending)
 
 
 def owner_chat(db: Session) -> str | None:
@@ -201,6 +201,63 @@ async def discover_owner_chat(db: Session, *, settings: Settings | None = None, 
         await client.aclose()
 
 
+# --- alerts that could not be delivered are kept, never only logged (owner, 2026-11-21: every alert of 2026-11-20/21, 46 "no Telegram post
+# for 12 h" among them, was a log line nobody read; when a chat was linked later, none of them reached the owner) ----------------------------
+PENDING_PREFIX = "pending:"  # an OwnerAlert row per undelivered key: last_text = the newest text, last_sent_at = when it was last raised,
+PENDING_MAX = 25  # sent_count = how many times; delivered as one digest, newest first, at most this many lines
+
+
+def _queue_pending(db: Session, key: str, text: str, now: datetime, why: str) -> None:
+    pkey = (PENDING_PREFIX + key)[:128]
+    row = db.get(OwnerAlert, pkey)
+    first = row is None
+    if row is None:
+        row = OwnerAlert(key=pkey, sent_count=0)
+        db.add(row)
+    row.last_sent_at, row.sent_count, row.last_text, row.open = now, (row.sent_count or 0) + 1, text[:2000], True
+    db.commit()
+    if first:
+        logger.warning("Owner alert kept for delivery (%s) [%s]: %s", why, key, text)
+    else:
+        logger.info("Owner alert raised again, still kept for delivery (%s) [%s] x%d", why, key, row.sent_count)
+
+
+def pending_alerts(db: Session) -> list[OwnerAlert]:
+    return sorted(db.scalars(select(OwnerAlert).where(OwnerAlert.key.like(PENDING_PREFIX + "%"), OwnerAlert.open.is_(True))),
+                  key=lambda r: _aware(r.last_sent_at) if r.last_sent_at else datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
+
+async def flush_pending(db: Session, *, settings: Settings | None = None, transport: Any = None, now: datetime | None = None,
+                        chat: str | None = None, skip: str = "") -> int:
+    """Send every kept alert to the owner's chat as one digest (newest first), except `skip` (the key being sent on its own). Returns how
+    many were delivered. Never raises."""
+    now = now or utcnow()
+    try:
+        rows = [r for r in pending_alerts(db) if not skip or r.key != (PENDING_PREFIX + skip)[:128]]
+        if not rows:
+            return 0
+        chat = chat or owner_chat(db)
+        if chat is None:
+            return 0
+        lines = []
+        for r in rows[:PENDING_MAX]:
+            times = f" (x{r.sent_count})" if (r.sent_count or 0) > 1 else ""
+            at = _when(_aware(r.last_sent_at)) if r.last_sent_at else "?"
+            lines.append(f"- {at}{times}: {(r.last_text or '').strip()[:400]}")
+        more = f"\n(+{len(rows) - PENDING_MAX} older)" if len(rows) > PENDING_MAX else ""
+        text = (f"Price Chat: {len(rows)} alert(s) that could not reach you when they happened\n" + "\n".join(lines) + more)[:3900]
+        await send_text(settings or get_settings(), chat, text, transport)
+        for r in rows:
+            r.open = False
+        db.commit()
+        logger.info("Owner alerts: %d kept alert(s) delivered", len(rows))
+        return len(rows)
+    except Exception as exc:  # noqa: BLE001 - kept for the next try
+        db.rollback()
+        logger.warning("Owner alerts: kept alerts not delivered yet (%s)", type(exc).__name__)
+        return 0
+
+
 def _when(now: datetime) -> str:
     return now.strftime("%Y-%m-%d %H:%M UTC")
 
@@ -232,18 +289,25 @@ async def notify_owner(db: Session, key: str, text: str, *, settings: Settings |
             return False
         chat = owner_chat(db) or await discover_owner_chat(db, settings=settings, transport=transport, now=now)
         if chat is None:
-            logger.warning("Owner alert (no owner Telegram chat set, logged only) [%s]: %s", key, text)
+            _queue_pending(db, key, text, now, "no owner Telegram chat set")
             return False
+        mine = db.get(OwnerAlert, (PENDING_PREFIX + key)[:128])
+        others = [r for r in pending_alerts(db) if r.key != (PENDING_PREFIX + key)[:128]]
+        if others:  # a chat exists now: what could not be delivered before goes first (this key's own kept copy is this message)
+            await flush_pending(db, settings=settings, transport=transport, now=now, chat=chat, skip=key)
         try:
             await send_text(settings or get_settings(), chat, text, transport)
-        except Exception as exc:  # noqa: BLE001 - Telegram down / no bot token / owner never pressed Start: log only
-            logger.warning("Owner alert [%s] not sent (%s: %s): %s", key, type(exc).__name__, str(exc)[:200], text)
+        except Exception as exc:  # noqa: BLE001 - Telegram down / no bot token / owner never pressed Start: kept for later
+            logger.warning("Owner alert [%s] not sent (%s: %s)", key, type(exc).__name__, str(exc)[:200])
+            _queue_pending(db, key, text, now, f"not sent: {type(exc).__name__}")
             return False
         row = db.get(OwnerAlert, key)  # read again: finding the owner's chat committed in between
         if row is None:
             row = OwnerAlert(key=key)
             db.add(row)
         row.last_sent_at, row.sent_count, row.last_text = now, (row.sent_count or 0) + 1, text[:2000]
+        if mine is not None and mine.open:  # delivered now, in its newest wording: nothing of it is kept any more
+            mine.open = False
         logger.info("Owner alert sent [%s] to the owner's chat", key)
         if open_ is not None:
             row.open = open_

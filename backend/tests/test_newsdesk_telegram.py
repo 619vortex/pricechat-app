@@ -512,10 +512,11 @@ async def test_turned_off_it_sends_nothing(db: Session) -> None:
     assert tg.sent == [] and out["skipped"] == "Turned off"
 
 
-async def test_the_x_emergency_stop_doesnt_stop_telegram_and_the_lane_reads_the_feeds_itself(db: Session) -> None:
+async def test_x_switched_off_doesnt_stop_telegram_and_the_lane_reads_the_feeds_itself(db: Session) -> None:
+    """X's automation off (not the emergency stop, which holds both platforms since 2026-11-21): Telegram goes on and decides for itself."""
     verified(db)
     desk = engine.settings_row(db)
-    desk.kill_switch, desk.feeds = True, [{"name": "Decrypt", "url": "https://decrypt.test/feed", "tier": 2, "category": "crypto"}]
+    desk.automation, desk.feeds = False, [{"name": "Decrypt", "url": "https://decrypt.test/feed", "tier": 2, "category": "crypto"}]
     desk.state = {"policy": OPEN}  # the plan opened up, as in the other delivery tests: otherwise the result depends on the time of day
     db.commit()
     asked: list[str] = []
@@ -528,7 +529,7 @@ async def test_the_x_emergency_stop_doesnt_stop_telegram_and_the_lane_reads_the_
     out = await lane.tick(db, get_settings(), tg, utcnow(), transport=httpx.MockTransport(web))
     assert asked[0] == "https://decrypt.test/feed" and all(u.startswith("https://query1.finance.yahoo.com/v8/finance/chart/") for u in asked[1:])  # the feed, then prices for live moves
     assert out["sent"] == 144
-    assert engine.settings_row(db).kill_switch is True
+    assert engine.settings_row(db).automation is False
 
 
 async def test_with_no_channel_set_nothing_is_sent(db: Session) -> None:

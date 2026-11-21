@@ -31,6 +31,53 @@ class Result:
         return next((c["detail"] for c in self.checks if not c["passed"]), "")
 
 
+# a figure with what it measures: its sign, currency, value and unit ("+6.7%", "$17B", "−3.1%", "17 billion", "$70K")
+_UNIT_FIGURE = re.compile(r"(?<![\w.,])([+\-−]\s?)?([$€£]\s?)?(\d[\d,]*(?:\.\d+)?)"
+                          r"(?:\s?(%|percent\b|per cent\b|bn\b|billion\b|mn\b|million\b|tn\b|trillion\b|[bmkt]\b))?", re.I)
+_SCALE = {"%": "%", "percent": "%", "per cent": "%", "bn": "b", "billion": "b", "b": "b", "mn": "m", "million": "m", "m": "m", "tn": "t",
+          "trillion": "t", "t": "t", "k": "k"}
+
+
+def _unit_figures(text: str) -> list[tuple[str, str, str, bool]]:
+    """(sign, value, unit, money) for every figure: sign "+", "-" or "" (none written); unit "%", "m", "b", "t" or "" (a plain number); money
+    when a currency sign leads it. "$70K" is 70000 with no unit, as "70,000" is."""
+    out = []
+    for m in _UNIT_FIGURE.finditer((text or "").replace("−", "-")):
+        sign = (m.group(1) or "").strip().replace("−", "-")
+        n = m.group(3).replace(",", "")
+        unit = _SCALE.get((m.group(4) or "").lower(), "")
+        if unit == "k":
+            n, unit = f"{float(n) * 1000:.6f}", ""
+        n = n.rstrip("0").rstrip(".") if "." in n else n
+        out.append((sign, n, unit, bool(m.group(2))))
+    return out
+
+
+def unit_problems(story: str, source_text: str) -> list[str]:
+    """Figures whose digits the sources have, but not as the story states them (owner, 2026-11-21: the digits-only check would pass "$17B"
+    for "$17M", "+6.7%" for "-6.7%", "6.7%" for "$6.7"). A figure the story gives a unit, a scale or a sign must be in the sources with that
+    unit and scale, and never only with the opposite sign. A plain number keeps the digits rule (numbers())."""
+    src: dict[str, list[tuple[str, str, bool]]] = {}
+    for sign, n, unit, money in _unit_figures(source_text):
+        src.setdefault(n, []).append((sign, unit, money))
+    bad = []
+    for sign, n, unit, money in _unit_figures(story):
+        have = src.get(n)
+        if not have:
+            continue  # digits no source gave: numbers() reports it
+        if unit:
+            same = [h for h in have if h[1] == unit]
+        elif money:
+            same = [h for h in have if h[1] != "%"]
+        else:
+            same = have
+        if not same:
+            bad.append(f"{sign}{'$' if money else ''}{n}{unit} (the sources give {', '.join(sorted({f'{h[0]}{n}{h[1]}' for h in have}))})")
+        elif sign and not any(h[0] in (sign, "") for h in same):
+            bad.append(f"{sign}{n}{unit} (the sources give {same[0][0]}{n}{same[0][1]})")
+    return list(dict.fromkeys(bad))
+
+
 def numbers(text: str) -> set[str]:
     """Every number, comparable: 1,000.50 and 1000.5 are the same."""
     out = set()
@@ -94,6 +141,8 @@ def check_post(text: str, *, source_text: str, source_names: list[str], breaking
     if not as_edited:
         extra = numbers(bare) - numbers(source_text)
         add("figures", not extra, f"Figures no source gave: {', '.join(sorted(extra))}")
+        wrong = unit_problems(bare, source_text)
+        add("figure_units", not wrong, f"Figures the sources give with another unit, scale or sign: {', '.join(wrong)}")
     unsupported = unsupported_tickers(t, source_text)
     add("tickers", not unsupported, f"Tickers the sources don't establish: {', '.join(unsupported)} (a company's name never brings its token or stock)")
     return Result(all(c["passed"] for c in checks), checks)
@@ -481,6 +530,9 @@ def claim_problems(story: str, source_text: str) -> list[str]:
     extra = numbers(story) - numbers(src)
     if extra:
         out.append(f"figures no source gave: {', '.join(sorted(extra))}")
+    wrong = unit_problems(story, src)
+    if wrong:
+        out.append(f"figures with another unit, scale or sign than the sources: {', '.join(wrong)}")
     people = [p for p in dict.fromkeys(photos.people_named(story)) if p.split()[-1].lower().strip("'s") not in low]
     if people:
         out.append(f"people no source names: {', '.join(people)}")

@@ -730,7 +730,7 @@ def looks_synthetic(points: list[tuple[int, float]]) -> str:
 
 
 def verify_series(points: list[tuple[int, float]], *, window: str, headline: str, as_of: Any, now: Any, max_age_minutes: float,
-                  second_pct: float | None = None, second_name: str = "", synthetic: bool = False) -> NumberCheck:
+                  second_pct: float | None = None, second_name: str = "", synthetic: bool = False, headline_pp: float = SAME_SERIES_PP) -> NumberCheck:
     """The gate every chart and every measured figure passes before any post (owner, 2026-11-10). The chart's data window must be the
     headline's window; the headline's percent must equal the percent of the very series the chart draws (within SAME_SERIES_PP) and a
     second source's (within CROSS_SOURCE_PP) when there is one; the last point must be fresh; the data must be real, never interpolated."""
@@ -754,8 +754,11 @@ def verify_series(points: list[tuple[int, float]], *, window: str, headline: str
         if said is not None and said != want:
             reasons.append(f"the headline says {said / 3600:g} h, the chart shows {want / 3600:g} h")
     series = (pts[-1][1] - pts[0][1]) / pts[0][1] * 100
+    turned = direction_problem(headline, series)
+    if turned:
+        reasons.append(turned)
     m = HEADLINE_PCT.search(headline or "")
-    if m and abs(float(m.group(1)) - abs(series)) > SAME_SERIES_PP:
+    if m and abs(float(m.group(1)) - abs(series)) > headline_pp:
         reasons.append(f"the headline says {m.group(1)}%, the chart's own data says {abs(series):.2f}%")
     if second_pct is not None:
         if (second_pct > 0) != (series > 0) or abs(second_pct - series) > CROSS_SOURCE_PP:
@@ -770,13 +773,27 @@ def verify_series(points: list[tuple[int, float]], *, window: str, headline: str
     return NumberCheck(not reasons, reasons, series, detail)
 
 
+UP_WORDS = re.compile(r"\b(rises?|rising|jumps?|soars?|skyrockets?|surges?|climbs?|gains?|rall(?:y|ies)|spikes?|pumps?|higher|breaks above)\b", re.I)
+DOWN_WORDS = re.compile(r"\b(falls?|falling|tumbles?|plunges?|crash(?:es)?|drops?|slides?|sinks?|slumps?|dives?|lower|falls below|sell-?off)\b", re.I)
+
+
+def direction_problem(headline: str, change: float) -> str:
+    """A measured move's headline says the way it moved: never "rises" for a fall (owner, 2026-11-21: signs and directions are checked)."""
+    up, down = bool(UP_WORDS.search(headline or "")), bool(DOWN_WORDS.search(headline or ""))
+    if change < 0 and up and not down:
+        return f"the headline says it rose; the measured change is {change:+.2f}%"
+    if change > 0 and down and not up:
+        return f"the headline says it fell; the measured change is {change:+.2f}%"
+    return ""
+
+
 QUOTE_PRICE_TOL = 0.0005  # 0.05%: a printed level against the quote it came from (the same Yahoo answer, so normally exact)
 
 
 def yahoo_equity(ev: Any) -> bool:
     """A move the desk measured on a US stock or index from Yahoo (app/newsdesk/moves): its numbers are checked against Yahoo's own quote,
     not Hyperliquid candles (there are none for the Nasdaq): before 2026-11-21 every such post went out as text, "no verified series"."""
-    from app.newsdesk import moves, sources
+    from app.newsdesk import moves
 
     f = ev.facts or {}
     if getattr(ev, "kind", "") not in ("market", "update") or f.get("kind") not in ("move", "wide"):
@@ -784,8 +801,15 @@ def yahoo_equity(ev: Any) -> bool:
     sym = str(f.get("symbol") or "")
     if sym == "US-STOCKS":
         return True
-    item = next((x for x in moves.watch_items(sources.DEFAULT_WATCHLIST) if x["symbol"] == sym), None)
-    return item is not None and item.get("group") in moves.EQUITY_GROUPS
+    # commodities too (gold, silver, oil, copper): Hyperliquid has no candles for them, so they went out text-only, figures unchecked
+    return group_of(sym) in (*moves.EQUITY_GROUPS, "commodity")
+
+
+def group_of(symbol: str) -> str:
+    from app.newsdesk import moves, sources
+
+    item = next((x for x in moves.watch_items(sources.DEFAULT_WATCHLIST) if x["symbol"] == symbol), None)
+    return str(item.get("group") or "") if item is not None else ""
 
 
 def verify_quote_move(ev: Any, quotes: dict[str, Any], now: Any = None, max_age_minutes: float = 90) -> NumberCheck:
@@ -812,7 +836,7 @@ def verify_quote_move(ev: Any, quotes: dict[str, Any], now: Any = None, max_age_
             continue
         if abs((price - ref) / ref * 100 - change) > 0.01:
             reasons.append(f"{name}: {change:+.2f}% is not what {price} against {ref} gives")
-        if f"{abs(change):.1f}%" not in head:
+        if not re.search(rf"(?<![\d.]){re.escape(f'{abs(change):.1f}')}%", head):  # "1.5%" is not inside "11.5%"
             reasons.append(f"{name}: the headline doesn't print {abs(change):.1f}%")
         q = quotes.get(sym)
         if q is None:
@@ -828,6 +852,11 @@ def verify_quote_move(ev: Any, quotes: dict[str, Any], now: Any = None, max_age_
         if window == "day":
             if not q.previous_close or abs(ref - q.previous_close) / q.previous_close > QUOTE_PRICE_TOL:
                 reasons.append(f"{name}: {ref} is not Yahoo's previous close ({q.previous_close})")
+        elif at is not None and group_of(sym) not in moves.EQUITY_GROUPS:
+            secs = moves.WINDOWS.get(window, 0)  # a futures move (moves.measure): its bars are stamped with their start, as it measured them
+            then = moves.price_at(q, at.timestamp() - secs, tolerance=max(600, int(secs * 0.05)))
+            if not then or abs(ref - then) / then > QUOTE_PRICE_TOL:
+                reasons.append(f"{name}: {ref} is not Yahoo's price {window} earlier ({then})")
         elif at is not None:
             then = moves.price_near(q, at.timestamp() - moves.WINDOWS.get(window, 0), before=at.timestamp())
             if not then or abs(ref - then) / then > QUOTE_PRICE_TOL:
@@ -835,6 +864,9 @@ def verify_quote_move(ev: Any, quotes: dict[str, Any], now: Any = None, max_age_
         if at is not None and now is not None and (now - at).total_seconds() / 60 > max_age_minutes:
             reasons.append(f"{name}: the price is {(now - at).total_seconds() / 60:.0f} min old")
     lead = float(figs[0].get("change") or 0)
+    turned = direction_problem(head, lead)
+    if turned:
+        reasons.append(turned)
     detail = "Yahoo quote check: " + ", ".join(f"{x.get('name')} {float(x.get('price') or 0):,.2f} vs {float(x.get('ref') or 0):,.2f} ({float(x.get('change') or 0):+.2f}%)" for x in figs)
     return NumberCheck(not reasons, reasons, lead, detail)
 
@@ -962,15 +994,32 @@ def plan(ev: Any, recent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return out
 
 
-async def candles_for(coin: str, market: Any = None) -> list[tuple[int, float]]:
+# the candles that chart a window with at least ten real prices across exactly that window (verify_series: the chart's span must be the
+# headline's window). Before 2026-11-21 every window got 24 h of 15-minute candles, so a crypto move over 15 minutes, an hour or 4 hours
+# was refused ("the chart covers 24.0 h, not the 1 h window") and the post never went out.
+CHART_CANDLES = {"15M": ("1m", 15), "1H": ("5m", 12), "4H": ("15m", 16)}
+
+
+async def candles_for(coin: str, market: Any = None, window: str = "24H") -> list[tuple[int, float]]:
+    """(unix seconds, price) for the window. 24 h: 97 fifteen-minute closes, as always. Shorter windows: the first candle's open at its
+    start, then each candle's close at its end, so the series runs from the window's first price to the latest one."""
     import asyncio
 
     if market is None:
         from app.tradingos.market import MarketData
 
         market = MarketData()
-    rows = await asyncio.to_thread(market.candles, coin, "15m", 97)
-    return [(int(c.t) // 1000, float(c.c)) for c in rows]
+    interval, count = CHART_CANDLES.get(str(window).upper(), ("15m", 97))
+    if interval == "15m" and count == 97:
+        rows = await asyncio.to_thread(market.candles, coin, "15m", 97)
+        return [(int(c.t) // 1000, float(c.c)) for c in rows]
+    from app.tradingos.market import INTERVALS
+
+    rows = await asyncio.to_thread(market.candles, coin, interval, count)
+    step = INTERVALS[interval]
+    first = rows[0] if rows else None
+    out = [(int(first.t) // 1000, float(getattr(first, "o", None) or first.c))] if first is not None else []
+    return out + [(int(c.t) // 1000 + step, float(c.c)) for c in rows]
 
 
 def _mark(ev: Any) -> str:
@@ -995,21 +1044,24 @@ async def _chart_for(ev: Any, chosen: dict[str, Any], market: Any, now: Any = No
     f = ev.facts or {}
     points = [tuple(p) for p in f.get("points") or []]
     coin = str(f.get("coin") or (f.get("tickers") or [""])[0] or "").lstrip("$").upper()
+    window = str(f.get("window") or "24h").upper()
+    other_source = False  # the series is Hyperliquid's while the headline was measured on Yahoo: two feeds, two clocks
     if len(points) < 10 and coin and ev.kind in ("recap", "market"):
         try:
-            points = await candles_for(coin, market)
+            points = await candles_for(coin, market, window if ev.kind == "market" else "24H")
+            other_source = ev.kind == "market"
         except Exception as e:  # noqa: BLE001
             logger.info("newsdesk visual: no candles for %s (%s)", coin, type(e).__name__)
     if len(points) < 10:
         return None
     from datetime import datetime, timezone
 
-    window = str(f.get("window") or "24h").upper()
     stamp = f.get("as_of") or f.get("published_at")
     as_of = datetime.fromisoformat(stamp) if stamp else (now or datetime.now(timezone.utc))
     as_of = as_of if as_of.tzinfo else as_of.replace(tzinfo=timezone.utc)  # now None (X re-rendering what Telegram checked): no age limit
     check = verify_series(points, window=window, headline=post_headline(ev), as_of=as_of, now=now,
                           max_age_minutes=90 if ev.kind in ("recap", "market") else 360, second_pct=f.get("second_pct"), second_name=str(f.get("second_source") or ""),
+                          headline_pp=CROSS_SOURCE_PP if other_source else SAME_SERIES_PP,
                           synthetic=bool(f.get("synthetic")))
     ev.facts = {**f, "number_check": check.out()}
     if not check.ok:

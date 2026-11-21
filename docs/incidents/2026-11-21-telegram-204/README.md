@@ -17,8 +17,10 @@ Binance's own public data (`raw/dapi_*.json`, fetched 2026-11-21 09:22 UTC from 
 | All BTCUSD_PERP trading, 02:00-03:00 UTC | 351,370 contracts = $35.1M |
 | All BTCUSD_PERP trading, 03:00-04:00 UTC | 2,863,142 contracts = $286.3M |
 | The post's window (the hour to ~03:48 UTC) | at most **$321.5M** of trading in total |
+| Second check, exact window 02:48-03:47 (`raw/dapi_klines_1m_0248_0348.json`, 60 one-minute candles, fetched 2026-11-21 ~11:10 UTC) | 2,506,511 contracts = **$250.7M** traded; sell-initiated (taker sell) **$155.2M** |
 
-A liquidation is a trade, so $10.1B of liquidations can't happen in an hour that traded at most $321.5M.
+A liquidation is a trade, so $10.1B can't happen in an hour that traded $250.7M. A long liquidation is a forced SELL, so the true
+figure is also at most the $155.2M that was sold aggressively in the window: the post overstated even that bound about 65 times.
 
 ## Root cause
 `app/tradingos/liqtape.py` `on_binance` stored `usd = price x quantity` for every symbol. On Binance COIN-M (inverse) futures the
@@ -28,8 +30,8 @@ so the raw contract name reached the post.
 
 ## The real figure
 Every row behind the post was a BTCUSD_PERP row (the post's coin key). The true dollar value is sum(contracts x 100) =
-the stated figure x 100 / price. BTC traded between 56,228.4 and 58,941.4 in the window, and $10.1B is rounded
-(10.05-10.15B), so the real figure is **$17.1M to $18.1M** (best estimate about $17.5M). Binance's stream shows at most one
+the stated figure x 100 / price. BTC traded between 56,418.0 and 58,565.9 in the exact window (1-minute candles), and $10.1B is
+rounded (10.05-10.15B), so the real figure is **$17.2M to $18.0M** (best estimate about $17.5M), well inside both bounds above. Binance's stream shows at most one
 liquidation per market per second, so it is a lower bound for Binance COIN-M BTC.
 
 Not verified: the stored rows themselves. The production database is on the Railway volume, and nothing in Price Chat's API reads
@@ -52,7 +54,7 @@ Recommended: edit message 204 in place, so forwards and screenshots lead to the 
 
 Edited text of 204:
 > ~~JUST IN: BTCUSD_PERP longs liquidated: $10.1B on Binance in an hour.~~
-> **Correction:** this post overstated the figure. About $17 million of Bitcoin long positions were liquidated on Binance's
+> **Correction:** this post overstated the figure. About $17-18 million of Bitcoin long positions were liquidated on Binance's
 > coin-margined Bitcoin futures in the hour to 03:48 UTC, not $10.1 billion. A unit error in our data feed counted $100
 > contracts as whole bitcoins. It has been fixed.
 >
@@ -60,7 +62,7 @@ Edited text of 204:
 
 Separate correction post (reply to 204):
 > CORRECTION: Our 04:04 UTC post said $10.1 billion of Bitcoin longs were liquidated on Binance in an hour. That was wrong.
-> The correct figure is about $17 million (Binance coin-margined BTC futures, 02:48-03:48 UTC). A unit error in our liquidation
+> The correct figure is about $17-18 million (Binance coin-margined BTC futures, 02:48-03:48 UTC). A unit error in our liquidation
 > feed counted $100 contracts as whole bitcoins. We've fixed it and added checks so a figure like this can't publish
 > automatically again.
 

@@ -58,6 +58,23 @@ def settings_row(db: Session) -> NdSettings:
     return row
 
 
+STOPPED = "stopped"
+
+
+def emergency_stop(db: Session) -> str:
+    """Why nothing automated may be published right now ("" = it may): the News Desk's emergency stop (Admin, Terminal /stop) or the
+    network's emergency pause. Checked by every sending path on both platforms, at the moment of sending (owner, 2026-11-21: the
+    Terminal stop held X back but Telegram kept posting, and even took over the desk's decisions because "the desk isn't running")."""
+    from app.newsdesk import network
+
+    s = db.get(NdSettings, 1)
+    if s is not None and s.kill_switch:
+        return "Emergency stop is on"
+    if s is not None and (s.pause_reason or "") == network.EMERGENCY:
+        return network.EMERGENCY
+    return ""
+
+
 def blocked_reason(s: NdSettings, now: datetime) -> str | None:
     if s.kill_switch:
         return "Emergency stop is on"
@@ -415,6 +432,8 @@ def _sync(ev: NdEvent, post: NdPost) -> None:
 async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRuntime | None, agent_id: int, now: datetime, transport: Any = None) -> str | None:
     """The next released event X still owes: written for X, checked, queued and sent (or recorded, in dry run). X's own failures stay X's:
     Telegram's delivery of the same event is untouched. Returns the publish result, or None if there was nothing to send."""
+    if emergency_stop(db):
+        return None
     posts = _recent_posts(db, now)
     for ev in events.pending(db, "x", now):
         if ev.x_status == "queued" and ev.x_post_id:
@@ -546,6 +565,16 @@ def x_words(ev: NdEvent, b: Any, shown: list[dict[str, Any]], named: list[str], 
         from app.newsdesk import visual
 
         text = visual.x_text(visual.post_headline(ev), visual.source_name(ev))
+        note = network.data_note(ev)
+        if note:  # a measured market post keeps its reference and "Market data:" line on X too (Telegram 203's missing levels, X side)
+            head, src = visual.post_headline(ev), visual.source_name(ev)
+            for n in dict.fromkeys([note, network._sentences(note)[-1]]):
+                candidate = f"{head}\n\n{n}\n\nSource: {src}"
+                if network.x_length(candidate) <= network.X_LIMIT:
+                    text = candidate
+                    break
+        told = f"{f.get('told') or ev.title} {ev.headline} {note} {' '.join(b.tickers)}"
+        return checks.one_cashtag(text), [], told, named
     else:
         text = (f.get("x_text") or "") if ev.kind == "recap" else brief.x_text(ev.headline, shown, b, ev.key)  # the market check is written for X when made
     return checks.one_cashtag(text), [], f"{f.get('told') or ev.title} {ev.headline} {' '.join(b.tickers)}", named
@@ -656,6 +685,9 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
     from app.social.guard import ActionRequest, SocialActionGuard
     from app.models.enums import Platform, SocialAction
 
+    if emergency_stop(db):  # nothing goes out under the emergency stop: not a queued post, not the owner's test post
+        logger.warning("newsdesk: post %s not sent: %s", post.id, emergency_stop(db))
+        return STOPPED
     if not _claim(db, post):
         return "already claimed"
     db.refresh(post)
@@ -899,7 +931,8 @@ def post_out(p: NdPost) -> dict[str, Any]:
 
 def settings_out(s: NdSettings) -> dict[str, Any]:
     return {"automation": s.automation, "mode": s.mode, "kill_switch": s.kill_switch, "paused_until": s.paused_until.isoformat() if s.paused_until else None, "pause_reason": s.pause_reason, "target_per_day": s.target_per_day,
-            "max_breaking_per_day": s.max_breaking_per_day, "breaking_gap_minutes": s.breaking_gap_minutes, "sensitivity": s.sensitivity, "categories": s.categories, "feeds": s.feeds, "watchlist": s.watchlist}
+            "max_breaking_per_day": s.max_breaking_per_day, "breaking_gap_minutes": s.breaking_gap_minutes, "sensitivity": s.sensitivity, "categories": s.categories, "feeds": s.feeds, "watchlist": s.watchlist,
+            "market_pause": bool((s.state or {}).get("market_pause"))}
 
 
 def overview(db: Session, settings: Settings) -> dict[str, Any]:

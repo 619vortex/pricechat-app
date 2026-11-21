@@ -55,7 +55,7 @@ def gates(ev: NdEvent, now: datetime, p: events.Policy, covered: list[editorial.
     else:
         out["numbers"] = _gate(True, "no chart or measured figure in this post")
     head, src = visual.post_headline(ev), visual.source_name(ev)
-    r = checks.check_post(f"{head}\n\nSource: {src}", source_text=f"{f.get('told') or ev.title} {ev.headline} {ev.summary} 24 hours", source_names=[src], max_len=1024)
+    r = checks.check_post(f"{head}\n\nSource: {src}", source_text=f"{f.get('told') or ev.title} {ev.headline} {ev.summary}", source_names=[src], max_len=1024)
     out["headline"] = _gate(r.ok and len(head) <= visual.MAX_HEADLINE + 40, r.reason or f"{len(head)} characters, one line, nothing added")
     b = f.get("blocked") or {}
     out["owner"] = _gate(not b.get("on"), f"blocked: {b.get('reason') or 'no reason given'}" if b.get("on") else "not blocked")
