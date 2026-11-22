@@ -217,6 +217,17 @@ def month(t: datetime) -> str:
     return t.strftime("%B %Y")
 
 
+RECORD_MIN_DAYS = 60  # "the biggest since ..." is only a record when the last bigger move is at least this old (the rarity score's own "since" floor)
+
+
+def since_words(last: datetime, day: datetime) -> str:
+    """When the last bigger move was: the month and year a year or more back ("April 2025"), else the day ("5 September", "5 September 2025"
+    when the year differs), so a recent mark never reads as the current month."""
+    if (day - last).days >= 365:
+        return month(last)
+    return f"{last.day} {last:%B}" + (f" {last.year}" if last.year != day.year else "")
+
+
 def cap(s: str) -> str:
     return s[:1].upper() + s[1:]
 
@@ -268,8 +279,12 @@ def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime, la
     last = next((t for t, x in reversed(rets[:-1]) if (x >= r if up else x <= r)), None)
     name = NAME[symbol]
     move = "gain" if up else "drop"
-    since = f"since {month(last)}" if last else "in at least two years"
     days = (day - last).days if last else 730
+    if days < RECORD_MIN_DAYS:
+        # production 2026-11-22 (held by the market pause): "The S&P 500's biggest one-day drop since November 2026: -3.7%". The bigger drop
+        # was 5 November, 15 days before: a two-week-old mark is no record, and the month alone read as if it were long ago
+        return None
+    since = f"since {since_words(last, day)}" if last else "in at least two years"
     so_far = quote.kind in ("intraday", "utc_day")  # a live price: the day isn't over, and the words say so
     # a session that has ended is named as the session it was: Friday's close read on Saturday is "on Friday", never "today"
     when = "today" if so_far else markethours.day_word(quote.at, now, group)
