@@ -12,7 +12,11 @@ coins) that overstated the figure about 570 times. Nothing asked whether such a 
    hour of the last week) or above an absolute ceiling. A 570x unit error is caught by both; a 20x one by the history rule.
 3. The safety stop: every held figure is an anomaly (recorded on the desk, the owner told). TRIP_COUNT anomalies within TRIP_WINDOW mean
    something is wrong with the data, not with the market: desk-measured market posts are paused (state.market_pause) until the owner
-   resumes them, and the owner is told why.
+   resumes them, and the owner is told why. Only while market posts are actually ON (the owner resumed them: market_pause False): with
+   them already paused (by default, events.MARKET_PAUSE_DEFAULT, or by the owner) there is nothing to stop, so no "SAFETY STOP" is sent
+   (2026-11-22: production tripped it on one repeated PIEVERSE figure while market posts were paused by default).
+4. Owner alerts: at most one per (kind, subject) per ALERT_EVERY, however often the same figure is held (2026-11-22: the same PIEVERSE
+   liquidation figure was held on every 5-minute pass). Every held figure is still recorded on the desk for Admin.
 
 A held figure is never published and never silently dropped: it is logged, recorded and alerted.
 """
@@ -41,6 +45,7 @@ LIQ_HISTORY_MIN_HOURS = 24  # with fewer recorded hours than this, only the ceil
 TRIP_COUNT = 3
 TRIP_WINDOW = timedelta(hours=1)
 KEEP = 50  # anomalies remembered on the desk
+ALERT_EVERY = timedelta(hours=1)  # one owner alert per (kind, subject) in this time; the state keeps when each was last told (safety_alerted)
 
 _pending: list[dict[str, Any]] = []  # held figures noticed by synchronous code, recorded by settle() in the desk's async pass
 
@@ -109,14 +114,30 @@ async def settle(db: Any, now: datetime, *, settings: Any = None) -> int:
             rows.append({**it, "at": now.isoformat()})
         state["anomalies"] = rows[-KEEP:]
         tripped = ""
-        if len(recent(state, now)) >= TRIP_COUNT and state.get("market_pause") is not True:
-            tripped = f"{len(recent(state, now))} implausible or contradicted figures within {int(TRIP_WINDOW.total_seconds() // 60)} minutes"
-            state["market_pause"], state["market_pause_reason"], state["market_pause_at"] = True, f"automatic: {tripped}", now.isoformat()
+        if len(recent(state, now)) >= TRIP_COUNT:
+            from app.newsdesk.events import MARKET_PAUSE_DEFAULT  # here: events imports this module
+
+            pause = state.get("market_pause")
+            if not (MARKET_PAUSE_DEFAULT if pause is None else bool(pause)):  # as events.market_paused: market posts are ON, so they are stopped
+                tripped = f"{len(recent(state, now))} implausible or contradicted figures within {int(TRIP_WINDOW.total_seconds() // 60)} minutes"
+                state["market_pause"], state["market_pause_reason"], state["market_pause_at"] = True, f"automatic: {tripped}", now.isoformat()
+            else:  # unset (paused by default, events.MARKET_PAUSE_DEFAULT) or paused by the owner: nothing to stop
+                logger.info("newsdesk safety: %d held figures within %d minutes; market posts are already paused, no safety stop needed",
+                            len(recent(state, now)), int(TRIP_WINDOW.total_seconds() // 60))
+        told = dict(state.get("safety_alerted") or {})
+        tell = []
+        for it in items:
+            key = f"newsdesk:safety:{it['kind']}:{it['subject']}"[:128]
+            last = told.get(key)
+            if last and now - _aware(datetime.fromisoformat(str(last)), now) < ALERT_EVERY:
+                continue  # told within the hour: recorded above, not alerted again
+            told[key] = now.isoformat()
+            tell.append((key, it))
+        state["safety_alerted"] = {k: v for k, v in told.items() if now - _aware(datetime.fromisoformat(str(v)), now) < timedelta(days=1)}
         s.state = state
         db.commit()
-        for it in items:
-            await notify_owner(db, f"newsdesk:safety:{it['kind']}:{it['subject']}"[:128],
-                               f"News Desk held a figure it can't believe ({it['kind']}, {it['subject']}): {it['why']}.\nNothing was published. "
+        for key, it in tell:
+            await notify_owner(db, key, f"News Desk held a figure it can't believe ({it['kind']}, {it['subject']}): {it['why']}.\nNothing was published. "
                                "Check Admin > X > News Desk.", settings=settings, now=now)
         if tripped:
             logger.warning("newsdesk safety: market-data posting paused automatically: %s", tripped)
