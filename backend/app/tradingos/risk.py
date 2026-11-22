@@ -5,7 +5,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-HARD_MAX_LEVERAGE = 5  # system cap whatever the user sets (3x by default for the first live rollout)
+HARD_MAX_LEVERAGE = 20  # system cap whatever the user sets (owner, 2026-11-10); each coin's own Hyperliquid maximum also applies
 HARD_MAX_POSITIONS = 3
 HARD_MAX_TRADES_PER_DAY = 12  # new entries per account per UTC day, whatever the member sets
 MIN_NOTIONAL = 10.0  # Hyperliquid's minimum order value (USD)

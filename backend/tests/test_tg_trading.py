@@ -167,10 +167,11 @@ def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Sessi
     from app.tradingbot import affiliate
 
     tg = TG()
-    kiwi(db, 4, "851")  # no wallet yet: one short line and a Connect wallet button, no pitch
+    kiwi(db, 4, "851")  # no wallet yet: one short line and Connect Hyperliquid / Connect wallet buttons, no pitch
     out = say(db, tg, 851, "/open btc long 20 3x")
     assert "No wallet is connected" in out and "Kiwi Passport" in out and "anter" not in out.lower() and len(out) < 200
-    assert tg.buttons[-1] == [[{"text": "🔗 Connect wallet", "url": "https://pricechat.live/passport#account-wallet"}]]
+    assert tg.buttons[-1] == [[{"text": "🔗 Connect Hyperliquid", "url": "https://pricechat.live/passport#trade-title"}],
+                              [{"text": "Connect wallet", "url": "https://pricechat.live/passport#account-wallet"}]]
     assert "4% off" not in out and "@botpricechat" not in out and "/api/r/" not in out
     banter(db, "852")
     out = say(db, tg, 852, "/long btc 3x")  # /long BTC 3x: the amount is asked for with buttons, never guessed
@@ -190,6 +191,14 @@ def test_no_banter_group_wording_and_long_short_run_the_real_open_flow(db: Sessi
     assert tgtrade.entry_gate(db, owner) is None
     for text in (tgtrade.HELP, bot.HELP_TEXT if hasattr(bot, "HELP_TEXT") else ""):
         assert "Banter group" not in text
+
+
+def test_open_takes_the_side_before_the_coin_too() -> None:
+    for words in (["long", "btc", "10", "5x"], ["LONG", "BTC", "10", "5X"], ["btc", "long", "10", "5x"]):
+        r = tgtrade.parse_open(words)
+        assert isinstance(r, tgtrade.OpenRequest) and (r.coin, r.side, r.margin, r.leverage) == ("BTC", "LONG", 10.0, 5), words
+    r = tgtrade.parse_open(["short", "eth", "20", "3x", "tp", "2k"])
+    assert (r.coin, r.side, r.tp) == ("ETH", "SHORT", 2000.0)
 
 
 def test_signal_numbers_come_from_the_command_or_the_card_replied_to() -> None:
@@ -221,13 +230,14 @@ def test_the_members_own_size_within_every_limit_with_a_stop_at_their_max_loss()
     assert p.max_loss_usd == pytest.approx(5.0, abs=0.05) and p.stop < 100  # default stop: the loss reaches the max per trade
     assert p.tp1 == pytest.approx(100 + 2 * (100 - p.stop), rel=0.001) and p.tp2 > p.tp1  # twice the risk, then 1.5x further
     assert m.liq < p.stop and p.est_fees == pytest.approx(300 * 2 * risk.TAKER_FEE, rel=0.01)
-    cases = [(dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 5)), "over your limit of 3x"),
+    cases = [(dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 25), market_max_lev=40), "over Price Chat's cap of 20x"),
+             (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 15), market_max_lev=10), "over BTC's maximum on Hyperliquid of 10x"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 150.0, 3)), "over your limit of 10%"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 2.0, 3)), "minimum"),
              (dict(open_positions=2), "positions open"), (dict(daily_pnl=-15.0), "daily loss"), (dict(paused=True), "STOP NEW TRADES"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 3, stop=101.0)), "below the price"),
              (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 3, stop=60.0)), "past the liquidation"),
-             (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 3, stop=90.0)), "over your $5.00 max per trade"),
+             (dict(req=tgtrade.OpenRequest("BTC", "LONG", 100.0, 3, stop=90.0)), "$5.00 max per trade"),
              (dict(req=tgtrade.OpenRequest("BTC", "SHORT", 100.0, 3, tp=105.0)), "below the price")]
     for kw, why in cases:
         r = man(**kw).plan
@@ -292,8 +302,8 @@ def test_trading_works_in_groups_and_its_buttons_only_for_whoever_asked(db: Sess
     gpress(db, tg, 812, pick, owner=811)  # another member presses 811's choice
     assert "for the member who asked" in answered[-1] and len(tg.sent) == n
     assert "which leverage" in gpress(db, tg, 811, pick, owner=811) and tg.sent[-1][1] == -100 and tg.replies[-1] == 77
-    gpress(db, tg, 811, button(tg, "oa:", "3x"), owner=811)
-    assert "Amount $50.00 · 3x" in tg.sent[-1][2] and tg.replies[-1] == 77  # the full card replies to the command too
+    gpress(db, tg, 811, button(tg, "oa:", "5x"), owner=811)
+    assert "Amount $50.00 · 5x" in tg.sent[-1][2] and tg.replies[-1] == 77  # the full card replies to the command too
     preview = button(tg, "op:")
     gpress(db, tg, 812, preview, owner=811)  # someone else's Preview: refused, no intent
     assert "for the member who asked" in answered[-1] and not db.scalars(select(TrIntent)).all()
@@ -374,7 +384,7 @@ def test_someone_elses_confirmation_does_nothing(db: Session, md: FakeMD) -> Non
 def test_limits_refuse_before_any_preview(db: Session, md: FakeMD) -> None:
     banter(db, "851")
     tg = TG()
-    assert "over your limit of 3x" in say(db, tg, 851, "/open BTC long 50 10x")
+    assert "over Price Chat's cap of 20x" in say(db, tg, 851, "/open BTC long 50 25x")
     assert "over your limit of 10%" in say(db, tg, 851, "/open BTC long 500 3x")
     assert "How much margin" in say(db, tg, 851, "/open BTC long")  # asked with buttons, never guessed
     assert "isn't a Hyperliquid perpetual" in say(db, tg, 851, "/open NOPE long 50 3x")
@@ -433,7 +443,7 @@ def test_positions_orders_balance_and_settings(db: Session, md: FakeMD) -> None:
     assert "PAPER balance" in say(db, tg, 881, "/balance")
     assert "Bot results" in say(db, tg, 881, "/pnl")
     assert "Max leverage 3x" in say(db, tg, 881, "/settings")
-    assert "capped at" in say(db, tg, 881, "/settings leverage 9")
+    assert "capped at 20x" in say(db, tg, 881, "/settings leverage 25")
     assert "Saved" in say(db, tg, 881, "/settings leverage 2") and "Max leverage 2x" in tg.sent[-1][2]
     assert "testnet API wallet" in say(db, tg, 881, "/settings mode testnet") or "Close your open" in tg.sent[-1][2]
     assert "Live is switched on at the website" in say(db, tg, 881, "/settings mode live")
@@ -605,7 +615,7 @@ def test_TR6_testnet_trades_are_priced_and_sized_from_testnets_own_market(db: Se
     m = banter(db, "992")
     on_testnet(db, m)
     ex = FakeExchange(mark=test_px)
-    with pytest.raises(execution.TradeError, match="BTC's maximum of 2x"):  # testnet's max leverage, not mainnet's 20x
+    with pytest.raises(execution.TradeError, match="BTC's maximum on Hyperliquid of 2x"):  # testnet's max leverage, not mainnet's 20x
         tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 3), ex)
     it = tgtrade.preview_open(db, m, tgtrade.OpenRequest("BTC", "LONG", 50.0, 2), ex)
     assert it.plan["entry"] == pytest.approx(test_px) and it.plan["entry"] != pytest.approx(main_px)
@@ -802,7 +812,7 @@ def test_the_card_shows_price_amount_leverage_size_fees_liquidation_and_stop(db:
     out = press(db, tg, 1101, button(tg, "op:"))
     p = db.scalars(select(TrIntent)).first().plan  # the same price in the fake market: the card's numbers are the preview's
     f = market.fmt_price
-    for part in ("🟢 <b>BTC LONG</b> · PAPER", f"price {f(mark)}", "Amount $50.00 · 3x", f"position ${p['notional']:,.2f}",
+    for part in ("📝 <b>PAPER</b> · simulated, never sent to Hyperliquid\n🟢 <b>BTC LONG</b> · price", f"price {f(mark)}", "Amount $50.00 · 3x", f"position ${p['notional']:,.2f}",
                  f"({p['size']:g} BTC)", f"Fees ≈ ${p['est_fees']:,.2f}", f"liquidation ≈ {f(p['liq'])}", f"Stop {f(p['stop'])}",
                  "(default: ≈ $", f"TP {f(p['tp1'])}", "Nothing is sent yet"):
         assert part in card, (part, card)
@@ -814,34 +824,33 @@ def test_the_card_shows_price_amount_leverage_size_fees_liquidation_and_stop(db:
     assert "(yours)" in card and "🔴 <b>ETH SHORT</b>" in card
 
 
-def test_missing_pieces_are_asked_for_with_buttons_within_the_limits(db: Session, md: FakeMD) -> None:
+def test_missing_pieces_are_asked_for_with_buttons_within_the_limits(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
     m = banter(db, "1102")
     tg = TG()
     out = say(db, tg, 1102, "/long BTC")
     assert "How much margin? Up to $100.00 · then the leverage" in out and "price " in out
     assert [b["text"] for b in tg.buttons[-1][0]] == ["$10", "$25", "$50", "$100"] and tg.buttons[-1][1][0]["text"] == "Cancel"
     out = press(db, tg, 1102, button(tg, "oa:", "$25"))
-    assert "Amount $25.00 · which leverage? Up to 3x" in out and [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x", "3x"]
+    assert "Amount $25.00 · which leverage? Up to 20x" in out and [b["text"] for b in tg.buttons[-1][0]] == ["2x", "5x", "10x", "20x"]
     out = press(db, tg, 1102, button(tg, "oa:", "2x"))
     assert "Amount $25.00 · 2x" in out and button(tg, "op:")
     out = say(db, tg, 1102, "/long btc 40")  # an amount and no leverage
     assert "Amount $40.00 · which leverage" in out
     acc = execution.account(db, m)
-    acc.max_leverage, acc.max_allocation_pct = 5, 3.0  # $30 margin at most, Price Chat's cap 5x
+    acc.max_allocation_pct = 3.0  # $30 margin at most
     db.commit()
     say(db, tg, 1102, "/short sol")
     assert [b["text"] for b in tg.buttons[-1][0]] == ["$10", "$25"]
+    monkeypatch.setattr(market, "_shared", NetMD({"SOL": uptrend_pullback(), "ETH": uptrend_pullback()}, 1.0, 2, 3))  # a coin with a 3x maximum
     press(db, tg, 1102, button(tg, "oa:", "$10"))
-    assert [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x", "3x", "5x"]
-    acc.max_leverage = 2
-    db.commit()
-    say(db, tg, 1102, "/long eth 10")
-    assert [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x"]
-    acc.max_allocation_pct = 0.5  # $5: only $5 itself, which reaches $10 at 2x
+    assert "Up to 3x" in tg.sent[-1][2] and [b["text"] for b in tg.buttons[-1][0]] == ["2x", "3x"]  # clamped to the coin's maximum
+    say(db, tg, 1102, "/long eth 4")
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["3x"]  # $4 at 2x is under the $10 minimum
+    acc.max_allocation_pct = 0.5  # $5: only $5 itself
     db.commit()
     say(db, tg, 1102, "/long eth")
     assert [b["text"] for b in tg.buttons[-1][0]] == ["$5"]
-    acc.max_allocation_pct = 0.2  # $2: nothing reaches Hyperliquid's $10 minimum
+    acc.max_allocation_pct = 0.05  # $0.50: nothing reaches Hyperliquid's $10 minimum
     db.commit()
     out = say(db, tg, 1102, "/long eth")
     assert "under Hyperliquid's $10 minimum" in out and tg.buttons[-1] is None
@@ -852,8 +861,10 @@ def test_too_much_leverage_or_margin_asks_again_instead_of_refusing_or_guessing(
     banter(db, "1103")
     tg = TG()
     out = say(db, tg, 1103, "/open long btc 10 10x")  # the owner's screenshot: a card, not a usage error
-    assert "10x is over your limit of 3x" in out and "Amount $10.00 · which leverage" in out
-    assert [b["text"] for b in tg.buttons[-1][0]] == ["1x", "2x", "3x"]
+    assert "Amount $10.00 · 10x" in out and button(tg, "op:")
+    out = say(db, tg, 1103, "/open long btc 10 25x")
+    assert "25x is over Price Chat's cap of 20x" in out and "Amount $10.00 · which leverage" in out
+    assert [b["text"] for b in tg.buttons[-1][0]] == ["2x", "5x", "10x", "20x"]
     out = say(db, tg, 1103, "/open BTC long 500 3x")
     assert "over your limit of 10%" in out and "How much margin" in out and not db.scalars(select(TrIntent)).all()
 
@@ -862,11 +873,11 @@ def test_forged_stale_or_out_of_limit_card_buttons_never_make_a_trade(db: Sessio
     banter(db, "1104")
     tg = TG()
     s = tgtrade._stamp()
-    for data, why in ((f"op:{s}:BTC:L:50:9", "isn't valid"), (f"op:{s}:BTC:L:inf:3", "isn't valid"), (f"op:{s}:B-TC:L:50:3", "isn't valid"),
+    for data, why in ((f"op:{s}:BTC:L:50:25", "isn't valid"), (f"op:{s}:BTC:L:inf:3", "isn't valid"), (f"op:{s}:B-TC:L:50:3", "isn't valid"),
                       (f"op:{s}:BTC:X:50:3", "isn't valid"), (f"op:{s}:BTC:L:50:3:q1", "isn't valid"), (f"op:{s}:BTC:L:_:3", "isn't valid"),
                       ("op:1:BTC:L:50:3", "out of date"), (f"op:{s}:BTC", "isn't valid"), (f"op:{s}:BTC:L:50:3:s{'9' * 60}", "isn't valid"),
-                      (f"op:{s}:BTC:L:50:5", "over your limit of 3x"), (f"op:{s}:BTC:L:5000:3", "over your limit of 10%"),
-                      (f"oa:{s}:BTC:L:50:7", "isn't valid"), ("ox:BTC", "Cancelled")):
+                      (f"op:{s}:NOPE:L:50:3", "isn't a Hyperliquid perpetual"), (f"op:{s}:BTC:L:5000:3", "over your limit of 10%"),
+                      (f"oa:{s}:BTC:L:50:21", "isn't valid"), ("ox:BTC", "Cancelled")):
         assert why in press(db, tg, 1104, data), data
     assert not db.scalars(select(TrIntent)).all() and not db.scalars(select(TrPosition)).all()
     assert "over your limit of 10%" in press(db, tg, 1104, f"oa:{s}:BTC:L:5000:3")  # a forged choice is only asked again
@@ -920,3 +931,46 @@ def test_help_shows_the_new_formats() -> None:
         assert "/long BTC 50 3x" in text and "/short ETH 25 2x" in text and "full margin" not in text
     assert "/long BTC 50 3x" in tgtrade.OPEN_USAGE and "any order" in tgtrade.OPEN_USAGE
     assert {"long", "short", "open"} <= {c for c, _ in bot.MENU_PRIVATE}
+
+
+def test_every_card_and_preview_shows_the_account_mode_badge(db: Session, md: FakeMD, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner, 2026-11-10: PAPER (simulated, never sent to Hyperliquid) / TESTNET (testnet, test funds) / LIVE (real money;
+    preview only while Telegram mainnet execution is OFF), on the card and on the preview."""
+    paper, test, live = banter(db, "1201"), banter(db, "1202"), banter(db, "1203")
+    tg = TG()
+    assert say(db, tg, 1201, "/long BTC").startswith("📝 <b>PAPER</b> · simulated, never sent to Hyperliquid")
+    assert opn(db, tg, 1201, "/long BTC 50 3x").startswith("📝 <b>PAPER</b> · simulated, never sent to Hyperliquid")
+    on_testnet(db, test)
+    real_executor = execution.executor
+    monkeypatch.setattr(execution, "executor", lambda *a, **k: FakeExchange(mark=md.market("BTC").mark))
+    assert say(db, tg, 1202, "/long BTC 50 3x").startswith("🧪 <b>TESTNET</b> · Hyperliquid testnet, test funds")
+    assert press(db, tg, 1202, button(tg, "op:")).startswith("🧪 <b>TESTNET</b> · Hyperliquid testnet, test funds")
+    monkeypatch.setattr(execution, "executor", real_executor)  # inside Telegram: the key-less reader for LIVE
+    acc = execution.account(db, live)
+    acc.mode, acc.master_address = "LIVE", db.scalar(select(TbWallet.address).where(TbWallet.member_id == live.id))
+    db.commit()
+    badge = "💰 <b>LIVE</b> · real money · preview only: Telegram mainnet execution is OFF"
+    card = say(db, tg, 1203, "/long BTC 50 3x")
+    assert card.startswith(badge) and "Preview is read-only" in card
+    out = press(db, tg, 1203, button(tg, "op:"))
+    assert badge in out and "MAINNET PREVIEW" in out and tg.buttons[-1] is None
+    assert not db.scalars(select(TrIntent).where(TrIntent.mode == "LIVE")).all() and paper is not None
+
+
+def test_no_hyperliquid_account_or_api_wallet_gets_a_connect_hyperliquid_button(db: Session, md: FakeMD) -> None:
+    connect = [[{"text": "🔗 Connect Hyperliquid", "url": "https://pricechat.live/passport#trade-title"}]]
+    m = banter(db, "1204")
+    acc = on_testnet(db, m)
+    acc.testnet_agent_key = None  # testnet without its API wallet
+    db.commit()
+    tg = TG()
+    out = say(db, tg, 1204, "/long BTC 50 3x")
+    assert "TESTNET" in out and "No Hyperliquid testnet API wallet" in out and tg.buttons[-1] == connect and len(out) < 200
+    assert "TESTNET" in press(db, tg, 1204, f"op:{tgtrade._stamp()}:BTC:L:50:3") and tg.buttons[-1] == connect
+    acc.mode, acc.mainnet_agent_key = "LIVE", None  # LIVE (mainnet switched on) with no mainnet API wallet
+    s = signals.settings(db)
+    s.strategies = {**(s.strategies or {}), "telegram_trading": {"live": True}}
+    db.commit()
+    out = say(db, tg, 1204, "/long BTC")
+    assert "LIVE · REAL MONEY" in out and "No Hyperliquid API wallet" in out and tg.buttons[-1] == connect
+    assert not db.scalars(select(TrIntent)).all()

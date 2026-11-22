@@ -134,7 +134,10 @@ def gate_buttons(db: Session, member: Member) -> list[list[dict[str, str]]]:
         url = tracked_url(db, "gate")
         rows = [[{"text": "Sign up on Hyperliquid", "url": url}]] if url else []
         return rows + [[{"text": "Connect another wallet", "url": GATE_WALLET_URL}]]
-    return [[{"text": "🔗 Connect wallet" if kind == "no_wallet" else "Recheck in Passport", "url": GATE_WALLET_URL}]]
+    if kind == "no_wallet":  # owner, 2026-11-10: Connect Hyperliquid (the Passport's trade steps), and the wallet row itself
+        return [[{"text": "🔗 Connect Hyperliquid", "url": f"{SITE}/passport#trade-title"}],
+                [{"text": "Connect wallet", "url": GATE_WALLET_URL}]]
+    return [[{"text": "Recheck in Passport", "url": GATE_WALLET_URL}]]
 
 
 def recheck_referral(db: Session, member: Member) -> None:
@@ -399,10 +402,12 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     p = risk.Plan(ok=False, coin=req.coin, side=req.side)
     reasons = p.reasons
     long = req.side == "LONG"
-    cap = min(acc_max_leverage, market_max_lev, risk.HARD_MAX_LEVERAGE)
     if req.margin is None or req.leverage is None:  # never guessed: the bot asks for the amount and the leverage first
         reasons.append("give an amount and a leverage, like 50 3x")
         return Manual(p, 0.0, 0.0)
+    # a typed /open names its own leverage: that's the member's choice, held to the coin's Hyperliquid maximum and Price Chat's cap
+    # (owner, 2026-11-10). Their saved max_leverage still governs signal trades; every other limit below still applies here.
+    cap = min(market_max_lev, risk.HARD_MAX_LEVERAGE)
     if paused:
         reasons.append("STOP NEW TRADES is on (/resume)")
     if global_paused:
@@ -415,8 +420,8 @@ def manual_plan(req: OpenRequest, *, mark: float, market_max_lev: int, sz_decima
     if cooldown_left_min > 0:
         reasons.append(f"cooling down on {req.coin}: {cooldown_left_min:.0f} min left since your last {req.coin} trade closed")
     if req.leverage > cap:
-        why = ("your limit" if cap == acc_max_leverage else "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{req.coin}'s maximum")
-        reasons.append(f"{req.leverage}x is over {why} of {cap}x (/settings leverage)")
+        why = "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{req.coin}'s maximum on Hyperliquid"
+        reasons.append(f"{req.leverage}x is over {why} of {cap}x")
     if open_positions >= min(max_positions, risk.HARD_MAX_POSITIONS):
         reasons.append(f"{open_positions} positions open already (your limit)")
     if daily_pnl <= -abs(daily_loss_limit):
@@ -561,7 +566,7 @@ MODE_NOTE = {"PAPER": "PAPER (simulated on real prices)", "TESTNET": "TESTNET (H
 
 def preview_open_text(it: TrIntent) -> str:
     p, f = it.plan, market.fmt_price
-    lines = [f"🧾 <b>{esc(MODE_NOTE.get(it.mode, it.mode))}</b>", f"<b>{esc(p['coin'])} {p['side']}</b> · your own trade, not a signal", "",
+    lines = [mode_badge(it.mode), f"🧾 <b>{esc(p['coin'])} {p['side']}</b> · your own trade, not a signal", "",
              (f"Entry at {f(p['limit_px'])} or better (limit, filled now or not at all)" if p.get("limit_px")
               else f"Entry ≈ {f(p['entry'])} (market order)"),
              f"Margin ${p['margin']:,.2f} · {p['leverage']}x isolated → position ${p['notional']:,.2f} ({p['size']:g} {esc(p['coin'])})",
@@ -689,7 +694,7 @@ def mainnet_preview(db: Session, member: Member, req: OpenRequest, ex: Any = Non
     gate = entry_gate(db, member)
     if gate:
         refusals.append("Price Chat's Hyperliquid referral isn't verified on your wallet")
-    lines = [PREVIEW_ONLY, f"<b>{esc(p.coin)} {p.side}</b> · {acc.master_address[:6]}…{acc.master_address[-4:]} · balance ${equity:,.2f}", ""]
+    lines = [PREVIEW_ONLY, mode_badge("LIVE", not mainnet_allowed(db)), f"<b>{esc(p.coin)} {p.side}</b> · {acc.master_address[:6]}…{acc.master_address[-4:]} · balance ${equity:,.2f}", ""]
     if p.size > 0:
         lines += [(f"Entry at {f(p.limit_px)} or better (limit)" if p.limit_px else f"Entry ≈ {f(p.entry)} (market)"),
                   f"Margin ${p.margin:,.2f} · {p.leverage}x isolated → position ${p.notional:,.2f} ({p.size:g} {esc(p.coin)})",
@@ -994,7 +999,33 @@ def _px(v: float) -> str:
 
 # ---------------------------------------------------------------- the trading card (/open, /long, /short) and its buttons
 AMOUNT_CHOICES = (10, 25, 50, 100)  # USD margin buttons, only those within the member's limit
-LEVERAGE_CHOICES = (1, 2, 3, 5)  # only up to the member's / the market's / Price Chat's cap (risk.HARD_MAX_LEVERAGE)
+LEVERAGE_CHOICES = (2, 5, 10, 20)  # only up to the coin's Hyperliquid maximum and Price Chat's cap (risk.HARD_MAX_LEVERAGE)
+CONNECT_URL = f"{SITE}/passport#trade-title"  # the Passport's "Trade on Hyperliquid" steps: sign up, API key, Telegram
+CONNECT_BUTTONS = [[{"text": "🔗 Connect Hyperliquid", "url": CONNECT_URL}]]
+
+
+def mode_badge(mode: str, read_only: bool = False) -> str:
+    """The account's network, plainly, on every card and preview (owner, 2026-11-10)."""
+    if mode == "PAPER":
+        return "📝 <b>PAPER</b> · simulated, never sent to Hyperliquid"
+    if mode == "TESTNET":
+        return "🧪 <b>TESTNET</b> · Hyperliquid testnet, test funds"
+    if read_only:
+        return "💰 <b>LIVE</b> · real money · preview only: Telegram mainnet execution is OFF"
+    return "💰 <b>LIVE · REAL MONEY</b>"
+
+
+def api_missing(acc: TrAccount, read_only: bool) -> str | None:
+    """No Hyperliquid account / API wallet for the account's network: a short line (sent with CONNECT_BUTTONS), or None."""
+    if acc.mode == "PAPER":
+        return None
+    if not acc.master_address:
+        return "No Hyperliquid account is connected yet. Connect it in your Passport, then try again."
+    if acc.mode == "TESTNET" and not acc.testnet_agent_key:
+        return "No Hyperliquid testnet API wallet is connected yet. Connect it in your Passport, then try again."
+    if acc.mode == "LIVE" and not read_only and not acc.mainnet_agent_key:
+        return "No Hyperliquid API wallet is connected yet. Connect it in your Passport, then try again."
+    return None
 CARD_PREFIXES = ("oa:", "op:", "ox:")  # oa: a choice (amount / leverage) · op: Preview · ox: Cancel; bot.py guards and rate-limits them
 CARD_INVALID = "That button isn't valid. Nothing was sent: send the command again."
 CARD_STALE = "That card is out of date (over 5 minutes). Nothing was sent: send the command again."
@@ -1021,8 +1052,8 @@ def _limits(db: Session, acc: TrAccount, coin: str) -> Limits:
         raise
     except Exception as e:  # noqa: BLE001
         raise execution.TradeError("Couldn't read your balance from Hyperliquid right now. Nothing was sent; try again in a moment.") from e
-    cap = min(acc.max_leverage, m.max_leverage, risk.HARD_MAX_LEVERAGE)
-    why = "your limit" if cap == acc.max_leverage else "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{m.coin}'s maximum"
+    cap = min(m.max_leverage, risk.HARD_MAX_LEVERAGE)  # a typed /open's leverage is the member's choice (as manual_plan)
+    why = "Price Chat's cap" if cap == risk.HARD_MAX_LEVERAGE else f"{m.coin}'s maximum on Hyperliquid"
     return Limits(m.coin, m.mark, equity, round(equity * acc.max_allocation_pct / 100, 2), max(1, cap), why)
 
 
@@ -1065,17 +1096,18 @@ async def _send(client: Any, chat_id: Any, text: str, buttons: Any, reply_to: in
         await client.send_message(chat_id, text, buttons, html=True)
 
 
-def _head(req: OpenRequest, mode: str, mark: float) -> str:
-    return f"{'🟢' if req.side == 'LONG' else '🔴'} <b>{esc(req.coin)} {req.side}</b> · {esc(mode)} · price {market.fmt_price(mark)}"
+def _head(req: OpenRequest, mode: str, mark: float, read_only: bool = False) -> str:
+    return (mode_badge(mode, read_only) + "\n"
+            + f"{'🟢' if req.side == 'LONG' else '🔴'} <b>{esc(req.coin)} {req.side}</b> · price {market.fmt_price(mark)}")
 
 
 def _cancel_button(req: OpenRequest) -> dict[str, str]:
     return {"text": "Cancel", "callback_data": "ox:" + req.coin}
 
 
-def ask_card(req: OpenRequest, lim: Limits, mode: str, note: str = "") -> tuple[str, list[list[dict[str, str]]] | None]:
+def ask_card(req: OpenRequest, lim: Limits, mode: str, note: str = "", read_only: bool = False) -> tuple[str, list[list[dict[str, str]]] | None]:
     """The amount or the leverage is missing: a short card asking for it with buttons (only choices within the limits)."""
-    lines = [_head(req, mode, lim.mark)] + ([esc(note)] if note else [])
+    lines = [_head(req, mode, lim.mark, read_only)] + ([esc(note)] if note else [])
     if req.margin is None:
         amts = [a for a in AMOUNT_CHOICES if a <= lim.max_margin + 1e-9 and a * (req.leverage or lim.cap) >= MIN_NOTIONAL]
         if not amts and lim.max_margin >= 1 and int(lim.max_margin) * (req.leverage or lim.cap) >= MIN_NOTIONAL:
@@ -1106,13 +1138,13 @@ def card_text(req: OpenRequest, man: Manual, mode: str, mark: float, read_only: 
     p, f = man.plan, market.fmt_price
     stop = f"🛑 Stop {f(p.stop)}" + (" (yours)" if req.stop is not None else f" (default: ≈ ${p.max_loss_usd:,.2f} max loss)")
     tp = f"🎯 TP {f(p.tp1)}" + (" (yours)" if req.tp is not None else "")
-    lines = [_head(req, mode, mark),
+    lines = [_head(req, mode, mark, read_only),
              f"Amount ${req.margin:,.2f} · {p.leverage}x → position ${p.notional:,.2f} ({p.size:g} {esc(p.coin)})"
              + (f" · limit {f(req.limit)}" if req.limit else ""),
              f"Fees ≈ ${p.est_fees:,.2f} (open + close) · liquidation ≈ {f(man.liq)}",
              f"{stop} · {tp}"]
     if read_only:
-        lines.append("Mainnet orders from Telegram are off: Preview is read-only.")
+        lines.append("Preview is read-only: nothing can be sent from Telegram.")
     else:
         lines.append("Preview shows the order to confirm. Nothing is sent yet.")
     return "\n".join(lines)
@@ -1148,6 +1180,10 @@ async def open_card(db: Session, client: Any, chat_id: Any, member: Member, req:
     if why:
         await _send(client, chat_id, esc(why), gate_buttons(db, member), reply_to)
         return None
+    why = api_missing(acc, read_only)
+    if why:
+        await _send(client, chat_id, f"{mode_badge(acc.mode, read_only)}\n{esc(why)}", CONNECT_BUTTONS, reply_to)
+        return None
     try:
         lim = await asyncio.to_thread(_limits, db, acc, req.coin)
     except (execution.TradeError, market.MarketError) as e:  # an unknown coin says so plainly
@@ -1156,13 +1192,13 @@ async def open_card(db: Session, client: Any, chat_id: Any, member: Member, req:
     req.coin = lim.coin
     notes = []
     if req.leverage is not None and req.leverage > lim.cap:
-        notes.append(f"{req.leverage}x is over {lim.cap_why} of {lim.cap}x (/settings leverage).")
+        notes.append(f"{req.leverage}x is over {lim.cap_why} of {lim.cap}x.")
         req.leverage = None
     if req.margin is not None and req.margin > lim.max_margin + 1e-9:
         notes.append(f"${req.margin:,.2f} margin is over your limit of {acc.max_allocation_pct:g}% of ${lim.equity:,.2f} (${lim.max_margin:,.2f}).")
         req.margin = None
     if req.margin is None or req.leverage is None:
-        text, buttons = ask_card(req, lim, acc.mode, " ".join(notes))
+        text, buttons = ask_card(req, lim, acc.mode, " ".join(notes), read_only)
         await _send(client, chat_id, text, buttons, reply_to)
         return None
     try:
@@ -1198,7 +1234,12 @@ async def card_callback(db: Session, client: Any, member: Member, chat_id: Any, 
     db.commit()
     if killed(db):
         return esc(KILLED)
-    if acc.mode == "LIVE" and not mainnet_allowed(db):  # read-only: no intent, no Confirm, nothing signed
+    read_only = acc.mode == "LIVE" and not mainnet_allowed(db)
+    why = api_missing(acc, read_only)
+    if why:
+        await _send(client, chat_id, f"{mode_badge(acc.mode, read_only)}\n{esc(why)}", CONNECT_BUTTONS, reply_to)
+        return None
+    if read_only:  # no intent, no Confirm, nothing signed
         try:
             return await asyncio.to_thread(mainnet_preview, db, member, req)
         except (execution.TradeError, market.MarketError) as e:
