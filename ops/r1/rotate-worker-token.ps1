@@ -6,7 +6,16 @@ token is shown once). The old token keeps working until you disable it in Admin,
 
   powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1              # preview: says what it would do, changes nothing
   powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1 -Apply       # do it
+  powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1 -Apply -FromClipboard   # token read from the clipboard
   powershell -ExecutionPolicy Bypass -File ops\r1\rotate-worker-token.ps1 -Rollback    # put the newest backup back and restart
+
+Entering the token (step 3). Pasting into a hidden Read-Host prompt is unreliable in the Windows PowerShell 5.1 console (Ctrl+V is
+often ignored there, and copied text can carry invisible characters). The reliable way: copy the token in Admin, then run with
+-FromClipboard. The token is read from the clipboard and never shown, written to the screen, a transcript or a log, and the
+clipboard is cleared once it has been read. Without -FromClipboard the hidden prompt is still offered; pressing Enter on an empty
+prompt also reads the clipboard. Either way the input may contain spaces, line breaks, quotes, a "PRICECHAT_WORKER_TOKEN=" prefix
+or invisible characters: exactly one pcw_ token must be found in it, or nothing changes. Windows clipboard history (Win+V), if you
+turned it on, keeps its own copy: delete that entry there after the rotation.
 
 What -Apply does, in order (it stops at the first problem):
   1. Backs up C:\AI\price-chat\worker\worker.env to %USERPROFILE%\.pricechat-secrets\worker.env.<time> (readable by you only).
@@ -26,7 +35,7 @@ Rollback (-Rollback, or -Rollback -Backup <file>): copies the newest backup (or 
 workers and checks them. This only works while the old worker is still enabled in Admin, which is why you disable it last.
 The step-2 untrack commit is never undone: the file must stay out of git either way.
 #>
-param([switch]$Apply, [switch]$Rollback, [string]$Backup = "", [string]$Repo = "C:\AI\price-chat")
+param([switch]$Apply, [switch]$Rollback, [switch]$FromClipboard, [string]$Backup = "", [string]$Repo = "C:\AI\price-chat")
 $ErrorActionPreference = "Stop"
 $repo = $Repo
 $env_file = Join-Path $repo "worker\worker.env"
@@ -38,6 +47,52 @@ $scripts = @("start_worldmonitor.pyw", "start_newsdesk_images.pyw", "start_worke
 $secrets = Join-Path $env:USERPROFILE ".pricechat-secrets"
 
 function Say($m) { Write-Host "  $m" }
+
+# The one pcw_ token in whatever was pasted or copied: invisible characters (zero-width, BOM, non-breaking space, soft hyphen)
+# are dropped first, then exactly one distinct token must be found. Returns "" when there is none or more than one; never prints it.
+function Find-WorkerToken([string]$text) {
+    if (-not $text) { return "" }
+    $clean = $text -replace "[\u200B-\u200D\u2060\uFEFF\u00AD]", "" -replace "\u00A0", " "
+    $found = @([regex]::Matches($clean, 'pcw_[A-Za-z0-9_\-]{20,}') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+    if ($found.Count -eq 1) { return $found[0] }
+    return ""
+}
+
+# Why no token was found, without saying anything about the token itself.
+function Explain-NoToken([string]$text, [string]$where) {
+    if (-not $text) { return "the $where was empty" }
+    $clean = $text -replace "[\u200B-\u200D\u2060\uFEFF\u00AD]", ""
+    $n = @([regex]::Matches($clean, 'pcw_[A-Za-z0-9_\-]{20,}') | ForEach-Object { $_.Value } | Sort-Object -Unique).Count
+    if ($n -gt 1) { return "the $where holds more than one different pcw_ token: copy only the new one" }
+    if ($clean -match 'pcw_') { return "the $where has 'pcw_' but not a whole token after it (cut short, or broken by other characters): copy it again" }
+    return "no pcw_ token in the $where ($($text.Length) characters): copy the token itself from Admin"
+}
+
+function Clear-ClipboardQuietly {
+    try { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::Clear() } catch { }
+}
+
+# The new token, never echoed: from the clipboard (-FromClipboard, or Enter on an empty prompt) or from the hidden prompt.
+function Read-NewToken {
+    $text = ""
+    $where = "clipboard"
+    if (-not $FromClipboard) {
+        $secure = Read-Host "3. Paste the NEW pcw_ token (hidden), or press Enter to read it from the clipboard" -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+        try { $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+        $secure.Dispose()
+        if ($text) { $where = "pasted text" }
+    }
+    if ($where -eq "clipboard") {
+        try { $text = [string](Get-Clipboard -Raw -ErrorAction Stop) } catch { throw "the clipboard couldn't be read ($($_.Exception.GetType().Name)): worker.env unchanged" }
+    }
+    $token = Find-WorkerToken $text
+    if (-not $token) { $why = Explain-NoToken $text $where; $text = $null; throw "${why}: worker.env unchanged" }
+    $text = $null
+    if ($where -eq "clipboard") { Clear-ClipboardQuietly; Say "3. token read from the clipboard ($($token.Length) characters, not shown); clipboard cleared" }
+    else { Say "3. token read from the prompt ($($token.Length) characters, not shown)" }
+    return $token
+}
 
 function Get-Workers {
     @(Get-CimInstance Win32_Process -Filter "name like 'pythonw%'" | Where-Object { $cl = $_.CommandLine; $scripts | Where-Object { $cl -like "*worker\$_*" } })
@@ -125,17 +180,19 @@ if ($tracked) {
 } else { Say "2. already untracked" }
 
 # 3. the new token, hidden
-$secure = Read-Host "3. Paste the NEW pcw_ token (hidden)" -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+$token = $null; $old = $null; $lines = $null
 try {
-    $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr).Trim()
-    if ($token -notmatch '^pcw_[A-Za-z0-9_\-]{20,}$') { throw "that doesn't look like a pcw_ worker token: worker.env unchanged" }
+    $token = Read-NewToken
     $old = (Get-Content $env_file | Where-Object { $_ -match '^\s*PRICECHAT_WORKER_TOKEN\s*=' }) -replace '^\s*PRICECHAT_WORKER_TOKEN\s*=\s*', ''
-    if ($old.Trim() -eq $token) { throw "that is the current token: create a NEW worker in Admin first" }
+    if ((Find-WorkerToken $old) -eq $token) { throw "that is the current token: create a NEW worker in Admin first; worker.env unchanged" }
     $lines = Get-Content $env_file | ForEach-Object { if ($_ -match '^\s*PRICECHAT_WORKER_TOKEN\s*=') { "PRICECHAT_WORKER_TOKEN=$token" } else { $_ } }
     [IO.File]::WriteAllLines($env_file, [string[]]$lines, (New-Object Text.UTF8Encoding($false)))
+    if ((Find-WorkerToken ((Get-Content $env_file | Where-Object { $_ -match '^\s*PRICECHAT_WORKER_TOKEN\s*=' }) -join "")) -ne $token) {
+        Copy-Item $backup $env_file -Force
+        throw "worker.env didn't read back with the new token: restored from the backup"
+    }
 } finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr); $token = $null; $old = $null; $lines = $null
+    $token = $null; $old = $null; $lines = $null
 }
 Say "3. worker.env updated (only the token line)"
 
