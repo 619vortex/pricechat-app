@@ -5,20 +5,26 @@ import { useApi } from "../api/useApi";
 import type { Approval, MetricSnapshot, MonitorRuleType, SocialOpportunity, SocialOpportunityStatus, SocialPost, WatchCategory, WatchedAccount, XCredentialsInput, XStatus } from "../api/types";
 import { TrendBadge } from "../components/community";
 import { GrowthPilot } from "./x/GrowthPilot";
+import { Fold } from "../components/hub";
 import { CapabilityBadge, compact, FeedbackButtons, GuardChecks, Reasons, SignalBars } from "../components/social";
 import { Advanced, ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, Tabs, formatTime, label, relativeTime, type Tone } from "../components/ui";
 
 type Tab = "growth" | "overview" | "mentions" | "accounts" | "topics" | "opportunities" | "own" | "analytics" | "connection";
-const TABS: { key: Tab; label: string; more?: boolean }[] = [
+// Admin redesign (owner, 2026-11-22): five real tabs and no "More" menu; setup and watch lists fold away below them. Their old
+// addresses (?tab=connection, growth, accounts, topics) open the Overview with that fold open. The X operator card (social actions,
+// dry run / live) stays on the Overview tab, never folded.
+const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "opportunities", label: "Post ideas" },
-  { key: "growth", label: "Growth Pilot" },
-  { key: "connection", label: "Connect X" },
-  { key: "mentions", label: "Mentions", more: true },
-  { key: "own", label: "Our posts", more: true },
-  { key: "accounts", label: "Accounts we follow", more: true },
-  { key: "topics", label: "Topics we watch", more: true },
-  { key: "analytics", label: "Analytics", more: true },
+  { key: "mentions", label: "Mentions" },
+  { key: "own", label: "Our posts" },
+  { key: "analytics", label: "Analytics" },
+];
+const FOLDS: { key: Tab; label: string; summary: string }[] = [
+  { key: "connection", label: "Connect X", summary: "credentials and connection test" },
+  { key: "growth", label: "Growth Pilot", summary: "suggested follows, likes and replies" },
+  { key: "accounts", label: "Accounts we follow", summary: "watched accounts" },
+  { key: "topics", label: "Topics we watch", summary: "keywords and searches" },
 ];
 
 const STATUS_TEXT: Record<string, [string, Tone]> = {
@@ -31,7 +37,9 @@ const STATUS_TEXT: Record<string, [string, Tone]> = {
 
 export function XPage() {
   const [params, setParams] = useSearchParams();
-  const tab = (TABS.find((t) => t.key === params.get("tab"))?.key ?? "overview") as Tab;
+  const asked = params.get("tab");
+  const tab = (TABS.find((t) => t.key === asked)?.key ?? "overview") as Tab;
+  const fold = FOLDS.find((f) => f.key === asked)?.key;
   const go = (t: Tab) => setParams(t === "overview" ? {} : { tab: t });
   const legacy = params.get("tab");
   if (legacy === "newsdesk" || legacy === "trending") return <Navigate to={`/terminal/${legacy}`} replace />;  // moved to Price Chat Terminal (2026-11-18)
@@ -39,15 +47,19 @@ export function XPage() {
     <>
       <PageHeader title="X / Twitter" subtitle="What's being said on X and post ideas. Nothing is posted without your approval." />
       <Tabs tabs={TABS} value={tab} onChange={go} />
-      {tab === "growth" && <GrowthPilot />}
       {tab === "overview" && <OverviewTab go={go} />}
       {tab === "mentions" && <PostsTab source="mention" empty="No mentions yet." intro="Posts that mention your account, newest first." />}
-      {tab === "accounts" && <AccountsTab />}
-      {tab === "topics" && <RulesTab />}
       {tab === "opportunities" && <OpportunitiesTab />}
       {tab === "own" && <PostsTab source="own" empty="None of your posts have been read yet." intro="Your own recent posts and the metrics X reports for them." />}
       {tab === "analytics" && <AnalyticsTab />}
-      {tab === "connection" && <ConnectionTab />}
+      {FOLDS.map((f) => (
+        <Fold key={f.key} id={`x-${f.key}`} title={f.label} summary={f.summary} focus={fold === f.key}>
+          {f.key === "connection" && <ConnectionTab />}
+          {f.key === "growth" && <GrowthPilot />}
+          {f.key === "accounts" && <AccountsTab />}
+          {f.key === "topics" && <RulesTab />}
+        </Fold>
+      ))}
     </>
   );
 }
@@ -60,7 +72,7 @@ function StatusBadge({ status }: { status: string }) {
 function NotConnected() {
   return (
     <div className="banner banner-info">
-      X is not connected yet. Open the <Link className="link" to="/x?tab=connection">Connection</Link> tab, paste your X API keys and press “Test connection”.
+      X is not connected yet. Open <Link className="link" to="/x?tab=connection">Connect X</Link> below, paste your X API keys and press “Test connection”.
     </div>
   );
 }

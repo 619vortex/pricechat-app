@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContentHub } from "../pages/hubs/ContentHub";
+import { PublishingHub } from "../pages/hubs/PublishingHub";
+import { XPage } from "../pages/XPage";
 import { Layout } from "./Layout";
 
 /** TEST FIXTURES only: fake API answers keyed by path (everything else is a 404, which the embedded pages show as an error). */
@@ -105,5 +107,57 @@ describe("Content: one page instead of five tabs (stage 2)", () => {
     expect(back.textContent).toBe("← Content");
     expect(back.getAttribute("href")).toBe("/content");
     expect(container.querySelector(".area-head")).toBeNull();
+  });
+});
+
+const XOP = { x_status: "connected", username: "thepricechat", user_context: true, write_capability: {}, social_actions_active: true, dry_run: true, mode: "supervised", automatic: "locked" };
+const HOME_SIGNALS = { ...HOME, todo: [...HOME.todo.filter((t) => t.key !== "signals"), { key: "signals", label: "Trading signals waiting for your OK", count: 2, to: "/trading-os" }], numbers: { ...HOME.numbers, open_signals: 3, signals_7d: 9 } };
+const publishingRoutes = (
+  <>
+    <Route path="publishing" element={<PublishingHub />} />
+    <Route path="youtube" element={<PublishingHub />} />
+    <Route path="website" element={<PublishingHub />} />
+    <Route path="x" element={<XPage />} />
+  </>
+);
+
+describe("Publishing: one page instead of four tabs (stage 3)", () => {
+  it("shows X's mode and signals waiting, with no section tabs", async () => {
+    serve({ "/api/admin/home": HOME_SIGNALS, "/api/x/operator": XOP });
+    const { container } = shell("/publishing", publishingRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const x = screen.getByLabelText("X / Twitter");
+    expect(x.textContent).toContain("connected");
+    expect(x.textContent).toContain("DRY RUN");  // the live / dry-run state is visible on the page, never folded away
+    const sig = screen.getByLabelText("Signals");
+    expect(sig.textContent).toContain("Open now3");
+    expect(sig.textContent).toContain("Trading signals waiting for your OK");
+    expect(screen.getByLabelText("News Desk (Telegram + X)").querySelector("a")!.getAttribute("href")).toBe("/terminal");
+    expect(container.querySelector(".nav-link.active")!.textContent).toContain("Publishing");
+  });
+
+  it("opens YouTube and Website from their old addresses", async () => {
+    serve();
+    const a = shell("/youtube", publishingRoutes);
+    await flush();
+    expect((a.container.querySelector("#panel-youtube") as HTMLDetailsElement).open).toBe(true);
+    expect((a.container.querySelector("#panel-website") as HTMLDetailsElement).open).toBe(false);
+    a.unmount();
+    const b = shell("/website", publishingRoutes);
+    await flush();
+    expect((b.container.querySelector("#panel-website") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("gives X five real tabs and folds setup below them; old ?tab= links open the fold", async () => {
+    serve();
+    const { container } = shell("/x?tab=connection", publishingRoutes);
+    await flush();
+    const tabs = [...container.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    expect(tabs).toEqual(["Overview", "Post ideas", "Mentions", "Our posts", "Analytics"]);
+    expect(screen.queryByText(/^More/)).toBeNull();
+    expect((container.querySelector("#x-connection") as HTMLDetailsElement).open).toBe(true);
+    for (const id of ["x-growth", "x-accounts", "x-topics"]) expect((container.querySelector(`#${id}`) as HTMLDetailsElement).open).toBe(false);
+    expect(container.querySelector(".hub-back")!.textContent).toContain("Publishing");
   });
 });

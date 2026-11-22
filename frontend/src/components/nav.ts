@@ -30,12 +30,13 @@ export const AREAS: NavArea[] = [
     ],
   },
   {
-    key: "publishing", label: "Publishing", short: "Publish", icon: "publishing", todo: ["signals"],
+    key: "publishing", label: "Publishing", short: "Publish", icon: "publishing", todo: ["signals"], hub: true,
     pages: [
-      { to: "/x", label: "X / Twitter", about: "Your X account: what's being said, post ideas and replies waiting for approval." },
-      { to: "/youtube", label: "YouTube", about: "Your YouTube channel and new videos." },
-      { to: "/website", label: "Website", about: "What the public website shows." },
-      { to: "/trading-os", label: "Signals", about: "The signal scanner: signals waiting for your OK, open and past signals, and the switches that control them." },
+      { to: "/publishing", label: "Publishing", about: "Where things go out: X, signals, YouTube and the public website.", kind: "hub" },
+      { to: "/x", label: "X / Twitter", about: "Your X account: what's being said, post ideas and replies waiting for approval.", kind: "tool" },
+      { to: "/trading-os", label: "Signals", about: "The signal scanner: signals waiting for your OK, open and past signals, and the switches that control them.", kind: "tool" },
+      { to: "/youtube", label: "YouTube", about: "Your YouTube channel and new videos.", kind: "panel", panel: "youtube" },
+      { to: "/website", label: "Website", about: "What the public website shows.", kind: "panel", panel: "website" },
     ],
   },
   {

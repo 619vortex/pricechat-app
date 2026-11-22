@@ -45,7 +45,7 @@ describe("Admin layout", () => {
     // owner-approved redesign, 2026-11-22: six sections, Price Chat Terminal its own section, left as it was
     expect(AREAS.map((a) => a.label)).toEqual(["Overview", "Content", "Publishing", "Price Chat Terminal", "Community", "System"]);
     for (const p of ["/trading-os", "/trading-bot", "/affiliate", "/members", "/rank-rewards", "/workers", "/realm", "/telegram", "/invite-bot", "/invite-bot/send",
-      "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
+      "/publishing", "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
       "/settings", "/api-keys", "/activity"]) {
       expect(locate(p).page.to).toBe(p);
     }
@@ -59,14 +59,17 @@ describe("Admin layout", () => {
     expect(locate("/invite-bot/send").page.label).toBe("Send invites");
   });
 
-  it("shows the section's pages as tabs with one line about the page, and the waiting count on the sidebar", async () => {
+  it("opens a full tool with a back link to its section instead of tabs, and keeps the waiting count on the sidebar", async () => {
+    // stage 3 (2026-11-22): Publishing is one page; Signals is a full tool one click from it, with "← Publishing" instead of four tabs
     serve(home({ signals: 2 }));
     const { container } = shell("/trading-os");
     await flush();
-    expect([...container.querySelectorAll(".subnav-link")].map((a) => a.textContent)).toEqual(["X / Twitter", "YouTube", "Website", "Signals"]);
-    expect(container.querySelector(".subnav-link.active")!.textContent).toBe("Signals");
-    expect(container.querySelector(".area-about")!.textContent).toContain("signals waiting for your OK");
-    expect(screen.queryByText("long text")).toBeNull();  // the page's own title / subtitle aren't repeated under the area header
+    expect(container.querySelector(".subnav")).toBeNull();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const back = container.querySelector(".hub-back")!;
+    expect(back.textContent).toBe("← Publishing");
+    expect(back.getAttribute("href")).toBe("/publishing");
+    expect(screen.getByText("long text")).toBeTruthy();  // with no section header above it, the tool shows its own title again
     expect(container.querySelector(".nav-link.active")!.textContent).toContain("Publishing");
     expect(container.querySelector(".nav-link.active .nav-count")!.textContent).toBe("2");
   });

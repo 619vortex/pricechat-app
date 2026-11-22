@@ -50,7 +50,7 @@ function expectedSection(path: string): string {
   const starts = (x: string) => p === x || p.startsWith(x + "/");
   if (p === "/" || ["/approvals", "/analytics", "/affiliate"].some(starts)) return "overview";
   if (["/content", "/brand-manager", "/short-market", "/brain", "/knowledge"].some(starts)) return "content";
-  if (["/x", "/youtube", "/website", "/trading-os"].some(starts)) return "publishing";
+  if (["/publishing", "/x", "/youtube", "/website", "/trading-os"].some(starts)) return "publishing";
   if (["/terminal", "/world-monitor"].some(starts)) return "terminal";
   if (["/members", "/rank-rewards", "/workers", "/trading-bot", "/telegram", "/invite-bot", "/telegram-trading", "/pokemon"].some(starts)) return "community";
   if (["/settings", "/api-keys", "/activity", "/vpn", "/kalshi", "/realm"].some(starts)) return "system";

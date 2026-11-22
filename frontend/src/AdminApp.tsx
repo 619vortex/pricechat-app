@@ -9,14 +9,13 @@ import { XPage } from "./pages/XPage";  // the overview uses it too
 // Admin redesign (owner, 2026-11-22): a section is one page (a hub); old addresses open it with the right panel open
 const ContentHub = lazy(() => import("./pages/hubs/ContentHub").then((m) => ({ default: m.ContentHub })));
 const ApprovalsPage = lazy(() => import("./pages/Approvals").then((m) => ({ default: m.ApprovalsPage })));
-const WebsitePage = lazy(() => import("./pages/WebsitePage").then((m) => ({ default: m.WebsitePage })));
 const CommunityPage = lazy(() => import("./pages/Community").then((m) => ({ default: m.CommunityPage })));
 const TopicDetailPage = lazy(() => import("./pages/TopicDetail").then((m) => ({ default: m.TopicDetailPage })));
 const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
 const ActivityPage = lazy(() => import("./pages/Activity").then((m) => ({ default: m.ActivityPage })));
 const ApiKeysPage = lazy(() => import("./pages/ApiKeys").then((m) => ({ default: m.ApiKeysPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
-const YouTubePage = lazy(() => import("./pages/YouTube").then((m) => ({ default: m.YouTubePage })));
+const PublishingHub = lazy(() => import("./pages/hubs/PublishingHub").then((m) => ({ default: m.PublishingHub })));
 const MembersPage = lazy(() => import("./pages/Members").then((m) => ({ default: m.MembersPage })));
 const MarketHome = lazy(() => import("./pages/pokemon/MarketHome").then((m) => ({ default: m.MarketHome })));
 const lp = () => import("./pages/pokemon/ListPages");
@@ -77,8 +76,9 @@ export function AdminApp() {
             <Route path="brand-manager/*" element={<BrandManagerPage />} />
             <Route path="short-market/*" element={<ShortMarketPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />
-            <Route path="website" element={<WebsitePage />} />
-            <Route path="youtube" element={<YouTubePage />} />
+            <Route path="publishing" element={<PublishingHub />} />
+            <Route path="website" element={<PublishingHub />} />
+            <Route path="youtube" element={<PublishingHub />} />
             <Route path="members" element={<MembersPage />} />
             <Route path="trading-bot" element={<TradingBotAdminPage />} />
             <Route path="affiliate" element={<AffiliateAdminPage />} />

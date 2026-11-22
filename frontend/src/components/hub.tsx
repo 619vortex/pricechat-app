@@ -122,10 +122,18 @@ export function TodoList({ items, empty }: { items: TodoItem[]; empty: string })
 }
 
 /** A fold inside a page (setup, advanced, rarely used): its content is only mounted once opened, so it costs nothing until then. */
-export function Fold({ title, summary, defaultOpen = false, children }: { title: string; summary?: ReactNode; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
+export function Fold({ title, summary, defaultOpen = false, focus = false, id, children }: {
+  title: string; summary?: ReactNode; defaultOpen?: boolean; focus?: boolean; id?: string; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen || focus);
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {  // an old address pointed here (e.g. /x?tab=connection): open it and bring it into view
+    if (!focus) return;
+    setOpen(true);
+    ref.current?.scrollIntoView?.({ block: "start" });
+  }, [focus]);
   return (
-    <details className="fold" open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+    <details ref={ref} id={id} className="fold" open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>{title}{summary && <span className="fold-summary">{summary}</span>}</summary>
       {open && <div className="fold-body">{children}</div>}
     </details>
