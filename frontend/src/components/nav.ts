@@ -3,8 +3,11 @@
  *  Price Chat Terminal is its own section and is deliberately left exactly as it was (its page list and sub-paths unchanged). */
 
 export type NavIconKey = "overview" | "content" | "publishing" | "terminal" | "community" | "system";
-export interface NavPage { to: string; label: string; about: string; match?: string[] }
-export interface NavArea { key: string; label: string; short: string; icon: NavIconKey; pages: NavPage[]; todo?: string[] }
+/** `kind` (sections that have a one-page hub): "hub" is the section's page; "panel" is shown on the hub, folded, and its old address
+ *  opens the hub with that panel open (`panel` names it); "tool" is a full screen of its own, one click from the hub, with a back link. */
+export interface NavPage { to: string; label: string; about: string; match?: string[]; kind?: "hub" | "panel" | "tool"; panel?: string }
+/** `hub`: the section is one page (its first page) with no tabs; its other pages are panels on it or tools one click away. */
+export interface NavArea { key: string; label: string; short: string; icon: NavIconKey; pages: NavPage[]; todo?: string[]; hub?: boolean }
 
 export const AREAS: NavArea[] = [
   {
@@ -17,13 +20,13 @@ export const AREAS: NavArea[] = [
     ],
   },
   {
-    key: "content", label: "Content", short: "Content", icon: "content", todo: ["drafts", "memories"],
+    key: "content", label: "Content", short: "Content", icon: "content", todo: ["drafts", "memories"], hub: true,
     pages: [
-      { to: "/content", label: "Ideas & drafts", about: "Post ideas and drafts." },
-      { to: "/brand-manager", label: "Brand Manager", about: "Plan and make posts for your social accounts." },
-      { to: "/short-market", label: "Short Market", about: "Short market videos made automatically." },
-      { to: "/brain", label: "AI Brain", about: "How the AI talks: its goals, voice and a test chat." },
-      { to: "/knowledge", label: "Knowledge", about: "What the AI knows about Price Chat." },
+      { to: "/content", label: "Ideas & drafts", about: "Everything being made: post ideas and drafts, Brand Manager posts, Short Market videos, and the AI's voice and knowledge.", kind: "hub" },
+      { to: "/brand-manager", label: "Brand Manager", about: "Plan and make posts for your social accounts.", kind: "tool" },
+      { to: "/short-market", label: "Short Market", about: "Short market videos made automatically.", kind: "tool" },
+      { to: "/brain", label: "AI voice", about: "How the AI talks: its goals, voice and a test chat.", kind: "panel", panel: "ai" },
+      { to: "/knowledge", label: "Knowledge", about: "What the AI knows about Price Chat.", kind: "panel", panel: "knowledge" },
     ],
   },
   {

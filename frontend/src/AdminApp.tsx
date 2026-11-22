@@ -6,9 +6,8 @@ import { Overview } from "./pages/Overview";
 import { XPage } from "./pages/XPage";  // the overview uses it too
 
 // every page but the overview is its own chunk, so the dashboard opens without downloading all of them (Layout's <Suspense>)
-const AIBrain = lazy(() => import("./pages/AIBrain").then((m) => ({ default: m.AIBrain })));
-const KnowledgePage = lazy(() => import("./pages/Knowledge").then((m) => ({ default: m.KnowledgePage })));
-const ContentPage = lazy(() => import("./pages/Content").then((m) => ({ default: m.ContentPage })));
+// Admin redesign (owner, 2026-11-22): a section is one page (a hub); old addresses open it with the right panel open
+const ContentHub = lazy(() => import("./pages/hubs/ContentHub").then((m) => ({ default: m.ContentHub })));
 const ApprovalsPage = lazy(() => import("./pages/Approvals").then((m) => ({ default: m.ApprovalsPage })));
 const WebsitePage = lazy(() => import("./pages/WebsitePage").then((m) => ({ default: m.WebsitePage })));
 const CommunityPage = lazy(() => import("./pages/Community").then((m) => ({ default: m.CommunityPage })));
@@ -66,9 +65,9 @@ export function AdminApp() {
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<Overview />} />
-            <Route path="brain" element={<AIBrain />} />
-            <Route path="knowledge" element={<KnowledgePage />} />
-            <Route path="content" element={<ContentPage />} />
+            <Route path="content" element={<ContentHub />} />
+            <Route path="brain" element={<ContentHub />} />
+            <Route path="knowledge" element={<ContentHub />} />
             <Route path="x" element={<XPage />} />
             <Route path="world-monitor" element={<WorldMonitorPage />} />
             <Route path="terminal" element={<TerminalPage />} />

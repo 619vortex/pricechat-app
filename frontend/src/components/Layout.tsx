@@ -4,6 +4,7 @@ import { adminHome, type TodoItem } from "../api/home";
 import { useApi } from "../api/useApi";
 import { useAdmin } from "./AdminGate";
 import { InArea } from "./ui";
+import { HomeData } from "./hub";
 import { AREAS, isTerminalPath, locate, searchJump, type NavIconKey } from "./nav";
 
 /** Six section icons, inline stroke SVG (no emoji). */
@@ -184,7 +185,7 @@ export function Layout() {
       </aside>
       <button className="scrim" aria-label="Close menu" tabIndex={-1} onClick={() => setMenu(false)} />
       <main className="main">
-        {area.pages.length > 1 && (
+        {area.pages.length > 1 && !area.hub && (
           <div className="area-head">
             <span className="area-title">{area.label}</span>
             <nav className="subnav" aria-label={area.label}>
@@ -195,7 +196,12 @@ export function Layout() {
             <p className="area-about">{page.about}</p>
           </div>
         )}
-        <InArea.Provider value={area.pages.length > 1 && (pathname.replace(/\/+$/, "") || "/") === page.to}><Suspense fallback={<div className="page-loading" aria-busy="true" />}><Outlet /></Suspense></InArea.Provider>
+        {area.hub && page.kind === "tool" && (
+          <Link to={area.pages[0].to} className="hub-back">← {area.label}</Link>
+        )}
+        <HomeData.Provider value={home.data ?? null}>
+          <InArea.Provider value={!area.hub && area.pages.length > 1 && (pathname.replace(/\/+$/, "") || "/") === page.to}><Suspense fallback={<div className="page-loading" aria-busy="true" />}><Outlet /></Suspense></InArea.Provider>
+        </HomeData.Provider>
       </main>
       {!terminal && (
         <nav className="bottombar" aria-label="Admin sections (phone)">
