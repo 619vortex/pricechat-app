@@ -15,6 +15,7 @@ const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default:
 const ActivityPage = lazy(() => import("./pages/Activity").then((m) => ({ default: m.ActivityPage })));
 const ApiKeysPage = lazy(() => import("./pages/ApiKeys").then((m) => ({ default: m.ApiKeysPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
+const CommunityHub = lazy(() => import("./pages/hubs/CommunityHub").then((m) => ({ default: m.CommunityHub })));
 const PublishingHub = lazy(() => import("./pages/hubs/PublishingHub").then((m) => ({ default: m.PublishingHub })));
 const MembersPage = lazy(() => import("./pages/Members").then((m) => ({ default: m.MembersPage })));
 const MarketHome = lazy(() => import("./pages/pokemon/MarketHome").then((m) => ({ default: m.MarketHome })));
@@ -33,12 +34,7 @@ const MarketplaceAdmin = lazy(() => import("./pages/pokemon/MarketplaceAdmin").t
 const VaultAdmin = lazy(() => import("./pages/pokemon/VaultAdmin").then((m) => ({ default: m.VaultAdmin })));
 const BrandManagerPage = lazy(() => import("./pages/brand/BrandManager").then((m) => ({ default: m.BrandManagerPage })));
 const ShortMarketPage = lazy(() => import("./pages/shortmarket/ShortMarket").then((m) => ({ default: m.ShortMarketPage })));
-const InviteBotPage = lazy(() => import("./pages/InviteBot").then((m) => ({ default: m.InviteBotPage })));
-const InviteQuickPage = lazy(() => import("./pages/InviteQuick").then((m) => ({ default: m.InviteQuickPage })));
-const TradingBotAdminPage = lazy(() => import("./pages/TradingBotAdmin").then((m) => ({ default: m.TradingBotAdminPage })));
 const AffiliateAdminPage = lazy(() => import("./pages/AffiliateAdmin").then((m) => ({ default: m.AffiliateAdminPage })));
-const WorkersAdminPage = lazy(() => import("./pages/WorkersAdmin").then((m) => ({ default: m.WorkersAdminPage })));
-const RewardsAdminPage = lazy(() => import("./pages/RewardsAdmin").then((m) => ({ default: m.RewardsAdminPage })));
 const RealmAdminPage = lazy(() => import("./pages/RealmAdmin").then((m) => ({ default: m.RealmAdminPage })));
 const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ default: m.VpnAdminPage })));
 const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
@@ -80,10 +76,11 @@ export function AdminApp() {
             <Route path="website" element={<PublishingHub />} />
             <Route path="youtube" element={<PublishingHub />} />
             <Route path="members" element={<MembersPage />} />
-            <Route path="trading-bot" element={<TradingBotAdminPage />} />
+            <Route path="community" element={<CommunityHub />} />
+            <Route path="trading-bot" element={<CommunityHub />} />
             <Route path="affiliate" element={<AffiliateAdminPage />} />
-            <Route path="workers" element={<WorkersAdminPage />} />
-            <Route path="rank-rewards" element={<RewardsAdminPage />} />
+            <Route path="workers" element={<CommunityHub />} />
+            <Route path="rank-rewards" element={<CommunityHub />} />
             <Route path="realm" element={<RealmAdminPage />} />
             <Route path="vpn" element={<VpnAdminPage />} />
             <Route path="kalshi" element={<KalshiAdminPage />} />
@@ -110,8 +107,8 @@ export function AdminApp() {
             <Route path="pokemon/portfolio/phone/:token" element={<PhoneLinkPage />} />
             <Route path="telegram-trading" element={<TelegramTradingPage />} />
             <Route path="telegram" element={<CommunityPage />} />
-            <Route path="invite-bot" element={<InviteBotPage />} />
-            <Route path="invite-bot/send" element={<InviteQuickPage />} />
+            <Route path="invite-bot" element={<CommunityHub />} />
+            <Route path="invite-bot/send" element={<CommunityHub />} />
             <Route path="telegram/topics/:id" element={<TopicDetailPage />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="activity" element={<ActivityPage />} />

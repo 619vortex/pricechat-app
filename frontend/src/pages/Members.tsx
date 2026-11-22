@@ -4,6 +4,7 @@ import { useApi } from "../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, Tabs, formatTime, relativeTime } from "../components/ui";
 import { DailyColumns, LabelledBars } from "./members/charts";
 import type { MemberDetail, MembersConfig, RuleRow } from "./members/types";
+import { Fold } from "../components/hub";
 
 type Tab = "overview" | "members" | "missions" | "reputation" | "rules" | "ranks" | "setup" | "audit";
 const PLATFORM = { telegram: "Telegram", x: "X", google: "Google" } as Record<string, string>;
@@ -11,7 +12,12 @@ const SOURCE = { website: "Website", telegram: "Telegram", x: "X", google: "Goog
 
 /** Dashboard › Members: Price Chat community accounts and the Kiwi XP system. Every change is audited. */
 export function MembersPage() {
-  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).get("tab") as Tab | null) ?? "overview");
+  // Admin redesign (owner, 2026-11-22): four real tabs, no "More" menu; how XP is earned, XP sources, sign-in setup and the change
+  // log fold away below (?tab=rules|reputation|setup|audit opens the Overview with that fold open).
+  const asked = new URLSearchParams(window.location.search).get("tab") as Tab | null;
+  const folded: Tab[] = ["rules", "reputation", "setup", "audit"];
+  const [tab, setTab] = useState<Tab>(() => (asked && !folded.includes(asked) ? asked : "overview"));
+  const fold = asked && folded.includes(asked) ? asked : undefined;
   return (
     <>
       <PageHeader title="Members" subtitle="Price Chat community accounts, Kiwi ranks and verified XP. Every change made here is recorded in the audit log." />
@@ -21,10 +27,6 @@ export function MembersPage() {
           { key: "members", label: "Find a member" },
           { key: "missions", label: "Missions" },
           { key: "ranks", label: "Ranks" },
-          { key: "rules", label: "How XP is earned", more: true },
-          { key: "reputation", label: "XP sources", more: true },
-          { key: "setup", label: "Sign-in setup", more: true },
-          { key: "audit", label: "Change log", more: true },
         ]}
         value={tab}
         onChange={setTab}
@@ -32,11 +34,11 @@ export function MembersPage() {
       {tab === "overview" && <Overview />}
       {tab === "members" && <MemberList />}
       {tab === "missions" && <Missions />}
-      {tab === "reputation" && <ReputationSourcesTab />}
-      {tab === "rules" && <Rules />}
       {tab === "ranks" && <RanksAndUnlocks />}
-      {tab === "setup" && <SignInSetup />}
-      {tab === "audit" && <Audit />}
+      <Fold id="members-rules" title="How XP is earned" summary="the rules members earn XP by" focus={fold === "rules"}><Rules /></Fold>
+      <Fold id="members-reputation" title="XP sources" summary="where reputation XP comes from" focus={fold === "reputation"}><ReputationSourcesTab /></Fold>
+      <Fold id="members-setup" title="Sign-in setup" summary="Telegram, X and Google sign-in" focus={fold === "setup"}><SignInSetup /></Fold>
+      <Fold id="members-audit" title="Change log" summary="every change made here" focus={fold === "audit"}><Audit /></Fold>
     </>
   );
 }

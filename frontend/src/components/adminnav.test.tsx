@@ -52,7 +52,7 @@ function expectedSection(path: string): string {
   if (["/content", "/brand-manager", "/short-market", "/brain", "/knowledge"].some(starts)) return "content";
   if (["/publishing", "/x", "/youtube", "/website", "/trading-os"].some(starts)) return "publishing";
   if (["/terminal", "/world-monitor"].some(starts)) return "terminal";
-  if (["/members", "/rank-rewards", "/workers", "/trading-bot", "/telegram", "/invite-bot", "/telegram-trading", "/pokemon"].some(starts)) return "community";
+  if (["/community", "/members", "/rank-rewards", "/workers", "/trading-bot", "/telegram", "/invite-bot", "/telegram-trading", "/pokemon"].some(starts)) return "community";
   if (["/settings", "/api-keys", "/activity", "/vpn", "/kalshi", "/realm"].some(starts)) return "system";
   throw new Error(`no section expected for ${path}`);
 }

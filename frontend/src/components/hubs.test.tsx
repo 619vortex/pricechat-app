@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContentHub } from "../pages/hubs/ContentHub";
 import { PublishingHub } from "../pages/hubs/PublishingHub";
 import { XPage } from "../pages/XPage";
+import { CommunityHub } from "../pages/hubs/CommunityHub";
+import { CommunityPage } from "../pages/Community";
+import { MembersPage } from "../pages/Members";
 import { Layout } from "./Layout";
 
 /** TEST FIXTURES only: fake API answers keyed by path (everything else is a 404, which the embedded pages show as an error). */
@@ -159,5 +162,64 @@ describe("Publishing: one page instead of four tabs (stage 3)", () => {
     expect((container.querySelector("#x-connection") as HTMLDetailsElement).open).toBe(true);
     for (const id of ["x-growth", "x-accounts", "x-topics"]) expect((container.querySelector(`#${id}`) as HTMLDetailsElement).open).toBe(false);
     expect(container.querySelector(".hub-back")!.textContent).toContain("Publishing");
+  });
+});
+
+const HOME_REQ = { ...HOME, todo: [
+  { key: "bot_access", label: "Trading bot access requests", count: 2, to: "/trading-bot" },
+  { key: "knight", label: "$10 Knight reward claims", count: 1, to: "/rank-rewards?tab=knight" },
+  { key: "workers", label: "Worker reports to check", count: 0, to: "/workers" },
+] };
+const TG = (kill: boolean, mainnet: boolean) => ({ switches: { live: mainnet, kill, killed_at: null, gate_signal_enter: false, global_paused: false, mainnet_execution: mainnet, live_phrase: "x" }, referral: { codes: [], url: "" }, window_hours: 24 });
+const communityRoutes = (
+  <>
+    {["community", "trading-bot", "rank-rewards", "workers", "invite-bot", "invite-bot/send"].map((p) => <Route key={p} path={p} element={<CommunityHub />} />)}
+    <Route path="telegram" element={<CommunityPage />} />
+    <Route path="members" element={<MembersPage />} />
+  </>
+);
+
+describe("Community: one page instead of nine tabs (stage 4)", () => {
+  it("lists every member request in one list, and shows Telegram trading's switches (never folded)", async () => {
+    serve({ "/api/admin/home": HOME_REQ, "/api/tradingos/admin/telegram-trading": TG(true, false) });
+    const { container } = shell("/community", communityRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const req = screen.getByLabelText("Requests from members");
+    expect([...req.querySelectorAll(".hub-todo-label")].map((l) => l.textContent)).toEqual(["Trading bot access requests", "$10 Knight reward claims"]);
+    const tg = screen.getByLabelText("Telegram trading");
+    expect(tg.textContent).toContain("Emergency stopON");
+    expect(tg.textContent).toContain("Mainnet from TelegramOFF");
+    expect(tg.closest(".hub-panel")).toBeNull();  // a card on the page, not inside a fold
+    expect(tg.querySelector("a")!.getAttribute("href")).toBe("/telegram-trading");
+    for (const id of ["rewards", "vip", "workers", "invites"]) expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("opens the right panel for each old address", async () => {
+    for (const [path, id] of [["/trading-bot", "vip"], ["/rank-rewards", "rewards"], ["/workers", "workers"], ["/invite-bot/send", "invites"], ["/invite-bot", "invites"]]) {
+      serve();
+      const { container, unmount } = shell(path, communityRoutes);
+      await flush();
+      expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
+      expect(container.querySelector(".nav-link.active")!.textContent).toContain("Community");
+      unmount();
+    }
+  });
+
+  it("cuts Telegram community to six tabs and Members to four, folding setup below; old ?tab= links open the fold", async () => {
+    serve();
+    window.history.pushState({}, "", "/admin/telegram?tab=setup");
+    const t = shell("/telegram?tab=setup", communityRoutes);
+    await flush();
+    expect([...t.container.querySelectorAll('[role="tab"]')].map((x) => x.textContent)).toEqual(["Overview", "Questions", "Topics", "Messages", "Daily summaries", "Search"]);
+    expect((t.container.querySelector("#tg-setup") as HTMLDetailsElement).open).toBe(true);
+    expect(t.container.querySelector(".hub-back")!.textContent).toContain("Community");
+    t.unmount();
+    window.history.pushState({}, "", "/admin/members?tab=audit");
+    const m = shell("/members?tab=audit", communityRoutes);
+    await flush();
+    expect([...m.container.querySelectorAll('[role="tab"]')].map((x) => x.textContent)).toEqual(["Overview", "Find a member", "Missions", "Ranks"]);
+    expect((m.container.querySelector("#members-audit") as HTMLDetailsElement).open).toBe(true);
+    window.history.pushState({}, "", "/");
   });
 });

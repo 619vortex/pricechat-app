@@ -7,18 +7,23 @@ import { MessageList, QuestionList, SummaryView, TopicTable, TrendBadge } from "
 import { MergesTab, PilotTab, TelegramWizard, TraceView } from "./community/Pilot";
 import { AccountSetup, HistoryImport, TelegramStatusCard } from "./community/Connection";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, Tabs, formatTime, label, relativeTime } from "../components/ui";
+import { Fold } from "../components/hub";
 
 type Tab = "overview" | "pilot" | "topics" | "merges" | "questions" | "summaries" | "search" | "messages" | "setup";
-const TABS: { key: Tab; label: string; more?: boolean }[] = [
+// Admin redesign (owner, 2026-11-22): six real tabs, no "More" menu; connecting Telegram, the pilot and topic merging fold away
+// below them (?tab=setup|pilot|merges opens the Overview with that fold open).
+const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "questions", label: "Questions" },
   { key: "topics", label: "Topics" },
-  { key: "setup", label: "Connect Telegram" },
-  { key: "messages", label: "Messages", more: true },
-  { key: "summaries", label: "Daily summaries", more: true },
-  { key: "search", label: "Search", more: true },
-  { key: "merges", label: "Similar topics to merge", more: true },
-  { key: "pilot", label: "Pilot", more: true },
+  { key: "messages", label: "Messages" },
+  { key: "summaries", label: "Daily summaries" },
+  { key: "search", label: "Search" },
+];
+const FOLDS: { key: Tab; label: string; summary: string }[] = [
+  { key: "setup", label: "Connect Telegram", summary: "bot or account, chats to read" },
+  { key: "pilot", label: "Pilot", summary: "statistics and message tracing" },
+  { key: "merges", label: "Similar topics to merge", summary: "topics that look like one" },
 ];
 
 const STATUS_TEXT: Record<TelegramStatus["status"], string> = {
@@ -35,20 +40,27 @@ const STATUS_TONE: Record<TelegramStatus["status"], "good" | "bad" | "warn" | "n
 };
 
 export function CommunityPage() {
-  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).get("tab") as Tab | null) ?? "overview");
+  const asked = new URLSearchParams(window.location.search).get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.key === asked)?.key ?? "overview");
+  const [fold, setFold] = useState<Tab | undefined>(() => FOLDS.find((f) => f.key === asked)?.key);
+  const go = (t: Tab) => { if (FOLDS.some((f) => f.key === t)) setFold(t); else setTab(t); };
   return (
     <>
       <PageHeader title="Telegram community" subtitle="What people are talking about in your Telegram chats. Read-only." />
-      <Tabs tabs={TABS} value={tab} onChange={setTab} />
-      {tab === "overview" && <OverviewTab go={setTab} />}
-      {tab === "pilot" && <PilotTab />}
+      <Tabs tabs={TABS} value={tab} onChange={go} />
+      {tab === "overview" && <OverviewTab go={go} />}
       {tab === "topics" && <TopicsTab />}
-      {tab === "merges" && <MergesTab />}
       {tab === "questions" && <QuestionsTab />}
       {tab === "summaries" && <SummariesTab />}
       {tab === "search" && <SearchTab />}
       {tab === "messages" && <MessagesTab />}
-      {tab === "setup" && <SetupTab />}
+      {FOLDS.map((f) => (
+        <Fold key={f.key} id={`tg-${f.key}`} title={f.label} summary={f.summary} focus={fold === f.key}>
+          {f.key === "setup" && <SetupTab />}
+          {f.key === "pilot" && <PilotTab />}
+          {f.key === "merges" && <MergesTab />}
+        </Fold>
+      ))}
     </>
   );
 }
