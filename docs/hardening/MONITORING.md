@@ -64,6 +64,8 @@ was added here except aligning the fleet alert with that guard (see 1).
   When alerts are delivered, it shows a small "Send test alert" button instead.
 
 ### 5. External uptime monitor (draft): `ops/uptime/kiwi-uptime.yml`
+> 2026-11-22: activated as `.github/workflows/uptime.yml` in pricechat-app (every 15 min, adds `/api/health/live`, alerts through a GitHub issue first and Telegram only when its secrets are set). See MONITORING-OWNER-SETUP.md section C. The text below describes the original draft.
+
 This is a GitHub Actions workflow. It is not placed in `.github/workflows`, not pushed, and not active anywhere. Every 30 min, plus a manual run, it checks:
 - `https://pricechat.live/` returns 200.
 - `/api/health/public`: `ok=true`, plus `jobs` not `failing` and `backup` not `old`.

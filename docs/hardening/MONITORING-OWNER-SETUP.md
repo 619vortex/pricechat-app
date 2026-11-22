@@ -33,32 +33,38 @@ No other Admin setting changes. Leave payments as they are.
 ## B. Railway environment variables
 **None.** The new jobs `system.backup_check` and `system.restore_test` are covered by the `system.` entry already in production's `SCHEDULER_ONLY_JOBS`. They use the existing bucket variables, which `system.backup` already uses. Migrations 0115 and 0116 run by themselves at start-up.
 
-## C. External uptime monitor on GitHub (optional, free, outside Railway)
+## C. External uptime monitor on GitHub (outside Railway)
+
+It now lives in this repository: `.github/workflows/uptime.yml` (pricechat-app). It starts running by itself once its PR is merged into
+`main` (scheduled workflows run only from the default branch). Every 15 minutes it checks the website, `/api/health/live`,
+`/api/health/public` (database, scheduler, jobs failing, backup age), the Kiwi VPN public endpoints and servers' online flags, each
+browser proxy's 407, and the TLS certificates (21 days or more left).
+
+On a failure it opens ONE GitHub issue labelled `uptime` that mentions you, so GitHub e-mails you even if Telegram is down. It comments
+when the failures change and every 6 h while they last, and closes the issue with a "Recovered" comment when every check passes. It uses
+only the built-in `GITHUB_TOKEN` with `issues: write`; no secret is needed for this.
 
 | What | Where | Value |
 |---|---|---|
-| Workflow file | the repository's `.github/workflows/kiwi-uptime.yml` | copy `ops/uptime/kiwi-uptime.yml` from this branch unchanged |
-| Repository | any GitHub repo you own. A **public** repo has unlimited free minutes. A private repo uses about 1,440 of the 2,000 free minutes a month at the default every 30 minutes | e.g. a new empty repo `kiwi-uptime`, or `619vortex/KIWIVPN` |
-| Secret `UPTIME_TELEGRAM_BOT_TOKEN` | repo › Settings › Secrets and variables › Actions › **Secrets** › New repository secret | the token of a **separate** bot made with @BotFather (`/newbot`), so a problem with the main bot can't silence this one. Press Start in a private chat with it once |
-| Secret `UPTIME_TELEGRAM_CHAT_ID` | same place | your numeric user id from A.1 |
-| Variable `UPTIME_PROXIES` (optional) | repo › Settings › Secrets and variables › Actions › **Variables** | a space-separated list of `host:port`. The default is `hel1.vpn.pricechat.live:443 ash1.vpn.pricechat.live:443`. Add a new region's proxy here |
+| Secret `UPTIME_TELEGRAM_BOT_TOKEN` (optional) | pricechat-app › Settings › Secrets and variables › Actions › **Secrets** › New repository secret | the token of a **separate** bot made with @BotFather (`/newbot`), so a problem with the main bot can't silence this one. Press Start in a private chat with it once |
+| Secret `UPTIME_TELEGRAM_CHAT_ID` (optional) | same place | your numeric user id from A.1 |
+| Variable `UPTIME_PROXIES` (optional) | pricechat-app › Settings › Secrets and variables › Actions › **Variables** | a space-separated list of `host:port`. The default is `hel1.vpn.pricechat.live:443 ash1.vpn.pricechat.live:443`. Add a new region's proxy here |
 
-Token scopes:
-- The workflow needs no personal token. It uses only the built-in `GITHUB_TOKEN` with `contents: read`; the cache needs no extra permission.
-- If you push the file from a terminal with a fine-grained personal token, that token needs **Contents: Read and write** and **Workflows: Read and write** on that one repository, and nothing else.
+Without the two Telegram secrets the Telegram step is skipped (the GitHub issue and e-mail still work). With them, the same events also
+go to Telegram.
 
-To enable it:
-1. Commit the file to the default branch. Scheduled workflows run only from the default branch.
-2. Go to the repo's Actions tab, choose "Kiwi uptime", then "Run workflow", to run it once.
-3. On a public repo, GitHub disables scheduled workflows after 60 days with no commits. Re-enable it from the Actions tab if that happens.
+Cost: each run is one short job, billed as 1 minute. Every 15 minutes is about 2,900 Actions minutes a month on this private repository;
+GitHub Pro includes 3,000 a month, shared with CI and the KIWIVPN builds (Windows minutes count double). If the minutes run short, either
+change the cron line to `7,37 * * * *` (every 30 min, about 1,440 minutes) or move the file to a small **public** repository, where
+Actions minutes are free (the checks only read public addresses, so nothing private is exposed).
 
-Expected first run:
-- the job is green;
-- the "Check" step log lists `ok:` lines for the website, api health, vpn public, the servers online, each proxy's 407 and each TLS host's days left;
-- no Telegram message is sent while everything passes. A message goes out only when the set of failures changes, plus "STILL FAILING" every 6 h.
+To check it after the merge: Actions tab › "Uptime" › "Run workflow". Expected: the job is green; the "Check" step log lists `ok:` lines
+for the website, api live, api health, vpn public, the servers online, each proxy's 407 and each TLS host's days left; no issue is opened
+and no Telegram message is sent while everything passes.
 
 Local proof without GitHub:
-- `python ops/uptime/selftest.py [--path DIR_WITH_JQ]` runs the workflow's own scripts 6 times against the live endpoints, with Telegram sent to a fake server on 127.0.0.1.
+- `python ops/uptime/selftest.py [--path DIR_WITH_JQ]` runs the workflow's own scripts 8 times against the live endpoints, with a fake
+  `gh` (issues kept in a JSON file, the workflow's jq expressions run through real jq) and Telegram sent to a fake server on 127.0.0.1.
 - Expected output: `ALL PASS`.
 
 ## D. Verify after the deploy (expected outputs)
