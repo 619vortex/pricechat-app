@@ -44,3 +44,30 @@ fundarb_universe_schema.json
 
 # worker settings hold the worker token (PRICECHAT_WORKER_TOKEN): never commit
 worker/worker.env
+
+
+# --- added 2026-11-22 for the shared GitHub repository ---
+# keys, certificates and signing material (Android/iOS/Windows/extension)
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+*.crx
+key.properties
+local.properties
+google-services.json
+GoogleService-Info.plist
+# credential files written by tools and scripts
+vm-credential.xml
+.pricechat-secrets/
+*.credentials.json
+service-account*.json
+# Railway / Vercel / Codemagic local links and state
+.railway/
+# build stamps written at deploy time
+backend/BUILD_ID
