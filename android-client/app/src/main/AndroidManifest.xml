@@ -74,6 +74,10 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+            <!-- Saves waking up for every chat message: a call is never a conversation notification. Android 12 and later. -->
+            <meta-data
+                android:name="android.service.notification.default_filter_types"
+                android:value="ongoing|alerting|silent" />
         </service>
     </application>
 </manifest>

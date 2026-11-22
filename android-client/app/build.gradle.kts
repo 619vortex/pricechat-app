@@ -20,7 +20,7 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.1.0-rc1"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "live.pricechat.kiwivpn.KiwiTestRunner"
         buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
     }
 

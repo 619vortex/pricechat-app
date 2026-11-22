@@ -1,12 +1,16 @@
 package live.pricechat.kiwivpn.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
+import android.net.VpnService
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -263,17 +267,23 @@ private fun AutoCallCard(model: AppViewModel, ui: UiState, openIntent: (Intent) 
     var consent by remember { mutableStateOf(false) }
     // Re-read when the screen is shown again after a trip to Android's settings
     var access by remember { mutableStateOf(model.hasNotificationAccess()) }
+    var vpnNeeded by remember { mutableStateOf(model.vpnPermissionNeeded()) }
+    var canNotify by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         while (true) {
             access = model.hasNotificationAccess()
+            vpnNeeded = model.vpnPermissionNeeded()
+            canNotify = Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
             delay(1500)
         }
     }
+    // Android's own consent screen has to be opened for a result, or it closes without asking.
+    val vpnConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { vpnNeeded = model.vpnPermissionNeeded() }
     fun installed(vararg names: String) = names.any {
         try { context.packageManager.getPackageInfo(it, 0); true } catch (_: PackageManager.NameNotFoundException) { false }
     }
     Card {
-        Toggle("Auto-Call VPN", "Experimental. Connects when a WhatsApp or Telegram call is detected, and disconnects 15 seconds after it ends.", s.autoCallEnabled) { on ->
+        Toggle("Auto-Call VPN", "Experimental. Connects when a WhatsApp or Telegram call is detected. When the call ends, it disconnects after 15 seconds, but only if Auto-Call VPN started that connection.", s.autoCallEnabled) { on ->
             if (on && !s.autoCallConsented) {
                 consent = true
             } else {
@@ -286,6 +296,17 @@ private fun AutoCallCard(model: AppViewModel, ui: UiState, openIntent: (Intent) 
                 LinkRow("Open Notification access") { openIntent(AutoCallController.accessSettings()) }
                 Text("If Android says it's a restricted setting: open the app's page in Settings, use the menu at the top right, choose Allow restricted settings, and try again. That applies to apps installed from an APK.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
                 LinkRow("Open this app's page in Settings") { openIntent(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+            }
+            if (vpnNeeded) {
+                Text("Android hasn't given Kiwi VPN permission to connect yet. It can only ask on screen, so Auto-Call VPN can't ask during a call.", color = Kiwi.Warn, style = MaterialTheme.typography.bodySmall)
+                LinkRow("Allow VPN connections") { VpnService.prepare(context)?.let { vpnConsent.launch(it) } }
+            }
+            if (!model.hasLastServer()) {
+                Text("Connect to a country once by hand first. Auto-Call VPN uses the last one you connected to.", color = Kiwi.Warn, style = MaterialTheme.typography.bodySmall)
+            }
+            if (!canNotify) {
+                Text("Notifications are off for Kiwi VPN, so Auto-Call VPN can only show its status here.", style = MaterialTheme.typography.bodySmall, color = Kiwi.Muted)
+                LinkRow("Open notification settings") { openIntent(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }
             }
             Toggle("WhatsApp", if (installed("com.whatsapp", "com.whatsapp.w4b")) null else "Not installed on this phone", s.autoCallWhatsApp) { on -> model.changeSettings { it.copy(autoCallWhatsApp = on) } }
             Toggle("Telegram", if (installed("org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram")) null else "Not installed on this phone", s.autoCallTelegram) { on -> model.changeSettings { it.copy(autoCallTelegram = on) } }
@@ -311,7 +332,7 @@ private fun AutoCallCard(model: AppViewModel, ui: UiState, openIntent: (Intent) 
             confirmButton = {
                 TextButton(onClick = {
                     consent = false
-                    model.changeSettings { it.copy(autoCallEnabled = true, autoCallConsented = true) }
+                    model.changeSettings { it.copy(autoCallEnabled = true, autoCallConsented = true, autoCallWhatsApp = true, autoCallTelegram = true) }
                     if (!model.hasNotificationAccess()) openIntent(AutoCallController.accessSettings())
                 }) { Text("I agree") }
             },

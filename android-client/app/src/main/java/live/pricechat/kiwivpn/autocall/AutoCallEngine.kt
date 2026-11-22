@@ -26,7 +26,8 @@ data class TrackedCall(val key: Int, val app: CallApp, val phase: CallPhase)
  * The whole of Auto-Call VPN's logic, with no Android in it. Its rules:
  *  - It only ever disconnects a VPN it started itself (`owned`), so a connection the person made by hand survives the call.
  *  - It only disconnects after a confirmed end, then 15 seconds, then only if no other call is tracked and Android's audio mode doesn't show a call.
- *  - Anything uncertain keeps the VPN on and tells the person. It's cleared only by the person acting, because nothing here can prove an uncertain call is over.
+ *  - Anything uncertain keeps the VPN on and tells the person. It's cleared by the person acting, or by a new call arriving when none is tracked: tapping a ringing notification to answer removes it
+ *    without the app cancelling it, and the ongoing call that follows is what's watched from then on. The audio-mode check still guards the disconnect after that call.
  *  - The same call seen twice, or a new key while the VPN is already on, starts nothing.
  *  - If the person disconnects during a call, it isn't reconnected until that call is over.
  *
@@ -51,6 +52,7 @@ class AutoCallEngine(owned: Boolean = false, private val graceMs: Long = 15_000)
     fun onPosted(key: Int, signal: CallSignal, tunnelOn: Boolean): List<AutoCallEffect> {
         val isNew = key !in calls
         val wasIdle = calls.isEmpty()
+        if (isNew && wasIdle) uncertain = false
         calls[key] = TrackedCall(key, signal.app, signal.phase)
         deadline = null
         if (!isNew) return emptyList()

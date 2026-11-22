@@ -29,13 +29,13 @@ import java.io.File
 import java.util.UUID
 
 /** Holds the app's single instances. The connection outlives every screen, so it lives here rather than in a ViewModel. */
-class KiwiApp : Application() {
+open class KiwiApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val vault by lazy { Vault(File(noBackupFilesDir, "vault.bin"), KeystoreSealer()) }
     val api by lazy { HttpKiwiApi(userAgent = "KiwiVPN-Android/${BuildConfig.VERSION_NAME}") }
     val driver by lazy { GoTunnelDriver(this) }
 
-    val connection: ConnectionManager by lazy {
+    open val connection: ConnectionManager by lazy {
         ConnectionManager(
             scope = scope,
             driver = driver,

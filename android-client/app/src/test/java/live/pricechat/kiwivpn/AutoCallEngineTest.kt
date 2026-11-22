@@ -110,6 +110,30 @@ class AutoCallEngineTest {
         assertTrue(e.owned)
     }
 
+    @Test fun tapping_a_ringing_notification_to_answer_doesnt_leave_the_vpn_stuck() {
+        val e = AutoCallEngine()
+        e.onPosted(1, CallSignal(CallApp.WHATSAPP, CallPhase.RINGING), tunnelOn = false)
+        e.onRemoved(1, confirmedEnd = false, now = 0) // the tap: Android reports a click, not the app cancelling
+        assertEquals(AutoCallStatus.UNCERTAIN, e.status)
+        e.onPosted(2, CallSignal(CallApp.WHATSAPP, CallPhase.ACTIVE), tunnelOn = true)
+        assertEquals(AutoCallStatus.CONNECTED, e.status)
+        assertEquals(false, e.uncertain)
+        e.onRemoved(2, confirmedEnd = true, now = 1_000)
+        assertEquals(AutoCallStatus.CALL_ENDED, e.status)
+        assertEquals(listOf(AutoCallEffect.Disconnect, AutoCallEffect.Status(AutoCallStatus.DISCONNECTED)), e.onTick(16_000, audioBusy = false))
+    }
+
+    @Test fun a_new_call_alongside_an_uncertain_one_doesnt_clear_it() {
+        val e = AutoCallEngine()
+        e.onPosted(1, CallSignal(CallApp.WHATSAPP, CallPhase.ACTIVE), tunnelOn = false)
+        e.onPosted(2, CallSignal(CallApp.TELEGRAM, CallPhase.ACTIVE), tunnelOn = true)
+        e.onRemoved(1, confirmedEnd = false, now = 0)
+        e.onPosted(3, CallSignal(CallApp.TELEGRAM, CallPhase.ACTIVE), tunnelOn = true)
+        assertEquals(true, e.uncertain)
+        e.onRemoved(2, confirmedEnd = true, now = 0)
+        assertEquals(emptyList<AutoCallEffect>(), e.onTick(100_000, audioBusy = false))
+    }
+
     @Test fun losing_the_listener_during_a_call_is_uncertain() {
         val e = AutoCallEngine()
         e.onPosted(1, active, false)

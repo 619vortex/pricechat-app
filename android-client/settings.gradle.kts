@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "KiwiVPN"
 include(":app")
+include(":testfixture") // stand-in call apps for the emulator. Never published: see testfixture/README.md

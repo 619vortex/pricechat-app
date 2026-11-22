@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import live.pricechat.kiwivpn.auth.LoopbackListener
 import live.pricechat.kiwivpn.auth.SignInAttempt
 import live.pricechat.kiwivpn.autocall.AutoCallController
+import live.pricechat.kiwivpn.autocall.CallListenerService
 import live.pricechat.kiwivpn.log.Diag
 import live.pricechat.kiwivpn.model.Account
 import live.pricechat.kiwivpn.model.Passport
@@ -223,6 +224,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         app.vault.update { it.copy(settings = after) }
         _ui.update { it.copy(settings = after) }
         if (before.autoCallEnabled && !after.autoCallEnabled) app.autoCall.disabled()
+        val wasListening = before.autoCallEnabled && before.autoCallConsented
+        val listening = after.autoCallEnabled && after.autoCallConsented
+        if (wasListening != listening) CallListenerService.setActive(getApplication(), listening)
     }
 
     /** Saved first, so the choice survives whatever happens next. If a VPN is running, it's rebuilt with the new lists. If not, they apply on the next connection. */
@@ -232,6 +236,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun hasNotificationAccess() = AutoCallController.hasNotificationAccess(getApplication())
+
+    fun vpnPermissionNeeded() = app.connection.needsPermission()
+
+    /** Auto-Call uses the last country connected to, so there has to be one. */
+    fun hasLastServer() = app.vault.read().lastServer != null
 
     fun alwaysOn(): Pair<Boolean, Boolean>? = app.driver.alwaysOn()
 
