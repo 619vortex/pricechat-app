@@ -26,8 +26,12 @@ What -Apply does, in order (it stops at the first problem):
      PRICECHAT_WORKER_TOKEN line; every other setting in worker.env stays as it is.
   4. Restarts the three workers that read worker.env: the scheduled tasks "Price Chat News Desk GPU" and "Price Chat World Monitor",
      and the AI worker (start_worker.pyw). Jobs pause for about a minute; nothing is lost (jobs wait in the queue).
-  5. Waits up to 3 minutes and reports whether each worker came back, and whether any log line written AFTER the restart shows a
-     401 (the token was refused). If it was, it puts the backup back and restarts again by itself, so the old token keeps working.
+  5. Waits up to 3 minutes for proof: all 3 workers running AND the Price Chat server (worker.env PRICECHAT_SERVER) answering a
+     worker request with 2xx in a log line written AFTER the restart. Only the server's own replies count: a 401/403 from it (or
+     the worker's "refused this worker's token") means refused, and the backup is put back and the workers restarted, so the old
+     token keeps working. 401s from local programs (the World Monitor desktop app's 127.0.0.1 API answers 401 for a few seconds
+     after each restart) are reported and ignored. No reply and no refusal within 3 minutes: the new token stays, nothing is
+     rolled back, and you check Admin (-Rollback is there if needed).
 Then, in Admin: confirm the new worker shows online, and only then disable and delete the old worker entry. If Railway has
 BM_WORKER_BOOTSTRAP_SHA256 set to the old token's hash, remove it.
 
@@ -121,16 +125,37 @@ function Get-NewLogText($sizes) {
     }
 }
 
-# Returns $true when nothing was refused.
+# The Price Chat server the workers talk to (worker.env PRICECHAT_SERVER; no secret in it).
+function Get-ServerHost {
+    $line = Get-Content $env_file | Where-Object { $_ -match '^\s*PRICECHAT_SERVER\s*=' } | Select-Object -First 1
+    $url = if ($line) { ($line -replace '^\s*PRICECHAT_SERVER\s*=\s*', '').Trim().Trim('"') } else { "" }
+    try { if ($url) { return ([uri]$url).Host } } catch { }
+    return "api.pricechat.live"
+}
+
+# "accepted": all 3 workers run and the Price Chat server answered at least one worker request with 2xx, nothing refused.
+# "refused": the Price Chat server answered 401/403, or a worker logged that its token was refused.
+# "unconfirmed": no refusal, but no accepted reply (or not all 3 workers) within 3 minutes.
+# Production 2026-11-22: the first version counted ANY "401" in the logs, and the World Monitor desktop app's own local API
+# (http://127.0.0.1:...) answers 401 for a few seconds after every restart. A working new token was rolled back because of it.
+# Only replies from the server's own host count now; local ones are reported and ignored.
 function Wait-Workers($sizes) {
+    $server = Get-ServerHost
     $deadline = (Get-Date).AddMinutes(3)
     do {
         Start-Sleep -Seconds 15
         $running = Count-Workers
-        $refused = @(Get-NewLogText $sizes | Where-Object { $_ -match '\b401\b|Unauthorized|refused this worker.s token' })
-    } while ((Get-Date) -lt $deadline -and $running -lt 3 -and $refused.Count -eq 0)
-    Say "worker scripts running: $running of 3$(if ($refused.Count) { '; the server REFUSED the token (401)' })"
-    return ($refused.Count -eq 0)
+        $new = @(Get-NewLogText $sizes)
+        $fromServer = @($new | Where-Object { $_ -like "*$server*" })
+        $refused = @($fromServer | Where-Object { $_ -match '"HTTP/1\.[01] 40[13]|\b40[13] (Unauthorized|Forbidden)\b' }) + @($new | Where-Object { $_ -match "refused this worker.s token" })
+        $accepted = @($fromServer | Where-Object { $_ -match '"HTTP/1\.[01] 2\d\d' })
+        $localNoise = @($new | Where-Object { $_ -match '127\.0\.0\.1|localhost' -and $_ -match '\b401\b' })
+    } while ((Get-Date) -lt $deadline -and $refused.Count -eq 0 -and ($running -lt 3 -or $accepted.Count -eq 0))
+    Say "worker scripts running: $running of 3; $server accepted $($accepted.Count) worker request(s), refused $($refused.Count)"
+    if ($localNoise.Count) { Say "(ignored $($localNoise.Count) 401 line(s) from local programs such as the World Monitor desktop app: not the Price Chat server)" }
+    if ($refused.Count) { return "refused" }
+    if ($running -ge 3 -and $accepted.Count -gt 0) { return "accepted" }
+    return "unconfirmed"
 }
 
 if (-not (Test-Path $env_file)) { throw "worker.env not found at $env_file" }
@@ -142,8 +167,10 @@ if ($Rollback) {
     Copy-Item $from $env_file -Force
     $sizes = Get-LogSizes
     Restart-Workers
-    if (Wait-Workers $sizes) { Write-Host "Rolled back. The old worker must still be enabled in Admin." -ForegroundColor Green }
-    else { Write-Host "Still refused: the old worker has probably been disabled in Admin. Re-enable it, or create a new worker and run -Apply." -ForegroundColor Red; exit 1 }
+    $result = Wait-Workers $sizes
+    if ($result -eq "accepted") { Write-Host "Rolled back, and the server accepts the restored token." -ForegroundColor Green }
+    elseif ($result -eq "refused") { Write-Host "The server refuses the restored token: that worker is probably disabled or deleted in Admin. Re-enable it, or create a new worker and run -Apply." -ForegroundColor Red; exit 1 }
+    else { Write-Host "Rolled back, but no accepted server reply was seen within 3 minutes: check the workers are running and Admin shows the worker online." -ForegroundColor Yellow; exit 1 }
     return
 }
 
@@ -200,14 +227,21 @@ Say "3. worker.env updated (only the token line)"
 $sizes = Get-LogSizes
 Restart-Workers
 Say "4. workers restarted"
-if (-not (Wait-Workers $sizes)) {
-    Write-Host "  The new token was refused. Rolling back to the old one ($backup)..." -ForegroundColor Red
+$result = Wait-Workers $sizes
+if ($result -eq "refused") {
+    Write-Host "  The Price Chat server refused the new token. Rolling back to the old one ($backup)..." -ForegroundColor Red
     Copy-Item $backup $env_file -Force
     $sizes = Get-LogSizes
     Restart-Workers
-    [void](Wait-Workers $sizes)
-    Write-Host "  Rolled back. Check the new worker in Admin is enabled and its token was copied whole, then run -Apply again." -ForegroundColor Red
+    $again = Wait-Workers $sizes
+    Write-Host "  Rolled back ($again). Check the new worker in Admin is enabled and its token was copied whole, then run -Apply again." -ForegroundColor Red
     exit 1
 }
-Write-Host "Done. In Admin: check the new worker is online, then disable and delete the old one. Backup: $backup" -ForegroundColor Green
+if ($result -eq "unconfirmed") {
+    # no refusal and no reply: the old token wouldn't get a reply either, so the new one stays; nothing is deleted
+    Write-Host "  No accepted reply from the server within 3 minutes, and no refusal. The new token stays in place." -ForegroundColor Yellow
+    Write-Host "  Check Admin shows the new worker online before touching the old one. To go back: run this script with -Rollback." -ForegroundColor Yellow
+    exit 1
+}
+Write-Host "Done: the server accepts the new token. In Admin: check the new worker is online, then disable and delete the old one. Backup: $backup" -ForegroundColor Green
 Write-Host "If anything misbehaves before you disable the old worker: run this script with -Rollback." -ForegroundColor Green
