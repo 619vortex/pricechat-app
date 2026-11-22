@@ -36,14 +36,45 @@ tested only on GitHub Actions. On this PC only `npm ci`, `npx vitest run` (99 pa
 | 43683280763 | f051fd9 (12bb5e9) | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
 | 43684595279 | e57950c (31f83af) | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
 | 43685983005 | 4fa06b6 | success | success | 41/41, every step succeeds, "cancelled" | success | skipped |
+| 44069835693 | (kiwi-22) | success | success | 41/41, **green** | success | skipped |
+| 45020247943 | 900aca4 (0f706ad) | success | success | 41/41, every step succeeds, "cancelled" | success | failure (separate: test devices) |
+| 45021994734 | 573d9ad (e227431) | success | success | 41/41, every step succeeds, "cancelled" | success | success |
+| 45040797637 | 8de0d50, diagnostic PR #1 (not merged) | success | success | 41/41, every step succeeds, "cancelled"; no leftover process | success | skipped |
 
-**The kill-switch job's "cancelled" (investigated 2026-11-15): a GitHub runner artefact, not a product or test failure.** Every step,
-including "Complete job", succeeds; GitHub records "cancelled" one second after "Cleaning up orphan processes". Ruled out, one run each:
-the uninstaller still running (fixed anyway: NSIS `uninstall.exe /S` copies itself to TEMP and returns, so `-Wait` didn't wait; CI now runs a
-copy with `_?=` and checks the service and processes are gone, in kill-switch and update-test), Kiwi processes or services left behind
-(none: only Windows' NetSetupSvc/DsmSvc started during the adapter tests), and the network settling (api.github.com answered 6 times in a
-row before the job ended). The same code was green once (43573165764: the only source difference to the next run is a log message in
-update_win.rs, which this job never runs). Read the job's step results and its "41/41" report, not its badge. Not a release blocker.
+**The kill-switch job's "cancelled": root cause found 2026-11-22 (run 45040797637). The tests take the runner offline; GitHub then
+cancels the job. Not a product or test failure, not a release blocker.**
+
+- What the runner logged: its diagnostic log (`Worker_*.log`) shows `16:22:08 Cancellation/Shutdown message received`, then
+  `job state = 'Canceled'`, while the "Uninstall" step (started 16:21:56) was running. Every later step is `if: always()`, so all of
+  them still ran and succeeded, and "Complete job" succeeded; the badge says "cancelled" because the job was cancelled.
+- Why: the kill-switch checks block all internet for every program except Kiwi's own, by design, and the GitHub runner is "every
+  program". In that run the PC was offline about 60 s (16:17:22-16:18:22, server that never answers), about 126 s
+  (16:18:23-16:20:29, "a pause with nothing after it lets go by itself", limit 120 s) and about 60 s more (16:20:39-16:21:44, strict
+  mode). The worker log records a failed TCP connect to GitHub inside that window.
+- Inference (GitHub doesn't log its reason): a runner that can't reach GitHub for long enough loses its hold on the job and GitHub
+  cancels it. Whether that happens depends on where the runner's check-ins fall against the offline windows: green on
+  44069835693 and 43573165764, "cancelled" otherwise.
+- Ruled out: leftover processes. Diagnostic PR #1 in KIWIVPN (not merged, by owner decision) listed every process started
+  during the job and stopped only those carrying the job's `RUNNER_TRACKING_ID`: there were none; the only new processes were
+  Windows' NetSetupSvc, DsmSvc and two WmiPrvSE. Earlier, also ruled out: the uninstaller still running (fixed anyway with the
+  `_?=` copy), Kiwi processes or services left behind, the network settling before the job ended.
+- Decision (owner, 2026-11-22): **the strict security tests stay exactly as they are.** Letting the runner through the kill switch
+  or shortening the 120 s check would weaken what the tests prove. Read the job's step results and its "41/41" report (job summary
+  and the `KiwiVPN-kill-switch-reports-*` artifact), not its badge.
+
+### Future improvement (investigated, nothing provisioned): an isolated test machine
+
+The clean fix is to run the kill-switch checks on a machine whose blocked network isn't the runner's own link to GitHub.
+Options, cheapest first:
+
+| Option | How it isolates | Cost and effort | Notes |
+|---|---|---|---|
+| A. Nested VM on the GitHub runner | The job starts a Hyper-V VM (Windows Server image) on the hosted runner and runs installer + `guard_check` inside it over PowerShell Direct; only the VM's network is blocked | No new spend (Actions minutes only); 1-2 days to script; adds ~10-15 min per run | Needs nested virtualization on `windows-2022` hosted runners (supported on the larger runners; must be checked on the standard ones before relying on it) and a Windows evaluation VHD download each run (~10 GB) or a cache |
+| B. Self-hosted runner on a cloud VM, tests in a second VM | Runner lives on the host; Kiwi is installed in a guest VM | A Windows-capable host with nested virtualization: roughly $40-90/month if left on, less if started per run | A self-hosted runner on a private repo is acceptable; it must never run fork PRs; adds patching and secret-hygiene work |
+| C. Self-hosted runner on the owner's main PC with a Hyper-V guest | Same as B on hardware the owner already has | No spend | Ties CI to the PC being on; the PC's own internet must never be the one blocked; Smart App Control applies to the host |
+| D. Keep the hosted runner and read the report (today) | none | none | The badge stays unreliable for this one job; every check result is still exact |
+
+Recommendation: stay on D until releases need a green badge, then try A first (no new spend). Nothing above has been set up.
 
 Exact test counts (final run):
 
