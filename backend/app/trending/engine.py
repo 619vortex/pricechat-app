@@ -600,7 +600,14 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
     from app.models.enums import Platform, SocialAction
     from app.social.guard import ActionRequest, SocialActionGuard
     from app.social.x_service import make_x_client
+    from app.newsdesk.engine import STOPPED, emergency_stop
 
+    stop = emergency_stop(db)
+    if stop:  # the moment of sending, as the News Desk's X and Telegram lanes: a stop switched on after the post was queued still holds it
+        post.note = f"Not sent: {stop}"[:500]  # still queued (never claimed, never marked sent): it goes when the stop is lifted, if still fresh
+        db.commit()
+        logger.warning("trending: post %s not sent: %s", post.id, stop)
+        return STOPPED
     if not _claim(db, post):
         return "already claimed"
     db.refresh(post)
