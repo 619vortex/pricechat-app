@@ -205,9 +205,10 @@ const COMMANDS = {
   },
 
   async dns(key) {
-    const n = managedNode(key);
-    const s = await findServer(api(), key);
-    const ip = s.public_net.ipv4.ip;
+    const n = CAT.nodes[key];
+    const hostOpt = opt("--host");
+    // external nodes (Linode etc.): the IP is given; managed nodes: the Hetzner server's own IP
+    const ip = L.dnsTarget(key, n, { hostOpt, serverIp: n?.external ? undefined : (await findServer(api(), key)).public_net.ipv4.ip });
     const now = await resolve4(n.host);
     if (now.length === 1 && now[0] === ip) return say(`${n.host} already points at ${ip}`);
     if (now.length) throw new Error(`${n.host} points at ${now.join(", ")}, not ${ip}: change it by hand after checking why`);
@@ -215,7 +216,7 @@ const COMMANDS = {
     say(`Adds A ${n.host} -> ${ip} on Vercel DNS (${CAT.dnsZone}).`);
     await approve(L.approvalPhrase("dns", key, 0, L.sha256(`${n.host} ${ip}`)));
     execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", ["vercel", "dns", "add", CAT.dnsZone, sub, "A", ip], { stdio: "inherit", shell: process.platform === "win32" });
-    say(`Added. Next: ! node vpn-node/infra/kiwi-infra.mjs install ${key}`);
+    say(`Added. Next: ! node vpn-node/infra/kiwi-infra.mjs install ${key}${n.external ? ` --host ${ip}` : ""}`);
   },
 
   async install(key) {
