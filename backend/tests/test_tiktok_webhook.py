@@ -108,7 +108,12 @@ def test_logs_never_carry_the_secret_signature_or_body(client: TestClient, app_k
     raw = body(content="private-content-xyz")
     h = signed(raw)
     client.post(URL, content=raw, headers=h)
-    client.post(URL, content=raw, headers={"TikTok-Signature": h["TikTok-Signature"][:-2] + "00"})
+    good = h["TikTok-Signature"]
+    # a forged signature: the last hex digit always changes (CI 2026-11-22: replacing the last two with "00" left a signature that
+    # already ended in "00" valid, about 1 run in 256, and the second post was a genuine duplicate, not a refusal)
+    forged = good[:-1] + ("0" if good[-1] != "0" else "1")
+    assert forged != good
+    client.post(URL, content=raw, headers={"TikTok-Signature": forged})
     text = caplog.text
     assert "accepted" in text and "refused" in text
     assert SECRET not in text and h["TikTok-Signature"].split("s=")[1] not in text and "private-content-xyz" not in text
