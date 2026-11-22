@@ -52,7 +52,10 @@ EVENT_SAID = re.compile(r"\b(attacks?|attacked|arson|sabotage|strikes?|struck|ha
                         r"shot down|downed|invad\w+|behind)\b", re.I)
 
 
-CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b)", re.I)
+# production 2026-11-22 (16:00 Dubai slot skipped): "Two injured, one critically, in Iranian attack on industrial plant in Bahrain" (one
+# story, two outlets) was refused as a round-up: a part that opens with a preposition continues the same sentence, like "as ..."
+CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b|"
+                          r"in\b|on\b|at\b|near\b|off\b|from\b|into\b|over\b|outside\b|inside\b)", re.I)
 
 
 def is_roundup(title: str) -> bool:
