@@ -403,12 +403,19 @@ def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
             elif money >= 500e6:
                 take("strong", f"${money / 1e6:,.0f}M liquidated")
     main = main_clause(head)  # "Bahrain intercepts Iranian aerial attacks as Tehran says it attacked...": the side clause's "says" is not the story
+    reported = reported_clause(head)
+    if reported:  # "Bahrain says Iranian attack causes fire at...": the state's own account of a hard event is the sourcing, not a statement
+        main = main_clause(reported)
     if ev.kin() == "conflict":
         acting = ev.states
         if WAR_MAJOR.search(head):
             take("major", WAR_MAJOR.search(head).group(0))  # type: ignore[union-attr]
         elif len(acting) >= 2 and HARD_CONFLICT.search(main) and not ROUTINE.search(main):
             take("strong", f"{' and '.join(sorted(acting))}: a state strikes another")
+    # production 2026-11-21: "Tankers hit in Strait of Hormuz as Iran tightens grip on shipping" and "Russian cargo ship struck by drone in
+    # Baltic" were refused as having no consequence. A merchant ship attacked on a sea lane is a shipping hit, whatever the number of ships
+    if hit := ship_hit(head, ev):
+        take("strong", hit)
     if ev.kin() == "disruption" and SCALE_DISRUPTION.search(head) and not OVER.search(head) and not REACTION.search(head) and not ROUTINE.search(main):
         take("strong", f"a {SCALE_DISRUPTION.search(head).group(0)} disruption, happening now")  # type: ignore[union-attr]
     if CENTRAL_BANK.search(head) and RATE_ACT.search(head):
@@ -419,7 +426,7 @@ def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
         take("strong", f"a country's {SUPPLY.search(head).group(0)} {RELATIVE.search(head).group(0)}")  # type: ignore[union-attr]
     if ev.family == "disaster" and deaths == 0 and re.search(r"\bmagnitude ([7-9](?:\.\d)?)\b", text, re.I):
         take("strong", "a magnitude 7+ earthquake")
-    if ev.kin() == "conflict" and not ROUTINE.search(head) and (m := INFRA_HIT.search(head)):
+    if ev.kin() == "conflict" and not ROUTINE.search(reported or head) and (m := INFRA_HIT.search(head)):
         take("major" if CHOKE_CLOSED.search(head) else "strong", f"energy or shipping hit: {m.group(0)}")
     if (m := SHIPS_HIT.search(head)) and (n := next((g for g in m.groups() if g), "0")) and (int(n) if n.isdigit() else WORDS.get(n.lower(), 0)) >= 2:
         take("strong", f"{m.group(0)}")
@@ -427,7 +434,7 @@ def _consequence(title: str, summary: str, ev: Event) -> tuple[str, str]:
         take("strong", f"a sanction or tariff that takes effect: {m.group(0)}")
     if MACRO_WORD.search(main) and (m := MACRO_EXTREME.search(head)):  # the economy is the subject, not shoe prices ("...amid inflation")
         take("strong", f"economic data at an extreme: {m.group(0)}")
-    if (m := INDEX_REGIME.search(head)):
+    if (m := INDEX_REGIME.search(head)) and "?" not in head and not ROUTINE.search(head):  # "Worst week since 2008? Analysts weigh..." asks
         take("strong", f"a market regime: {m.group(0)}")
     if (m := PRICE_EXTREME.search(head)) and (INDEX.search(head) or CRYPTO.search(head) or OIL.search(head) or MAJOR_ASSET.search(head)) and not HEDGE.search(head):
         take("strong", f"a price extreme: {m.group(0)}")
@@ -460,7 +467,53 @@ MACRO_EXTREME = _rx(r"\b(highest|lowest|fastest|slowest|biggest|record|since (?:
                     r"(?:\d+|one|two|three|five|ten)-year (?:high|low)|in a year|"
                     r"unexpected\w*|surpris\w*|contracts?|contracted|recession)\b")
 INDEX_REGIME = _rx(r"\b(?:enters?|entered|in|into|tips? into)\s+(?:a )?(correction|bear market)\b|\bcircuit breakers?\b|\btrading (?:halted|halt)\b|"
-                   r"\bworst (?:day|week|month) since\b")
+                   # "tech's worst week on Wall Street since 2020" (production 2026-11-21, refused): a few words may sit between
+                   r"\bworst (?:day|week|month)(?: [\w'’]+){0,3} since (?:(?:19|20)\d\d|the)\b")
+# a merchant ship struck (one is enough) and the sea lane it was on: the shipping-hit rule in _consequence
+SHIP_STRUCK = _rx(r"\b(?:ships?|tankers?|vessels?|freighters?)\s+(?:(?:was|were|is|are|has been|have been)\s+)?(?:hit|struck|attacked|seized|sunk|ablaze|on fire|damaged)\b|"
+                  r"\b(?:hits?|struck|strikes?|attack(?:s|ed)?|seiz(?:es|ed)|sinks?|sank)\s+(?:a |an |the |two |three |several )?(?:\w+ )?(?:ships?|tankers?|vessels?|freighters?)\b")
+SEA_LANE = _rx(r"\b(strait of hormuz|hormuz|red sea|bab el-mandeb|suez|gulf of (?:oman|aden|finland)|persian gulf|baltic|north sea|malacca|black sea)\b")
+# "<state or official body> says <hard event>": the wire's attribution (one rule: who speaks must be a state or an official body, and what is
+# reported must itself be a hard event, unhedged). "Kraken says trades stand", "Trump says ... might" stay statements
+ATTRIBUTION = _rx(r"^(?P<who>[\w'’.\- ]{2,40}?)\s+(?:says?|said|confirms?|confirmed|reports?|reported)\s+(?:that\s+)?(?P<rest>.+)$")
+OFFICIAL = _rx(r"\b(ministry|military|army|navy|coast guard|authorities|police|government|armed forces|state media|defen[cs]e forces)\b")
+
+
+def reported_clause(head: str) -> str:
+    """The reported event of "<state or official> says <hard event>", or "" when the headline isn't that shape."""
+    m = ATTRIBUTION.match(head or "")
+    if not m:
+        return ""
+    who, rest = m.group("who"), m.group("rest")
+    if not (OFFICIAL.search(who) or any(rx.search(who) for rx in STATES.values())):
+        return ""
+    if HEDGE.search(rest) or ROUTINE.search(main_clause(rest)) or THREAT.search(main_clause(rest)):  # reported, but not done yet
+        return ""
+    return rest if HARD_CONFLICT.search(main_clause(rest)) or SHIP_STRUCK.search(main_clause(rest)) else ""
+
+
+# what makes a struck ship an attack: a weapon or an armed actor in the headline (a named state counts, via Event.states). Weather, ice and
+# collisions are not attacks; a seizure that has ended is not news now
+HOSTILE = _rx(r"\b(drones?|missiles?|mines?|torpedo\w*|rockets?|projectiles?|attack\w*|strikes?|explosi\w*|militants?|houthis?|hezbollah|hamas|"
+              r"irgc|navy|naval|warships?|commandos?|seiz\w*|hijack\w*|pirates?|gunmen|armed)\b")
+NATURAL = _rx(r"\b(lightning|iceberg|storm|waves?|weather|collision|collides?|collided|ran aground|runs? aground)\b")
+ENDED = _rx(r"\b(released|freed|let go|returns?|returned|last (?:week|month|year)|anniversary|a year after)\b")
+THREAT = _rx(r"\b(threat\w*|to (?:attack|strike|hit|seize|sink|target)|will|would|plans?|planned|prepar\w*|ready to)\b")  # not done yet
+
+
+def ship_hit(head: str, ev: Event) -> str:
+    """'shipping hit: ...' when a merchant ship is struck or seized on a named sea lane by a weapon or an armed actor, now; else ''."""
+    main = main_clause(reported_clause(head) or head)
+    m = SHIP_STRUCK.search(main)
+    lane = SEA_LANE.search(head)
+    if not m or not lane or ROUTINE.search(main) or HEDGE.search(head) or THREAT.search(main) or NATURAL.search(head) or ENDED.search(head) \
+            or OVER.search(head):
+        return ""
+    if not (HOSTILE.search(head) or ev.states):
+        return ""
+    return f"shipping hit: {m.group(0)} ({lane.group(0)})"
+
+
 NOT_YET = _rx(r"\b(stud(?:y|ies|ying)|pilots?|piloting|trials?|testing|to test|tests|explor\w*|consider\w*|plans? to|planning|aims? to|to help|"
               r"research\w*|evaluat\w*|proof of concept|memorandum|mou|partnership to)\b")
 PRICE_EXTREME = _rx(r"\b(record high|all-time high|new record|(?:lowest|highest) (?:level |close )?since (?:(?:january|february|march|april|may|june|july|"
@@ -861,6 +914,8 @@ def audience(title: str, summary: str, a: Assessment) -> tuple[int, str, str]:
         angles.append((15, f"a major attack: {', '.join(STATE_NAMES.get(x, x.title()) for x in sorted(ev.states))}"))
     if WAR_MAJOR.search(head) or CHOKE_CLOSED.search(head) or INFRA_HIT.search(head):
         angles.append((15, f"escalation: {(WAR_MAJOR.search(head) or CHOKE_CLOSED.search(head) or INFRA_HIT.search(head)).group(0)}"))  # type: ignore[union-attr]
+    elif hit := ship_hit(head, ev):  # a sea lane's risk is oil's and trade's
+        angles.append((15, hit))
     if m := SCANDAL.search(head):
         angles.append((10, f"a scandal or crime: {m.group(0)}"))
     if "disruption, happening now" in (a.why or "") and re.search(OUTAGE.pattern + r"|\bground stop\b|\bgrounded\b|\bflights? (?:cancel|halt)\w*",
