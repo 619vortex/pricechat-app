@@ -69,6 +69,7 @@ LIMITS = {
     "vpn_device": Bucket(burst=5, every=600, shared_burst=60, shared_every=5),  # Kiwi VPN device creation, per member
     "vpn_key": Bucket(burst=30, every=5, shared_burst=600, shared_every=0.1),  # anonymous key requests, per client
     "vpn_new": Bucket(burst=5, every=600, shared_burst=120, shared_every=5),  # new anonymous keys, per client
+    "vpn_reviewer": Bucket(burst=5, every=120, shared_burst=60, shared_every=5),  # the store-review password sign-in, per client
     "vpn_pay": Bucket(burst=6, every=120, shared_burst=120, shared_every=2),  # starting a payment, per client
     # starting a Google / X / Telegram sign-in (each stores a pending attempt) and the Telegram widget check: a person
     # needs a handful; the shared bucket is generous so a flood from one script can't lock everyone else out of signing in

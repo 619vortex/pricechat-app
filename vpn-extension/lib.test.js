@@ -66,4 +66,6 @@ test("the manifest asks for what it needs and no more", async () => {
   assert.deepEqual([...m.permissions].sort(), ["privacy", "proxy", "storage", "webRequest", "webRequestAuthProvider"]);
   for (const bad of ["cookies", "history", "tabs", "scripting", "webRequestBlocking"]) assert.ok(!m.permissions.includes(bad));
   assert.equal(m.content_scripts, undefined);
+  // only the account API and the check the proxy answers: the proxy's password request reaches the extension without access to every site
+  assert.deepEqual(m.host_permissions, ["https://pricechat.live/*", "http://check.kiwi-vpn.invalid/*"]);
 });

@@ -25,7 +25,7 @@ from app.members.catalog import ensure_catalog
 from app.models.members import Entitlement, Member, MemberEntitlement
 from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnServer, VpnSettings
 from app.security.secrets import protect, unprotect
-from app.vpn import billing, keys, node
+from app.vpn import billing, keys, node, reviewer
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,8 @@ def access(db: Session, acct: VpnAccount, r: Rules | None = None, now: datetime 
             return "blocked"
     if acct.status != "active":
         return "blocked"
+    if reviewer.is_reviewer(member):
+        return "active" if reviewer.in_time(now) else "blocked"
     if acct.is_owner or (r.free if r is not None else not settings(db).payments_enabled):
         return "active"
     if (until := _aware(acct.paid_until)) is not None and until > now:
@@ -145,10 +147,16 @@ def qualifies(db: Session, who: Who, r: Rules | None = None) -> tuple[bool, str 
     return False, "Your account can't use Kiwi VPN." if state == "blocked" else NOT_SUBSCRIBED
 
 
+def _reviewing(db: Session, who: Who) -> bool:
+    """The store-review account, within its time (app/vpn/reviewer.py)."""
+    member = who if isinstance(who, Member) else db.get(Member, who.member_id) if who.member_id is not None else None
+    return reviewer.is_reviewer(member) and reviewer.in_time()
+
+
 def eligibility(db: Session, member: Who, preview: bool = False) -> tuple[bool, str | None]:
     """preview: the owner, signed in to Admin, testing while the VPN is closed to everyone else."""
     s = settings(db)
-    if not s.enabled and not preview:
+    if not s.enabled and not preview and not _reviewing(db, member):
         return False, "Kiwi VPN isn't open yet."
     return qualifies(db, member)
 
@@ -262,9 +270,12 @@ def overview(db: Session, who: Who, preview: bool = False) -> dict[str, Any]:
     ok, reason = eligibility(db, acct, preview)
     counts = _device_counts(db)
     servers = list(db.scalars(select(VpnServer).where(VpnServer.enabled.is_(True)).order_by(VpnServer.name, VpnServer.id)))
+    review = _reviewing(db, acct)
+    if review:
+        servers = [v for v in servers if v.name == reviewer.SERVER]
     best = recommended_id(servers, counts)
     devices = db.scalars(select(VpnDevice).where(VpnDevice.account_id == acct.id).order_by(VpnDevice.created_at, VpnDevice.id))
-    out = {"enabled": s.enabled or preview, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": s.max_devices,
+    out = {"enabled": s.enabled or preview or review, "test_mode": preview and not s.enabled, "payments": payments, "eligible": ok, "reason": reason, "max_devices": 1 if review else s.max_devices,
            "servers": [{"id": v.id, "name": v.name, "region": v.region, "country_code": v.country_code, "online": v.online,
                         "load": _load(v, counts.get(v.id, 0)), "adblock": v.adblock, "recommended": v.id == best, "browser": bool(v.proxy_host)} for v in servers],
            "devices": [device_out(d) for d in devices], "usage": usage_out(db, acct, s),
@@ -338,6 +349,8 @@ def create_device(db: Session, who: Who, name: str, server_id: int, preview: boo
     ok, reason = eligibility(db, acct, preview)
     if not ok:
         raise VpnError(reason or "Kiwi VPN isn't available.", 403)
+    if _reviewing(db, acct):
+        raise VpnError("This review account is for the browser extension only.", 403)
     s = settings(db)
     max_devices = OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
     if s.monthly_cap_gb > 0 and not acct.is_owner:
@@ -399,7 +412,8 @@ def create_browser(db: Session, who: Who, server_id: int, replace: str | None = 
         if use["paused_until"] or use["used_bytes"] >= use["cap_bytes"]:
             raise VpnError(f"You've used this month's {s.monthly_cap_gb} GB of Kiwi VPN. It resumes on the 1st of next month.", 403)
     server = db.get(VpnServer, server_id)
-    if server is None or not server.enabled or not server.proxy_host:
+    review = _reviewing(db, acct)
+    if server is None or not server.enabled or not server.proxy_host or (review and server.name != reviewer.SERVER):
         raise VpnError("That server isn't available for the browser extension.", 404)
     if not server.online:
         raise VpnError("This server is offline right now. Pick another one or try again later.", 503)
@@ -407,7 +421,7 @@ def create_browser(db: Session, who: Who, server_id: int, replace: str | None = 
     for old in [b for b in mine if b.username == replace]:
         _remove_browser(db, old)
         mine.remove(old)
-    limit = OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
+    limit = 1 if review else OWNER_MAX_DEVICES if acct.is_owner else s.max_devices
     while len(mine) >= limit:
         _remove_browser(db, mine.pop(0))
     username, password = secrets.token_hex(12), secrets.token_urlsafe(32)

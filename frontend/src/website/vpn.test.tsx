@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserCard, VpnPage, ago, bytes, flag, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
+import { BrowserCard, VpnPage, VpnReviewerPage, ago, bytes, flag, pickServer, resumeDay, type VpnDevice, type VpnState } from "./vpn";
 import { STORE_LINKS, visitorBrowser } from "./vpnConfig";
 
 /** TEST FIXTURES only: a fake Kiwi VPN API. No real config, keys or servers. */
@@ -80,6 +80,28 @@ describe("Free while payments are off", () => {
   const EDGE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0";
   const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
   const PHONE = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36";
+
+  it("signs a reviewer in with an email and password, and says what to do next", async () => {
+    serve({ "/api/website/home": [200, HOME], "POST /api/members/auth/reviewer": [200, { signed_in: true }] });
+    const { container } = render(<VpnReviewerPage />);
+    expect(document.querySelector('meta[name="robots"]')?.getAttribute("content")).toMatch(/noindex/);
+    fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: "r@example.com" } });
+    fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await settle();
+    expect(calls.find((c) => c.startsWith("POST /api/members/auth/reviewer"))).toContain('"email":"r@example.com"');
+    expect(screen.getByRole("status").textContent).toMatch(/press the switch/);
+  });
+
+  it("shows a reviewer why the sign-in failed", async () => {
+    serve({ "/api/website/home": [200, HOME], "POST /api/members/auth/reviewer": [401, { detail: "That email or password isn't right, or this account has ended." }] });
+    const { container } = render(<VpnReviewerPage />);
+    fireEvent.change(container.querySelector('input[type="email"]')!, { target: { value: "r@example.com" } });
+    fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await settle();
+    expect(screen.getByRole("alert").textContent).toMatch(/isn't right/);
+  });
 
   it("tells the browsers apart", () => {
     expect(visitorBrowser(EDGE)).toBe("edge");

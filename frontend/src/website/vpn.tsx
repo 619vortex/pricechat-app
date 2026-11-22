@@ -156,6 +156,50 @@ export function VpnPage() {
   );
 }
 
+/** The store-review account's sign-in: a plain email and password. Everyone else signs in at /join. */
+export function VpnReviewerPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await memberApi("/members/auth/reviewer", { method: "POST", body: JSON.stringify({ email: email.trim(), password }) });
+      setDone(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't sign in. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SitePage title="Kiwi VPN store review" description="Sign-in for browser store reviewers." path="/vpn/reviewer" noindex>
+      <section className="vpn">
+        <section className="vpn-card vpn-start" aria-labelledby="vpn-reviewer">
+          <h2 id="vpn-reviewer">Kiwi VPN store review</h2>
+          {done ? (
+            <p className="site-muted" role="status">You're signed in. Click the Kiwi VPN icon in your browser's toolbar and press the switch to connect.</p>
+          ) : (
+            <form className="vpn-form" onSubmit={(e) => void submit(e)}>
+              <p className="site-muted">For browser store reviewers. Everyone else, <a className="vpn-privacy" href="/join">sign in here</a>.</p>
+              <label className="site-field"><span>Email</span>
+                <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+              <label className="site-field"><span>Password</span>
+                <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+              {error && <p className="site-error" role="alert">{error}</p>}
+              <button className="site-button" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+            </form>
+          )}
+        </section>
+      </section>
+    </SitePage>
+  );
+}
+
 /** Free: one way in, nothing about money. A key from before still works. */
 function FreeStart({ onKey }: { onKey: (k: string) => void }) {
   const [typed, setTyped] = useState("");

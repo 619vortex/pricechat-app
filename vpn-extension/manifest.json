@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kiwi VPN",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Private browsing with Kiwi VPN, from Price Chat. One switch sends your browser's traffic through an encrypted connection.",
   "homepage_url": "https://pricechat.live/vpn",
   "minimum_chrome_version": "116",
@@ -14,7 +14,8 @@
     "privacy"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://pricechat.live/*",
+    "http://check.kiwi-vpn.invalid/*"
   ],
   "background": {
     "service_worker": "background.js",

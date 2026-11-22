@@ -23,6 +23,7 @@ const work = mkdtempSync(join(tmpdir(), "kiwi-ext-"));
 const ext = join(work, "ext");
 cpSync(join(HERE, ".."), ext, { recursive: true, filter: (p) => !p.includes("e2e") && !p.endsWith(".test.js") });
 writeFileSync(join(ext, "lib.js"), readFileSync(join(ext, "lib.js"), "utf8").replace('"https://pricechat.live/api/members/vpn"', `"${API}/api/members/vpn"`));
+writeFileSync(join(ext, "manifest.json"), readFileSync(join(ext, "manifest.json"), "utf8").replace('"https://pricechat.live/*"', '"http://127.0.0.1/*"'));  // the fake API stands in for pricechat.live
 
 // ----- the browser and a tiny DevTools client -----
 const port = 9400 + Math.floor(Math.random() * 400);

@@ -529,6 +529,30 @@ def email_verify(payload: EmailVerify, response: Response, db: DbSession, runtim
             "member": {**service.header_out(db, member), "username_chosen": member.username_chosen}}
 
 
+class ReviewerSignIn(StrictInput):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/members/auth/reviewer")
+def reviewer_sign_in(payload: ReviewerSignIn, request: Request, response: Response, db: DbSession, runtime: Runtime, pc_session: SessionToken = None) -> dict[str, bool]:
+    """The store-review account's email and password (app/vpn/reviewer.py). Refuses everything unless it's configured."""
+    from app.security.rate_limit import LIMITS
+    from app.vpn import reviewer
+
+    wait = LIMITS["vpn_reviewer"].hit(_client_ip(request))
+    if wait is not None:
+        raise HTTPException(429, "Too many tries. Please wait a few minutes.", headers={"Retry-After": str(wait)})
+    try:
+        member = reviewer.sign_in(db, runtime.settings, payload.email, payload.password)
+    except MemberError as exc:
+        raise HTTPException(401, str(exc)) from exc
+    if pc_session:
+        service.end_session(db, pc_session)
+    _set_session(response, runtime.settings, service.new_session(db, member, 30))
+    return {"signed_in": True}
+
+
 class UsernameCheck(StrictInput):
     username: str = Field(min_length=1, max_length=32)
 

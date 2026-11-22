@@ -10,7 +10,7 @@ Browsers can't run WireGuard, so this covers the browser only; the WireGuard app
 
 ## Files
 
-`background.js` owns the proxy setting and answers the proxy's password request. `popup.*` only displays state and never sees the password. `lib.js` holds the logic with no browser APIs.
+It has site access only to pricechat.live and the proxy's check address: tested in Edge, the proxy's password request reaches it on any page without access to every site. `background.js` owns the proxy setting and answers the proxy's password request. `popup.*` only displays state and never sees the password. `lib.js` holds the logic with no browser APIs.
 
 ## Tests
 
