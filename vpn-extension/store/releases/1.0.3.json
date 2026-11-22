@@ -1,0 +1,34 @@
+{
+  "version": "1.0.3",
+  "zip": "vpn-extension/store/dist/kiwi-vpn-chrome-1.0.3.zip",
+  "sha256": "659e6300127e7d4787a719858118a442be825c95e71a03bd4f683e1586e24ee3",
+  "bytes": 27034,
+  "prepared_at": "2026-11-06T18:15:20.751Z",
+  "store_before": {
+    "live": [
+      "1.0.0"
+    ]
+  },
+  "tests": {
+    "passed": true,
+    "unit": true,
+    "node": true,
+    "browser_source": [
+      {
+        "ok": true,
+        "pass": 31,
+        "fail": []
+      }
+    ],
+    "browser_store_zip": [
+      {
+        "ok": true,
+        "pass": 31,
+        "fail": []
+      }
+    ]
+  },
+  "uploaded": null,
+  "submitted": null,
+  "live": null
+}
