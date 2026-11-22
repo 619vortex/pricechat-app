@@ -1,11 +1,12 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import { TrendBadge } from "../components/community";
 import { PriorityBadge } from "../components/social";
 import type { CommandCenter, PilotCheckStatus } from "../api/types";
-import { adminHome } from "../api/home";
-import { Advanced, ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, formatTime, label, relativeTime, statusTone, type Tone } from "../components/ui";
+import { adminHome, type TodoItem } from "../api/home";
+import { ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, formatTime, label, relativeTime, statusTone, type Tone } from "../components/ui";
 import { CrossSignalList } from "./XPage";
 
 const CONN: Record<string, [string, "good" | "warn" | "bad" | "neutral"]> = {
@@ -51,13 +52,23 @@ function PilotPanel({ d }: { d: CommandCenter }) {
   );
 }
 
-/** Home: what's waiting for you (each with the page that handles it), whether the main parts are running, and a few
- *  numbers. The older, more technical overview is folded underneath. */
+/** A short tag for each kind of waiting item (the home to-do keys); unknown keys fall back to their own label. */
+const KIND: Record<string, string> = {
+  signals: "Signal", bot_access: "VIP bot", knight: "Reward", vip: "Reward", workers: "Workers", approvals: "Post", drafts: "Draft", memories: "AI memory",
+};
+const kindOf = (t: TodoItem) => KIND[t.key] ?? t.label;
+
+/** Home (redesign, owner 2026-11-22): what needs you (one list, filtered by kind, each with a link to the page that handles it),
+ *  alerts, whether everything is running and a few numbers. Growth and the older, more technical details are folded underneath. */
 export function Overview() {
   const h = useApi(adminHome, 20000);
+  const [kind, setKind] = useState("all");
   const d = h.data;
   if (!d) return h.failure ? <ApiErrorBanner error={h.failure} /> : <Loading />;
   const waiting = d.todo.filter((t) => t.count > 0);
+  const total = waiting.reduce((n, t) => n + t.count, 0);
+  const kinds = [...new Set(waiting.map(kindOf))];
+  const shown = kind === "all" ? waiting : waiting.filter((t) => kindOf(t) === kind);
   const s = d.status;
   const scanAge = s.last_scan_at ? (Date.now() - new Date(s.last_scan_at).getTime()) / 60000 : null;
   const [tgText, tgTone] = CONN[s.telegram] ?? [label(s.telegram), "neutral"];
@@ -70,41 +81,89 @@ export function Overview() {
     { name: "AI", text: s.ai ? "Working" : "Offline", tone: s.ai ? "good" : "bad", to: "/settings" },
     { name: "Background jobs", text: s.failing_jobs.length ? `${s.failing_jobs.length} having problems` : "All fine", tone: s.failing_jobs.length ? "warn" : "good", to: "/settings?tab=jobs" },
   ];
+  // alerts: anything that is wrong right now, each with the page that fixes it (nothing here switches anything itself)
+  const alerts: { tone: "bad" | "warn"; title: string; detail: string; to: string; action: string }[] = [];
+  if (s.kill_switch) alerts.push({ tone: "bad", title: "Emergency stop is ON", detail: "Nothing is posted or sent.", to: "/settings", action: "Turn it off in Settings" });
+  if (s.failing_jobs.length) alerts.push({ tone: "warn", title: `${s.failing_jobs.length} background job${s.failing_jobs.length === 1 ? "" : "s"} having problems`, detail: s.failing_jobs.join(", "), to: "/settings?tab=jobs", action: "Open jobs" });
+  if (!s.ai) alerts.push({ tone: "bad", title: "The AI is offline", detail: "Drafts, summaries and replies wait until it is back.", to: "/settings", action: "Open Settings" });
+  for (const x of health.slice(1, 3)) if (x.tone === "bad") alerts.push({ tone: "bad", title: `${x.name}: ${x.text}`, detail: "Its connection reports a problem.", to: x.to, action: "Open" });
+  if (scanAge != null && scanAge >= 40) alerts.push({ tone: "warn", title: "The signal scanner hasn't checked recently", detail: `Last check ${relativeTime(s.last_scan_at)}.`, to: "/trading-os", action: "Open Signals" });
+
   return (
-    <>
+    <div className="ov">
       <PageHeader title="Home" subtitle="What needs you, and whether everything is running." />
       {s.kill_switch && <div className="banner banner-error"><strong>Emergency stop is ON.</strong> Nothing is posted or sent. <Link className="link" to="/settings">Turn it off in Settings</Link></div>}
 
-      <Card title={waiting.length ? `Needs you (${waiting.reduce((n, t) => n + t.count, 0)})` : "Needs you"}>
-        {waiting.length === 0 ? <p className="home-clear">✓ All clear. Nothing is waiting for you.</p> : (
-          <ul className="home-todo">
-            {waiting.map((t) => (
-              <li key={t.key}>
-                <Link to={t.to}><b>{t.count}</b><span>{t.label}</span><span className="home-go">Open →</span></Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <div className="home-numbers">
+      <div className="ov-kpis">
+        <Stat label="Waiting for you" value={total} tone={total ? "warn" : "good"} />
         <Stat label="Members" value={d.numbers.members.toLocaleString()} hint={`+${d.numbers.new_members_7d} this week`} />
         <Stat label="Signals this week" value={d.numbers.signals_7d} hint={`${d.numbers.open_signals} open now`} />
+        <Stat label="Background jobs" value={s.failing_jobs.length ? `${s.failing_jobs.length} failing` : "All fine"} tone={s.failing_jobs.length ? "warn" : "good"} />
       </div>
 
-      <Card title="Is everything running?">
-        <ul className="home-health">
-          {health.map((x) => (
-            <li key={x.name}><Link to={x.to}><span>{x.name}</span><Badge tone={x.tone}>{x.text}</Badge></Link></li>
-          ))}
-        </ul>
-        {s.failing_jobs.length > 0 && <p className="muted small">Having problems: {s.failing_jobs.join(", ")}</p>}
-      </Card>
+      <div className="ov-grid">
+        <section className="card ov-needs" aria-labelledby="ov-needs-title">
+          <div className="card-head ov-needs-head">
+            <h2 id="ov-needs-title">{total ? `Needs you (${total})` : "Needs you"}</h2>
+            {kinds.length > 1 && (
+              <div className="ov-chips" role="group" aria-label="Filter by kind">
+                <button type="button" className={`ov-chip${kind === "all" ? " active" : ""}`} aria-pressed={kind === "all"} onClick={() => setKind("all")}>All {total}</button>
+                {kinds.map((k) => {
+                  const n = waiting.filter((t) => kindOf(t) === k).reduce((a, t) => a + t.count, 0);
+                  return <button key={k} type="button" className={`ov-chip${kind === k ? " active" : ""}`} aria-pressed={kind === k} onClick={() => setKind(k)}>{k} {n}</button>;
+                })}
+              </div>
+            )}
+          </div>
+          {waiting.length === 0 ? <p className="home-clear">✓ All clear. Nothing is waiting for you.</p> : (
+            <ul className="ov-rows">
+              {shown.map((t) => (
+                <li key={t.key} className="ov-row">
+                  <span className={`ov-tag ov-tag-${t.key}`}>{kindOf(t)}</span>
+                  <span className="ov-row-text"><b>{t.count}</b> {t.label}</span>
+                  <Link className="ov-review" to={t.to}>Review</Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-      <Advanced label="More details: setup checklist, community, AI and recent activity">
-        <Details />
-      </Advanced>
-    </>
+        <div className="ov-side">
+          <Card title={alerts.length ? `Alerts (${alerts.length})` : "Alerts"} className="ov-alerts">
+            {alerts.length === 0 ? <p className="muted small">No alerts. Everything that reports a status is fine.</p> : (
+              <ul className="ov-alert-list">
+                {alerts.map((a) => (
+                  <li key={a.title} className={`ov-alert ov-alert-${a.tone}`}>
+                    <span className="ov-alert-dot" aria-hidden="true" />
+                    <div><strong>{a.title}</strong><div className="muted small">{a.detail}</div><Link className="link" to={a.to}>{a.action}</Link></div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+          <Card title="Is everything running?">
+            <ul className="home-health">
+              {health.map((x) => (
+                <li key={x.name}><Link to={x.to}><span>{x.name}</span><Badge tone={x.tone}>{x.text}</Badge></Link></li>
+              ))}
+            </ul>
+            {s.failing_jobs.length > 0 && <p className="muted small">Having problems: {s.failing_jobs.join(", ")}</p>}
+          </Card>
+        </div>
+      </div>
+
+      <details className="advanced ov-panel">
+        <summary>Growth: visitors, sign-ups and affiliate volume</summary>
+        <div className="ov-panel-links">
+          <Link className="link" to="/analytics">Open Analytics</Link>
+          <Link className="link" to="/affiliate">Open Affiliate</Link>
+        </div>
+      </details>
+      <details className="advanced ov-panel">
+        <summary>Recent activity and details: setup checklist, community, AI</summary>
+        <div className="stack"><Details /></div>
+      </details>
+    </div>
   );
 }
 
