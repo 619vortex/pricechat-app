@@ -52,10 +52,12 @@ EVENT_SAID = re.compile(r"\b(attacks?|attacked|arson|sabotage|strikes?|struck|ha
                         r"shot down|downed|invad\w+|behind)\b", re.I)
 
 
+CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b)", re.I)
 # production 2026-11-22 (16:00 Dubai slot skipped): "Two injured, one critically, in Iranian attack on industrial plant in Bahrain" (one
-# story, two outlets) was refused as a round-up: a part that opens with a preposition continues the same sentence, like "as ..."
-CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b|"
-                          r"in\b|on\b|at\b|near\b|off\b|from\b|into\b|over\b|outside\b|inside\b)", re.I)
+# story, two outlets) was refused as a round-up. A closing part that opens with a preposition says where or how it happened: the same
+# sentence. Only the LAST part: in the middle, "Fed cuts rates, Over 100 killed in Kenya floods, Apple earnings beat" or "Oil jumps,
+# On Wall Street stocks slide, Gold record high" is still a list of stories.
+CLOSING_PLACE = re.compile(r"^(?:in|on|at|near|off|from|into|over|outside|inside)\b", re.I)
 
 
 def is_roundup(title: str) -> bool:
@@ -68,6 +70,8 @@ def is_roundup(title: str) -> bool:
     # a continuation clause ("..., Saying 'It's Life'", "..., as shares fall") makes it one sentence, not a list (production 2026-11-17:
     # "Trump Downplays Microsoft, JPMorgan Outages, Saying 'It's Life'" was refused as a round-up)
     if any(CONTINUATION.match(p) for p in parts[1:]):
+        return False
+    if len(parts) > 1 and CLOSING_PLACE.match(parts[-1]):
         return False
     return len(parts) >= 3 and all(len(p.split()) >= _SEGMENT_WORDS for p in parts)
 
