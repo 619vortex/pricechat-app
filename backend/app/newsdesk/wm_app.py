@@ -63,6 +63,19 @@ def clean_signal(s: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def feed_health(payload: dict[str, Any], feeds: dict[str, dict[str, Any]], signals: int) -> dict[str, Any]:
+    """feeds_ok / feeds_failed as the bridge counted them (1.1.0+), else counted here (older bridges: every feed not ok is failed).
+    `bad`: no feed answered, or zero signals (2026-11-22: an orphaned sidecar made every feed answer 401 for hours, unnoticed)."""
+    ok, failed = _num(payload.get("feeds_ok")), _num(payload.get("feeds_failed"))
+    if ok is None:
+        ok = sum(1 for f in feeds.values() if f["ok"])
+    if failed is None:
+        failed = sum(1 for f in feeds.values() if not f["ok"])
+    ok_n, failed_n = max(0, int(ok)), max(0, int(failed))
+    why = next((f"{k}: {f['note']}" for k, f in feeds.items() if not f["ok"] and f["note"]), "")
+    return {"feeds_ok": ok_n, "feeds_failed": failed_n, "bad": ok_n == 0 or signals == 0, "bad_note": why[:200]}
+
+
 def save(db: Session, worker_name: str, payload: dict[str, Any], now: datetime) -> dict[str, Any]:
     signals = [c for c in (clean_signal(s) for s in (payload.get("signals") or [])[:MAX_SIGNALS] if isinstance(s, dict)) if c]
     feeds = {
@@ -79,9 +92,12 @@ def save(db: Session, worker_name: str, payload: dict[str, Any], now: datetime) 
         "signals": signals,
         "summary": payload.get("summary") if isinstance(payload.get("summary"), dict) else {},
     }
+    value.update(feed_health(payload, feeds, len(signals)))
     if len(json.dumps(value, default=str)) > MAX_BYTES:
         raise WmError("snapshot too large")
     row = db.get(ExSetting, KEY)
+    prev = dict(row.value or {}) if row is not None else {}
+    value["bad_since"] = (prev.get("bad_since") or now.isoformat()) if value["bad"] else None  # how long it has been broken (monitor)
     if row is None:
         row = ExSetting(key=KEY, value=value, updated_at=now)
         db.add(row)

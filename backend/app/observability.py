@@ -284,7 +284,7 @@ def _m(key: str, label: str, status: str, detail: str, alert: str | None = None,
 
 
 def silence_monitors(db: Session, sched: Any, now: datetime | None = None) -> list[dict[str, Any]]:
-    """The four silence monitors' states (read-only; never raises: a monitor that can't be read says so)."""
+    """The silence monitors' states (read-only; never raises: a monitor that can't be read says so)."""
     from sqlalchemy import func
 
     from app.models.routing import ScheduledJob
@@ -362,6 +362,108 @@ def silence_monitors(db: Session, sched: Any, now: datetime | None = None) -> li
     except Exception as exc:  # noqa: BLE001
         db.rollback()
         out.append(_m("failing_jobs", "Background jobs failing", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+    out += pc_monitors(db, now)
+    return out
+
+
+# --- the owner's PC (2026-11-22): the World Monitor bridge pushed "signals: 0" for hours (an orphaned sidecar answered every feed
+# with 401) and nobody was told, because the pushes themselves stayed fresh. The PC is off at night: report silence is judged in
+# Dubai daytime only, counted from the start of the day, so a PC switched on in the morning never pages the owner.
+DUBAI = timezone(timedelta(hours=4))  # no daylight saving
+PC_DAY_HOURS = range(8, 23)  # Dubai local hours the PC is expected on
+WM_QUIET = timedelta(minutes=30)  # no World Monitor push for this long (it pushes every 5 min)
+WM_BROKEN = timedelta(minutes=30)  # every feed failing / zero signals for this long
+GPU_OFFLINE = timedelta(hours=2)  # the News Desk GPU worker hasn't checked in for this long
+
+
+def _pc_day_start(now: datetime) -> datetime | None:
+    """The start of today's Dubai daytime (UTC), or None outside it."""
+    local = now.astimezone(DUBAI)
+    if local.hour not in PC_DAY_HOURS:
+        return None
+    return local.replace(hour=PC_DAY_HOURS.start, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def _iso(v: Any) -> datetime | None:
+    try:
+        return _aware(datetime.fromisoformat(str(v)))
+    except (TypeError, ValueError):
+        return None
+
+
+def pc_monitors(db: Session, now: datetime) -> list[dict[str, Any]]:
+    """World Monitor reports / World Monitor feeds / News Desk GPU worker (never raises)."""
+    out: list[dict[str, Any]] = []
+    day = _pc_day_start(now)
+    hours = f"{PC_DAY_HOURS.start:02d}:00-{PC_DAY_HOURS.stop:02d}:00 Dubai"
+    try:
+        from app.models.exchange import ExSetting
+        from app.newsdesk import wm_app
+
+        row = db.get(ExSetting, wm_app.KEY)
+        v = dict(row.value or {}) if row is not None else {}
+        if not v:
+            out.append(_m("wm_reports", "World Monitor bridge: reports", "off", "the PC bridge has never reported"))
+            out.append(_m("wm_feeds", "World Monitor bridge: feeds", "off", "the PC bridge has never reported"))
+        else:
+            last = _iso(v.get("received_at"))
+            quiet_for = now - max(last, day) if last is not None and day is not None else now - last if last is not None else None
+            if last is not None and now - last <= WM_QUIET:
+                st = "ok"
+            elif day is None:
+                st = "hold"  # the PC is allowed to be off at night
+            else:
+                st = "alert" if quiet_for is None or quiet_for > WM_QUIET else "hold"
+            out.append(_m("wm_reports", "World Monitor bridge: reports", st, f"last report {_ago(now, last)}",
+                          f"Price Chat alert: the World Monitor bridge on the PC has sent no report for over "
+                          f"{WM_QUIET.total_seconds() / 60:.0f} min (last: {_ago(now, last)}).\nThe PC is off, or the 'Price Chat World Monitor' "
+                          f"task stopped: restart it on the PC.\nJudged {hours} only.\nTime: {_when(now)}"))
+            fresh = last is not None and now - last <= timedelta(seconds=wm_app.STALE_S)
+            since = _iso(v.get("bad_since"))
+            counts = f"{v.get('feeds_ok', '?')} feeds answering, {v.get('feeds_failed', '?')} failing, {len(v.get('signals') or [])} signals"
+            if not fresh:
+                st = "hold"  # no recent snapshot to judge (the reports monitor covers it)
+            elif not v.get("bad"):
+                st = "ok"
+            else:
+                st = "alert" if since is None or now - since > WM_BROKEN else "hold"
+            note = f"\nFirst problem: {v['bad_note']}" if v.get("bad_note") else ""
+            out.append(_m("wm_feeds", "World Monitor bridge: feeds", st, counts + (f", broken since {_ago(now, since)}" if v.get("bad") else ""),
+                          f"Price Chat alert: the World Monitor bridge has reported no working feed / zero signals for over "
+                          f"{WM_BROKEN.total_seconds() / 60:.0f} min (since {_ago(now, since)}; {counts}).{note}\n"
+                          f"On the PC: restart the 'Price Chat World Monitor' task (worldmonitor.out.log says why).\nTime: {_when(now)}"))
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out.append(_m("wm_reports", "World Monitor bridge: reports", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+        out.append(_m("wm_feeds", "World Monitor bridge: feeds", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
+    try:
+        from app.models.brand_manager import BmWorker
+        from app.models.newsdesk import NdSettings
+        from app.newsdesk import render_queue
+
+        workers = [w for w in db.scalars(select(BmWorker).where(BmWorker.enabled.is_(True))) if (w.info or {}).get("newsdesk")]
+        s = db.get(NdSettings, 1)
+        label = "News Desk GPU worker (PC)"
+        if not workers:
+            out.append(_m("gpu_worker", label, "off", "no News Desk GPU worker has checked in"))
+        elif s is not None and not render_queue.enabled(s.state or {}):
+            out.append(_m("gpu_worker", label, "off", "GPU pictures are switched off"))
+        else:
+            last = max((_aware(w.last_seen_at) for w in workers if w.last_seen_at), default=None)
+            if render_queue.online(db, now):
+                st = "ok"
+            elif day is None:
+                st = "hold"
+            else:
+                st = "alert" if last is None or now - max(last, day) > GPU_OFFLINE else "hold"
+            out.append(_m("gpu_worker", label, st, f"last seen {_ago(now, last)}",
+                          f"Price Chat alert: the News Desk GPU worker on the PC has been offline for over "
+                          f"{GPU_OFFLINE.total_seconds() / 3600:.0f} h (last seen: {_ago(now, last)}).\nNews Desk posts go out without painted "
+                          f"pictures until it is back. Check the PC is on and the 'Price Chat News Desk GPU' task is running.\n"
+                          f"Judged {hours} only.\nTime: {_when(now)}"))
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        out.append(_m("gpu_worker", "News Desk GPU worker (PC)", "warn", f"couldn't read ({type(exc).__name__})", notify=False))
     return out
 
 
