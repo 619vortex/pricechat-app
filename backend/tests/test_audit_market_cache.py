@@ -171,7 +171,9 @@ def test_the_warm_up_job_rebuilds_before_the_ttl(db: Session, monkeypatch: pytes
     assert history.is_cached(("base", market.DEFAULT_GRADE.label), market.BASE_TTL)
     market.warm(db, utcnow())
     assert len(builds) == 1 and market.base_rows(db, market.DEFAULT_GRADE) is not first
-    assert history.is_cached(("base", market.DEFAULT_GRADE.label), 1)  # brand new: a visitor at T+900 finds it fresh
+    # brand new: a visitor at T+900 finds it fresh. "Younger than 60 s" rather than 1 s: on GitHub's slower CI runners the rebuild
+    # itself took over a second (main, run 45006596768), and the point is new versus the 600 s-old rows it replaced
+    assert history.is_cached(("base", market.DEFAULT_GRADE.label), 60)
     _age(("base", market.DEFAULT_GRADE.label), market.BASE_TTL - 300)
     market.base_rows(db, market.DEFAULT_GRADE)
     assert len(builds) == 1  # requests never rebuilt anything
