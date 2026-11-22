@@ -1452,10 +1452,35 @@ def note_skip(db: Session, now: datetime, p: Policy) -> None:
     skips[slot.isoformat()] = SKIP_REASON
     row.state = {**(row.state or {}), "skipped_slots": dict(sorted(skips.items())[-24:])}
     # what the desk passed over, in the logs (2026-11-16: two overnight slots went empty and production had no record of why)
-    best = sorted(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")), key=lambda e: (-e.virality, e.id))[:3]
+    waiting = list(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")))
+    best = sorted(waiting, key=lambda e: (-e.virality, e.id))[:3]
     logger.info("newsdesk events: skipped the %s Dubai slot; best waiting: %s", slot_label(slot),
                 " | ".join(f"#{e.id} {int(e.virality)} {e.evidence} \"{(e.headline or e.title or '')[:70]}\": {(e.why or '')[:120]}" for e in best) or "none")
+    # and why, for the owner alert when slots keep going empty (2026-11-22: every slot from 11-21 12:00 UTC was skipped and nobody was told)
+    details = dict((row.state or {}).get("skip_details") or {})
+    details[slot.isoformat()] = {"reasons": refusal_reasons(waiting),
+                                 "best": (f"#{best[0].id} scores {best[0].virality:g} ({best[0].evidence}) \"{(best[0].headline or best[0].title or '')[:100]}\": "
+                                          f"{(best[0].why or 'no reason recorded')[:160]}") if best else ""}
+    row.state = {**(row.state or {}), "skip_details": dict(sorted(details.items())[-24:])}
     db.commit()
+
+
+def _reason_key(why: str) -> str:
+    """Refusals that differ only in their numbers are one reason ("scores 41, under the bar of 56" and "scores 38, ...")."""
+    return re.sub(r"\s+", " ", re.sub(r"\d[\d.,:%]*", "#", why or "")).strip()[:160]
+
+
+def refusal_reasons(waiting: list[NdEvent], top: int = 5) -> list[list[Any]]:
+    """The commonest reasons the waiting candidates were refused: [[one example, how many], ...], commonest first."""
+    seen: dict[str, list[Any]] = {}
+    for e in waiting:
+        why = (e.why or "no reason recorded").strip()
+        k = _reason_key(why)
+        if k in seen:
+            seen[k][1] += 1
+        else:
+            seen[k] = [why[:200], 1]
+    return sorted(seen.values(), key=lambda r: -r[1])[:top]
 
 
 def skipped_slots(db: Session) -> dict[str, str]:
@@ -1527,7 +1552,85 @@ async def alert_slots(db: Session, now: datetime, p: Policy) -> int:
                 sent += await notify_owner(db, key, f"News Desk: the {at.astimezone(DUBAI):%H:%M} Dubai {(urgency_of(ev) or 'major') + ' market move' if (ev.facts or {}).get('market_major') else 'breaking post'} "
                                            f"(event #{ev.id}) was not delivered to {platform}: {status}" + (f" ({(note or '')[:240]})" if note else "") + "."
                                            f"\n{(ev.headline or '')[:160]}\nCheck Admin > Terminal.", now=now)
+    sent += await _alert_skip_run(db, now, p)
     return sent
+
+
+SKIP_ALERT_AFTER = 2  # empty (skipped) slots in a row before the owner is told; told again after each further SKIP_ALERT_AFTER
+
+
+async def _alert_skip_run(db: Session, now: datetime, p: Policy) -> int:
+    """Owner, 2026-11-22: production skipped every slot from 11-21 12:00 UTC into 11-22 and nobody was alerted (a skip is by design, so it
+    never counted as missed). Slots are followed in order once each is decided (filled, skipped, missed); the run of skipped slots in a row
+    is kept in the desk's state (skip_run). At SKIP_ALERT_AFTER skips in a row: ONE owner alert with the top refusal reasons and the best
+    waiting candidate; no repeat until SKIP_ALERT_AFTER more skips or a slot is filled. A filled slot after an alerted run sends one
+    "recovered" message. A missed slot ends the run quietly (it has its own alert). Never raises."""
+    from app.alerts import notify_owner
+    from app.models.newsdesk import NdSettings
+
+    try:
+        row = db.get(NdSettings, 1)
+        if row is None:
+            return 0
+        state = row.state or {}
+        run = dict(state.get("skip_run") or {})
+        seen = datetime.fromisoformat(run["seen"]) if run.get("seen") else None
+        details = state.get("skip_details") or {}
+        decided = [s for s in schedule(db, now, p)["slots"] if s["state"] in ("filled", "skipped", "missed", "before")
+                   and (seen is None or datetime.fromisoformat(s["at"]) > seen)]
+        if not decided:
+            return 0
+        sent = 0
+        for s in decided:
+            run["seen"] = s["at"]
+            if s["state"] == "skipped":
+                if not run.get("first"):
+                    run.update(first=s["at"], count=0, alerted=0)
+                run["count"] = int(run.get("count") or 0) + 1
+                run["last"] = s["at"]
+                continue
+            if s["state"] == "filled" and run.get("alerted"):
+                key = f"newsdesk:skipped:{run['first']}:recovered"
+                if _fresh(key, now):
+                    sent += await notify_owner(db, key, f"News Desk recovered: the {s['dubai']} Dubai slot was filled (event #{s['event']}) after "
+                                               f"{run.get('count')} empty slots in a row.\n{(s.get('headline') or '')[:160]}", now=now)
+            run = {"seen": run["seen"]}  # filled, missed or before the schedule: the run of skips, if any, is over
+        count, first = int(run.get("count") or 0), run.get("first")
+        if first and count >= SKIP_ALERT_AFTER and count // SKIP_ALERT_AFTER > int(run.get("alerted") or 0):
+            key = f"newsdesk:skipped:{first}:{count // SKIP_ALERT_AFTER}"
+            run["alerted"] = count // SKIP_ALERT_AFTER
+            if _fresh(key, now):
+                sent += await notify_owner(db, key, _skip_run_text(run, details, now, p), now=now)
+            row = db.get(NdSettings, 1)  # read again: notify_owner commits
+        row.state = {**(row.state or {}), "skip_run": run}
+        db.commit()
+        return sent
+    except Exception as e:  # noqa: BLE001 - the skip alert never breaks the slot alerts or the lane that asked
+        logger.warning("newsdesk events: the skipped-slots alert failed (%s)", type(e).__name__)
+        db.rollback()
+        return 0
+
+
+def _skip_run_text(run: dict[str, Any], details: dict[str, Any], now: datetime, p: Policy) -> str:
+    first, last = datetime.fromisoformat(run["first"]), datetime.fromisoformat(run["last"])
+    slots = [t for t in sorted(details) if first <= datetime.fromisoformat(t) <= last]
+    merged: dict[str, list[Any]] = {}
+    for t in slots:
+        for example, n in (details[t].get("reasons") or []):
+            k = _reason_key(example)
+            if k in merged:
+                merged[k][1] += n
+            else:
+                merged[k] = [example, n]
+    top = sorted(merged.values(), key=lambda r: -r[1])[:3]
+    best = next((details[t].get("best") for t in reversed(slots) if details[t].get("best")), "")
+    lines = [f"News Desk: {run['count']} slots in a row went empty (skipped), from the {slot_label(first)} Dubai slot ({first:%m-%d %H:%M} UTC) "
+             f"to the {slot_label(last)} Dubai slot ({last:%m-%d %H:%M} UTC). No story cleared the bar of {p.regular_bar}."]
+    lines.append("Top reasons the waiting stories were refused:" if top else "Top reasons: none recorded (no candidates were waiting, or the skips came before this alert existed).")
+    lines += [f"- {example[:200]} ({n}x)" for example, n in top]
+    lines.append(f"Best waiting: {best}" if best else "Best waiting: none")
+    lines.append("Check Admin > X > News Desk.")
+    return "\n".join(lines)
 
 
 def schedule(db: Session, now: datetime, p: Policy) -> dict[str, Any]:
