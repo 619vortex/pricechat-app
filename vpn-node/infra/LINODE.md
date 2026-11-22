@@ -32,6 +32,17 @@ In Cloud Manager (or `linode-cli linodes create --type g6-nanode-1 --region gb-l
 Ubuntu 24.04, Nanode 1 GB, the SSH key, the `kiwi-node` firewall, no backups (stateless node), private IP off.
 Note the public IPv4 (and the SSH host key fingerprint from the Linode's LISH console: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`).
 
+### 1b. Swap (1 GB Nanode: a safety margin, not working memory)
+Before `install`, over SSH as root on the new Linode (it changes nothing the install checks look at):
+```
+fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+printf 'vm.swappiness=10\n' > /etc/sysctl.d/90-kiwi-swap.conf && sysctl -p /etc/sysctl.d/90-kiwi-swap.conf
+swapon --show && free -m
+```
+Expected: `/swapfile 1G`, swappiness 10. At idle the node (WireGuard, unbound, agent, browser proxy) uses about 0.5 GB of RAM; swap
+should stay near 0 in normal use. Swap in steady use (step 4 memory test) means the node needs the 2 GB plan.
+
 ## 2. DNS, install, register (approval phrase at each step)
 ```
 ! node vpn-node/infra/kiwi-infra.mjs dns lon1 --host <ipv4>
@@ -57,6 +68,22 @@ the region is invisible to users until step 5.
   three times, switch country while connected, disconnect (IP back to the runner's).
 - Backend: Admin shows the server online for 24 h with no flaps (vpn.sync every 5 min; 2 failed syncs = offline).
 - Existing Germany, Finland and Ashburn devices unaffected (their servers untouched; e2e baseline still passes).
+
+## 4b. London pilot: real-world speed, memory and security (before the other three are bought)
+`lon1` is built first and stays testers-only. The other three regions are ordered only after all of this passes and the owner approves.
+
+| Test | How | Pass |
+|---|---|---|
+| Throughput | from a test client connected to lon1 (e.g. the KIWIVPN runner or a tester's PC): `iperf3 -c <iperf host in London> -t 30` and `-R`; plus a speedtest through the tunnel | >= 300 Mbit/s down and up through the tunnel; node CPU < 80% during the run |
+| Latency | ping the node from the client region; DNS lookup time through the tunnel | London RTT from the EU < 40 ms; DNS answers < 50 ms |
+| Concurrency | 20 parallel streams (`iperf3 -P 20`) for 2 min | no drops; CPU < 90%; agent still answers (Admin shows online) |
+| Memory | `free -m` and `swapon --show` on the node at idle and during the concurrency test; `systemctl status unbound kiwi-vpn-agent kiwi-vpn-proxy "wg-quick@wg0"` | RAM used < 800 MB; swap used < 50 MB; no service restarts (`journalctl -p err -b` empty) |
+| Security, outside | port scan from outside any Kiwi tunnel: TCP 22, 80, 443 and UDP 51820 only; `curl https://lon1.vpn.pricechat.live` -> 407; 8443 times out | exactly that |
+| Security, node | `kiwi-vpn-doctor` all pass; nftables default drop; client-to-client blocked; 10/8, 172.16/12, 192.168/16, 169.254/16 and 100.64/10 unreachable through the tunnel; SMTP 25/465/587 blocked; IPv6 through the tunnel rejected (no leak, no hang) | all pass |
+| Leaks and reconnection | the KIWIVPN e2e run (step 4): DNS only through the node, no IPv6 leak, kill switch, reconnect x3, switch country while connected | all PASS for lon1 |
+| Stability | 24 h online in Admin with no flaps; vpn.sync every 5 min | no offline events |
+
+Results go in the PR for the next three nodes; any FAIL stops the rollout until fixed.
 
 ## 5. Show to everyone (owner)
 Only when step 4 is all green: Admin > the server > "Show to everyone". Then add the host to the uptime monitor (`UPTIME_PROXIES`
