@@ -10,6 +10,7 @@ import { CommunityPage } from "../pages/Community";
 import { MembersPage } from "../pages/Members";
 import { SystemHub } from "../pages/hubs/SystemHub";
 import { Overview } from "../pages/Overview";
+import { TestChat } from "../pages/brain/TestChat";
 import { Layout } from "./Layout";
 
 /** TEST FIXTURES only: fake API answers keyed by path (everything else is a 404, which the embedded pages show as an error). */
@@ -284,6 +285,21 @@ describe("System and Overview: one page each (stage 5)", () => {
       expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
       expect(container.querySelector(".nav-link.active")!.textContent).toContain("Overview");
       unmount();
+    }
+  });
+});
+
+describe("AI voice test chat (found by the stage 5 browser pass)", () => {
+  it("doesn't crash when the browser's scrollIntoView returns a Promise (newer Chromium)", async () => {
+    serve();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = (() => Promise.resolve()) as unknown as typeof original;
+    try {
+      const { unmount } = render(<MemoryRouter><TestChat paused={false} onActivate={() => {}} /></MemoryRouter>);
+      await flush();
+      expect(() => unmount()).not.toThrow();  // the effect's cleanup used to be the returned Promise: "destroy is not a function"
+    } finally {
+      Element.prototype.scrollIntoView = original;
     }
   });
 });

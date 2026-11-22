@@ -77,7 +77,9 @@ export function TestChat({ paused, onActivate }: { paused: boolean; onActivate: 
     };
   }, [conversationId]);
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), [lines, busy]);
+  // braces: newer browsers return a Promise from scrollIntoView, and an effect must return nothing or a cleanup function
+  // (returning it crashed the AI Brain page with "destroy is not a function", found 2026-11-22)
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [lines, busy]);
 
   useEffect(() => {
     if (!busy) return;
