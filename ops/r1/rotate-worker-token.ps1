@@ -105,6 +105,11 @@ function Get-Workers {
 # How many of the three worker scripts are running (a venv's pythonw launches two processes per script).
 function Count-Workers { @(Get-Workers | ForEach-Object { $cl = $_.CommandLine; $scripts | Where-Object { $cl -like "*worker\$_*" } } | Sort-Object -Unique).Count }
 
+# pythonw processes whose command line this window can't read: started from an Administrator window while this one isn't (seen
+# 2026-11-22: the AI worker restarted by an elevated run was invisible to a normal window, so it would be counted as stopped and
+# couldn't be stopped, and a restart would start a second copy).
+function Get-HiddenWorkers { @(Get-CimInstance Win32_Process -Filter "name like 'pythonw%'" | Where-Object { -not $_.CommandLine }) }
+
 function Restart-Workers {
     foreach ($t in $tasks) { if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue } }
     Get-Workers | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -161,6 +166,7 @@ function Wait-Workers($sizes) {
 if (-not (Test-Path $env_file)) { throw "worker.env not found at $env_file" }
 
 if ($Rollback) {
+    if ((Get-HiddenWorkers).Count) { throw "some worker processes were started from an Administrator window and can't be stopped from this one: open PowerShell as Administrator and run again (nothing was changed)" }
     $from = if ($Backup) { $Backup } else { Get-ChildItem $secrets -Filter "worker.env.*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName }
     if (-not $from -or -not (Test-Path $from)) { throw "no backup found in ${secrets}: nothing to roll back to" }
     Write-Host "R1 ROLLBACK: restoring $from"
@@ -184,9 +190,12 @@ Say "worker.env: present; PRICECHAT_WORKER_TOKEN line: $(if ($hasLine) {'yes'} e
 Say "git: branch $branch, worker.env $(if ($tracked) {'TRACKED (will be untracked)'} else {'already untracked'}), other staged changes: $(if ($staged) {'YES (step 2 would stop)'} else {'none'})"
 foreach ($t in $tasks) { $s = Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue; Say "task '$t': $(if ($s) {$s.State} else {'not installed'})" }
 Say "worker scripts running: $(Count-Workers) of 3"
+$hidden = Get-HiddenWorkers
+if ($hidden.Count) { Say "WARNING: $($hidden.Count) pythonw process(es) can't be inspected from this window (started from an Administrator window). Run this script from an Administrator PowerShell." }
 Say "backups so far: $(@(Get-ChildItem $secrets -Filter 'worker.env.*' -ErrorAction SilentlyContinue).Count) in $secrets"
 if (-not $Apply) { Write-Host "Preview only. Create the new worker in Admin first, then run again with -Apply."; return }
 if (-not $hasLine) { throw "worker.env has no PRICECHAT_WORKER_TOKEN line: nothing to replace" }
+if ($hidden.Count) { throw "some worker processes were started from an Administrator window and can't be stopped from this one: open PowerShell as Administrator and run again (nothing was changed)" }
 if ($tracked -and $branch -ne "main") { throw "the main checkout is on '$branch', not main: switch it back, then run again" }
 if ($tracked -and $staged) { throw "other changes are staged in ${repo}; commit or unstage them first so step 2 commits only the untrack" }
 
