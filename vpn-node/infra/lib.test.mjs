@@ -7,6 +7,32 @@ import * as L from "./lib.mjs";
 
 const FIX = JSON.parse(readFileSync(new URL("./fixture-hetzner-2026-11-07.json", import.meta.url)));
 const CAT = JSON.parse(readFileSync(new URL("./catalog.json", import.meta.url)));
+test("dnsTarget: managed nodes use their Hetzner IP, external nodes only an explicit public --host", () => {
+  assert.equal(L.dnsTarget("ash1", CAT.nodes.ash1, { serverIp: "203.0.113.10" }), "203.0.113.10");
+  assert.throws(() => L.dnsTarget("ash1", CAT.nodes.ash1, { hostOpt: "8.8.8.8", serverIp: "203.0.113.10" }), /only for external nodes/);
+  for (const key of ["sin2", "lon1", "ams1", "tyo1"]) {
+    const n = CAT.nodes[key];
+    assert.equal(n.external, true); assert.equal(n.managed, false); assert.equal(n.provider, "linode");
+    assert.ok(n.host.endsWith(`.vpn.${CAT.dnsZone}`));
+    assert.equal(L.dnsTarget(key, n, { hostOpt: "8.8.8.8" }), "8.8.8.8");
+    assert.throws(() => L.dnsTarget(key, n, {}), /give its public IPv4 with --host/);
+    for (const bad of ["10.0.0.5", "192.168.1.2", "100.64.0.1", "127.0.0.1", "not-an-ip"]) {
+      assert.throws(() => L.dnsTarget(key, n, { hostOpt: bad }), /isn't a public IPv4/, `${key} ${bad}`);
+    }
+  }
+  assert.throws(() => L.dnsTarget("hel1", CAT.nodes.hel1, {}), /isn't built by this tool/);  // Helsinki: never touched by the tool
+  assert.throws(() => L.dnsTarget("nope", undefined, {}), /isn't in catalog/);
+});
+
+test("the four Linode regions are new countries with their own hostnames; existing nodes unchanged", () => {
+  const want = { sin2: "SG", lon1: "GB", ams1: "NL", tyo1: "JP" };
+  for (const [k, cc] of Object.entries(want)) assert.equal(CAT.nodes[k].country, cc);
+  const hosts = Object.values(CAT.nodes).map((n) => n.host);
+  assert.equal(new Set(hosts).size, hosts.length);
+  assert.equal(CAT.nodes.hel1.managed, false); assert.equal(CAT.nodes.fsn1.managed, false);
+  assert.equal(CAT.nodes.ash1.managed, true);
+});
+
 const live = (over = {}) => ({ pricing: FIX.pricing, serverTypes: FIX.serverTypes, servers: [], firewalls: [],
   sshKeys: [{ id: 7, name: "owner", fingerprint: CAT.sshKeyFingerprint }], ...over });
 

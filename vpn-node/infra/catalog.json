@@ -53,6 +53,58 @@
                                "name":  "United States (Oregon)",
                                "region":  "US West",
                                "capacity":  250
+                           },
+                  "sin2":  {
+                              "managed":  false,
+                              "external":  true,
+                              "provider":  "linode",
+                              "linodeType":  "g6-nanode-1",
+                              "linodeRegion":  "sg-sin-2",
+                              "host":  "sin2.vpn.pricechat.live",
+                              "country":  "SG",
+                              "name":  "Singapore",
+                              "region":  "Asia",
+                              "capacity":  150,
+                              "note":  "Linode Nanode 1 GB, $5/mo, 1 TB pooled then $5/TB; replaces Hetzner sin1 (never installed) once verified"
+                           },
+                  "lon1":  {
+                              "managed":  false,
+                              "external":  true,
+                              "provider":  "linode",
+                              "linodeType":  "g6-nanode-1",
+                              "linodeRegion":  "gb-lon",
+                              "host":  "lon1.vpn.pricechat.live",
+                              "country":  "GB",
+                              "name":  "United Kingdom (London)",
+                              "region":  "Europe",
+                              "capacity":  150,
+                              "note":  "Linode Nanode 1 GB, $5/mo, 1 TB pooled then $5/TB"
+                           },
+                  "ams1":  {
+                              "managed":  false,
+                              "external":  true,
+                              "provider":  "linode",
+                              "linodeType":  "g6-nanode-1",
+                              "linodeRegion":  "nl-ams",
+                              "host":  "ams1.vpn.pricechat.live",
+                              "country":  "NL",
+                              "name":  "Netherlands (Amsterdam)",
+                              "region":  "Europe",
+                              "capacity":  150,
+                              "note":  "Linode Nanode 1 GB, $5/mo, 1 TB pooled then $5/TB"
+                           },
+                  "tyo1":  {
+                              "managed":  false,
+                              "external":  true,
+                              "provider":  "linode",
+                              "linodeType":  "g6-nanode-1",
+                              "linodeRegion":  "jp-tyo-3",
+                              "host":  "tyo1.vpn.pricechat.live",
+                              "country":  "JP",
+                              "name":  "Japan (Tokyo)",
+                              "region":  "Asia",
+                              "capacity":  150,
+                              "note":  "Linode Nanode 1 GB, $5/mo, 1 TB pooled then $5/TB"
                            }
               }
 }

@@ -189,6 +189,23 @@ export function planFor(key, cat, live, { trafficTB = [0, 1, 2, 5] } = {}) {
   return { key, node, problems, steps, price, costs, body, firewallName: fwName, firewallRules: firewallRules(cat), hash };
 }
 
+/**
+ * Which IPv4 the DNS record of `node` must point at. Managed (Hetzner) nodes: the server this tool built (`serverIp`), and `--host`
+ * is refused. External nodes (another provider, e.g. Linode): only an explicit, public `--host`. Throws with the reason otherwise.
+ */
+export function dnsTarget(key, node, { hostOpt, serverIp } = {}) {
+  if (!node) throw new Error(`${key} isn't in catalog.json`);
+  if (node.external) {
+    if (!hostOpt) throw new Error(`${key} is an external node: give its public IPv4 with --host <ip>`);
+    if (!isPublicIPv4(hostOpt)) throw new Error(`--host ${hostOpt} isn't a public IPv4 address`);
+    return hostOpt;
+  }
+  if (hostOpt !== undefined) throw new Error(`--host is only for external nodes; ${key} is built by this tool`);
+  if (!node.managed) throw new Error(`${key} isn't built by this tool: ${node.note ?? ""}`);
+  if (!serverIp) throw new Error(`${key}: the Hetzner server has no public IPv4`);
+  return serverIp;
+}
+
 export function approvalPhrase(action, key, amount, hash) {
   return `${action} ${key} ${amount.toFixed(2)} ${hash.slice(0, 8)}`;
 }
