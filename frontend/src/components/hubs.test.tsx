@@ -1,0 +1,305 @@
+import { act, cleanup, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ContentHub } from "../pages/hubs/ContentHub";
+import { PublishingHub } from "../pages/hubs/PublishingHub";
+import { XPage } from "../pages/XPage";
+import { CommunityHub } from "../pages/hubs/CommunityHub";
+import { CommunityPage } from "../pages/Community";
+import { MembersPage } from "../pages/Members";
+import { SystemHub } from "../pages/hubs/SystemHub";
+import { Overview } from "../pages/Overview";
+import { TestChat } from "../pages/brain/TestChat";
+import { Layout } from "./Layout";
+
+/** TEST FIXTURES only: fake API answers keyed by path (everything else is a 404, which the embedded pages show as an error). */
+type Routes_ = Record<string, unknown>;
+const HOME = {
+  todo: [
+    { key: "drafts", label: "Content drafts to review", count: 2, to: "/content" },
+    { key: "memories", label: "Community memories to review", count: 1, to: "/content" },
+    { key: "signals", label: "Trading signals waiting for your OK", count: 0, to: "/trading-os" },
+  ],
+  status: { kill_switch: false, telegram: "connected", x: "not_configured", ai: true, last_scan_at: new Date().toISOString(), failing_jobs: [] },
+  numbers: { members: 1, new_members_7d: 0, signals_7d: 0, open_signals: 0 },
+};
+const BM = {
+  automation: { running: true, status: "running", reason: "", started_at: null, last_tick_at: null, emergency_stop: false, upload_consent: true, blocking: [], warnings: [] },
+  stats: { created_today: 3, published_today: 2, sent_to_drafts_today: 0, upcoming: 4, total_views: null, followers: null, followers_gained: null, best_video: null, measured_videos: 0 },
+};
+const SM = { worker: { registered: 1, online: true, name: "pc", last_seen_at: null, video_ai: null, voices: [], writer: null }, counts: { queued: 1, rendering: 0, ready: 5, failed: 0 } };
+
+function serve(extra: Routes_ = {}) {
+  const table: Routes_ = { "/api/admin/home": HOME, "/api/brand-manager/overview": BM, "/api/short-market/overview": SM, ...extra };
+  const calls: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const url = String(input).split("?")[0];
+    calls.push(url);
+    if (url in table) return new Response(JSON.stringify(table[url]), { status: 200 });
+    return new Response(JSON.stringify({ detail: "not in this test" }), { status: 404 });
+  }));
+  return calls;
+}
+const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); };
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+function shell(path: string, routes: ReactNode) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route element={<Layout />}>{routes}</Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+const contentRoutes = (
+  <>
+    <Route path="content" element={<ContentHub />} />
+    <Route path="brain" element={<ContentHub />} />
+    <Route path="knowledge" element={<ContentHub />} />
+    <Route path="brand-manager/*" element={<div data-testid="bm-tool">Brand Manager tool</div>} />
+  </>
+);
+
+describe("Content: one page instead of five tabs (stage 2)", () => {
+  it("has no section tabs, and shows live cards from the existing APIs", async () => {
+    serve();
+    const { container } = shell("/content", contentRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    expect(container.querySelector(".subnav")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Content" })).toBeTruthy();
+    const bm = screen.getByLabelText("Brand Manager");
+    expect(bm.textContent).toContain("Made today3");
+    expect(bm.textContent).toContain("Published today2");
+    expect(screen.getByLabelText("Short Market").textContent).toContain("Ready5");
+    const review = screen.getByLabelText("Waiting for review");
+    expect(review.textContent).toContain("Content drafts to review");
+    expect(review.textContent).toContain("Community memories to review");
+    // Ideas & drafts opens by default; AI voice and Knowledge are folded and not loaded
+    expect((container.querySelector("#panel-ideas") as HTMLDetailsElement).open).toBe(true);
+    expect((container.querySelector("#panel-ai") as HTMLDetailsElement).open).toBe(false);
+    expect(container.querySelector("#panel-ai .hub-panel-body")).toBeNull();
+    expect(container.querySelector(".nav-link.active")!.textContent).toContain("Content");
+  });
+
+  it("opens the AI voice panel for the old /brain address, and Knowledge for /knowledge", async () => {
+    serve();
+    const { container, unmount } = shell("/brain", contentRoutes);
+    await flush();
+    expect((container.querySelector("#panel-ai") as HTMLDetailsElement).open).toBe(true);
+    expect(container.querySelector(".nav-link.active")!.textContent).toContain("Content");
+    unmount();
+    const k = shell("/knowledge", contentRoutes);
+    await flush();
+    expect((k.container.querySelector("#panel-knowledge") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("shows Brand Manager's emergency stop on its card when it is on", async () => {
+    serve({ "/api/brand-manager/overview": { ...BM, automation: { ...BM.automation, emergency_stop: true, running: false, status: "stopped" } } });
+    shell("/content", contentRoutes);
+    await flush();
+    expect(screen.getByLabelText("Brand Manager").textContent).toContain("emergency stop on");
+  });
+
+  it("gives full tools a back link instead of tabs", async () => {
+    serve();
+    const { container } = shell("/brand-manager/studio", contentRoutes);
+    await flush();
+    expect(screen.getByTestId("bm-tool")).toBeTruthy();
+    const back = container.querySelector(".hub-back")!;
+    expect(back.textContent).toBe("← Content");
+    expect(back.getAttribute("href")).toBe("/content");
+    expect(container.querySelector(".area-head")).toBeNull();
+  });
+});
+
+const XOP = { x_status: "connected", username: "thepricechat", user_context: true, write_capability: {}, social_actions_active: true, dry_run: true, mode: "supervised", automatic: "locked" };
+const HOME_SIGNALS = { ...HOME, todo: [...HOME.todo.filter((t) => t.key !== "signals"), { key: "signals", label: "Trading signals waiting for your OK", count: 2, to: "/trading-os" }], numbers: { ...HOME.numbers, open_signals: 3, signals_7d: 9 } };
+const publishingRoutes = (
+  <>
+    <Route path="publishing" element={<PublishingHub />} />
+    <Route path="youtube" element={<PublishingHub />} />
+    <Route path="website" element={<PublishingHub />} />
+    <Route path="x" element={<XPage />} />
+  </>
+);
+
+describe("Publishing: one page instead of four tabs (stage 3)", () => {
+  it("shows X's mode and signals waiting, with no section tabs", async () => {
+    serve({ "/api/admin/home": HOME_SIGNALS, "/api/x/operator": XOP });
+    const { container } = shell("/publishing", publishingRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const x = screen.getByLabelText("X / Twitter");
+    expect(x.textContent).toContain("connected");
+    expect(x.textContent).toContain("DRY RUN");  // the live / dry-run state is visible on the page, never folded away
+    const sig = screen.getByLabelText("Signals");
+    expect(sig.textContent).toContain("Open now3");
+    expect(sig.textContent).toContain("Trading signals waiting for your OK");
+    expect(screen.getByLabelText("News Desk (Telegram + X)").querySelector("a")!.getAttribute("href")).toBe("/terminal");
+    expect(container.querySelector(".nav-link.active")!.textContent).toContain("Publishing");
+  });
+
+  it("opens YouTube and Website from their old addresses", async () => {
+    serve();
+    const a = shell("/youtube", publishingRoutes);
+    await flush();
+    expect((a.container.querySelector("#panel-youtube") as HTMLDetailsElement).open).toBe(true);
+    expect((a.container.querySelector("#panel-website") as HTMLDetailsElement).open).toBe(false);
+    a.unmount();
+    const b = shell("/website", publishingRoutes);
+    await flush();
+    expect((b.container.querySelector("#panel-website") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("gives X five real tabs and folds setup below them; old ?tab= links open the fold", async () => {
+    serve();
+    const { container } = shell("/x?tab=connection", publishingRoutes);
+    await flush();
+    const tabs = [...container.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+    expect(tabs).toEqual(["Overview", "Post ideas", "Mentions", "Our posts", "Analytics"]);
+    expect(screen.queryByText(/^More/)).toBeNull();
+    expect((container.querySelector("#x-connection") as HTMLDetailsElement).open).toBe(true);
+    for (const id of ["x-growth", "x-accounts", "x-topics"]) expect((container.querySelector(`#${id}`) as HTMLDetailsElement).open).toBe(false);
+    expect(container.querySelector(".hub-back")!.textContent).toContain("Publishing");
+  });
+});
+
+const HOME_REQ = { ...HOME, todo: [
+  { key: "bot_access", label: "Trading bot access requests", count: 2, to: "/trading-bot" },
+  { key: "knight", label: "$10 Knight reward claims", count: 1, to: "/rank-rewards?tab=knight" },
+  { key: "workers", label: "Worker reports to check", count: 0, to: "/workers" },
+] };
+const TG = (kill: boolean, mainnet: boolean) => ({ switches: { live: mainnet, kill, killed_at: null, gate_signal_enter: false, global_paused: false, mainnet_execution: mainnet, live_phrase: "x" }, referral: { codes: [], url: "" }, window_hours: 24 });
+const communityRoutes = (
+  <>
+    {["community", "trading-bot", "rank-rewards", "workers", "invite-bot", "invite-bot/send"].map((p) => <Route key={p} path={p} element={<CommunityHub />} />)}
+    <Route path="telegram" element={<CommunityPage />} />
+    <Route path="members" element={<MembersPage />} />
+  </>
+);
+
+describe("Community: one page instead of nine tabs (stage 4)", () => {
+  it("lists every member request in one list, and shows Telegram trading's switches (never folded)", async () => {
+    serve({ "/api/admin/home": HOME_REQ, "/api/tradingos/admin/telegram-trading": TG(true, false) });
+    const { container } = shell("/community", communityRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const req = screen.getByLabelText("Requests from members");
+    expect([...req.querySelectorAll(".hub-todo-label")].map((l) => l.textContent)).toEqual(["Trading bot access requests", "$10 Knight reward claims"]);
+    const tg = screen.getByLabelText("Telegram trading");
+    expect(tg.textContent).toContain("Emergency stopON");
+    expect(tg.textContent).toContain("Mainnet from TelegramOFF");
+    expect(tg.closest(".hub-panel")).toBeNull();  // a card on the page, not inside a fold
+    expect(tg.querySelector("a")!.getAttribute("href")).toBe("/telegram-trading");
+    for (const id of ["rewards", "vip", "workers", "invites"]) expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("opens the right panel for each old address", async () => {
+    for (const [path, id] of [["/trading-bot", "vip"], ["/rank-rewards", "rewards"], ["/workers", "workers"], ["/invite-bot/send", "invites"], ["/invite-bot", "invites"]]) {
+      serve();
+      const { container, unmount } = shell(path, communityRoutes);
+      await flush();
+      expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
+      expect(container.querySelector(".nav-link.active")!.textContent).toContain("Community");
+      unmount();
+    }
+  });
+
+  it("cuts Telegram community to six tabs and Members to four, folding setup below; old ?tab= links open the fold", async () => {
+    serve();
+    window.history.pushState({}, "", "/admin/telegram?tab=setup");
+    const t = shell("/telegram?tab=setup", communityRoutes);
+    await flush();
+    expect([...t.container.querySelectorAll('[role="tab"]')].map((x) => x.textContent)).toEqual(["Overview", "Questions", "Topics", "Messages", "Daily summaries", "Search"]);
+    expect((t.container.querySelector("#tg-setup") as HTMLDetailsElement).open).toBe(true);
+    expect(t.container.querySelector(".hub-back")!.textContent).toContain("Community");
+    t.unmount();
+    window.history.pushState({}, "", "/admin/members?tab=audit");
+    const m = shell("/members?tab=audit", communityRoutes);
+    await flush();
+    expect([...m.container.querySelectorAll('[role="tab"]')].map((x) => x.textContent)).toEqual(["Overview", "Find a member", "Missions", "Ranks"]);
+    expect((m.container.querySelector("#members-audit") as HTMLDetailsElement).open).toBe(true);
+    window.history.pushState({}, "", "/");
+  });
+});
+
+const VPN = { settings: { enabled: true, payments_enabled: false, max_devices: 3, monthly_cap_gb: 0 }, servers: [{}, {}], totals: { devices: 7, members: 5, active_24h: 2 } };
+const systemRoutes = (
+  <>
+    {["system", "settings", "api-keys", "activity", "kalshi"].map((p) => <Route key={p} path={p} element={<SystemHub />} />)}
+    {["approvals", "analytics", "affiliate"].map((p) => <Route key={p} path={p} element={<Overview />} />)}
+    <Route index element={<Overview />} />
+  </>
+);
+
+describe("System and Overview: one page each (stage 5)", () => {
+  it("shows every stop and switch with its state on the page, and Settings (the emergency stop) open", async () => {
+    serve({
+      "/api/admin/home": { ...HOME, status: { ...HOME.status, kill_switch: true } },
+      "/api/x/operator": { ...XOP, dry_run: false }, "/api/tradingos/admin/telegram-trading": TG(false, true), "/api/vpn/admin/overview": VPN,
+    });
+    const { container } = shell("/system", systemRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const list = screen.getByLabelText("Stops and switches");
+    expect(list.closest("details")).toBeNull();  // never folded
+    const rows = Object.fromEntries([...list.querySelectorAll("li")].map((li) => [li.querySelector("span")!.textContent, li.querySelector(".badge")?.textContent]));
+    expect(rows["Emergency stop (X actions, approvals)"]).toBe("ON");
+    expect(rows["X: dry run / live"]).toBe("LIVE");
+    expect(rows["Telegram trading: mainnet"]).toBe("ON");
+    expect(rows["Brand Manager: emergency stop"]).toBe("off");
+    expect(rows["Kiwi VPN: payments"]).toBe("off");
+    expect(rows["News Desk emergency stop and market-data pause"]).toBe("in Terminal");
+    expect([...list.querySelectorAll("a")].find((a) => a.textContent === "Price Chat Terminal")!.getAttribute("href")).toBe("/terminal");
+    expect((container.querySelector("#panel-settings") as HTMLDetailsElement).open).toBe(true);
+    expect(screen.getByLabelText("Kiwi VPN").textContent).toContain("Devices / members7 / 5");
+  });
+
+  it("opens API keys, Activity and Kalshi from their old addresses", async () => {
+    for (const [path, id] of [["/api-keys", "apikeys"], ["/activity", "activity"], ["/kalshi", "kalshi"], ["/settings", "settings"]]) {
+      serve();
+      const { container, unmount } = shell(path, systemRoutes);
+      await flush();
+      expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
+      expect(container.querySelector(".nav-link.active")!.textContent).toContain("System");
+      unmount();
+    }
+  });
+
+  it("gives Overview no tabs: Approvals and Growth are panels, opened by their old addresses", async () => {
+    serve();
+    const home = shell("/", systemRoutes);
+    await flush();
+    expect(home.container.querySelector(".area-head")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Overview" })).toBeTruthy();
+    expect((home.container.querySelector("#panel-approvals") as HTMLDetailsElement).open).toBe(false);
+    home.unmount();
+    for (const [path, id] of [["/approvals", "approvals"], ["/analytics", "growth"], ["/affiliate", "growth"]]) {
+      serve();
+      const { container, unmount } = shell(path, systemRoutes);
+      await flush();
+      expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
+      expect(container.querySelector(".nav-link.active")!.textContent).toContain("Overview");
+      unmount();
+    }
+  });
+});
+
+describe("AI voice test chat (found by the stage 5 browser pass)", () => {
+  it("doesn't crash when the browser's scrollIntoView returns a Promise (newer Chromium)", async () => {
+    serve();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = (() => Promise.resolve()) as unknown as typeof original;
+    try {
+      const { unmount } = render(<MemoryRouter><TestChat paused={false} onActivate={() => {}} /></MemoryRouter>);
+      await flush();
+      expect(() => unmount()).not.toThrow();  // the effect's cleanup used to be the returned Promise: "destroy is not a function"
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});

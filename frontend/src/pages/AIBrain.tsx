@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { AgentStatus } from "../api/types";
 import { ModelStatusCard } from "../components/ModelStatusCard";
+import { Fold } from "../components/hub";
 import { ApiErrorBanner, Badge, Card, Loading, PageHeader, Stat, Tabs, statusTone } from "../components/ui";
 import { BrandProfileEditor } from "./brain/BrandProfileEditor";
 import { CompiledPromptView } from "./brain/CompiledPromptView";
@@ -10,13 +11,12 @@ import { GoalsEditor } from "./brain/GoalsEditor";
 import { IdentityRules } from "./brain/IdentityRules";
 import { TestChat } from "./brain/TestChat";
 
-type Tab = "chat" | "brand" | "goals" | "identity" | "prompt";
+// Admin redesign (owner, 2026-11-22): three tabs for what's used often; identity & rules and the compiled prompt fold away below them.
+type Tab = "chat" | "brand" | "goals";
 const TABS: { key: Tab; label: string }[] = [
   { key: "chat", label: "Test chat" },
   { key: "brand", label: "Brand profile" },
   { key: "goals", label: "Goals" },
-  { key: "identity", label: "Identity & rules" },
-  { key: "prompt", label: "Compiled prompt" },
 ];
 
 export function AIBrain() {
@@ -99,8 +99,8 @@ export function AIBrain() {
           {tab === "chat" && <TestChat paused={b.config.status === "paused"} onActivate={() => void setStatus("active")} />}
           {tab === "brand" && <BrandProfileEditor onSaved={() => void brain.reload()} />}
           {tab === "goals" && <GoalsEditor onChanged={() => void brain.reload()} />}
-          {tab === "identity" && <IdentityRules config={b.config} onSaved={() => void brain.reload()} />}
-          {tab === "prompt" && <CompiledPromptView />}
+          <Fold title="Identity & rules"><IdentityRules config={b.config} onSaved={() => void brain.reload()} /></Fold>
+          <Fold title="Compiled prompt"><CompiledPromptView /></Fold>
         </>
       )}
     </>

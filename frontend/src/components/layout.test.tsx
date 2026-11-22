@@ -41,16 +41,17 @@ function shell(path: string) {
 }
 
 describe("Admin layout", () => {
-  it("keeps the sidebar short: a few areas, every old page still reachable", () => {
-    expect(AREAS.length).toBeLessThanOrEqual(11);  // World Monitor got its own area (owner, 2026-11-12)
+  it("keeps the sidebar short: six sections, every old page still reachable", () => {
+    // owner-approved redesign, 2026-11-22: six sections, Price Chat Terminal its own section, left as it was
+    expect(AREAS.map((a) => a.label)).toEqual(["Overview", "Content", "Publishing", "Price Chat Terminal", "Community", "System"]);
     for (const p of ["/trading-os", "/trading-bot", "/affiliate", "/members", "/rank-rewards", "/workers", "/realm", "/telegram", "/invite-bot", "/invite-bot/send",
-      "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
+      "/publishing", "/community", "/system", "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
       "/settings", "/api-keys", "/activity"]) {
       expect(locate(p).page.to).toBe(p);
     }
     expect(locate("/telegram/topics/4").page.to).toBe("/telegram");
-    expect(locate("/pokemon/cards/9").area.key).toBe("pokemon");
-    expect(locate("/vpn").area.key).toBe("vpn");
+    expect(locate("/pokemon/cards/9").area.key).toBe("community");
+    expect(locate("/vpn").area.key).toBe("system");
     expect(locate("/world-monitor").area.key).toBe("terminal");
     expect(locate("/terminal").area.key).toBe("terminal");
     expect(locate("/world-monitor").page.to).toBe("/terminal");  // Terminal 2.0: one page, the rest in its Settings drawer
@@ -58,15 +59,18 @@ describe("Admin layout", () => {
     expect(locate("/invite-bot/send").page.label).toBe("Send invites");
   });
 
-  it("shows the area's pages as tabs with one line about the page, and the waiting count on the sidebar", async () => {
+  it("opens a full tool with a back link to its section instead of tabs, and keeps the waiting count on the sidebar", async () => {
+    // stage 3 (2026-11-22): Publishing is one page; Signals is a full tool one click from it, with "← Publishing" instead of four tabs
     serve(home({ signals: 2 }));
     const { container } = shell("/trading-os");
     await flush();
-    expect([...container.querySelectorAll(".subnav-link")].map((a) => a.textContent)).toEqual(["Signals", "Bot access", "Affiliate", "Kalshi bot"]);
-    expect(container.querySelector(".subnav-link.active")!.textContent).toBe("Signals");
-    expect(container.querySelector(".area-about")!.textContent).toContain("signals waiting for your OK");
-    expect(screen.queryByText("long text")).toBeNull();  // the page's own title / subtitle aren't repeated under the area header
-    expect(container.querySelector(".nav-link.active")!.textContent).toContain("Trading");
+    expect(container.querySelector(".subnav")).toBeNull();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const back = container.querySelector(".hub-back")!;
+    expect(back.textContent).toBe("← Publishing");
+    expect(back.getAttribute("href")).toBe("/publishing");
+    expect(screen.getByText("long text")).toBeTruthy();  // with no section header above it, the tool shows its own title again
+    expect(container.querySelector(".nav-link.active")!.textContent).toContain("Publishing");
     expect(container.querySelector(".nav-link.active .nav-count")!.textContent).toBe("2");
   });
 
@@ -83,9 +87,9 @@ describe("Admin home", () => {
     serve(home({ vip: 1, approvals: 3 }));
     const { container } = shell("/");
     await flush();
-    const rows = [...container.querySelectorAll(".home-todo a")];
-    expect(rows.map((r) => r.textContent)).toEqual(["1Royal WhatsApp VIP requestsOpen →", "3Posts and replies waiting for approvalOpen →"]);
-    expect(rows[0].getAttribute("href")).toBe("/rank-rewards?tab=royal");
+    const rows = [...container.querySelectorAll(".ov-row")];
+    expect(rows.map((r) => r.textContent)).toEqual(["Reward1 Royal WhatsApp VIP requestsReview", "Post3 Posts and replies waiting for approvalReview"]);
+    expect(rows[0].querySelector("a")!.getAttribute("href")).toBe("/rank-rewards?tab=royal");
     expect(screen.getByText("Needs you (4)")).toBeTruthy();
   });
 
