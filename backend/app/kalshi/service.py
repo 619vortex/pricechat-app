@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.db.base import utcnow
 from app.models.kalshi import KalshiBot, KalshiReport
 
@@ -31,12 +32,7 @@ def _hash(token: str) -> str:
 
 
 def _bot(db: Session) -> KalshiBot:
-    row = db.get(KalshiBot, 1)
-    if row is None:
-        row = KalshiBot(id=1)
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, KalshiBot, lambda: KalshiBot(id=1))
 
 
 def new_token(db: Session) -> str:

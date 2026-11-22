@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.db.base import utcnow
 from app.members import xp as ledger
 from app.models.members import Member
@@ -89,8 +90,7 @@ def ensure_rewards(db: Session) -> None:
             db.add(RankReward(**r))
             added = True
     if db.get(RewardSettings, 1) is None:
-        db.add(RewardSettings(id=1, knight_terms="", knight_regions="", vip_description=""))
-        added = True
+        get_or_create(db, RewardSettings, lambda: RewardSettings(id=1, knight_terms="", knight_regions="", vip_description=""))
     if added:
         db.flush()
 

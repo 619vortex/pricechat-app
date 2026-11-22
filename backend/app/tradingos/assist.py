@@ -32,6 +32,7 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.db.base import utcnow
 from app.models.tradingos import TsAssistConvo, TsAssistJob, TsAssistState
 from app.tradingos import indicators as ind
@@ -78,10 +79,7 @@ def config(db: Session) -> dict[str, Any]:
 
 
 def mark_seen(db: Session, now: datetime | None = None) -> None:
-    st = db.get(TsAssistState, 1)
-    if st is None:
-        st = TsAssistState(id=1)
-        db.add(st)
+    st = get_or_create(db, TsAssistState, lambda: TsAssistState(id=1))
     st.last_seen_at = now or utcnow()
 
 

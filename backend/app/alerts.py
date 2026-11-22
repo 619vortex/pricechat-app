@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import Settings, get_settings
 from app.db.base import utcnow
+from app.db.singleton import get_or_create
 from app.models.alerts import OwnerAlert, OwnerAlertSettings
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,7 @@ VPN_MIN_HEALTHY = 2  # public servers that must be healthy while the VPN is open
 
 
 def settings_row(db: Session) -> OwnerAlertSettings:
-    row = db.get(OwnerAlertSettings, 1)
-    if row is None:
-        row = OwnerAlertSettings(id=1)
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, OwnerAlertSettings, lambda: OwnerAlertSettings(id=1))
 
 
 # --- linking the owner's chat from Admin (2026-11-18: owner alerts were "logged only" for days: no chat id was ever set) ------------

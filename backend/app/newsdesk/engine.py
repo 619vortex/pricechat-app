@@ -15,6 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.config.settings import Settings
 from app.connectors.x import XRuntime
 from app.connectors.x.errors import XAuthError, XCreditsError, XError, XForbiddenError, XRateLimitError, XUnavailableError
@@ -50,12 +51,8 @@ X_FORMAT = "visual"  # owner, 2026-11-09: X posts carry the same picture as Tele
 
 
 def settings_row(db: Session) -> NdSettings:
-    row = db.get(NdSettings, 1)
-    if row is None:
-        row = NdSettings(id=1, categories={c: True for c in sources.CATEGORIES}, feeds=sources.DEFAULT_FEEDS, watchlist=sources.DEFAULT_WATCHLIST, state={})
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, NdSettings, lambda: NdSettings(id=1, categories={c: True for c in sources.CATEGORIES}, feeds=sources.DEFAULT_FEEDS,
+                                                            watchlist=sources.DEFAULT_WATCHLIST, state={}))
 
 
 STOPPED = "stopped"

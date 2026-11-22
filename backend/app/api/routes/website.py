@@ -14,6 +14,7 @@ from pydantic import field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
 from app.connectors.state import get_connector_state
@@ -70,8 +71,7 @@ def _card(i: ContentItem) -> dict[str, Any]:
 def _settings(db: Session) -> WebsiteSettings:
     row = db.get(WebsiteSettings, 1)
     if row is None:
-        row = WebsiteSettings(id=1, sections={}, links={})
-        db.add(row)
+        row = get_or_create(db, WebsiteSettings, lambda: WebsiteSettings(id=1, sections={}, links={}))
         db.commit()
     return row
 

@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.db.base import utcnow
 from app.members import xp as ledger
 from app.models.members import LinkedIdentity, Member, ProgramSettings, Referral, ReferralCode, ReputationEvent, XPRule
@@ -37,13 +38,8 @@ CODE_PREFIX = "kiwi"
 
 
 def program(db: Session) -> ProgramSettings:
-    row = db.get(ProgramSettings, 1)
-    if row is None:
-        row = ProgramSettings(id=1, referral_qualifying_events=list(DEFAULT_QUALIFYING), updates_channel="@Pricechatupdates",
-                              leaderboard_periods=["all", "week"])
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, ProgramSettings, lambda: ProgramSettings(id=1, referral_qualifying_events=list(DEFAULT_QUALIFYING),
+                                                                      updates_channel="@Pricechatupdates", leaderboard_periods=["all", "week"]))
 
 
 def browser_hash(browser: str | None) -> str | None:
