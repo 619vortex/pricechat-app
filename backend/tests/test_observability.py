@@ -80,7 +80,10 @@ def _app_with_test_routes(fake_provider: Any, fake_embedder: Any) -> Any:
     return app
 
 
-def test_request_id_header_and_compact_log_line(fake_provider: Any, fake_embedder: Any, caplog: Any) -> None:
+def test_request_id_header_and_compact_log_line(fake_provider: Any, fake_embedder: Any, caplog: Any, monkeypatch: Any) -> None:
+    # "fast" must not depend on the machine: GitHub's runner took over SLOW_REQUEST_MS (1 s) on the first request after start-up
+    # (CI 2026-11-22) and logged it at INFO. The slow path keeps its own test (test_5xx_and_slow_requests_log_at_info).
+    monkeypatch.setattr(observability, "SLOW_REQUEST_MS", 60_000.0)
     app = _app_with_test_routes(fake_provider, fake_embedder)
     _capture(caplog)
     with TestClient(app) as c:
