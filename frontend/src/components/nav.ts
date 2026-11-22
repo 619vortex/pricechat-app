@@ -11,12 +11,12 @@ export interface NavArea { key: string; label: string; short: string; icon: NavI
 
 export const AREAS: NavArea[] = [
   {
-    key: "overview", label: "Overview", short: "Overview", icon: "overview", todo: ["approvals"],
+    key: "overview", label: "Overview", short: "Overview", icon: "overview", todo: ["approvals"], hub: true,
     pages: [
-      { to: "/", label: "Home", about: "What needs you today, and whether everything is running." },
-      { to: "/approvals", label: "Approvals", about: "Posts and replies the AI prepared. Nothing goes out until you approve it." },
-      { to: "/analytics", label: "Analytics", about: "Visitors, sign-ups and growth." },
-      { to: "/affiliate", label: "Affiliate", about: "Your Hyperliquid referral link: sign-ups, volume and rewards." },
+      { to: "/", label: "Home", about: "What needs you today, and whether everything is running.", kind: "hub" },
+      { to: "/approvals", label: "Approvals", about: "Posts and replies the AI prepared. Nothing goes out until you approve it.", kind: "panel", panel: "approvals" },
+      { to: "/analytics", label: "Analytics", about: "Visitors, sign-ups and growth.", kind: "panel", panel: "growth" },
+      { to: "/affiliate", label: "Affiliate", about: "Your Hyperliquid referral link: sign-ups, volume and rewards.", kind: "panel", panel: "growth" },
     ],
   },
   {
@@ -64,14 +64,15 @@ export const AREAS: NavArea[] = [
     ],
   },
   {
-    key: "system", label: "System", short: "System", icon: "system",
+    key: "system", label: "System", short: "System", icon: "system", hub: true,
     pages: [
-      { to: "/settings", label: "Settings", about: "The emergency stop, background jobs and AI models." },
-      { to: "/api-keys", label: "API keys", about: "Passwords and keys for the services Price Chat connects to." },
-      { to: "/activity", label: "Activity log", about: "Everything Price Chat did, newest first." },
-      { to: "/vpn", label: "Kiwi VPN", about: "Who can use it, whether it costs anything, servers and devices." },
-      { to: "/kalshi", label: "Kalshi bot", about: "Your Kalshi prediction-market bot on your PC: balance, fee curve and the markets it watches. Read-only." },
-      { to: "/realm", label: "Realm (test)", about: "Play Vortex Realm, the Warrior Kiwi game, to test it. Members play it in Passport → Realm." },
+      { to: "/system", label: "System", about: "Health, every stop and switch at a glance, settings, keys and the activity log.", kind: "hub" },
+      { to: "/settings", label: "Settings", about: "The emergency stop, background jobs and AI models.", kind: "panel", panel: "settings" },
+      { to: "/api-keys", label: "API keys", about: "Passwords and keys for the services Price Chat connects to.", kind: "panel", panel: "apikeys" },
+      { to: "/activity", label: "Activity log", about: "Everything Price Chat did, newest first.", kind: "panel", panel: "activity" },
+      { to: "/kalshi", label: "Kalshi bot", about: "Your Kalshi prediction-market bot on your PC: balance, fee curve and the markets it watches. Read-only.", kind: "panel", panel: "kalshi" },
+      { to: "/vpn", label: "Kiwi VPN", about: "Who can use it, whether it costs anything, servers and devices.", kind: "tool" },
+      { to: "/realm", label: "Realm (test)", about: "Play Vortex Realm, the Warrior Kiwi game, to test it. Members play it in Passport → Realm.", kind: "tool" },
     ],
   },
 ];

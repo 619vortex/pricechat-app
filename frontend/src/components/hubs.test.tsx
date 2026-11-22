@@ -8,6 +8,8 @@ import { XPage } from "../pages/XPage";
 import { CommunityHub } from "../pages/hubs/CommunityHub";
 import { CommunityPage } from "../pages/Community";
 import { MembersPage } from "../pages/Members";
+import { SystemHub } from "../pages/hubs/SystemHub";
+import { Overview } from "../pages/Overview";
 import { Layout } from "./Layout";
 
 /** TEST FIXTURES only: fake API answers keyed by path (everything else is a 404, which the embedded pages show as an error). */
@@ -221,5 +223,67 @@ describe("Community: one page instead of nine tabs (stage 4)", () => {
     expect([...m.container.querySelectorAll('[role="tab"]')].map((x) => x.textContent)).toEqual(["Overview", "Find a member", "Missions", "Ranks"]);
     expect((m.container.querySelector("#members-audit") as HTMLDetailsElement).open).toBe(true);
     window.history.pushState({}, "", "/");
+  });
+});
+
+const VPN = { settings: { enabled: true, payments_enabled: false, max_devices: 3, monthly_cap_gb: 0 }, servers: [{}, {}], totals: { devices: 7, members: 5, active_24h: 2 } };
+const systemRoutes = (
+  <>
+    {["system", "settings", "api-keys", "activity", "kalshi"].map((p) => <Route key={p} path={p} element={<SystemHub />} />)}
+    {["approvals", "analytics", "affiliate"].map((p) => <Route key={p} path={p} element={<Overview />} />)}
+    <Route index element={<Overview />} />
+  </>
+);
+
+describe("System and Overview: one page each (stage 5)", () => {
+  it("shows every stop and switch with its state on the page, and Settings (the emergency stop) open", async () => {
+    serve({
+      "/api/admin/home": { ...HOME, status: { ...HOME.status, kill_switch: true } },
+      "/api/x/operator": { ...XOP, dry_run: false }, "/api/tradingos/admin/telegram-trading": TG(false, true), "/api/vpn/admin/overview": VPN,
+    });
+    const { container } = shell("/system", systemRoutes);
+    await flush();
+    expect(container.querySelector(".area-head")).toBeNull();
+    const list = screen.getByLabelText("Stops and switches");
+    expect(list.closest("details")).toBeNull();  // never folded
+    const rows = Object.fromEntries([...list.querySelectorAll("li")].map((li) => [li.querySelector("span")!.textContent, li.querySelector(".badge")?.textContent]));
+    expect(rows["Emergency stop (X actions, approvals)"]).toBe("ON");
+    expect(rows["X: dry run / live"]).toBe("LIVE");
+    expect(rows["Telegram trading: mainnet"]).toBe("ON");
+    expect(rows["Brand Manager: emergency stop"]).toBe("off");
+    expect(rows["Kiwi VPN: payments"]).toBe("off");
+    expect(rows["News Desk emergency stop and market-data pause"]).toBe("in Terminal");
+    expect([...list.querySelectorAll("a")].find((a) => a.textContent === "Price Chat Terminal")!.getAttribute("href")).toBe("/terminal");
+    expect((container.querySelector("#panel-settings") as HTMLDetailsElement).open).toBe(true);
+    expect(screen.getByLabelText("Kiwi VPN").textContent).toContain("Devices / members7 / 5");
+  });
+
+  it("opens API keys, Activity and Kalshi from their old addresses", async () => {
+    for (const [path, id] of [["/api-keys", "apikeys"], ["/activity", "activity"], ["/kalshi", "kalshi"], ["/settings", "settings"]]) {
+      serve();
+      const { container, unmount } = shell(path, systemRoutes);
+      await flush();
+      expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
+      expect(container.querySelector(".nav-link.active")!.textContent).toContain("System");
+      unmount();
+    }
+  });
+
+  it("gives Overview no tabs: Approvals and Growth are panels, opened by their old addresses", async () => {
+    serve();
+    const home = shell("/", systemRoutes);
+    await flush();
+    expect(home.container.querySelector(".area-head")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Overview" })).toBeTruthy();
+    expect((home.container.querySelector("#panel-approvals") as HTMLDetailsElement).open).toBe(false);
+    home.unmount();
+    for (const [path, id] of [["/approvals", "approvals"], ["/analytics", "growth"], ["/affiliate", "growth"]]) {
+      serve();
+      const { container, unmount } = shell(path, systemRoutes);
+      await flush();
+      expect((container.querySelector(`#panel-${id}`) as HTMLDetailsElement).open).toBe(true);
+      expect(container.querySelector(".nav-link.active")!.textContent).toContain("Overview");
+      unmount();
+    }
   });
 });

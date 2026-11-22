@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
@@ -8,6 +8,12 @@ import type { CommandCenter, PilotCheckStatus } from "../api/types";
 import { adminHome, type TodoItem } from "../api/home";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, Stat, formatTime, label, relativeTime, statusTone, type Tone } from "../components/ui";
 import { CrossSignalList } from "./XPage";
+import { HubPanel, HubPanels, useHubFocus } from "../components/hub";
+
+// stage 5 (owner, 2026-11-22): Overview has no tabs; Approvals, Analytics and Affiliate are panels on it, loaded when opened
+const ApprovalsPage = lazy(() => import("./Approvals").then((m) => ({ default: m.ApprovalsPage })));
+const Analytics = lazy(() => import("./Analytics").then((m) => ({ default: m.Analytics })));
+const AffiliateAdminPage = lazy(() => import("./AffiliateAdmin").then((m) => ({ default: m.AffiliateAdminPage })));
 
 const CONN: Record<string, [string, "good" | "warn" | "bad" | "neutral"]> = {
   connected: ["Connected", "good"],
@@ -62,6 +68,7 @@ const kindOf = (t: TodoItem) => KIND[t.key] ?? t.label;
  *  alerts, whether everything is running and a few numbers. Growth and the older, more technical details are folded underneath. */
 export function Overview() {
   const h = useApi(adminHome, 20000);
+  const focus = useHubFocus();
   const [kind, setKind] = useState("all");
   const d = h.data;
   if (!d) return h.failure ? <ApiErrorBanner error={h.failure} /> : <Loading />;
@@ -91,7 +98,7 @@ export function Overview() {
 
   return (
     <div className="ov">
-      <PageHeader title="Home" subtitle="What needs you, and whether everything is running." />
+      <PageHeader title="Overview" subtitle="What needs you, and whether everything is running." />
       {s.kill_switch && <div className="banner banner-error"><strong>Emergency stop is ON.</strong> Nothing is posted or sent. <Link className="link" to="/settings">Turn it off in Settings</Link></div>}
 
       <div className="ov-kpis">
@@ -152,13 +159,13 @@ export function Overview() {
         </div>
       </div>
 
-      <details className="advanced ov-panel">
-        <summary>Growth: visitors, sign-ups and affiliate volume</summary>
-        <div className="ov-panel-links">
-          <Link className="link" to="/analytics">Open Analytics</Link>
-          <Link className="link" to="/affiliate">Open Affiliate</Link>
-        </div>
-      </details>
+      <HubPanels focus={focus}>
+        <HubPanel id="approvals" title="Approvals" summary="posts and replies the AI prepared: nothing goes out until you approve"><ApprovalsPage /></HubPanel>
+        <HubPanel id="growth" title="Growth" summary="visitors, sign-ups and affiliate volume">
+          <Analytics />
+          <AffiliateAdminPage />
+        </HubPanel>
+      </HubPanels>
       <details className="advanced ov-panel">
         <summary>Recent activity and details: setup checklist, community, AI</summary>
         <div className="stack"><Details /></div>

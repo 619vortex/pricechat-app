@@ -53,7 +53,7 @@ function expectedSection(path: string): string {
   if (["/publishing", "/x", "/youtube", "/website", "/trading-os"].some(starts)) return "publishing";
   if (["/terminal", "/world-monitor"].some(starts)) return "terminal";
   if (["/community", "/members", "/rank-rewards", "/workers", "/trading-bot", "/telegram", "/invite-bot", "/telegram-trading", "/pokemon"].some(starts)) return "community";
-  if (["/settings", "/api-keys", "/activity", "/vpn", "/kalshi", "/realm"].some(starts)) return "system";
+  if (["/system", "/settings", "/api-keys", "/activity", "/vpn", "/kalshi", "/realm"].some(starts)) return "system";
   throw new Error(`no section expected for ${path}`);
 }
 
@@ -98,7 +98,8 @@ describe("Admin shell", () => {
     const { container } = { container: document.body };
     fireEvent.keyDown(box, { key: "Enter" });
     await flush();
-    expect(container.querySelector(".subnav-link.active")!.textContent).toBe("API keys");  // System's tabs, API keys open
+    expect(screen.getByText("API keys page")).toBeTruthy();  // the API keys address opened (stage 5: a panel on System, no tabs)
+    expect(container.querySelector(".subnav")).toBeNull();
     expect(container.querySelector(".nav-link.active")!.textContent).toContain("System");
     expect(box.value).toBe("");
   });
@@ -184,6 +185,6 @@ describe("Overview", () => {
     expect(screen.getByText("1 open now")).toBeTruthy();
     for (const n of ["Signal scanner", "Telegram", "X / Twitter", "AI"]) expect(screen.getAllByText(n).length).toBeGreaterThan(0);
     expect(screen.getByText(/Recent activity and details/)).toBeTruthy();
-    expect(screen.getByText(/Growth: visitors/)).toBeTruthy();
+    expect(screen.getByText("visitors, sign-ups and affiliate volume")).toBeTruthy();  // stage 5: Growth is a panel on the page (Analytics + Affiliate)
   });
 });

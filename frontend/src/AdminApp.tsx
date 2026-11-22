@@ -8,14 +8,10 @@ import { XPage } from "./pages/XPage";  // the overview uses it too
 // every page but the overview is its own chunk, so the dashboard opens without downloading all of them (Layout's <Suspense>)
 // Admin redesign (owner, 2026-11-22): a section is one page (a hub); old addresses open it with the right panel open
 const ContentHub = lazy(() => import("./pages/hubs/ContentHub").then((m) => ({ default: m.ContentHub })));
-const ApprovalsPage = lazy(() => import("./pages/Approvals").then((m) => ({ default: m.ApprovalsPage })));
 const CommunityPage = lazy(() => import("./pages/Community").then((m) => ({ default: m.CommunityPage })));
 const TopicDetailPage = lazy(() => import("./pages/TopicDetail").then((m) => ({ default: m.TopicDetailPage })));
-const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
-const ActivityPage = lazy(() => import("./pages/Activity").then((m) => ({ default: m.ActivityPage })));
-const ApiKeysPage = lazy(() => import("./pages/ApiKeys").then((m) => ({ default: m.ApiKeysPage })));
-const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 const CommunityHub = lazy(() => import("./pages/hubs/CommunityHub").then((m) => ({ default: m.CommunityHub })));
+const SystemHub = lazy(() => import("./pages/hubs/SystemHub").then((m) => ({ default: m.SystemHub })));
 const PublishingHub = lazy(() => import("./pages/hubs/PublishingHub").then((m) => ({ default: m.PublishingHub })));
 const MembersPage = lazy(() => import("./pages/Members").then((m) => ({ default: m.MembersPage })));
 const MarketHome = lazy(() => import("./pages/pokemon/MarketHome").then((m) => ({ default: m.MarketHome })));
@@ -34,10 +30,8 @@ const MarketplaceAdmin = lazy(() => import("./pages/pokemon/MarketplaceAdmin").t
 const VaultAdmin = lazy(() => import("./pages/pokemon/VaultAdmin").then((m) => ({ default: m.VaultAdmin })));
 const BrandManagerPage = lazy(() => import("./pages/brand/BrandManager").then((m) => ({ default: m.BrandManagerPage })));
 const ShortMarketPage = lazy(() => import("./pages/shortmarket/ShortMarket").then((m) => ({ default: m.ShortMarketPage })));
-const AffiliateAdminPage = lazy(() => import("./pages/AffiliateAdmin").then((m) => ({ default: m.AffiliateAdminPage })));
 const RealmAdminPage = lazy(() => import("./pages/RealmAdmin").then((m) => ({ default: m.RealmAdminPage })));
 const VpnAdminPage = lazy(() => import("./pages/VpnAdmin").then((m) => ({ default: m.VpnAdminPage })));
-const KalshiAdminPage = lazy(() => import("./pages/KalshiAdmin").then((m) => ({ default: m.KalshiAdminPage })));
 const TelegramTradingPage = lazy(() => import("./pages/TelegramTradingPage").then((m) => ({ default: m.TelegramTradingPage })));
 const TerminalPage = lazy(() => import("./pages/terminal/TerminalPage").then((m) => ({ default: m.TerminalPage })));
 const XIntelPage = lazy(() => import("./pages/terminal/XIntelPage").then((m) => ({ default: m.XIntelPage })));
@@ -71,19 +65,19 @@ export function AdminApp() {
             <Route path="terminal/trending" element={<TerminalTrending />} />
             <Route path="brand-manager/*" element={<BrandManagerPage />} />
             <Route path="short-market/*" element={<ShortMarketPage />} />
-            <Route path="approvals" element={<ApprovalsPage />} />
+            <Route path="approvals" element={<Overview />} />
             <Route path="publishing" element={<PublishingHub />} />
             <Route path="website" element={<PublishingHub />} />
             <Route path="youtube" element={<PublishingHub />} />
             <Route path="members" element={<MembersPage />} />
             <Route path="community" element={<CommunityHub />} />
             <Route path="trading-bot" element={<CommunityHub />} />
-            <Route path="affiliate" element={<AffiliateAdminPage />} />
+            <Route path="affiliate" element={<Overview />} />
             <Route path="workers" element={<CommunityHub />} />
             <Route path="rank-rewards" element={<CommunityHub />} />
             <Route path="realm" element={<RealmAdminPage />} />
             <Route path="vpn" element={<VpnAdminPage />} />
-            <Route path="kalshi" element={<KalshiAdminPage />} />
+            <Route path="kalshi" element={<SystemHub />} />
             <Route path="arena" element={<Navigate to="/realm" replace />} />
             <Route path="trading-os" element={<TradingOSPage />} />
             <Route path="pokemon" element={<MarketHome />} />
@@ -110,10 +104,11 @@ export function AdminApp() {
             <Route path="invite-bot" element={<CommunityHub />} />
             <Route path="invite-bot/send" element={<CommunityHub />} />
             <Route path="telegram/topics/:id" element={<TopicDetailPage />} />
-            <Route path="analytics" element={<Analytics />} />
-            <Route path="activity" element={<ActivityPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="api-keys" element={<ApiKeysPage />} />
+            <Route path="analytics" element={<Overview />} />
+            <Route path="activity" element={<SystemHub />} />
+            <Route path="system" element={<SystemHub />} />
+            <Route path="settings" element={<SystemHub />} />
+            <Route path="api-keys" element={<SystemHub />} />
             <Route path="*" element={<Overview />} />
           </Route>
         </Routes>

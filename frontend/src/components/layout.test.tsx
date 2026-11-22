@@ -45,7 +45,7 @@ describe("Admin layout", () => {
     // owner-approved redesign, 2026-11-22: six sections, Price Chat Terminal its own section, left as it was
     expect(AREAS.map((a) => a.label)).toEqual(["Overview", "Content", "Publishing", "Price Chat Terminal", "Community", "System"]);
     for (const p of ["/trading-os", "/trading-bot", "/affiliate", "/members", "/rank-rewards", "/workers", "/realm", "/telegram", "/invite-bot", "/invite-bot/send",
-      "/publishing", "/community", "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
+      "/publishing", "/community", "/system", "/x", "/youtube", "/brand-manager", "/short-market", "/approvals", "/content", "/brain", "/knowledge", "/pokemon", "/website", "/analytics",
       "/settings", "/api-keys", "/activity"]) {
       expect(locate(p).page.to).toBe(p);
     }
