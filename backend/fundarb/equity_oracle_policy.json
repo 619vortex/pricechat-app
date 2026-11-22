@@ -1,0 +1,435 @@
+{
+  "_doc": "Written by `fundarb oracle-study` (fundarb.oracle_study). The equity bucket reads it; re-run the study to refresh it. Every session's policy cites the measurement it came from.",
+  "citation": {
+    "study_id": "o20261025T060536",
+    "measured_at": "2026-10-25T06:00:37.664265+00:00",
+    "days": 30.0,
+    "markets": [
+      "xyz:XYZ100",
+      "xyz:SP500",
+      "xyz:MRNA",
+      "xyz:SNDK",
+      "xyz:SKHX",
+      "xyz:MU",
+      "xyz:SPCX",
+      "xyz:MSTR",
+      "xyz:NVDA",
+      "xyz:DRAM",
+      "xyz:SOXL",
+      "xyz:CRCL"
+    ],
+    "control": "BTC",
+    "method_check": "control slope within +-0.010 in every session (an oracle that tracks reads ~0)",
+    "holidays_known": false
+  },
+  "measurement": {
+    "extended": {
+      "beta_median": 0.0008,
+      "beta_range": [
+        -0.0127,
+        0.215
+      ],
+      "control_beta": 0.0097,
+      "corr_median": -0.0025,
+      "hours": 2268,
+      "markets": 12,
+      "median_abs_premium_bps": 4.04,
+      "verdict": "tracks"
+    },
+    "holiday": {
+      "beta_median": null,
+      "beta_range": null,
+      "control_beta": null,
+      "corr_median": null,
+      "hours": 0,
+      "markets": 0,
+      "median_abs_premium_bps": null,
+      "verdict": "unmeasured"
+    },
+    "overnight": {
+      "beta_median": -0.0086,
+      "beta_range": [
+        -0.0822,
+        0.0349
+      ],
+      "control_beta": 0.0065,
+      "corr_median": -0.0951,
+      "hours": 1932,
+      "markets": 12,
+      "median_abs_premium_bps": 3.64,
+      "verdict": "tracks"
+    },
+    "rth": {
+      "beta_median": -0.0047,
+      "beta_range": [
+        -0.0094,
+        0.2165
+      ],
+      "control_beta": 0.0052,
+      "corr_median": -0.2397,
+      "hours": 1764,
+      "markets": 12,
+      "median_abs_premium_bps": 3.618,
+      "verdict": "tracks"
+    },
+    "weekend": {
+      "beta_median": 0.2742,
+      "beta_range": [
+        0.0898,
+        0.3222
+      ],
+      "control_beta": 0.0092,
+      "corr_median": 0.4572,
+      "hours": 2664,
+      "markets": 12,
+      "median_abs_premium_bps": 4.207,
+      "verdict": "mark-influenced"
+    }
+  },
+  "policy": {
+    "rth": {
+      "verdict": "tracks",
+      "funding_reliable": true,
+      "stop_mult": 1.0,
+      "entries": "preferred"
+    },
+    "extended": {
+      "verdict": "tracks",
+      "funding_reliable": true,
+      "stop_mult": 1.0,
+      "entries": "allowed"
+    },
+    "overnight": {
+      "verdict": "tracks",
+      "funding_reliable": true,
+      "stop_mult": 1.0,
+      "entries": "allowed"
+    },
+    "weekend": {
+      "verdict": "mark-influenced",
+      "funding_reliable": false,
+      "stop_mult": 1.5,
+      "entries": "blocked"
+    },
+    "holiday": {
+      "verdict": "mark-influenced",
+      "funding_reliable": false,
+      "stop_mult": 1.5,
+      "entries": "blocked"
+    }
+  },
+  "markets": {
+    "xyz:CRCL": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:DRAM": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:MRNA": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:MSTR": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:MU": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:NVDA": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:SKHX": {
+      "rth": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      },
+      "extended": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      },
+      "overnight": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:SNDK": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:SOXL": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:SP500": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:SPCX": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    },
+    "xyz:XYZ100": {
+      "rth": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "preferred"
+      },
+      "extended": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "overnight": {
+        "verdict": "tracks",
+        "funding_reliable": true,
+        "stop_mult": 1.0,
+        "entries": "allowed"
+      },
+      "weekend": {
+        "verdict": "mark-influenced",
+        "funding_reliable": false,
+        "stop_mult": 1.5,
+        "entries": "blocked"
+      }
+    }
+  }
+}

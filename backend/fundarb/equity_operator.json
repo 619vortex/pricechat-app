@@ -1,0 +1,5 @@
+{
+  "_doc": "Operator data for the equity bucket (fundarb.events, fundarb.equity). Not in Hyperliquid's API. calendar: earnings / holidays / halts / rebalances / splits / news; until covers_until is set and in the future every new equity entry is blocked. index_baskets: published constituent weights per index market, e.g. {\"xyz:INDEX\": {\"weights\": {\"xyz:NAME\": 0.08}, \"source\": \"...\", \"as_of\": \"YYYY-MM-DD\"}}; without one the basket is chosen statistically and labelled so.",
+  "calendar": {"covers_until": null, "source": null, "events": []},
+  "index_baskets": {}
+}

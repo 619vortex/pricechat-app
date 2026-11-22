@@ -9,6 +9,8 @@ Tables
 - scan_results  every list a scan produces (capital_apr, score, transient, net_unknown, rejected), each row with its full
                 inputs, metrics and the scan config
 - cluster_runs / cluster_members   the correlation clustering behind each scan (not printed; inspect with SQL)
+- oracle_studies   every oracle-staleness measurement (fundarb.oracle_study), whole result as JSON
+- equity_runs / equity_results   Module 4: each index-vs-constituents run, every index market's metrics with its full inputs
 Everything a decision used is stored next to it, so a run can be replayed and must reproduce the same result."""
 
 from __future__ import annotations
@@ -40,6 +42,11 @@ DDL = [
        legs INTEGER NOT NULL, clusters INTEGER NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS cluster_members (scan_id TEXT NOT NULL, leg_id TEXT NOT NULL, cluster INTEGER NOT NULL, hours INTEGER NOT NULL,
        PRIMARY KEY (scan_id, leg_id))""",
+    """CREATE TABLE IF NOT EXISTS oracle_studies (study_id TEXT PRIMARY KEY, ts TEXT NOT NULL, result TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS equity_runs (run_id TEXT PRIMARY KEY, ts TEXT NOT NULL, config TEXT NOT NULL, policy TEXT NOT NULL,
+       calls INTEGER NOT NULL, elapsed_s REAL NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS equity_results (run_id TEXT NOT NULL, rank INTEGER NOT NULL, index_name TEXT NOT NULL, status TEXT NOT NULL,
+       metrics TEXT NOT NULL, inputs TEXT NOT NULL, PRIMARY KEY (run_id, index_name))""",
 ]
 SCAN_LISTS = ("capital_apr", "score", "transient", "unprofitable", "net_unknown", "rejected")
 QUOTE_COLS = ["ts", "raw_name", "funding_rate_raw", "funding_interval_hours", "funding_apr", "premium", "mark_price", "oracle_price",
@@ -142,7 +149,41 @@ class UniverseStore:
             row = c.execute("SELECT scan_id FROM scan_results ORDER BY ts DESC LIMIT 1").fetchone()
         return row[0] if row else None
 
+    def save_study(self, study: dict[str, Any]) -> None:
+        with closing(self._conn()) as c, c:
+            c.execute("INSERT INTO oracle_studies VALUES (?, ?, ?)", (study["study_id"], study["measured_at"], json.dumps(study, sort_keys=True)))
+
+    def load_study(self, study_id: str) -> dict[str, Any]:
+        with closing(self._conn()) as c:
+            row = c.execute("SELECT result FROM oracle_studies WHERE study_id = ?", (study_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"no oracle study {study_id}")
+        return json.loads(row[0])
+
+    def save_equity_run(self, run: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+        with closing(self._conn()) as c, c:
+            c.execute("INSERT INTO equity_runs VALUES (?, ?, ?, ?, ?, ?)", (run["run_id"], run["ts"], json.dumps(run["config"], sort_keys=True),
+                                                                           json.dumps(run["policy"], sort_keys=True), run["calls"], run["elapsed_s"]))
+            c.executemany("INSERT INTO equity_results VALUES (?, ?, ?, ?, ?, ?)",
+                          [(run["run_id"], i, r["index"], r["metrics"]["status"], json.dumps(r["metrics"], sort_keys=True, default=str),
+                            json.dumps(r["inputs"], sort_keys=True, default=str)) for i, r in enumerate(rows, 1)])
+
+    def load_equity_run(self, run_id: str) -> dict[str, Any]:
+        with closing(self._conn()) as c:
+            run = c.execute("SELECT * FROM equity_runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run is None:
+                raise KeyError(f"no equity run {run_id}")
+            rows = c.execute("SELECT * FROM equity_results WHERE run_id = ? ORDER BY rank", (run_id,)).fetchall()
+        return {"run_id": run_id, "ts": run["ts"], "config": json.loads(run["config"]), "policy": json.loads(run["policy"]),
+                "rows": [{"index": r["index_name"], "metrics": json.loads(r["metrics"]), "inputs": json.loads(r["inputs"])} for r in rows]}
+
+    def latest_equity_run(self) -> str | None:
+        with closing(self._conn()) as c:
+            row = c.execute("SELECT run_id FROM equity_runs ORDER BY ts DESC LIMIT 1").fetchone()
+        return row[0] if row else None
+
     def counts(self) -> dict[str, int]:
         with closing(self._conn()) as c:
             return {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                    for t in ("markets", "quotes", "gate_runs", "gate_results", "pairs", "scan_results", "cluster_runs", "cluster_members")}
+                    for t in ("markets", "quotes", "gate_runs", "gate_results", "pairs", "scan_results", "cluster_runs", "cluster_members",
+                              "oracle_studies", "equity_runs", "equity_results")}

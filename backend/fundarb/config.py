@@ -72,6 +72,24 @@ class Settings(BaseSettings):
     # capital model (fundarb.capital)
     capital_buffer: float = Field(0.25, ge=0)  # idle collateral on top of initial margin, share of that margin
 
+    # Module 4 equity bucket (fundarb.sessions / events / oracle_study / equity)
+    equity_tz: str = "America/New_York"
+    equity_rth_open: str = Field("09:30", pattern=r"^\d{2}:\d{2}$")
+    equity_rth_close: str = Field("16:00", pattern=r"^\d{2}:\d{2}$")
+    equity_ext_open: str = Field("04:00", pattern=r"^\d{2}:\d{2}$")
+    equity_ext_close: str = Field("20:00", pattern=r"^\d{2}:\d{2}$")
+    equity_operator_path: Path = Path(__file__).with_name("equity_operator.json")  # event calendar + published index weights
+    oracle_policy_path: Path = Path(__file__).with_name("equity_oracle_policy.json")  # written by `fundarb oracle-study`
+    oracle_tracks_beta: float = Field(0.05, ge=0)  # |slope of hourly premium change on the perp's return| at or below: oracle tracks
+    oracle_frozen_beta: float = Field(0.8, gt=0)  # at or above: the oracle is not moving (premium = the perp's own move)
+    oracle_stale_stop_mult: float = Field(1.5, ge=1)  # spread-stop widening in a session the study found stale
+    # Hyperliquid caps funding at 4%/hour for every asset (Module 4 rule 6; Hyperliquid docs "Funding"). Not served by the
+    # API as a field, so it is configuration, not a constant buried in code.
+    funding_cap_hourly: float = Field(0.04, gt=0)
+    funding_cap_share: float = Field(0.9, gt=0, le=1)  # |hourly funding| at or above this share of the cap = "at cap"
+    equity_event_buffer_hours: float = Field(24.0, ge=0)  # block entries this long before an event starts
+    equity_risk_budget_usd: float = Field(1000.0, gt=0)  # loss at the spread stop that sizes one index trade
+
     @field_validator("hl_account_address")
     @classmethod
     def _evm(cls, v: str | None) -> str | None:

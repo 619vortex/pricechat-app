@@ -6,6 +6,8 @@
   python -m fundarb scan [--top 20] [--replay SCAN_ID|latest] [--json]   (Module 3: crypto pairs, both ranked lists)
   python -m fundarb scan-legacy ...                                       (the Phase 2 four-venue scan)
   python -m fundarb universe [--live-only] [--dex xyz] [--class EQUITY] [--csv out.csv] [--json] [--accept-schema] [--watch]
+  python -m fundarb oracle-study [--markets 12] [--days 30] [--samples 20] [--every 15] [--no-policy] [--show STUDY_ID]
+  python -m fundarb equity [--top 20] [--replay RUN_ID|latest]          (Module 4: index vs constituents, its own bucket)
 
 Every venue answers or says why it couldn't; nothing is ever shown as a silent zero. (`scan` and `status` come in
 Phases 2 and 3.)"""
@@ -17,7 +19,10 @@ import logging
 import sys
 import time
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
+
+import numpy as np
 
 from fundarb.config import load
 from fundarb.history import QuoteStore
@@ -482,6 +487,180 @@ def cmd_scan2(a: argparse.Namespace) -> int:
     return asyncio.run(_scan_once(s, max(1, min(a.top, 20))))  # hard cap: never a "top 500"
 
 
+# --- Module 4: oracle study + equity bucket ---------------------------------------------------------------------------
+
+def _f(v: Any, fmt: str = "{:+.2f}") -> str:
+    return "-" if v is None else fmt.format(v)
+
+
+def _print_study(st: dict[str, Any]) -> None:
+    print(f"ORACLE STALENESS STUDY {st['study_id']} ({st['measured_at'][:16]}Z): {len(st['markets'])} equity/index markets by 24h volume, "
+          f"{st['days']:g} days of hourly settlements; control {st['control']} (24/7 crypto)")
+    print("method: slope of the hourly change in fundingHistory.premium on the perp's hourly return (avg price). ~0 = the oracle "
+          "tracks; ~1 = the oracle is frozen (premium absorbs the whole move); between = the oracle partly follows the perp itself")
+    print(f"{'session':10s} {'verdict':16s} {'mkts':>4s} {'hours':>6s} {'slope med':>9s} {'slope range':>15s} {'corr med':>8s} "
+          f"{'|prem| med':>10s} {'control':>8s}")
+    for s, v in st["sessions"].items():
+        rng = f"{v['beta_range'][0]:+.2f}..{v['beta_range'][1]:+.2f}" if v["beta_range"] else "-"
+        print(f"{s:10s} {v['verdict']:16s} {v['markets']:>4d} {v['hours']:>6d} {_f(v['beta_median']):>9s} {rng:>15s} {_f(v['corr_median']):>8s} "
+              f"{_f(v['median_abs_premium_bps'], '{:.1f}bp'):>10s} {_f(v['control_beta']):>8s}")
+    print(f"method check: {'OK' if st['method_valid'] else 'FAILED'}: {st['method_check']}"
+          + ("" if st["holidays_known"] else "; no holiday calendar loaded, so holidays count in their weekday session"))
+    print("\nslope by market:  " + "  ".join(f"{s:>9s}" for s in ("rth", "extended", "overnight", "weekend")))
+    for n in [*st["markets"], st["control"]]:
+        row = st["per_market"].get(n, {})
+        print(f"  {n or '-':18s}" + "  ".join(f"{_f((row.get(s) or {}).get('beta')):>9s}" for s in ("rth", "extended", "overnight", "weekend"))
+              + ("   (control)" if n == st["control"] else ""))
+    live = st["live"]
+    if live["markets"]:
+        ms = [v for k, v in live["markets"].items() if k != st["control"] and v.get("samples", 0) >= 3]
+        moved = sum(1 for v in ms if v["oracle_changed_share"] > 0)
+        fol = [v["corr_oracle_follows_mark"] for v in ms if v.get("corr_oracle_follows_mark") is not None]
+        lead = [v["corr_mark_follows_oracle"] for v in ms if v.get("corr_mark_follows_oracle") is not None]
+        print(f"\nlive ({live['session']} session, {live['samples']} samples {live['every_s']:g}s apart): oracle moved on {moved}/{len(ms)} markets; "
+              f"median corr(oracle change, previous mark change) {_f(float(np.median(fol)) if fol else None)}, "
+              f"corr(mark change, previous oracle change) {_f(float(np.median(lead)) if lead else None)} (observed only; not used for the verdict)")
+    print(f"cost: {st['calls']} calls, {st['elapsed_s']}s")
+
+
+def cmd_oracle_study(a: argparse.Namespace) -> int:
+    from fundarb.events import load_operator
+    from fundarb.oracle_study import run_study, write_policy
+    from fundarb.sessions import SessionClock
+    from fundarb.store import UniverseStore
+    from fundarb.universe import HyperliquidUniverse
+
+    s = load()
+    store = UniverseStore(s.universe_db_path)
+    if a.show:
+        _print_study(store.load_study(a.show))
+        return 0
+    op = load_operator(s.equity_operator_path)
+    clock = SessionClock.from_settings(s, op["calendar"].holidays())
+
+    async def run() -> dict[str, Any]:
+        snap = await HyperliquidUniverse(s).fetch()
+        if not snap.ranking_allowed:
+            print(f"WARN: universe schema is {snap.schema.status}; the study only reads names, classes and volumes from it")
+        return await run_study(s, snap.markets, clock, n_markets=a.markets, days=a.days, samples=a.samples, every=a.every)
+
+    st = asyncio.run(run())
+    store.save_study(st)
+    _print_study(st)
+    if not st["method_valid"]:
+        print(f"policy NOT written ({s.oracle_policy_path}): the method check failed")
+        return 1
+    if a.no_policy:
+        print("policy not written (--no-policy)")
+        return 0
+    doc = write_policy(s.oracle_policy_path, st, s.oracle_stale_stop_mult)
+    print("\npolicy written to " + str(s.oracle_policy_path) + " (cited as " + st["study_id"] + "):")
+    for sess, p in doc["policy"].items():
+        print(f"  {sess:10s} {p['verdict']:16s} funding reliable: {'yes' if p['funding_reliable'] else 'NO':3s}  stop x{p['stop_mult']:g}  entries {p['entries']}")
+    return 0
+
+
+def _print_equity(run_id: str, ts: str, session: str, policy: dict[str, Any], rows: list[dict[str, Any]], pool: int) -> None:
+    cite = (policy.get("citation") or {}).get("study_id") or "NO STUDY ON FILE (assumption: only regular hours trusted)"
+    p = policy["policy"][session]
+    print(f"=== EQUITY BUCKET: index vs constituents ({run_id}, {ts[:16]}Z) ===")
+    print("SEPARATE BUCKET: isolated margin on every leg (each leg its own collateral); ranked only against other equity rows. "
+          "Never compare these APRs with the crypto scan's.")
+    print(f"session now: {session}; oracle policy {p['verdict']} ({cite}): funding reliable {'yes' if p['funding_reliable'] else 'NO'}, "
+          f"entries {p['entries']}, stop x{p['stop_mult']:g}. Gated equity pool: {pool} names.")
+    print(f"{'index':12s} {'basket (hedge $ per $1 index)':44s} {'R2':>5s} {'sd bp':>6s} {'z':>6s} {'HL h':>5s} {'signal':27s} "
+          f"{'est cap APR':>11s} {'status':15s}")
+    for r in rows:
+        m = r["metrics"]
+        if m["status"] == "rejected":
+            print(f"{r['index']:12s} REJECTED: {m['reason']}")
+            continue
+        basket = " + ".join(f"{b:.2f} {n}" for n, b in m["betas"].items())
+        apr = (m.get("expected") or {}).get("capital_apr_pct")
+        print(f"{r['index']:12s} {basket:44s} {m['r2']:5.2f} {m['spread_sd_bps']:6.1f} {m['z']:+6.2f} {_f(m['half_life_h'], '{:.0f}'):>5s} "
+              f"{m['signal']:27s} {_pct(apr):>11s} {m['status']:15s}")
+    for r in rows:
+        m = r["metrics"]
+        if m["status"] == "rejected":
+            continue
+        print(f"\n{r['index']}: basket {m['basket_source']}; {m['hours']} shared hours")
+        for n, f in m["funding"].items():
+            print(f"  funding {n:14s} now {_f(f['now_hourly'] * 1e4 if f['now_hourly'] is not None else None, '{:+.3f}')}bp/h  estimate "
+                  f"{_f(f['estimate_hourly'] * 1e4 if f['estimate_hourly'] is not None else None, '{:+.3f}')}bp/h{'  AT CAP' if f['at_cap'] else ''}")
+        sz = m["sizing"]
+        print(f"  sizing (risk ${sz['risk_budget_usd']:,.0f} at the stop z={m['stop_z']:g}, {sz['stop_distance_bps']:.0f}bp away): index notional "
+              f"${sz['index_notional_usd']:,.0f}, capital ${sz['capital_usd']:,.0f} ({sz['capital_per_index_notional']:.2f} per $1 index)")
+        for n, lg in sz["legs"].items():
+            print(f"    {lg['side']:5s} {n:14s} ${lg['notional_usd']:>10,.0f}  {lg['leverage']:g}x of max {lg['max_leverage']:g}x  margin ${lg['margin_usd']:,.0f}  "
+                  f"liq ~{lg['liq_distance_pct']:.0f}% away  {lg['bucket']}")
+        if m.get("expected"):
+            e = m["expected"]
+            print(f"  estimate: reversion {e['reversion_bps']:+.1f}bp - costs {e['cost_bps']:.1f}bp + carry {e['carry_bps']:+.1f}bp over {e['hold_h']:.0f}h "
+                  f"= {e['net_bps']:+.1f}bp on index notional -> capital APR {_pct(e['capital_apr_pct'])} ({e['model']})")
+        for b in m["blockers"]:
+            print(f"  BLOCKED: {b}")
+        for fl in m["flags"]:
+            print(f"  flag: {fl}")
+
+
+async def _equity_once(s: Any, top: int) -> int:
+    from fundarb.equity import IndexConfig, config_dict, gather_equity, rank_equity
+    from fundarb.events import load_operator
+    from fundarb.gates import GateConfig
+    from fundarb.oracle_study import load_policy, unmeasured_policy
+    from fundarb.sessions import SessionClock
+    from fundarb.store import UniverseStore
+    from fundarb.universe import HyperliquidUniverse
+
+    t0 = time.monotonic()
+    store = UniverseStore(s.universe_db_path)
+    op = load_operator(s.equity_operator_path)
+    clock = SessionClock.from_settings(s, op["calendar"].holidays())
+    policy = load_policy(s.oracle_policy_path) or unmeasured_policy(s.oracle_stale_stop_mult)
+    gate = await _gates_once(HyperliquidUniverse(s), store, GateConfig.from_settings(s))
+    if gate is None:
+        return 2
+    results = {r["raw_name"]: {"passed": r["passed"], "failed_gate": r["failed_gate"], "checks": r["checks"],
+                               "reason": next((f"{c['note'] or ''} (value {c['value']}, limit {c['limit']})" for c in r["checks"]
+                                               if c["gate"] == r["failed_gate"]), "")} for r in gate["report"].results}
+    ts = gate["report"].ts
+    session = clock.session(datetime.fromisoformat(ts))
+    cfg = IndexConfig.from_settings(s, top_n=top)
+    res = await gather_equity(s, gate["snap"].markets, results, cfg, op, policy, session, ts)
+    rows = rank_equity(res["rows"], cfg)
+    run_id = "e" + gate["report"].run_id[1:]
+    elapsed = round(time.monotonic() - t0, 1)
+    store.save_equity_run({"run_id": run_id, "ts": ts, "config": config_dict(cfg), "policy": policy, "calls": gate["calls"] + res["calls"],
+                           "elapsed_s": elapsed}, rows)
+    _print_equity(run_id, ts, session, policy, rows, len(res["pool"]))
+    print(f"\ncost: gates {gate['calls']} calls + equity {res['calls']} calls, {elapsed}s; stored as {run_id} in {store.path}")
+    return 0
+
+
+def _replay_equity(s: Any, run_id: str | None) -> int:
+    from fundarb.equity import IndexConfig, rank_equity
+    from fundarb.store import UniverseStore
+
+    store = UniverseStore(s.universe_db_path)
+    run_id = store.latest_equity_run() if run_id in (None, "latest") else run_id
+    if run_id is None:
+        print("no stored equity run to replay")
+        return 1
+    old = store.load_equity_run(run_id)
+    new = rank_equity([{"index": r["index"], "inputs": r["inputs"]} for r in old["rows"]], IndexConfig(**old["config"]))
+    same = [r["index"] for r in new] == [r["index"] for r in old["rows"]] and \
+        [json.loads(json.dumps(r["metrics"], sort_keys=True, default=str)) for r in new] == [r["metrics"] for r in old["rows"]]
+    print(f"replayed equity run {run_id}: {len(new)} index markets; ranking and metrics {'IDENTICAL' if same else 'DIFFERENT'}")
+    return 0 if same else 1
+
+
+def cmd_equity(a: argparse.Namespace) -> int:
+    s = load()
+    if a.replay:
+        return _replay_equity(s, a.replay)
+    return asyncio.run(_equity_once(s, max(1, min(a.top, 20))))
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s %(message)s")
     p = argparse.ArgumentParser(prog="fundarb", description="Funding-rate arbitrage scanner (read-only)")
@@ -523,6 +702,18 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--accept-schema", action="store_true", help="confirm the field-name schema seen now (a human decision)")
     u.add_argument("--watch", action="store_true", help="refresh every FUNDARB_UNIVERSE_REFRESH_SECONDS (default 300)")
     u.set_defaults(fn=cmd_universe)
+    o = sub.add_parser("oracle-study", help="Module 4 rule 4: measure whether equity oracles go stale outside US hours; writes the policy")
+    o.add_argument("--markets", type=int, default=12, help="equity/index markets, by 24h volume")
+    o.add_argument("--days", type=float, default=30.0)
+    o.add_argument("--samples", type=int, default=20, help="live snapshots (0 to skip)")
+    o.add_argument("--every", type=float, default=15.0, help="seconds between live snapshots")
+    o.add_argument("--no-policy", action="store_true", help="measure and store, but don't rewrite the policy file")
+    o.add_argument("--show", metavar="STUDY_ID", help="print a stored study")
+    o.set_defaults(fn=cmd_oracle_study)
+    e = sub.add_parser("equity", help="Module 4: index vs constituents (equity bucket, never mixed with crypto)")
+    e.add_argument("--top", type=int, default=20, help="rows (hard cap 20)")
+    e.add_argument("--replay", metavar="RUN_ID", help="re-decide a stored run from its stored inputs ('latest' for the newest)")
+    e.set_defaults(fn=cmd_equity)
     a = p.parse_args(argv)
     return a.fn(a)
 
