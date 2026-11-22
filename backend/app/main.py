@@ -221,6 +221,9 @@ def create_app(
             from app.newsdesk import editor as _editor
 
             app.state.vision_self_test = _asyncio.get_running_loop().create_task(_editor.self_test(app_settings))
+            from app.newsdesk import photography as _photography  # the silver bullion library, checked on this server (2026-11-20)
+
+            app.state.photo_self_test = _asyncio.get_running_loop().create_task(_photography.library_self_test("silver"))
         if app_settings.is_production and initialize_database:
             # build the market homepage's rows once now, in the background, so the first visitor after a deploy doesn't
             # wait for the ~50k-card build (the scheduled warm-up only runs where background jobs are on)

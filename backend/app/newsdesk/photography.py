@@ -424,6 +424,41 @@ async def library_photo(subject: Subject, *, transport: Any = None, records: lis
     return None
 
 
+async def library_self_test(key: str = "silver", transport: Any = None) -> dict[str, Any]:
+    """Once after each start, on the server itself (owner, 2026-11-20: "confirm the new silver bullion photos work"): every file of the
+    subject read from Commons with its licence re-verified, downloaded, checked like a post's picture (size, sharpness, never refused as
+    a coin picture) and framed for X and Telegram. Logged as one line per file ("photography self-test: ..."). Never raises."""
+    import httpx
+
+    from app.newsdesk import editor, photos
+
+    subject = BY_KEY[key]
+    out: dict[str, Any] = {"subject": key, "files": len(subject.files), "ok": [], "refused": []}
+    try:
+        async with httpx.AsyncClient(transport=transport) as client:
+            recs = await _records(client, subject)
+            for p in recs:
+                name = _title_of(p) or p.title
+                img = await photos.fetch(client, p, min_width=MIN_SOURCE if p.width >= p.height else 0, colour=False)
+                why = "download or pixels refused" if img is None else editor.pixel_problem(img, ui=False, sharp_min=LIBRARY_SHARP_MIN) or ""
+                if not why:
+                    x, _ = frame(img, "x")
+                    tg, _ = frame(img, "telegram")
+                    out["ok"].append({"file": name, "licence": p.licence, "credit": p.credit, "x": list(x.size), "telegram": list(tg.size),
+                                      "aesthetic": aesthetic(img)})
+                    logger.info("photography self-test: %s OK %s | %s | X %sx%s, Telegram %sx%s", key, name, p.credit, *x.size, *tg.size)
+                else:
+                    out["refused"].append({"file": name, "why": why})
+                    logger.warning("photography self-test: %s REFUSED %s: %s", key, name, why)
+        missing = len(subject.files) - len(out["ok"]) - len(out["refused"])
+        logger.log(logging.INFO if out["ok"] and not out["refused"] else logging.WARNING, "photography self-test: %s %d of %d library photos usable%s",
+                   key, len(out["ok"]), len(subject.files), f" ({missing} gone or refused on licence)" if missing else "")
+    except Exception as e:  # noqa: BLE001 - a self-test never stops anything
+        logger.warning("photography self-test: %s failed (%s)", key, type(e).__name__)
+        out["error"] = type(e).__name__
+    return out
+
+
 def frame(img: Image.Image, platform: str) -> tuple[Image.Image, tuple[float, float, float, float]]:
     """The photograph cropped (never stretched) to the platform's frame, keeping its subject."""
     from app.newsdesk import photos
