@@ -518,6 +518,19 @@ jobs:
       run:
         shell: powershell
     steps:
+      # Leftover-process diagnostics (2026-11-22). The job has shown "cancelled" right after the runner's "Cleaning up orphan processes"
+      # although every step succeeded (runs 43683280763, 43684595279, 43685983005, 45020247943, 45021994734; green on 44069835693).
+      # This step records what was running when the job began; the last step names what the job left behind and stops only processes
+      # proven to be this job's (the runner's own rule: they carry this job's RUNNER_TRACKING_ID). Nothing else is touched.
+      - name: Processes at the start of the job
+        run: |
+          $start = (Get-Date).ToUniversalTime().ToString("o")
+          Get-CimInstance Win32_Process | ForEach-Object {
+            $c = if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString("o") } else { "" }
+            "$($_.ProcessId)|$c"
+          } | Out-File "$env:RUNNER_TEMP\ks-procs-start.txt" -Encoding ascii
+          "job start $start; RUNNER_TRACKING_ID present: $([bool]$env:RUNNER_TRACKING_ID)"
+
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: KiwiVPN-Windows-${{ github.sha }}
@@ -619,6 +632,116 @@ jobs:
           path: ks-*-report.json
           retention-days: 14
           if-no-files-found: ignore
+
+      # Last step (see "Processes at the start of the job"). A process is stopped only when its environment carries this job's
+      # RUNNER_TRACKING_ID (the exact test the runner's orphan cleanup applies), it is not this step's own process tree, and its PID,
+      # creation time and tracking id still match right before the stop. Everything else started during the job is only listed.
+      # Never fails the job.
+      - name: Leftover processes (listed; only this job's are stopped)
+        if: always()
+        run: |
+          $ErrorActionPreference = "Continue"
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class KiwiLeftover {
+            [StructLayout(LayoutKind.Sequential)]
+            struct PBI { public IntPtr ExitStatus; public IntPtr Peb; public IntPtr Affinity; public IntPtr Priority; public IntPtr Pid; public IntPtr ParentPid; }
+            [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int cls, ref PBI pbi, int len, out int ret);
+            [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+            [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadProcessMemory(IntPtr h, IntPtr addr, byte[] buf, IntPtr size, out IntPtr read);
+            [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+            static byte[] Read(IntPtr h, long addr, int n) {
+              byte[] b = new byte[n]; IntPtr got;
+              return ReadProcessMemory(h, new IntPtr(addr), b, new IntPtr(n), out got) ? b : null;
+            }
+            // The value of `name` in a process's environment block: "" when absent, null when it can't be read (64-bit layout).
+            public static string Env(int pid, string name) {
+              IntPtr h = OpenProcess(0x0410, false, pid); // PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
+              if (h == IntPtr.Zero) return null;
+              try {
+                PBI pbi = new PBI(); int ret;
+                if (NtQueryInformationProcess(h, 0, ref pbi, Marshal.SizeOf(pbi), out ret) != 0 || pbi.Peb == IntPtr.Zero) return null;
+                byte[] p = Read(h, pbi.Peb.ToInt64() + 0x20, 8); if (p == null) return null;   // PEB.ProcessParameters
+                long pp = BitConverter.ToInt64(p, 0);
+                byte[] e = Read(h, pp + 0x80, 8), s = Read(h, pp + 0x3F0, 8);                 // Environment, EnvironmentSize
+                if (e == null || s == null) return null;
+                long size = BitConverter.ToInt64(s, 0);
+                if (size <= 0 || size > (1 << 20)) return null;
+                byte[] env = Read(h, BitConverter.ToInt64(e, 0), (int)size); if (env == null) return null;
+                foreach (string kv in Encoding.Unicode.GetString(env).Split('\0')) {
+                  int i = kv.Length > 1 ? kv.IndexOf('=', 1) : -1;
+                  if (i > 0 && string.Equals(kv.Substring(0, i), name, StringComparison.OrdinalIgnoreCase)) return kv.Substring(i + 1);
+                }
+                return "";
+              } finally { CloseHandle(h); }
+            }
+          }
+          '@
+          function Get-Key($p) { $c = if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString("o") } else { "" }; "$($p.ProcessId)|$c" }
+          function Get-Line($p, $byId) {
+            $par = $byId[[int]$p.ParentProcessId]
+            $pn = if ($par -and $par.CreationDate -le $p.CreationDate) { $par.Name } else { "gone" }
+            $cmd = "$($p.CommandLine)"; if ($cmd.Length -gt 300) { $cmd = $cmd.Substring(0, 300) + "..." }
+            $at = if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString("HH:mm:ss") } else { "?" }
+            "pid $($p.ProcessId) $($p.Name) | parent $($p.ParentProcessId) ($pn) | started $at UTC | $($p.ExecutablePath) | $cmd"
+          }
+          $mine = $env:RUNNER_TRACKING_ID
+          $atStart = @{}
+          if (Test-Path "$env:RUNNER_TEMP\ks-procs-start.txt") { Get-Content "$env:RUNNER_TEMP\ks-procs-start.txt" | ForEach-Object { $atStart[$_.Trim()] = $true } }
+          $procs = @(Get-CimInstance Win32_Process)
+          $byId = @{}; foreach ($p in $procs) { $byId[[int]$p.ProcessId] = $p }
+          # this step's own tree (this PowerShell, what it started, and what started it) carries the same tracking id: never a leftover
+          $self = @{ ([int]$PID) = $true }; $selfStart = $byId[[int]$PID].CreationDate
+          $a = $byId[[int]$PID]
+          while ($a -and $byId[[int]$a.ParentProcessId] -and $byId[[int]$a.ParentProcessId].CreationDate -le $a.CreationDate -and -not $self[[int]$a.ParentProcessId]) {
+            $a = $byId[[int]$a.ParentProcessId]; $self[[int]$a.ProcessId] = $true
+          }
+          do {
+            $grew = $false
+            foreach ($p in $procs) {
+              if (-not $self[[int]$p.ProcessId] -and $self[[int]$p.ParentProcessId] -and $p.CreationDate -ge $selfStart) { $self[[int]$p.ProcessId] = $true; $grew = $true }
+            }
+          } while ($grew)
+          $ours = @(); $other = @(); $unreadable = 0
+          foreach ($p in $procs) {
+            if ($self[[int]$p.ProcessId] -or $p.ProcessId -le 4) { continue }
+            $new = $atStart.Count -gt 0 -and -not $atStart[(Get-Key $p)]
+            $tid = [KiwiLeftover]::Env([int]$p.ProcessId, "RUNNER_TRACKING_ID")
+            if ($mine -and $tid -eq $mine) { $ours += $p }
+            elseif ($new) { $other += $p; if ($null -eq $tid) { $unreadable++ } }
+          }
+          "RUNNER_TRACKING_ID present: $([bool]$mine); processes now: $($procs.Count); at the start: $($atStart.Count)"
+          "--- Started during the job, NOT this job's (listed only, never stopped): $($other.Count) ($unreadable with an unreadable environment)"
+          $other | Sort-Object CreationDate | ForEach-Object { Get-Line $_ $byId }
+          "--- Left running by this job (they carry its RUNNER_TRACKING_ID): $($ours.Count)"
+          $md = "### Leftover processes`n`nStarted during the job but not this job's (listed only): $($other.Count)`n`nLeft running by this job: $($ours.Count)`n`n"
+          foreach ($p in $ours) {
+            Get-Line $p $byId
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue
+            if (-not $now -or (Get-Key $now) -ne (Get-Key $p)) { $res = "already exited" }
+            elseif ([KiwiLeftover]::Env([int]$p.ProcessId, "RUNNER_TRACKING_ID") -ne $mine) { $res = "not stopped: identity changed" }
+            else {
+              Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+              Start-Sleep -Milliseconds 500
+              $res = if (Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue) { "STILL RUNNING after stop" } else { "stopped" }
+            }
+            "    -> $res"
+            Write-Host "::warning title=Leftover process from the kill-switch job::$($p.Name) (pid $($p.ProcessId), parent $($p.ParentProcessId)): $res"
+            $md += "- $($p.Name) pid $($p.ProcessId), parent $($p.ParentProcessId), $($p.ExecutablePath): $res`n"
+          }
+          # what the runner itself has logged so far about orphans and cancellation (its diagnostic log, matching lines only)
+          $w = Get-Process Runner.Worker -ErrorAction SilentlyContinue | Where-Object Path | Select-Object -First 1
+          if ($w) {
+            $log = Get-ChildItem (Split-Path (Split-Path $w.Path)) -Filter "Worker_*.log" -Recurse -Depth 3 -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($log) {
+              "--- $($log.Name): lines about orphans or cancellation"
+              Select-String -Path $log.FullName -Pattern "orphan|cancel|terminat" | Select-Object -Last 20 | ForEach-Object { $t = $_.Line; if ($t.Length -gt 300) { $t.Substring(0, 300) } else { $t } }
+            } else { "runner diagnostic log not found" }
+          }
+          $md | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          exit 0
 
   # 2.2 signed auto-update on a fresh GitHub Windows machine, no account and no secrets (ci/update-test/run.ps1): the previous
   # version (TEST build) refuses every bad manifest and installer, then updates itself to this build; service, protected state,
