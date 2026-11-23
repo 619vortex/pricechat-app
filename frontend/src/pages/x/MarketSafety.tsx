@@ -10,8 +10,9 @@ const json = (method: string, value: unknown): RequestInit => ({ method, body: J
 
 export type HeldFigure = { kind: string; subject: string; why: string; at: string };
 
-export function MarketPause({ paused, reason, held, busy, save }: {
-  paused: boolean; reason: string | null; held: HeldFigure[]; busy: boolean; save: (change: { market_pause: boolean }) => Promise<void>;
+export function MarketPause({ paused, reason, held, busy, save, liqPaused = false, liqReason = null }: {
+  paused: boolean; reason: string | null; held: HeldFigure[]; busy: boolean; save: (change: { market_pause?: boolean; liq_pause?: boolean }) => Promise<void>;
+  liqPaused?: boolean; liqReason?: string | null;
 }) {
   return (
     <Card title="Market-data posts">
@@ -23,6 +24,13 @@ export function MarketPause({ paused, reason, held, busy, save }: {
           : <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => void save({ market_pause: true })}>Pause market-data posts</button>}
       </div>
       {paused && reason && <p className="small" role="status">Why: {reason}</p>}
+      {liqPaused && (
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <Badge tone="warn">Liquidation posts paused</Badge>
+          <span className="small">Price news checked against two markets goes on.{liqReason ? ` Why: ${liqReason}` : ""}</span>
+          <button className="btn btn-sm" disabled={busy} onClick={() => { if (window.confirm("Resume liquidation posts?")) void save({ liq_pause: false }); }}>Resume liquidation posts</button>
+        </div>
+      )}
       {held.length > 0 && (
         <details>
           <summary>Figures held as implausible or contradicted ({held.length})</summary>

@@ -347,13 +347,15 @@ async def second_market(m: moves.Move, items: list[dict[str, Any]]) -> str:
         if not sources.has_second(it):
             continue
         try:
-            ok, detail = await SECOND(it, float(fig["price"]))
-        except Exception as e:  # noqa: BLE001 - unreadable: no disagreement to report
+            ok, detail = await sources.call_second(SECOND, it, float(fig["price"]), change=float(fig.get("change") or 0))
+        except Exception as e:  # noqa: BLE001 - unreadable: not verified (owner, 2026-11-23: no automatic move without reliable verification)
             logger.info("livedata: second market for %s unreadable (%s)", fig["symbol"], type(e).__name__)
-            continue
+            return f"{fig['name']} couldn't be checked against an independent market right now ({type(e).__name__})"
         if not ok and "apart" in detail:
             safety.note("second_source", str(fig["symbol"]), detail, price=fig["price"])
             return f"{fig['name']} disagrees with an independent market: {detail}"
+        if not ok:
+            return f"{fig['name']} couldn't be checked against an independent market right now: {detail}"
     return ""
 
 

@@ -134,8 +134,51 @@ LIQ_REVIEW_USD = 500_000_000  # kept for reference: the ceilings and the history
 LIQ_COIN = re.compile(r"[A-Z0-9]{2,15}")  # a coin symbol; "BTCUSD_PERP" is a contract and means the record was mis-keyed
 
 
+_HOUR_MARKET: dict[tuple[str, int], dict[str, float] | None] = {}  # (coin, hour) -> the hour's market on Hyperliquid (one read per coin-hour)
+
+
+def hour_market(coin: str, since_ms: int, fetch: Any = None) -> dict[str, float] | None:
+    """The hour of a liquidation flush on Hyperliquid against the coin's own week (owner, 2026-11-23: a liquidation figure is judged
+    against that hour's market): {range_ratio, volume_ratio, volume_usd}. The last two hourly candles (the flush's 60 minutes span two)
+    against every two-candle window of the week before, by median. None when Hyperliquid can't be read or doesn't list the coin."""
+    import statistics
+
+    key = (coin, since_ms // 3_600_000)
+    if key in _HOUR_MARKET:
+        return _HOUR_MARKET[key]
+    try:
+        if fetch is None:
+            def fetch(req: dict[str, Any]) -> Any:
+                with httpx.Client(timeout=6) as c:
+                    r = c.post("https://api.hyperliquid.xyz/info", json=req)
+                    r.raise_for_status()
+                    return r.json()
+        start = since_ms - 7 * 24 * 3_600_000
+        rows = fetch({"type": "candleSnapshot", "req": {"coin": coin, "interval": "1h", "startTime": start, "endTime": since_ms + 2 * 3_600_000}}) or []
+        bars = [(int(b["t"]), float(b["h"]), float(b["l"]), float(b["o"]), float(b["c"]), float(b["v"])) for b in rows]
+        bars.sort()
+        if len(bars) < 26:
+            out = None
+        else:
+            def window(a: tuple, b: tuple) -> tuple[float, float]:
+                hi, lo, op = max(a[1], b[1]), min(a[2], b[2]), a[3]
+                return ((hi - lo) / op if op > 0 else 0.0), a[5] * a[4] + b[5] * b[4]
+            now_rng, now_vol = window(bars[-2], bars[-1])
+            past = [window(bars[i], bars[i + 1]) for i in range(len(bars) - 3)]
+            mr, mv = statistics.median(r for r, _ in past), statistics.median(v for _, v in past)
+            out = {"range_ratio": now_rng / mr if mr > 0 else 0.0, "volume_ratio": now_vol / mv if mv > 0 else 0.0, "volume_usd": now_vol}
+    except Exception as e:  # noqa: BLE001 - unreadable: the rule without the market's context (it holds)
+        logger.info("liquidations: Hyperliquid candles for %s unreadable (%s)", coin, type(e).__name__)
+        out = None
+    _HOUR_MARKET[key] = out
+    while len(_HOUR_MARKET) > 500:
+        _HOUR_MARKET.pop(next(iter(_HOUR_MARKET)))
+    return out
+
+
 def _liq_implausible(db: Session, coin: str, total: float, since_ms: int) -> str:
-    """app/newsdesk/safety.liquidation_problem against the coin's recorded hours of the last week (before this hour)."""
+    """app/newsdesk/safety.liquidation_problem against the coin's recorded hours of the last week (before this hour) and, when that alone
+    would hold it, against the same hour's market on Hyperliquid (a real squeeze is believed; a figure larger than the hour's trading is not)."""
     from app.models.tradingos import TsLiquidation
     from app.newsdesk import safety
 
@@ -144,7 +187,11 @@ def _liq_implausible(db: Session, coin: str, total: float, since_ms: int) -> str
     for t, usd in db.execute(select(TsLiquidation.t, TsLiquidation.usd).where(TsLiquidation.coin == coin, TsLiquidation.t >= week,
                                                                              TsLiquidation.t < since_ms)).all():
         hours[int(t) // 3_600_000] = hours.get(int(t) // 3_600_000, 0.0) + float(usd or 0)
-    return safety.liquidation_problem(coin, total, [v for v in hours.values() if v > 0])
+    history = [v for v in hours.values() if v > 0]
+    why = safety.liquidation_problem(coin, total, history)
+    if not why or "ceiling" in why:
+        return why  # believed, or above the absolute ceiling (no market context changes that)
+    return safety.liquidation_problem(coin, total, history, hour_market(coin, since_ms))
 
 
 def liquidation_topics(db: Session, now: datetime, listed: set[str] | None = None) -> list[Any]:

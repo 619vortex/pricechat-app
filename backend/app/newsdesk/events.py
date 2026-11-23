@@ -777,6 +777,7 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
         if db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.parent_id == last.id, NdEvent.status.in_(("candidate", RELEASED)))) >= p.updates_per_story:
             return 0
         parent = last
+    confirmed = False  # a second market compared and agreed (owner, 2026-11-23: no automatic move without it)
     if second_opinion is not None and m.kind == "wide" and any(sources.has_second(_item_of(f["symbol"])) for f in m.figures):
         # a market-wide move: every member with a second market is checked against it (the S&P 500 always is)
         details = []
@@ -784,26 +785,29 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
             it = _item_of(fig["symbol"])
             if not sources.has_second(it):
                 continue
-            ok, detail = await second_opinion(it, float(fig["price"]), market)
+            ok, detail = await sources.call_second(second_opinion, it, float(fig["price"]), market, change=float(fig.get("change") or 0))
             if not ok:
                 logger.info("newsdesk events: %s not verified (%s): %s", m.symbol, fig["name"], detail)
-                safety.note("second_source", str(fig["symbol"]), detail, price=fig["price"])
+                if "apart" in detail:  # a real disagreement, not a second market that couldn't be read
+                    safety.note("second_source", str(fig["symbol"]), detail, price=fig["price"])
                 return 0
             details.append(f"{fig['name']}: {detail}")
         verified = "; ".join(details)
+        confirmed = bool(details)
     elif second_opinion is not None and sources.has_second(m.item):
-        ok, detail = await second_opinion(m.item, m.price, market)
+        ok, detail = await sources.call_second(second_opinion, m.item, m.price, market, change=m.change)
         if not ok:
             logger.info("newsdesk events: %s not verified: %s", m.symbol, detail)
             if "apart" in detail:  # a real disagreement between two markets, not a source that couldn't be read
                 safety.note("second_source", m.symbol, detail, price=m.price)
             return 0
         verified = detail
+        confirmed = True
     elif m.symbol == "CRYPTO":
         verified = "several assets, one price source (Yahoo Finance)"
     else:
         verified = "one price source (Yahoo Finance)" if not m.item.get("hl") else "one price source (Yahoo Finance): no second opinion available"
-    two = "Hyperliquid" in verified
+    two = confirmed  # a second market compared and agreed (Hyperliquid, trade.xyz, Nasdaq.com)
     round_level = m.kind == "milestone" and m.level > 0 and (m.level / (m.item.get("step") or m.level)) % 10 == 0
     score = virality.market(kind=m.kind, group=str(m.item.get("group") or "stock"), ratio=m.ratio, two_sources=two, symbol_key=m.key, round_level=round_level,
                             engagement=_engagement_points(adj, "move"))
@@ -820,7 +824,8 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
     names = {"Bitcoin": "BTC", "Ethereum": "ETH", "Solana": "SOL", "XRP": "XRP"}
     tickers = [tk] if tk else [names[n] for n, _ in m.members if n in names][:3]
     facts = {"symbol": m.symbol, "assets": assets, "kind": m.kind, "window": m.window, "change_pct": round(m.change, 2), "ratio": round(m.ratio, 2), "price": m.price,
-             "as_of": m.as_of.isoformat(), "level": m.level, "members": m.members, "direction": direction, "verified": verified, "tickers": tickers, "falling": not m.up,
+             "as_of": m.as_of.isoformat(), "level": m.level, "members": m.members, "direction": direction, "verified": verified, "two_sources": two,
+             "tickers": tickers, "falling": not m.up,
              "risk": False, "told": told, "spark": m.spark, "stat": f"{'+' if m.change > 0 else '-'}{abs(m.change):.1f}%" if m.kind in ("move", "wide") else writer_money(m),
              "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else "", **({"urgency": u.out()} if u is not None else {}),
              **livedata.move_facts(m, verified, extra)}
@@ -893,12 +898,14 @@ def release(db: Session, now: datetime, p: Policy = POLICY) -> NdEvent | None:
     """At most one event per pass. The best candidate that fits the plan goes; the others say why they wait."""
     out = list(db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.released_at >= now - timedelta(hours=24))))
     waiting = sorted(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")), key=lambda e: (-e.virality, e.id))
-    if market_paused(db):  # the owner paused desk-measured market posts: they wait (and expire); news goes on
-        held = [e for e in waiting if market_post(e)]
-        for e in held:  # said on each one (it used to read "no slot before it went stale")
-            importance.record(e, importance.judge_event(e, _age(e, now)), "safety", "held", now,
-                              "market-data posts are paused (" + str(_pause_reason(db) or "owner") + ")")
-        waiting = [e for e in waiting if not market_post(e)]
+    held = [e for e in waiting if held_market(db, e)]
+    for e in held:  # a pause, or a move no second market confirmed: it waits (and expires); news goes on. Said on each one
+        why = held_market(db, e)
+        if why.startswith("market-data posts are paused"):
+            why += " (" + str(_pause_reason(db) or "owner") + ")"
+        importance.record(e, importance.judge_event(e, _age(e, now)), "safety", "held", now, why)
+    if held:
+        waiting = [e for e in waiting if e not in held]
     if not waiting:
         return None
     if sched(p) == "slots":
@@ -1717,6 +1724,33 @@ def _age(ev: NdEvent, now: datetime) -> float:
 # --- what each platform delivers -----------------------------------------------------------------------------------
 
 
+def liquidation_post(ev: NdEvent) -> bool:
+    return (ev.topic or "") == "liquidations" or any(str(a).startswith("LIQ:") for a in ((ev.facts or {}).get("assets") or []))
+
+
+def held_market(db: Session, ev: NdEvent) -> str:
+    """Why a market post is held by a pause ("" = it isn't): the owner's (or a price-data safety stop's) market_pause holds every market
+    post; a liquidation-data stop (liq_pause) holds liquidation posts only (owner, 2026-11-23: "A liquidation-data problem must never
+    silence independently verified market news")."""
+    if not market_post(ev):
+        return ""
+    if market_paused(db):
+        return "market-data posts are paused"
+    if liquidation_post(ev) and liquidations_paused(db):
+        return "liquidation posts are paused (liquidation data held as implausible)"
+    if ev.kind in ("market", "update") and not liquidation_post(ev) and (ev.facts or {}).get("two_sources") is False:
+        # owner, 2026-11-23: "No automatic major-move publishing without reliable verification"
+        return f"not verified by a second market ({str((ev.facts or {}).get('verified') or 'one price source')[:120]}): a measured move goes out only when two markets agree"
+    return ""
+
+
+def liquidations_paused(db: Session) -> bool:
+    from app.models.newsdesk import NdSettings
+
+    s = db.get(NdSettings, 1)
+    return bool((s.state or {}).get("liq_pause")) if s is not None else False
+
+
 def market_post(ev: NdEvent) -> bool:
     """A post made of the desk's own measured market data: a price move, a level, a data post, a market check or a liquidation flush."""
     f = ev.facts or {}
@@ -1753,11 +1787,11 @@ def pending(db: Session, platform: str, now: datetime) -> list[NdEvent]:
     col = NdEvent.x_status if platform == "x" else NdEvent.tg_status
     rows = list(db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, col.in_(("pending", "queued")), NdEvent.released_at >= now - timedelta(hours=12)).order_by(NdEvent.released_at, NdEvent.id)))
     out = []
-    paused = market_paused(db)
     for ev in rows:
-        if paused and market_post(ev):
-            mark(ev, platform, "skipped", "market-data posts are paused (owner)")
-            logger.info("newsdesk events: %s won't deliver #%s: market-data posts are paused", platform, ev.id)
+        why_held = held_market(db, ev)
+        if why_held:
+            mark(ev, platform, "skipped", why_held)
+            logger.info("newsdesk events: %s won't deliver #%s: %s", platform, ev.id, why_held)
             continue
         limit = POLICY.deliver_market if ev.kind == "market" or (ev.facts or {}).get("symbol") else POLICY.deliver_news
         if platform == "x" and X_FOLLOWS_TELEGRAM and ev.tg_status in ("delivered", "uncertain"):

@@ -195,7 +195,20 @@ async def test_a_round_number_milestone(db: Session) -> None:
     web = Web()
     web.prices["GC=F"] = chart(3020, 2990, now, seconds=1800)  # through $3,000 in the last half hour, and holding 0.5% past it
     setup(db, [], [GOLD])
-    await run(db, web)
+    from app.newsdesk import sources as _sources
+
+    async def gold_xyz(*_: object, **__: object) -> dict[str, tuple[float, float]]:
+        return {"xyz:GOLD": (3021.0, 3021.0)}  # the second market agrees (a move is published only when two markets agree, 2026-11-23)
+
+    _sources._xyz = None
+    import pytest as _pytest
+
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(_sources, "xyz_prices", gold_xyz)
+    try:
+        await run(db, web)
+    finally:
+        mp.undo()
     made = posts(db)
     assert len(made) == 1 and "GOLD BREAKS ABOVE $3,000, NOW $3,020" in made[0].text
 
