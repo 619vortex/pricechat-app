@@ -65,6 +65,7 @@ class SettingsInput(StrictInput):
     mode: Literal["dry_run", "live"] | None = None
     kill_switch: bool | None = None
     market_pause: bool | None = None  # no desk-measured market post (moves, data posts, market checks, liquidations) released or delivered
+    liq_pause: bool | None = None  # liquidation posts only (the safety stop sets it on liquidation-data problems; price news goes on)
     resume: bool | None = None
     target_per_day: int | None = Field(None, ge=1, le=48)
     max_breaking_per_day: int | None = Field(None, ge=0, le=24)
@@ -104,6 +105,14 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
             state["breaker_reset_at"] = utcnow().isoformat()
             state.pop("market_pause_reason", None)
             state.pop("market_pause_at", None)
+        s.state = state
+    if "liq_pause" in data:
+        on = bool(data.pop("liq_pause"))
+        state = {**(s.state or {}), "liq_pause": on}
+        if not on:  # resumed: liquidation anomalies count afresh from now
+            state["breaker_reset_at"] = utcnow().isoformat()
+            state.pop("liq_pause_reason", None)
+            state.pop("liq_pause_at", None)
         s.state = state
     if "categories" in data:
         data["categories"] = {c: bool(data["categories"].get(c, False)) for c in sources.CATEGORIES}

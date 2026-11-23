@@ -213,9 +213,14 @@ async def test_post_203_as_telegram_and_x_send_it_now(db: Session, wall_street: 
 
     desk_running(db, T203, {})
     quotes = quotes_at(T203)
+
+    async def agrees(item: dict[str, Any], price: float, *a: Any, **kw: Any) -> tuple[bool, str]:
+        return True, f"second market {price:,.2f} vs Yahoo {price:,.2f}: 0.00% apart"
+
     await events.decide(db, T203, quotes=quotes, watchlist=INDICES, categories={}, desk_state=engine.settings_row(db).state, liquidations=False,
-                        second_opinion=None, daily={})
+                        second_opinion=agrees, daily={})
     [ev] = list(db.scalars(select(NdEvent).where(NdEvent.kind == "market")))
+    assert ev.facts["two_sources"] is True
     if ev.status != "released":  # the slot plan is not what is under test: release it as the 00:00 Dubai slot did
         ev.status, ev.released_at, ev.slot = "released", T203, "slot"
         db.commit()

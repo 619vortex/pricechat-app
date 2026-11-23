@@ -219,12 +219,16 @@ async def test_the_s_and_p_500_is_checked_against_trade_xyz(monkeypatch: pytest.
 
 
 async def test_no_second_market_means_one_source_said_plainly(monkeypatch: pytest.MonkeyPatch) -> None:
+    other = {"symbol": "^N225", "name": "Nikkei", "group": "index"}  # no second market exists for it
+    assert not sources.has_second(other)
+    assert await sources.second_opinion(other, 38000.0) == (True, "one price source (Yahoo Finance)")
+    # owner, 2026-11-23: the Dow and the Nasdaq Composite have a second source now (Nasdaq.com), and a second market that can't be read is
+    # NOT verified (no automatic move without reliable verification), no longer "one source, said so"
     dow = next(w for w in sources.DEFAULT_WATCHLIST if w["symbol"] == "^DJI")
-    assert not sources.has_second(dow)
-    assert await sources.second_opinion(dow, 48147.33) == (True, "one price source (Yahoo Finance)")
+    assert sources.has_second(dow)
     gold = next(w for w in sources.DEFAULT_WATCHLIST if w["symbol"] == "GC=F")
-    ok, detail = await sources.second_opinion(gold, 3515.4)  # trade.xyz unreadable (conftest): one source, said so
-    assert ok and detail.startswith("one price source (Yahoo Finance): Hyperliquid trade.xyz couldn't be read")
+    ok, detail = await sources.second_opinion(gold, 3515.4)  # trade.xyz unreadable (conftest)
+    assert not ok and detail.startswith("not verified: Hyperliquid trade.xyz couldn't be read")
 
 
 async def test_a_combined_index_move_contradicted_by_the_second_market_is_not_offered(db: Session) -> None:
@@ -233,6 +237,8 @@ async def test_a_combined_index_move_contradicted_by_the_second_market_is_not_of
     m = wide_at(T203)
 
     async def disagrees(item: dict[str, Any], price: float, market: Any = None) -> tuple[bool, str]:
+        if item.get("symbol") != "^GSPC":  # the Nasdaq Composite and the Dow (second source since 2026-11-23) agree
+            return True, f"Nasdaq.com {price:,.2f} vs Yahoo {price:,.2f}: 0.00% apart"
         return False, f"Hyperliquid trade.xyz SP500 7,150.00 vs Yahoo {price:,.2f}: 2.60% apart"
 
     assert await events._offer_move(db, m, [], T203, {}, events.POLICY, disagrees, None, {}) == 0
@@ -242,7 +248,9 @@ async def test_a_combined_index_move_contradicted_by_the_second_market_is_not_of
 async def test_at_sending_a_disagreement_holds_the_post(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.test_price_updates_20261121 import T203, wide_at
 
-    async def disagrees(item: dict[str, Any], price: float, *a: Any) -> tuple[bool, str]:
+    async def disagrees(item: dict[str, Any], price: float, *a: Any, **kw: Any) -> tuple[bool, str]:
+        if item.get("symbol") != "^GSPC":  # the Nasdaq Composite and the Dow (second source since 2026-11-23) agree
+            return True, f"Nasdaq.com {price:,.2f} vs Yahoo {price:,.2f}: 0.00% apart"
         return False, "Hyperliquid trade.xyz SP500 7,150.00 vs Yahoo 6,966.75: 2.63% apart"
 
     monkeypatch.setattr(livedata, "SECOND", disagrees)

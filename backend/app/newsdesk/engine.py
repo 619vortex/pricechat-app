@@ -950,6 +950,7 @@ def settings_out(s: NdSettings) -> dict[str, Any]:
             "market_pause": events.MARKET_PAUSE_DEFAULT if (s.state or {}).get("market_pause") is None else bool((s.state or {}).get("market_pause")),
             "market_pause_reason": (s.state or {}).get("market_pause_reason") or ("not resumed by the owner since the 2026-11-21 deploy"
                                                                                   if (s.state or {}).get("market_pause") is None and events.MARKET_PAUSE_DEFAULT else None),
+            "liq_pause": bool((s.state or {}).get("liq_pause")), "liq_pause_reason": (s.state or {}).get("liq_pause_reason"),
             "held_figures": list((s.state or {}).get("anomalies") or [])[-10:]}
 
 
