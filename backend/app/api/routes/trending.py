@@ -109,6 +109,21 @@ def reject(post_id: int, db: DbSession) -> dict[str, Any]:
     return engine.post_out(post)
 
 
+class ReleaseInput(StrictInput):
+    action: Literal["retry", "text"]
+
+
+@router.post("/posts/{post_id}/release")
+def release(post_id: int, payload: ReleaseInput, db: DbSession) -> dict[str, Any]:
+    """Owner, 2026-11-23: a tweet held for having no picture and no link: look again, or post it as words alone (still needs Approve)."""
+    post = _post(db, post_id)
+    try:
+        engine.release_held(db, post, payload.action)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+    return engine.post_out(post)
+
+
 class TextInput(StrictInput):
     text: str = Field(min_length=1, max_length=280)
 

@@ -84,7 +84,7 @@ async def test_with_no_style_chosen_the_lane_posts_clean(client: Any, db: Sessio
     await lane.tick(db, get_settings(), tg, NOW)
     assert tg.sent[0]["caption"].endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')  # clean's shape: sources · @thepricechat, one line
     # no photo of the bank itself here and no stand-in: a clean text post (2026-11-16), still the clean style
-    assert tg.sent[0]["image"] is None and db.scalars(select(NdEvent)).one().facts["visual"] == {"style": "clean", "kind": "text", "layout": "text"}
+    assert tg.sent[0]["image"] is None and {k: db.scalars(select(NdEvent)).one().facts["visual"][k] for k in ("style", "kind", "layout")} == {"style": "clean", "kind": "link_preview", "layout": "link_preview"}
 
 
 # ================================================================ 1. casing and qualifiers
@@ -308,7 +308,7 @@ async def test_a_story_with_no_real_picture_goes_text_only(client: Any, db: Sess
     await lane.tick(db, get_settings(), tg, NOW)
     cap = tg.sent[0]["caption"]
     assert tg.sent[0]["image"] is None and cap.startswith("Deutsche Bank's Bitcoin $BTC and Ether $ETH custody is open to clients, bank says.\n\n🔗 ")
-    assert db.scalars(select(NdEvent)).one().facts["visual"] == {"style": "wire", "kind": "text", "layout": "text"}
+    assert {k: db.scalars(select(NdEvent)).one().facts["visual"][k] for k in ("style", "kind", "layout")} == {"style": "wire", "kind": "link_preview", "layout": "link_preview"}
 
 
 def _points(start: float, end: float, n: int = 97) -> list[list[float]]:
@@ -369,7 +369,7 @@ async def test_no_chart_when_the_candles_dont_show_what_the_headline_says(client
     _released(db, "c2", BTC70[2], BTC70[3], [(BTC70[0], BTC70[1])], label=brief.JUST_IN, age=37, evidence="attributed")
     tg = TextTg()
     await lane.tick(db, get_settings(), tg, NOW, writer_transport=_yahoo(71_800.0, 72_600.0))  # never below $70,000 in these candles
-    assert tg.sent[0]["image"] is None and db.scalars(select(NdEvent)).one().facts["visual"]["layout"] == "text"
+    assert tg.sent[0]["image"] is None and db.scalars(select(NdEvent)).one().facts["visual"]["layout"] == "link_preview"  # owner, 2026-11-23
 
 
 @pytest.mark.parametrize("text,start,end,ok", [

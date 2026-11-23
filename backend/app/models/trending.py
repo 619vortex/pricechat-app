@@ -108,3 +108,5 @@ class TtPost(IdMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     metrics_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # owner, 2026-11-23: a tweet goes with a licensed picture or a link; the owner alone may send it as words only ("Post without picture")
+    text_ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)

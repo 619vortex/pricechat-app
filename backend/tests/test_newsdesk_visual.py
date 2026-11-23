@@ -237,7 +237,9 @@ async def test_a_verified_story_goes_out_as_picture_headline_and_source_and_noth
     assert "Price Chat News" in sent["text"] and "Verified across 2 outlets" in sent["text"] and '<a href="https://' in sent["text"]
     assert "PRICE ALERT" not in sent["text"] and "#" not in sent["text"] and "exclusive" not in sent["text"].lower()
     seen = lane.settings_row(db).state["recent_visuals"]
-    assert seen[-1]["kind"] == "text"  # no real photo of the exchange: clean text, not a typographic headline card (owner, 2026-11-19)
+    # no real photo of the exchange: never a typographic headline card (owner, 2026-11-19), and never bare text either (owner, 2026-11-23):
+    # the source article's own preview, shown by Telegram
+    assert seen[-1]["kind"] == "link_preview" and "preview_url" in sent
 
 
 async def test_a_company_story_gets_a_real_licensed_photo_of_the_company(monkeypatch: pytest.MonkeyPatch) -> None:

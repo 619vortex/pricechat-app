@@ -70,6 +70,12 @@ async def test_replay_major_event_through_the_whole_pipeline(case: str, a: str, 
     assert sent.get("sent"), sent
     x_at = BETWEEN + timedelta(seconds=50)
     result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, x_at)
+    if result == "held":  # owner, 2026-11-23: no licensed picture and no link on X: it waits for the owner, who releases it as words alone
+        from app.terminal import feed
+
+        feed.release_held(db, ev.id, "text", x_at)
+        x_at += timedelta(seconds=30)
+        result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, x_at)
     assert result == "published", result
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
@@ -104,6 +110,11 @@ async def test_x_posts_on_its_own_when_telegram_refuses_its_caption(client: Any,
     db.expire_all()
     assert db.get(NdEvent, ev.id).tg_status == "skipped" and live["tg"].sent == []
     result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(seconds=50))
+    assert result == "held" and live["x"].posts == []  # owner, 2026-11-23: no picture and no link: X waits for the owner
+    from app.terminal import feed
+
+    feed.release_held(db, ev.id, "text", BETWEEN + timedelta(seconds=55))
+    result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(seconds=60))
     assert result == "published" and len(live["x"].posts) == 1
     assert "qeshm" in live["x"].posts[0]["text"].lower()
     await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=2))

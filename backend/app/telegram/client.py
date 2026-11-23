@@ -161,8 +161,13 @@ class TelegramBotClient:
     # posts / updates signal cards in the one signal group set in Admin → Trading OS. Nothing else is ever sent.
     # The News Desk's Telegram lane (app/newsdesk/telegram) also posts here, to the one announcement channel, after checking the bot's rights.
     async def send_message(self, chat_id: int | str, text: str, buttons: list[list[dict[str, str]]] | None = None, html: bool = False,
-                           reply_to: int | None = None, silent: bool = False) -> dict[str, Any]:
+                           reply_to: int | None = None, silent: bool = False, preview_url: str | None = None) -> dict[str, Any]:
         params: dict[str, Any] = {"chat_id": chat_id, "text": fit_text(text, TEXT_LIMIT, html), "disable_web_page_preview": True}
+        if preview_url:
+            # the News Desk's article preview (owner, 2026-11-23): Telegram itself fetches the source article's own preview picture
+            # and shows it large above the words. Nothing is downloaded or re-uploaded here: the publisher's page decides what shows.
+            params.pop("disable_web_page_preview")
+            params["link_preview_options"] = {"url": preview_url, "prefer_large_media": True, "show_above_text": True}
         if buttons:
             params["reply_markup"] = {"inline_keyboard": buttons}
         if html:

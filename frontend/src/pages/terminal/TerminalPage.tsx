@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "re
 import { request } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import type { Story } from "./classic";
+import { PicturePanel } from "./PicturePanel";
 import { StoryInsight } from "./StoryInsight";
 import "./t2.css";
 
@@ -33,7 +34,7 @@ type Item = { key: string; id: number; title: string; category: string; lane: st
   priority: boolean; story?: T2Story; desk?: DeskRow };
 
 const VERDICT_TEXT: Record<Verdict, string> = { verified: "Verified", developing: "Developing", unverified: "Unverified" };
-const LANE_TEXT: Record<string, string> = { breaking: "Breaking", disruption: "Disruption", emerging: "Emerging", rumor: "Rumor watch", watch: "News", published: "Published", rejected: "Skipped" };
+const LANE_TEXT: Record<string, string> = { breaking: "Breaking", disruption: "Disruption", emerging: "Emerging", rumor: "Rumor watch", watch: "News", published: "Published", rejected: "Skipped", held: "Held" };
 const HOOK_TEXT: Record<string, string> = { breaking: "Breaking", viral: "Viral", bold: "Viral", curiosity: "Curiosity" };
 const FILTERS = [{ key: "all", label: "All" }, { key: "breaking", label: "Breaking" }, { key: "emerging", label: "Emerging" }, { key: "rumor", label: "Rumors" },
   { key: "published", label: "Published" }] as const;
@@ -299,6 +300,7 @@ function FeedCard({ i, n, onOpen }: { i: Item; n: number; onOpen: () => void }) 
         <span className="t2-card-title">{i.title}</span>
         <span className="t2-card-foot">
           <span className="t2-meta">{i.sources} source{i.sources === 1 ? "" : "s"}{i.x ? " · on X" : ""}{i.desk ? " · News Desk" : ""}</span>
+          {i.desk && [i.desk.desk.x_status, i.desk.desk.tg_status].includes("held") && <span className="t2-held-chip">Held: needs a picture</span>}
           <span className="t2-open">Open ›</span>
         </span>
       </button>
@@ -396,13 +398,14 @@ function StoryPanel({ item, onClose, onChanged }: { item: Item; onClose: () => v
         <span className="t2-card-top"><span className={`t2-lane lane-${item.lane}`}>{LANE_TEXT[item.lane] ?? item.lane}</span><VerdictChip v={item.verdict} lead={item.x} /><span className="t2-meta">{item.category} · {ago(item.at)}</span></span>
         <button className="t2-icon" aria-label="Close" onClick={onClose}>✕</button>
       </div>
-      {item.story ? <StoryBody id={item.story.id} onChanged={onChanged} onClose={onClose} /> : item.desk ? <DeskBody d={item.desk} /> : null}
+      {item.story ? <StoryBody id={item.story.id} onChanged={onChanged} onClose={onClose} /> : item.desk ? <DeskBody d={item.desk} onChanged={onChanged} /> : null}
     </Panel>
   );
 }
 
-function DeskBody({ d }: { d: DeskRow }) {
+function DeskBody({ d, onChanged }: { d: DeskRow; onChanged: () => void }) {
   const sent = [d.desk.x_status, d.desk.tg_status];
+  const held = sent.includes("held");
   return (
     <div className="t2-body">
       <h2 className="t2-panel-title">{d.headline || d.title}</h2>
@@ -411,7 +414,9 @@ function DeskBody({ d }: { d: DeskRow }) {
         <p>{d.status === "released" ? "Released by the News Desk." : d.status === "candidate" ? "The News Desk is still deciding." : `News Desk: ${d.status}.`}</p>
         {d.why && <p className="t2-reason">{d.why}</p>}
         <p className="t2-meta">X: {sent[0]}{d.desk.x_note ? ` (${d.desk.x_note})` : ""} · Telegram: {sent[1]}{d.desk.tg_note ? ` (${d.desk.tg_note})` : ""}</p>
+        {held && <p className="t2-warnline">Held for your review: no licensed picture and no article preview. Decide below.</p>}
       </Section>
+      <PicturePanel target={{ kind: "event", id: d.id, held }} onChanged={onChanged} />
       <StoryInsight target={`event:${d.id}`} />
       <Section title="Sources">
         <ul className="t2-sources">{d.sources.map((x, i) => <li key={i}>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">{x.name}</a> : x.name}</li>)}</ul>
@@ -470,6 +475,8 @@ function StoryBody({ id, onChanged, onClose }: { id: number; onChanged: () => vo
         <button className="t2-link" disabled={busy} onClick={() => void act("hooks", {}, "Three new headlines written.")}>Write new options with AI</button>
       </Section>
 
+      <PicturePanel target={{ kind: "topic", id }} />
+
       <Section title="Publish">
         {xSent ? (
           <p className="t2-sent">On X{data.post?.status === "dry_run" ? " (dry run)" : ""} {ago(data.post?.published_at)}{data.post?.x_id ? <> · <a href={`https://x.com/i/web/status/${data.post.x_id}`} target="_blank" rel="noreferrer">view</a></> : null}</p>
@@ -486,6 +493,10 @@ function StoryBody({ id, onChanged, onClose }: { id: number; onChanged: () => vo
           {!xSent && data.lane !== "rejected" && <button className="t2-btn ghost" disabled={busy} onClick={() => void act("reject", { reason: "Skipped from the Terminal" }, "Skipped.", onClose)}>Skip</button>}
         </div>
         {note && <p className={note.ok ? "t2-okline" : "t2-problem"}>{note.text}</p>}
+        {note && !note.ok && /Send without picture/.test(note.text) && !data.telegram && (
+          <button className="t2-btn ghost" disabled={busy}
+            onClick={() => window.confirm("Send this to Telegram WITHOUT a picture?") && void act("telegram", { text: draft, text_ok: true }, "Sent to Telegram without a picture.")}>Send without picture</button>
+        )}
       </Section>
 
       <StoryInsight target={`topic:${id}`} />

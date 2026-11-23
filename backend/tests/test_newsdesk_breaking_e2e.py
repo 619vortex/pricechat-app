@@ -135,9 +135,14 @@ async def test_a_world_monitor_event_breaks_on_telegram_and_x_at_once_as_text(cl
     assert "<b>" in tg.sent[0]["caption"] and "Sources: DW · The National" in tg.sent[0]["caption"]  # feed links: named, not linked
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    assert ev.tg_status == "delivered" and ev.facts["visual"]["kind"] == "text"
+    assert ev.tg_status == "delivered" and ev.facts["visual"]["kind"] == "link_preview"  # owner, 2026-11-23: the article's own preview, never bare text
     x = live["x"]
-    result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=1))
+    # owner, 2026-11-23: no licensed picture and no article link on X, so X waits for the owner; released as words alone, it goes
+    assert await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=1)) == "held" and x.posts == []
+    from app.terminal import feed
+
+    feed.release_held(db, ev.id, "text", BETWEEN + timedelta(minutes=1))
+    result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=1, seconds=30))
     assert result == "published" and len(x.posts) == 1 and not x.posts[0]["media"] and x.uploads == []
     db.expire_all()
     ev = db.get(NdEvent, ev.id)

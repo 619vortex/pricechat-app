@@ -490,7 +490,8 @@ def merge_desk(db: Session, rows: list[dict[str, Any]], now: datetime) -> list[d
             r.setdefault("desk", info)
         if hits:
             continue
-        out.append({**desk_event_out(e), "lane": DESK_LANE.get(e.status, "watch"), "desk": info})
+        lane = "held" if "held" in (e.tg_status, e.x_status) else DESK_LANE.get(e.status, "watch")  # waiting for the owner: no picture
+        out.append({**desk_event_out(e), "lane": lane, "desk": info})
     return out
 
 
@@ -570,7 +571,8 @@ def _tg_text(text: str, sources: list[dict[str, Any]]) -> str:
     return body + (f"\n\n<a href=\"{html.escape(url, quote=True)}\">Source</a>" if url else "")
 
 
-async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: str | None, *, client: Any = None) -> dict[str, Any]:
+async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: str | None, *, client: Any = None, text_ok: bool = False,
+                           transport: Any = None) -> dict[str, Any]:
     """The owner's one-click Telegram send of a Terminal story, through the channel lane's own sender: never a rumour, never with an emergency
     stop on or the lane paused, the same words checks as X, one send per story (its unique link), and not when the News Desk already has it."""
     from app.members.telegram_missions import channel_handle
@@ -617,6 +619,19 @@ async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: st
     srcs = [{"name": str(x.get("name") or x.get("outlet") or ""), "url": str(x.get("url") or "")} for x in (post.sources or [])][:4]
     message = {"link": link, "title": t.title, "headline": post.text.split("\n")[0][:200], "plain": post.text, "source": (srcs[0]["name"] if srcs else "Price Chat") or "Price Chat",
                "sources": srcs, "fingerprint": checks.fingerprint(t.title), "writer": "owner", "html": _tg_text(post.text, srcs)}
+    # owner, 2026-11-23: the Terminal's button carries a picture like every desk post: a licensed picture through the Visual Editor, else the
+    # source article's own preview; with neither it is not sent unless the owner chose to send the words alone (text_ok)
+    from app.newsdesk import clean
+    from app.terminal import pictures
+
+    image, pmeta = await pictures.for_topic(db, t, now, transport=transport)
+    if image and pmeta.get("style") == "clean":
+        message["html"], message["plain"] = clean.with_credit(message["html"], message["plain"], pmeta)
+    preview_url = str(pmeta.get("preview_url") or "") if pmeta.get("kind") == "link_preview" else ""
+    if not image and not preview_url and not text_ok:
+        raise ValueError("Not sent: no licensed picture passed the Visual Editor and no source article shows a preview picture. "
+                         "Check the picture panel, or choose Send without picture to post the words alone.")
+    message.update({"card": image or None, "preview": preview_url, "text_ok": bool(text_ok and not image and not preview_url)})
     own = client is None
     if own:
         from app.telegram.service import make_client
@@ -632,10 +647,52 @@ async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: st
             await client.aclose()
     if sent is None:
         raise ValueError(f"Not sent: {(tg.state or {}).get('problem') or 'Telegram did not confirm the message'}.")
-    t.parts = {**(t.parts or {}), "telegram": {"at": now.isoformat(), "message_id": sent.message_id, "post_id": sent.id, "chat": handle}}
+    picture = {"kind": "photo" if image else "link_preview" if preview_url else "text", "page": pmeta.get("page") or "", "licence": pmeta.get("licence") or "",
+               "source": pictures.source_label(pmeta) if (image or preview_url) else "none (the owner sent the words alone)",
+               "credit": pmeta.get("credit_line") or pmeta.get("credit") or ""}
+    if image and pmeta.get("kind") == "photo" and pmeta.get("url"):  # one photograph, one story (app/newsdesk/editor.reuse_problem)
+        used = [*list((tg.state or {}).get("used_photos") or []), [pmeta["url"], now.isoformat(), t.title[:200], f"terminal:{t.id}"]][-600:]
+        tg.state = {**(tg.state or {}), "used_photos": used}
+    t.parts = {**(t.parts or {}), "telegram": {"at": now.isoformat(), "message_id": sent.message_id, "post_id": sent.id, "chat": handle, "picture": picture}}
     from app.newsdesk import memory  # the story's memory across every lane
 
     memory.remember(db, "telegram", str(sent.message_id), t.title, "", now)
     db.commit()
-    logger.info("terminal telegram: topic %s -> message %s in %s (owner)", t.id, sent.message_id, handle)
-    return {"ok": True, "message_id": sent.message_id, "chat": handle}
+    logger.info("terminal telegram: topic %s -> message %s in %s (owner, picture: %s)", t.id, sent.message_id, handle, picture["kind"])
+    return {"ok": True, "message_id": sent.message_id, "chat": handle, "picture": picture}
+
+
+def release_held(db: Session, event_id: int, action: str, now: datetime) -> dict[str, Any]:
+    """The owner's decision on a News Desk post held for want of a picture (owner, 2026-11-23): "retry" looks for a picture again (the
+    library may have grown, the article's preview may work now), "text" sends the words alone because the owner chose to, "skip" drops it.
+    Both platforms that held it are released together."""
+    from app.models.newsdesk import NdPost
+    from app.newsdesk import events as nd_events
+
+    ev = db.get(NdEvent, event_id)
+    if ev is None:
+        raise ValueError("No such event.")
+    held = [p for p in ("telegram", "x") if (ev.tg_status if p == "telegram" else ev.x_status) == "held"]
+    if not held:
+        raise ValueError("This post is not held.")
+    if action not in ("retry", "text", "skip"):
+        raise ValueError("Choose retry, text or skip.")
+    if action == "text":
+        ev.facts = {**(ev.facts or {}), "text_ok": True, "text_ok_at": now.isoformat()}
+    if action == "retry":
+        ev.facts = {k: v for k, v in (ev.facts or {}).items() if k != "visual"}
+    for platform in held:
+        if action == "skip":
+            nd_events.mark(ev, platform, "skipped", "the owner skipped it (no picture)")
+        else:
+            # "queued", not "pending": the owner's release is not missed for being past the 2-hour delivery window (pending() still only
+            # looks 12 hours back, and a market figure is still re-read live before it goes)
+            nd_events.mark(ev, platform, "queued", "released by the owner" + (" as words alone" if action == "text" else ": looking for a picture again"))
+        if platform == "x" and ev.x_post_id:
+            post = db.get(NdPost, ev.x_post_id)
+            if post is not None and post.status == "held":
+                post.status = "skipped" if action == "skip" else "queued"
+                post.facts = {**(post.facts or {}), **({"text_ok": True} if action == "text" else {})}
+    db.commit()
+    logger.info("terminal: held event %s -> %s (%s, owner)", ev.id, action, ", ".join(held))
+    return {"ok": True, "event": ev.id, "action": action, "platforms": held}

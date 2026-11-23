@@ -120,8 +120,9 @@ async def preview(db: Session, event_id: int, now: datetime) -> tuple[bytes, dic
         got = await visual.for_event(copy, used=used, recent=list(state.get("recent_visuals") or []), now=now, db=db, records=records)
     except visual.NumbersRefused as e:
         got = visual.graphic(visual.post_headline(copy), palette="crimson", layout="lower", seed=1, source=f"NOT POSTED: numbers check failed: {str(e)[:80]}")
-    if not got[0]:  # the wire style's text-only post: the preview says so (nothing is drawn for the real post)
-        got = (visual.graphic(visual.post_headline(copy), palette="crimson", layout="lower", seed=1, source="TEXT ONLY: this post goes without a picture")[0], got[1])
+    if not got[0]:  # no licensed picture: the real post uses the article's preview or waits for the owner (never text-only on its own)
+        got = (visual.graphic(visual.post_headline(copy), palette="crimson", layout="lower", seed=1,
+                              source="NO LICENSED PICTURE: article preview, else held for review in the Terminal")[0], got[1])
     if len(_images) > 40:
         _images.clear()
     _images[key] = got

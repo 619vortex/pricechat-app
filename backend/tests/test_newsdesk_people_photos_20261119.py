@@ -4,6 +4,7 @@ explosions.")
 
 Library records are stubbed with the real Commons titles (no network); every file was looked at before it went in."""
 import io
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -105,4 +106,4 @@ def test_every_people_file_has_a_caption() -> None:
     for s in (*photography.PEOPLE, *(p[0] for p in photography.PAIRS), photography.BY_KEY["binance"]):
         for f in s.files:
             assert photography.CAPTIONS.get(f), f
-            assert any(m in photography.CAPTIONS[f] for m in ("2022", "2023", "2025", "2026"))  # when it was taken: an archive photo never passes for today's
+            assert re.search(r"\b20\d\d\b", photography.CAPTIONS[f])  # when it was taken: an archive photo never passes for today's
