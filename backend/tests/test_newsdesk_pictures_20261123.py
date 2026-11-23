@@ -304,3 +304,43 @@ async def test_the_terminal_button_uses_the_articles_preview_when_no_licensed_ph
     tg = Tg()
     out = await feed.publish_telegram(db, get_settings(), t, None, client=tg)
     assert out["ok"] and tg.sent[0]["card"] is False and tg.sent[0]["preview_url"] == ART and out["picture"]["kind"] == "link_preview"
+
+
+# --- 7. the library's new subjects (owner, 2026-11-23: "expand the approved image library using properly licensed sources") ---------------
+
+@pytest.mark.parametrize("head,key", [
+    ("OPEC+ agrees surprise output cut; oil jumps 6%", "opec"),  # OPEC's own building before a generic oil picture
+    ("Oil prices fall as US crude stocks rise", "oil"),
+    ("SEC sues Bybaz exchange over unregistered securities", "sec"),
+    ("IMF cuts its global growth forecast", "imf"),
+    ("Bank of Japan raises rates to 1%", "boj"),
+    ("BoE holds rates at 4%", "boe"),
+    ("Meta shares slide after earnings", "meta"),
+    ("White House weighs a crypto executive order", "white_house"),
+    ("US Senate passes the stablecoin bill", "capitol"),
+    ("World Bank approves a $2B loan to Egypt", "world_bank"),
+    ("Treasury Department sanctions a crypto mixer", "treasury"),
+])
+def test_a_headline_naming_an_institution_gets_its_own_building(head: str, key: str) -> None:
+    from app.newsdesk import photography
+
+    got = photography.subject_of(head)
+    assert got is not None and got.key == key
+
+
+@pytest.mark.parametrize("head", ["Meta-analysis shows coffee helps", "Second quarter GDP beats", "Kenya's Senate votes on a tax bill", "Treasury yields climb"])
+def test_lookalike_words_never_pull_an_institutions_photo(head: str) -> None:
+    from app.newsdesk import photography
+
+    assert photography.subject_of(head) is None
+
+
+@pytest.mark.parametrize("head,key", [("Warsh signals a rate pause", "warsh"), ("Lagarde says the ECB is ready to act", "lagarde"),
+                                      ("Erdoğan says Turkey will cut energy imports", "erdogan"), ("Sam Altman says OpenAI will raise again", "altman"),
+                                      ("Saylor's Strategy buys more bitcoin", "saylor"), ("Bessent rules out a tariff cut", "bessent")])
+def test_a_headline_naming_a_person_gets_their_dated_captioned_photo(head: str, key: str) -> None:
+    from app.newsdesk import photography
+
+    got = photography.people_of(head)
+    assert got is not None and got[0].key == key
+    assert all(photography.CAPTIONS.get(f) for f in got[0].files)  # who, where and when: an archive photo never passes for today's event

@@ -79,6 +79,13 @@ LIBRARY: tuple[Subject, ...] = (
     Subject("ether", "Ether", r"\b(ether|ethereum|eth)\b(?! foundation)", (
         "File:Close-up of a physical Ethereum coin (51002904687).jpg",
     )),
+    # owner, 2026-11-23 (library expansion): every file below was read live on Commons and looked at; licences re-verified at every use.
+    # OPEC comes before oil: a headline naming OPEC shows OPEC's own building, not a generic oil picture
+    Subject("opec", "OPEC", r"\bopec\+?(?=\W|$)", (
+        "File:Wien - OPEC-Zentrale, Portal.JPG",  # the canopy reading ORGANIZATION OF THE PETROLEUM EXPORTING COUNTRIES, 2021
+        "File:Entrance OPEC Headquarter Vienna.JPG",
+        "File:Wien - OPEC-Zentrale (a).JPG",
+    )),
     Subject("oil", "Oil", r"\b(oil|crude|brent|wti|opec\+?|diesel|gasoline)\b", (
         "File:LostHillsPumpjacksSunset.JPG",
         "File:PumpjacksFull.JPG",
@@ -179,6 +186,49 @@ LIBRARY: tuple[Subject, ...] = (
         "File:2022 - Q&A PO1 4700 (52471974491).jpg",
         "File:2022 - Press Conferences BE6 1583 (52472585725).jpg",
     )),
+    # owner, 2026-11-23 (library expansion): institutions the desk names most, each photo showing the institution's own building or name
+    Subject("meta", "Meta", r"\b(meta platforms|facebook|instagram|whatsapp)\b|(?-i:\bMeta(?:'s|’s)?\b(?!-))", (
+        "File:Meta i Almedalen.jpeg",  # the large Meta lettering, 2022
+    )),
+    Subject("boe", "The Bank of England", r"\b(bank of england|threadneedle street)\b|(?-i:\bBoE\b)", (
+        "File:Bank of England Building, London, UK - Diliff.jpg",
+        "File:Bank of England Building, City of London (Southwest View - 01).jpg",
+    )),
+    Subject("boj", "The Bank of Japan", r"\bbank of japan\b|(?-i:\bBoJ\b|\bBOJ\b)", (
+        "File:Bank of Japan 20190223.jpg",
+        "File:Bank of Japan Head Office, Tokyo - Aug 29, 2011.jpg",
+        "File:Bank of Japan Head Office,Chuo-city,Tokyo,Japan.jpg",
+    )),
+    Subject("treasury", "The US Treasury", r"\b(u\.?s\.? treasury department|treasury department|department of the treasury)\b", (
+        "File:U.S. Treasury Building and Albert Gallatin Statue.jpg",
+        "File:Treasury Building (1).jpg",
+        "File:Us-treasury-building.jpg",
+    )),
+    Subject("sec", "The SEC", r"(?-i:\bSEC(?:'s|’s)?\b)|\bsecurities and exchange commission\b", (
+        "File:U.S. Securities and Exchange Commission headquarters.JPG",
+        "File:Facade of the U.S. Securities and Exchange Commission headquarters, Washington, D.C.jpg",
+    )),
+    # the US Congress only: "Senate" or "Congress" alone can be another country's
+    Subject("capitol", "The US Capitol", r"\b(u\.?s\.? capitol|capitol hill|u\.?s\.? congress|u\.?s\.? senate|u\.?s\.? house of representatives|congressional)\b", (
+        "File:The dome of the United States Capitol building.jpg",
+        "File:US Capitol Building at night Jan 2006.jpg",
+        "File:United States Capitol west side at night.jpg",
+        "File:Capitol at Dusk 2.jpg",
+    )),
+    Subject("white_house", "The White House", r"\bwhite house\b", (
+        "File:The White House June 2024.jpg",
+        "File:North Façade White House.JPG",
+        "File:White House 05.jpg",
+    )),
+    Subject("imf", "The IMF", r"(?-i:\bIMF(?:'s|’s)?\b)|\binternational monetary fund\b", (
+        "File:11 International Monetary Fund IMF in Washington DC USA - Creative Commons CC-BY.jpg",  # the name on the wall
+        "File:International Monetary Fund (IMF) (53844898894).jpg",
+        "File:IMF building HR.jpg",
+    )),
+    Subject("world_bank", "The World Bank", r"\bworld bank\b", (
+        "File:The World Bank Group (53844804648).jpg",
+        "File:The World Bank Group.jpg",  # the name carved in stone
+    )),
     Subject("stocks", "Wall Street", r"\b(s&p 500|dow jones|wall street|nyse|new york stock exchange|u\.s\. stocks|us stocks)\b", (
         "File:Sign of the New York Stock Exchange, Broad Street.jpg",
         "File:New York Stock Exchange Facade.JPG",
@@ -191,6 +241,24 @@ LIBRARY: tuple[Subject, ...] = (
 # CC0, re-verified live). A pair is used when the story names both; otherwise the person named first. CAPTIONS says who is pictured, where
 # and when, drawn with the credit: an archive photo never passes for today's meeting. Never in a story of violence (clean.picture).
 CAPTIONS: dict[str, str] = {
+    # owner, 2026-11-23 (library expansion): who, where and when, so an archive photo never passes for today's event
+    "File:Chairman Warsh answers reporters' questions at the FOMC press conference on June 17, 2026 (2).jpg": "Fed Chair Kevin Warsh at the FOMC press conference, June 2026",
+    "File:Official portrait of Kevin M. Warsh.jpg": "Fed Chair Kevin Warsh, official portrait, 2026",
+    "File:Visite de Christine Lagarde, Présidente de la Banque centrale européenne le Jeudi 20 avril 2023 à l’Ecole polytechnique (52834400095).jpg": "Christine Lagarde at the Ecole polytechnique, April 2023",
+    "File:AC SO Karlspreisverleihung 2026 14. Mai Krönungssaal Christine Lagarde I.jpg": "Christine Lagarde in Aachen, May 2026",
+    "File:P20250929DT-0078 President Donald Trump and Israeli Prime Minister Benjamin Netanyahu hold a joint press conference.jpg": "Benjamin Netanyahu at the White House, September 2025",
+    "File:MGR0373 (53847540280).jpg": "Narendra Modi arriving in Vienna, July 2024",
+    "File:Recep Tayyip Erdoğan, M11 Arnavutköy-Halkalı etabının açılış töreninde 3.jpg": "Recep Tayyip Erdogan in Istanbul, June 2026",
+    "File:Sam Altman speaking at TED.jpg": "Sam Altman at TED, April 2025",
+    "File:Sam Altman November 2022.jpg": "Sam Altman, November 2022",
+    "File:Dario Amodei at TechCrunch Disrupt 2023 01.jpg": "Dario Amodei at TechCrunch Disrupt, September 2023",
+    "File:Dario Amodei at TechCrunch Disrupt 2023 04.jpg": "Dario Amodei at TechCrunch Disrupt, September 2023",
+    "File:Michael Saylor (54559609943).jpg": "Michael Saylor at Bitcoin 2025, May 2025",
+    "File:Michael Saylor (54345839472).jpg": "Michael Saylor at CPAC, February 2025",
+    "File:Michael Saylor (54345839687).jpg": "Michael Saylor at CPAC, February 2025",
+    "File:P20260528AM-0092 Treasury Secretary Scott Bessent holds a White House Press Briefing.jpg": "Scott Bessent at the White House, May 2026",
+    "File:P20260528AM-0063 Treasury Secretary Scott Bessent holds a White House Press Briefing.jpg": "Scott Bessent at the White House, May 2026",
+    "File:Official portrait of Treasury Secretary Scott Bessent.jpg": "Scott Bessent, official portrait, 2025",
     "File:Donald Trump visit to China, May 2026 P20260514DT-1182.jpg": "Xi Jinping and Donald Trump in Beijing, May 2026",
     "File:President Donald Trump greets Chinese President Xi Jinping before a bilateral meeting at the Gimhae International Airport terminal (54890669438).jpg": "Donald Trump and Xi Jinping in Busan, October 2025",
     "File:Donald Trump visit to China, May 2026T-0783.jpg": "Xi Jinping and Donald Trump in Beijing, May 2026",
@@ -265,6 +333,42 @@ PEOPLE: tuple[Subject, ...] = (
         "File:Elon Musk (54817688006).jpg",
         "File:Elon Musk - 54819827616.jpg",
     )),
+    # owner, 2026-11-23 (library expansion): each person alone in the frame (a two-leader photo is not one person's picture)
+    Subject("warsh", "Kevin Warsh", r"\bwarsh(?:'s|’s)?\b", (
+        "File:Chairman Warsh answers reporters' questions at the FOMC press conference on June 17, 2026 (2).jpg",
+        "File:Official portrait of Kevin M. Warsh.jpg",
+    )),
+    Subject("lagarde", "Christine Lagarde", r"\blagarde(?:'s|’s)?\b", (
+        "File:Visite de Christine Lagarde, Présidente de la Banque centrale européenne le Jeudi 20 avril 2023 à l’Ecole polytechnique (52834400095).jpg",
+        "File:AC SO Karlspreisverleihung 2026 14. Mai Krönungssaal Christine Lagarde I.jpg",
+    )),
+    Subject("netanyahu", "Benjamin Netanyahu", r"\bnetanyahu(?:'s|’s)?\b", (
+        "File:P20250929DT-0078 President Donald Trump and Israeli Prime Minister Benjamin Netanyahu hold a joint press conference.jpg",
+    )),
+    Subject("modi", "Narendra Modi", r"(?-i:\bModi(?:'s|’s)?\b)", (
+        "File:MGR0373 (53847540280).jpg",
+    )),
+    Subject("erdogan", "Recep Tayyip Erdogan", r"\berdo[gğ]an(?:'s|’s)?\b", (
+        "File:Recep Tayyip Erdoğan, M11 Arnavutköy-Halkalı etabının açılış töreninde 3.jpg",
+    )),
+    Subject("altman", "Sam Altman", r"\bsam altman\b", (
+        "File:Sam Altman speaking at TED.jpg",
+        "File:Sam Altman November 2022.jpg",
+    )),
+    Subject("amodei", "Dario Amodei", r"\b(dario )?amodei\b", (
+        "File:Dario Amodei at TechCrunch Disrupt 2023 01.jpg",
+        "File:Dario Amodei at TechCrunch Disrupt 2023 04.jpg",
+    )),
+    Subject("saylor", "Michael Saylor", r"\bsaylor(?:'s|’s)?\b", (
+        "File:Michael Saylor (54559609943).jpg",
+        "File:Michael Saylor (54345839472).jpg",
+        "File:Michael Saylor (54345839687).jpg",
+    )),
+    Subject("bessent", "Scott Bessent", r"\bbessent(?:'s|’s)?\b", (
+        "File:P20260528AM-0092 Treasury Secretary Scott Bessent holds a White House Press Briefing.jpg",
+        "File:P20260528AM-0063 Treasury Secretary Scott Bessent holds a White House Press Briefing.jpg",
+        "File:Official portrait of Treasury Secretary Scott Bessent.jpg",
+    )),
     Subject("cz", "Changpeng Zhao", r"\bchangpeng zhao\b|\bzhao changpeng\b|(?-i:\bCZ\b)", (
         "File:2022 - Press Conferences BE6 1591 (52472274614).jpg",
         "File:2022 - Q&A PO1 4700 (52471974491).jpg",
@@ -299,7 +403,7 @@ BY_KEY = {s.key: s for s in (*LIBRARY, *PEOPLE, *(p[0] for p in PAIRS))}
 # a data post's or market move's symbol -> its subject
 SYMBOLS = {"GC=F": "gold", "XAU": "gold", "GOLD": "gold", "PAXG": "gold", "SI=F": "silver", "SILVER": "silver", "BTC-USD": "bitcoin", "BTC": "bitcoin",
            "ETH-USD": "ether", "ETH": "ether", "CL=F": "oil", "BZ=F": "oil", "CL": "oil", "OIL": "oil", "^GSPC": "stocks", "^IXIC": "stocks", "US-STOCKS": "stocks",
-           "^DJI": "stocks", "NG=F": "natgas", "HG=F": "copper", "ZW=F": "grains", "DOGE-USD": "dogecoin", "DOGE": "dogecoin",
+           "^DJI": "stocks", "NG=F": "natgas", "HG=F": "copper", "ZW=F": "grains", "DOGE-USD": "dogecoin", "DOGE": "dogecoin", "META": "meta",
            "AMZN": "amazon", "GOOGL": "google", "GOOG": "google", "TSM": "tsmc", "JPM": "jpmorgan", "MSFT": "microsoft", "NVDA": "nvidia", "AAPL": "apple", "TSLA": "tesla"}
 
 _cache: dict[str, tuple[float, Any]] = {}
