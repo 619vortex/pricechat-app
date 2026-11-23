@@ -82,6 +82,19 @@ def test_no_third_post_in_a_row_from_one_desk() -> None:
     assert editorial.diversity(_cand("BINANCE HALTS WITHDRAWALS", topic="hack", kind="update"), covered, SLOT) == (0.0, "")
 
 
+def test_a_run_counts_recent_posts_only() -> None:
+    # production 2026-11-23 08:00 UTC: #1131 (2.5 h earlier) and #1053 (46 h earlier) were read as two in a row, and the slot was skipped
+    # with five eligible Ukraine stories waiting (#1135 scored 70)
+    geo = lambda h: editorial.Covered({**sig([], typ="news", cls=""), "desk": "geopolitics"}, SLOT - timedelta(hours=h), None)  # noqa: E731
+    cand = _cand("ZELENSKYY SAYS UKRAINE BEHIND DRONE ATTACKS ON RUSSIAN SHIPS NEAR LIBYA", topic="geopolitics", category="politics")
+    assert editorial.desk_of(cand) == "geopolitics"
+    pen, held = editorial.diversity(cand, [geo(2.5), geo(46)], SLOT)
+    assert held == "" and pen == editorial.DIVERSITY_PENALTY  # not a run; still ranked lower for the one post today
+    pen, held = editorial.diversity(cand, [geo(4), geo(8)], SLOT)
+    assert "geopolitics" in held  # two in the last slots: the third still waits
+    assert editorial.diversity(cand, [geo(4), geo(12.5)], SLOT)[1] == ""  # the window is 12 hours
+
+
 def test_the_same_desk_ranks_lower_the_more_it_posted_today() -> None:
     covered = [_cov(["OIL"], 4, "commodity"), _cov(["BTC"], 8), _cov(["GOLD"], 12, "commodity")]
     pen, held = editorial.diversity(_cand("OIL JUMPS AFTER STRIKES ON TANKERS", topic="geopolitics", assets=["OIL"], category="commodities"), covered, SLOT)

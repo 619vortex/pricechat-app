@@ -654,6 +654,8 @@ TOPIC_DESK = {"macro": "macro", "geopolitics": "geopolitics", "regulation": "cry
 CATEGORY_DESK = {"economics": "macro", "politics": "geopolitics", "commodities": "commodities", "stocks": "stocks", "crypto": "crypto"}
 DIVERSITY_PENALTY = 5.0  # ranking points per post from the same desk in the last 24 h
 RUN_LIMIT = 2  # never more than this many posts in a row from one desk
+RUN_WINDOW = timedelta(hours=12)  # "in a row" means recent slots (production 2026-11-23: a post from 46 h earlier still made a
+# "run" with this morning's post, and the 08:00 UTC slot was skipped with five eligible stories waiting); the 24 h penalty still ranks
 
 
 def desk_of(ev: Any, sig: dict[str, Any] | None = None) -> str:
@@ -679,7 +681,7 @@ def diversity(ev: Any, covered: list[Covered], now: datetime) -> tuple[float, st
     same = sum(1 for c in day if desk_c(c) == desk)
     run = 0
     for c in covered:
-        if desk_c(c) != desk:
+        if now - c.at > RUN_WINDOW or desk_c(c) != desk:
             break
         run += 1
     if run >= RUN_LIMIT:
