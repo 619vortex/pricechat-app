@@ -51,9 +51,14 @@ async def test_breaking_news_goes_out_text_only_on_telegram_and_x(client: Any, d
         assert poster not in cap
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    assert ev.facts["visual"] == {"style": "wire", "kind": "text", "layout": "text"}
+    assert {k: ev.facts["visual"][k] for k in ("style", "kind", "layout")} == {"style": "wire", "kind": "link_preview", "layout": "link_preview"}  # owner, 2026-11-23: the article's preview
     x = live["x"]
-    assert await engine.follow_telegram(db, get_settings(), None, 0, BETWEEN + timedelta(minutes=1)) == "published"
+    # owner, 2026-11-23: no licensed picture and no article link on X, so X waits for the owner; released as words alone, it goes
+    assert await engine.follow_telegram(db, get_settings(), None, 0, BETWEEN + timedelta(minutes=1)) == "held" and x.posts == []
+    from app.terminal import feed
+
+    feed.release_held(db, ev.id, "text", BETWEEN + timedelta(minutes=1))
+    assert await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=1, seconds=30)) == "published"
     assert x.posts[0]["media"] is None and x.uploads == [] and x.posts[0]["text"].startswith("BREAKING: ")
     assert "@" not in x.posts[0]["text"] and network.x_length(x.posts[0]["text"]) <= 280
     assert db.get(NdPost, db.get(NdEvent, ev.id).x_post_id).status == "published"

@@ -251,3 +251,28 @@
 @media (prefers-reduced-motion: reduce) {
   .t2 *, .t2-panel, .t2-modal, .t2-toast, .t2-scrim { animation: none !important; transition: none !important; }
 }
+
+/* --- the picture panel (owner, 2026-11-23): the image, where it came from, licence and credit ------------------------------------- */
+.t2-pic-frame { margin: 4px 0 12px; border: 1px solid var(--t2-line-2); border-radius: var(--t2-r); overflow: hidden; background: var(--t2-card-2); }
+.t2-pic-frame img { display: block; width: 100%; height: auto; max-height: 420px; object-fit: contain; background: #000; }
+.t2-pic-frame.loading { min-height: 180px; display: grid; place-items: center; animation: t2-pulse 1.4s ease-in-out infinite; }
+.t2-pic-frame.preview figcaption { display: grid; gap: 2px; padding: 10px 12px; font-size: 13px; border-top: 1px solid var(--t2-line); }
+.t2-pic-site { color: var(--t2-blue); font-size: 11.5px; letter-spacing: 0.04em; text-transform: uppercase; }
+.t2-pic-frame.held { display: grid; gap: 4px; padding: 22px 16px; text-align: center; border-color: var(--t2-amber); background: var(--t2-amber-soft); }
+.t2-pic-frame.held strong { color: var(--t2-amber); }
+.t2-pic-frame.held span { color: var(--t2-muted); font-size: 12.5px; }
+.t2-pic-facts { display: grid; gap: 6px; margin: 0; font-size: 13px; }
+.t2-pic-facts > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; }
+.t2-pic-facts dt { color: var(--t2-muted); font-size: 12px; }
+.t2-pic-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.t2-pic-kind { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--t2-green-soft); color: var(--t2-green); }
+.t2-pic-kind.k-link_preview { background: var(--t2-blue-soft); color: var(--t2-blue); }
+.t2-pic-kind.k-held { background: var(--t2-amber-soft); color: var(--t2-amber); }
+.t2-pic-tried { margin-top: 10px; }
+.t2-pic-tried ul { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; }
+.t2-pic-tried li.no { color: var(--t2-muted); }
+.t2-pic-tried li.ok { color: var(--t2-green); }
+.t2-held-chip { margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--t2-amber-soft); color: var(--t2-amber); }
+@keyframes t2-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .t2-pic-frame.loading { animation: none; } }
+.t2-lane.lane-held { background: var(--t2-amber-soft); color: var(--t2-amber); }

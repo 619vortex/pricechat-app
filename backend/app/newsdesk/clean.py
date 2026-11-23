@@ -987,8 +987,8 @@ async def redraw(ev: Any, meta: dict[str, Any], *, transport: Any = None, db: An
     """The same clean picture again from what was stored (X posts what Telegram showed): the same photo, the same template with the same
     verified figures (in X's 16:9 format when it is for X)."""
     layout = meta.get("layout")
-    if layout == "text":
-        return b"", meta  # a text post on Telegram stays a text post on X
+    if layout in ("text", "link_preview"):
+        return b"", meta  # a text post on Telegram stays one on X; the article's preview is Telegram's own and is never redrawn or re-uploaded
     if meta.get("template") and meta.get("template_args"):
         fmt = "x" if platform == "x" else "tg"
         data, tmeta = render(str(meta["template"]), meta["template_args"], fmt)

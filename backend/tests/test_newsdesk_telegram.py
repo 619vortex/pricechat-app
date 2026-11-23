@@ -385,11 +385,14 @@ async def test_routine_pr_stays_out_even_when_it_mentions_a_chaos_word(db: Sessi
     assert tg.sent == []
 
 
-async def test_a_refused_card_still_goes_out_as_text_once(db: Session) -> None:
+async def test_a_refused_card_is_never_replaced_by_bare_text(db: Session) -> None:
+    """Owner, 2026-11-23: never a text-only post on its own. A card Telegram refuses is not swapped for the words alone: nothing goes out,
+    the lane waits, and the post is tried again later with its picture."""
     now = utcnow()
     tg = Tg(photo_fail=TelegramRequestError("Telegram rejected sendPhoto: bad image"))
     await run(db, tg, now, quotes=crash(now))
-    assert len(tg.sent) == 1 and tg.sent[0]["card"] is False and rows(db)[0].status == "delivered"
+    assert [s for s in tg.sent if s["card"] is False] == [] and rows(db) == []
+    assert lane._paused(lane.settings_row(db), now)
 
 
 # --- rights, failures, limits ---------------------------------------------------------------------------------------

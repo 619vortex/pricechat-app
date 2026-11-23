@@ -177,6 +177,13 @@ async def test_telegram_and_x_each_deliver_the_market_check_in_their_own_format(
     await decide(db, now)
     tg = Tg()
     out = await lane.tick(db, get_settings(), tg, now, quotes={})
+    # owner, 2026-11-23: the market check has no source article and (with no quotes here) no verified chart or photo: it waits for the
+    # owner instead of going out as bare text. Released as words alone, it goes in its own format.
+    assert out["sent"] is None and tg.sent == [] and released(db)[0].tg_status == "held"
+    from app.terminal import feed
+
+    feed.release_held(db, released(db)[0].id, "text", now)
+    out = await lane.tick(db, get_settings(), tg, now, quotes={})
     assert out["sent"] == 144 and tg.sent[0]["card"] is False and tg.sent[0]["text"].startswith("<b>Crypto holds steady")
     desk = engine.settings_row(db)
     await engine.deliver_x(db, desk, get_settings(), None, 0, now)

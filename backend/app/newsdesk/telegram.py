@@ -32,6 +32,7 @@ from app.telegram.errors import TelegramError, TelegramRateLimitError, TelegramR
 logger = logging.getLogger(__name__)
 
 FORMAT = "visual"  # owner, 2026-11-09: a picture, one bold headline, a small source credit. "classic" = the older card and summary
+HOLD = "HOLD:"  # a compose result that waits for the owner in the Terminal (no picture, no article preview), never refused for good
 MAX_AGE = timedelta(hours=8)  # older than this isn't news on arrival
 MAX_LEN = 900
 SAME_TITLE = 0.34  # engine.corroboration's bar for two headlines being one story
@@ -267,6 +268,21 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
     except Exception as e:  # noqa: BLE001 - no picture, no post (the wire style's text-only post is b"", not an error)
         logger.warning("tgnews: no picture for event %s (%s)", ev.id, type(e).__name__)
         return None, f"no picture could be made ({type(e).__name__})"
+    preview_url = ""
+    text_ok = bool((ev.facts or {}).get("text_ok"))  # the owner released a held post as words alone, in the Terminal
+    if not image and not text_ok:  # owner, 2026-11-23: never a text-only post on its own. The source article's own preview, else held for review
+        from app.newsdesk import preview
+
+        links = [x.url for x in pkg.links if x.kind != "pricechat"] if pkg is not None else []
+        links += [str(x.get("url") or "") for x in ev.sources or []]
+        got, looks = await preview.first_working(links, transport)
+        if got is None:
+            why = "; ".join(f"{p.url and preview.site_of(p.url)}: {p.why}" for p in looks) or "the story has no source article link"
+            ev.facts = {**(ev.facts or {}), "visual": {**meta, "kind": "held", "layout": "held", "previews": [p.out() for p in looks], "why": meta.get("why", "")}}
+            logger.info("tgnews: event %s held for review: no licensed picture and no working article preview (%s)", ev.id, why[:300])
+            return None, f"{HOLD} no licensed picture passed the Visual Editor and no article preview shows a picture ({why})"
+        meta = preview.meta_for(got, meta)
+        preview_url = got.url
     ev.facts = f = {**(ev.facts or {}), "visual": meta}  # the picture's own record (number_check) is kept, not the facts from before it
     if s is not None:  # what the picture looked like, so the next ones look different
         seen = {k: meta.get(k) for k in ("kind", "motif", "palette", "layout", "tone", "design")}
@@ -307,10 +323,11 @@ async def compose_visual(ev: NdEvent, s: NdTelegramSettings | None, now: datetim
         srcs = [{"name": x.name, "url": x.url} for x in pkg.links if x.kind != "pricechat"]
         return {"headline": pkg.copy.headline, "summary": pkg.copy.context, "html": pkg.telegram_html, "plain": pkg.telegram_plain, "sources": srcs,
                 "writer": f"network-{pkg.copy.writer}", "card": image or None, "choice": {}, "link": f"event:{ev.id}", "title": ev.title, "source": src[:60],
-                "fingerprint": checks.fingerprint(f"{pkg.copy.headline} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""
+                "fingerprint": checks.fingerprint(f"{pkg.copy.headline} {ev.key}"), "label": ev.label, "evidence": ev.evidence, "preview": preview_url, "text_ok": text_ok}, ""
     srcs = [{"name": x["name"], "url": x["url"]} for x in ev.sources or [] if str(x.get("url", "")).startswith("https://")][:3]
     return {"headline": head, "summary": "", "html": wire_html or visual.caption_html(head, src), "plain": plain, "sources": srcs, "writer": "visual", "card": image or None, "choice": {},
-            "link": f"event:{ev.id}", "title": ev.title, "source": src[:60], "fingerprint": checks.fingerprint(f"{head} {ev.key}"), "label": ev.label, "evidence": ev.evidence}, ""
+            "link": f"event:{ev.id}", "title": ev.title, "source": src[:60], "fingerprint": checks.fingerprint(f"{head} {ev.key}"), "label": ev.label, "evidence": ev.evidence,
+            "preview": preview_url, "text_ok": text_ok}, ""
 
 
 # --- rights and delivery ------------------------------------------------------------------------------------------
@@ -353,14 +370,32 @@ async def _deliver(client: Any, chat_id: int, message: dict[str, Any]) -> dict[s
         try:
             return await client.send_photo(chat_id, message["card"], caption=message["html"], html=True, silent=True, **extra)
         except TelegramRequestError as e:
-            logger.info("tgnews: the card was refused (%s); sending the text alone", e)
+            logger.info("tgnews: the card was refused (%s)", e)
+            if not message.get("preview") and not message.get("text_ok"):
+                raise  # never bare text instead: the lane pauses and the post is tried again later, picture and all
+    if message.get("preview"):  # the source article's own preview, shown by Telegram above the words (app/newsdesk/preview)
+        return await client.send_message(chat_id, message["html"], html=True, silent=True, preview_url=message["preview"], **extra)
+    if not message.get("text_ok"):  # owner, 2026-11-23: the desk never sends a text-only post unless the owner chose to
+        raise NoPicture("Telegram refused the picture and the post has no article preview: held, not sent as text")
     return await client.send_message(chat_id, message["html"], html=True, silent=True, **extra)
+
+
+class NoPicture(Exception):
+    """A post that would have gone out as text only (owner, 2026-11-23: never automatically)."""
+
+
+def has_picture(message: dict[str, Any]) -> bool:
+    """A picture, the source article's preview, or the owner's own choice to send the words alone."""
+    return bool(message.get("card") or message.get("preview") or message.get("text_ok"))
 
 
 async def send(db: Session, s: NdTelegramSettings, client: Any, message: dict[str, Any], handle: str, rights: dict[str, Any], now: datetime) -> NdTelegramPost | None:
     """The unique link is the claim: two runs can't both send one story. Returns the row only if Telegram confirmed the message."""
     if engine.emergency_stop(db):  # the last moment before Telegram: a stop switched on during this run still holds the post
         logger.warning("tgnews: not sent, %s: %s", engine.emergency_stop(db), message.get("headline"))
+        return None
+    if not has_picture(message):
+        logger.warning("tgnews: not sent, no picture and no article preview (held for review): %s", message.get("headline"))
         return None
     post = NdTelegramPost(story_link=message["link"][:500], title=message["title"][:300], headline=message["headline"][:200], text=message["plain"], source=message["source"][:60],
                           sources=message["sources"], fingerprint=message["fingerprint"], status="publishing", writer=message["writer"], chat=handle, created_at=now, updated_at=now)
@@ -372,6 +407,11 @@ async def send(db: Session, s: NdTelegramSettings, client: Any, message: dict[st
         return None
     try:
         sent = await _deliver(client, rights["chat_id"], message)
+    except NoPicture as e:
+        db.delete(post)
+        db.commit()
+        logger.warning("tgnews: %s: %s", e, message.get("headline"))
+        return None
     except TelegramRateLimitError as e:
         db.delete(post)
         _pause(s, now, timedelta(seconds=e.retry_after or 60), f"Telegram rate limit: {e}")
@@ -518,10 +558,21 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
             return done(skipped=f"event {ev.id}: waiting for a fresh live price ({detail})")
         db.commit()
         message, reason = await compose(settings, ev, writer_transport, db=db, s=s, now=now)
+        if message is None and reason.startswith(HOLD):  # owner, 2026-11-23: no picture, no automatic post: waiting in the Terminal
+            events.mark(ev, "telegram", "held", reason[len(HOLD):].strip())
+            db.commit()
+            continue
         if message is None:  # remembered, so it isn't tried again every run
             db.add(NdTelegramPost(story_link=f"event:{ev.id}", title=ev.title[:300], headline=ev.headline[:200], text="", source=((ev.sources or [{}])[0].get("name") or "Price Chat")[:60],
                                   sources=[], fingerprint=checks.fingerprint(ev.headline), status="refused", error=reason[:300], chat=handle, created_at=now, updated_at=now))
             events.mark(ev, "telegram", "skipped", f"failed the checks: {reason}")
+            db.commit()
+            continue
+        if (ev.facts or {}).get("text_ok"):  # the owner released it as words alone (Terminal), in whichever format composed it
+            message["text_ok"] = True
+        if not has_picture(message):  # any format: no picture, no article preview, no owner's choice -> waiting in the Terminal
+            events.mark(ev, "telegram", "held", "no picture and no article preview")
+            logger.info("tgnews: event %s held for review: no picture and no article preview", ev.id)
             db.commit()
             continue
         if ev.parent_id:

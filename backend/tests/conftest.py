@@ -484,3 +484,21 @@ def _no_library_network(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.newsdesk import datapost
 
     datapost._last.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_article_previews(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: the source article's preview check (app/newsdesk/preview) reads publishers' pages; tests never touch the network. As
+    most real articles do, an https source offers a large preview picture here (made up: no page is read), so a story with no licensed
+    photo goes out with its article's preview. A test marked real_preview supplies its own pages instead (the hold for review, the
+    refusals: tests/test_newsdesk_pictures_20261123.py)."""
+    if request.node.get_closest_marker("real_preview"):
+        return
+    from app.newsdesk import preview
+
+    async def offline(url: str, transport: object = None) -> "preview.Preview":
+        if not url.startswith("https://"):
+            return preview.Preview(url, False, "not an https link")
+        return preview.Preview(url, True, "", url.rstrip("/") + "/og.jpg", 1200, 630, preview.site_of(url), "")
+
+    monkeypatch.setattr(preview, "check", offline)

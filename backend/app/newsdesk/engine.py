@@ -739,6 +739,21 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
                 stage = "image"
                 image, meta = await visual.for_event(ev, db=db, platform="x")
                 ev.facts = {**(ev.facts or {}), "visual": meta}
+                if isinstance((post.facts or {}).get("viral"), dict):  # what the post actually carried, for what engagement learns
+                    post.facts = {**post.facts, "viral": {**post.facts["viral"], "format": str(meta.get("kind") or "")}}
+                if not image and not (post.facts or {}).get("text_ok") and "https://" not in post.text:
+                    # owner, 2026-11-23: never a text-only post on its own. A post that carries its article's link shows X's own card of
+                    # that article (the owner's X-links switch decides that); without a link and without a licensed picture it waits for
+                    # the owner in the Terminal
+                    why = "no licensed picture passed the Visual Editor"
+                    post.status, post.error = "held", f"held for review: {why}"
+                    from app.newsdesk import events as _events
+
+                    _events.mark(ev, "x", "held", why)
+                    _note_x(s, post, now, ok=False, outcome="held", message=post.error, stage="image")
+                    db.commit()
+                    logger.info("newsdesk: X post %s held for review: %s (event %s)", post.id, why, ev.id)
+                    return "held"
                 if image:  # the wire style's text-only post (b"") goes without a picture, as on Telegram
                     stage = "permit"
                     upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
