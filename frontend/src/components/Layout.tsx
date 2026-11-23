@@ -5,7 +5,7 @@ import { useApi } from "../api/useApi";
 import { useAdmin } from "./AdminGate";
 import { InArea } from "./ui";
 import { HomeData } from "./hub";
-import { AREAS, isTerminalPath, locate, searchJump, type NavIconKey } from "./nav";
+import { AREAS, SIDE_PROJECTS, isSideProjectPath, isTerminalPath, locate, searchJump, type NavIconKey } from "./nav";
 
 /** Six section icons, inline stroke SVG (no emoji). */
 export function NavIcon({ name, size = 18 }: { name: NavIconKey; size?: number }) {
@@ -146,6 +146,9 @@ export function Layout() {
   const [menu, setMenu] = useState(false);
   const { area, page } = locate(pathname);
   const terminal = isTerminalPath(pathname);
+  const side = isSideProjectPath(pathname);  // a side project's page belongs to no section: none is highlighted
+  // owner, 2026-11-23: Side Projects only for a signed-in admin (or the local dashboard, where no login is asked)
+  const signedIn = Boolean(admin.session && (admin.session.authenticated || !admin.session.required));
   const todo = home.data?.todo ?? [];
   const waiting = (keys: string[] = []) => todo.filter((t) => keys.includes(t.key)).reduce((n, t) => n + t.count, 0);
   const s = home.data?.status;
@@ -168,7 +171,7 @@ export function Layout() {
           {AREAS.map((a) => {
             const n = waiting(a.todo);
             return (
-              <NavLink key={a.key} to={a.pages[0].to} end className={() => `nav-link${a.key === area.key ? " active" : ""}`} aria-current={a.key === area.key ? "page" : undefined}>
+              <NavLink key={a.key} to={a.pages[0].to} end className={() => `nav-link${a.key === area.key && !side ? " active" : ""}`} aria-current={a.key === area.key && !side ? "page" : undefined}>
                 <span className="nav-icon"><NavIcon name={a.icon} /></span>
                 <span className="nav-label">{a.label}</span>
                 {n > 0 && <span className="nav-count" aria-label={`${n} waiting`}>{n}</span>}
@@ -177,6 +180,12 @@ export function Layout() {
           })}
         </nav>
         <div className="sidebar-foot">
+          {signedIn && <nav className="side-projects" aria-label="Side projects">
+            <span className="side-projects-head">Side Projects</span>
+            {SIDE_PROJECTS.map((p) => (
+              <NavLink key={p.to} to={p.to} className={({ isActive }) => `side-project-link${isActive ? " active" : ""}`} title={p.about}>{p.label}</NavLink>
+            ))}
+          </nav>}
           {s?.kill_switch && <Link to="/settings" className="kill-indicator">Emergency stop is ON</Link>}
           {admin.session?.required && (
             <button className="signout" onClick={() => void admin.signOut()}>Sign out{admin.session.username ? ` (${admin.session.username})` : ""}</button>
@@ -208,7 +217,7 @@ export function Layout() {
           {AREAS.map((a) => {
             const n = waiting(a.todo);
             return (
-              <Link key={a.key} to={a.pages[0].to} className={`bottombar-link${a.key === area.key ? " active" : ""}`} aria-current={a.key === area.key ? "page" : undefined}>
+              <Link key={a.key} to={a.pages[0].to} className={`bottombar-link${a.key === area.key && !side ? " active" : ""}`} aria-current={a.key === area.key && !side ? "page" : undefined}>
                 <span className="bottombar-icon"><NavIcon name={a.icon} size={20} />{n > 0 && <span className="bottombar-dot" aria-label={`${n} waiting`} />}</span>
                 <span className="bottombar-label">{a.short}</span>
               </Link>

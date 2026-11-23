@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     #   {members_public_url}/api/members/auth/google/callback  and  {members_public_url}/api/members/auth/x/callback
     # Register exactly those on the Google OAuth client and the X app. Use the real https address once deployed.
     members_public_url: str = "http://127.0.0.1:5173"
+    # Admin -> Side Projects (owner, 2026-11-23): where the separate GUMMY & BAKED audit is deployed (its site, and its moderation origin).
+    # Only public https addresses are ever shown to the admin (app/api/routes/side_projects); empty = "Not available yet".
+    gummy_audit_url: str = ""
+    gummy_audit_admin_url: str = ""
     # The Kiwi VPN browser extension(s) allowed to use /api/members/vpn/browser. A Chrome Web Store listing gets its own id: add it here.
     vpn_extension_origins: list[str] = ["chrome-extension://gfajopjikiojbdlgmimbcmcnffbnjpfi"]
     # The one store-review account (app/vpn/reviewer.py). All three or it stays off. Until: YYYY-MM-DD, UTC.
