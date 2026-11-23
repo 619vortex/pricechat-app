@@ -59,6 +59,7 @@ def run(paused: bool = True) -> dict:
     published: list[dict] = []
     decisions: dict = {}
     repeats: dict = {}
+    best: dict = {}  # the highest tier each story reached while it waited
 
     def repeat(it: dict, now: datetime) -> str:
         if it.get("status") == "superseded":
@@ -87,12 +88,16 @@ def run(paused: bool = True) -> dict:
             if (it.get("kind") or "news") in ("market", "data", "recap") or (it.get("topic") or "") == "liquidations":
                 if paused or now - it["_seen"] > timedelta(minutes=90):
                     continue
+                if str((it.get("facts") or {}).get("verified") or "").startswith("one price source"):
+                    continue  # owner, 2026-11-23: a measured move goes out only when a second market confirms it
             rep = repeat(it, now)
             if rep:
                 repeats[it["id"]] = rep
                 continue
             d = verdict(it, now)
             decisions[it["id"]] = d
+            if d.rank > best.get(it["id"], (-1, None))[0]:
+                best[it["id"]] = (d.rank, d)
             if d.tier != importance.NOISE:
                 out.append((it, d))
         return sorted(out, key=lambda x: (-x[1].rank, -x[1].score, str(x[0]["id"])))
@@ -136,7 +141,7 @@ def run(paused: bool = True) -> dict:
                     published[-1]["slot"] = slot
                     break
         now += timedelta(minutes=5)
-    return {"published": published, "items": items, "decisions": decisions, "repeats": repeats, "ds": ds}
+    return {"published": published, "items": items, "decisions": decisions, "repeats": repeats, "best": best, "ds": ds}
 
 
 def production(ds: dict) -> dict[str, str]:
@@ -145,6 +150,45 @@ def production(ds: dict) -> dict[str, str]:
         if it.get("released_at") and it.get("status") == "released":
             went = "went out" if "delivered" in (it.get("tg_status"), it.get("x_status")) or "published" in (it.get("x_status"),) else "refused at delivery"
             out[str(it["id"])] = went
+    return out
+
+
+def quality_report(r: dict) -> list[str]:
+    """Volume per day, duplicates among what was published, major stories that never went out, published stories labelled stay_out, and
+    real headlines per tier."""
+    pub, ds = r["published"], r["ds"]
+    out = ["", "## Quality", "", "**Volume per day (UTC)**", "", "| day | slot | breaking | market | total |", "|---|---|---|---|---|"]
+    days = sorted({p["at"].date() for p in pub})
+    for day in days:
+        c = Counter(p["how"] for p in pub if p["at"].date() == day)
+        out.append(f"| {day:%m-%d} | {c.get('slot', 0)} | {c.get('breaking', 0)} | {c.get('market', 0)} | {sum(c.values())} |")
+    dups = []
+    for i, a in enumerate(pub):
+        for b in pub[i + 1:]:
+            hours = abs((b["at"] - a["at"]).total_seconds()) / 3600
+            if hours > 48:
+                continue
+            ta, tb = a["item"].get("title") or "", b["item"].get("title") or ""
+            same = quality.same_story(ta, tb) or newsworthy.same_event(newsworthy.event_of(ta), newsworthy.event_of(tb), hours_apart=hours)
+            if same:
+                dups.append((a, b, hours))
+    out += ["", f"**Possible duplicates among the published** (same story, or the same event by the cross-lane rule, within 48 h): {len(dups)}"]
+    out += [f"- #{a['item']['id']} \"{(a['item'].get('title') or '')[:70]}\" / #{b['item']['id']} \"{(b['item'].get('title') or '')[:70]}\" ({h:.0f} h apart)"
+            for a, b, h in dups[:12]]
+    got = {p["item"]["id"] for p in pub}
+    majors = [(i, d) for i, (rank, d) in r["best"].items() if d.tier == importance.MAJOR and i not in got]
+    out += ["", f"**Rated MAJOR at some point but never published**: {len(majors)}"]
+    by_id = {it["id"]: it for it in ds["items"]}
+    for i, d in majors[:15]:
+        last = r["decisions"].get(i)
+        out.append(f"- #{i} {(by_id[i].get('title') or '')[:90]}: {('later ' + last.reason[:120]) if last else 'held'}")
+    fp = [p for p in pub if p["item"].get("label") == "stay_out"]
+    out += ["", f"**Published but labelled stay_out (false positives)**: {len(fp)}"] + [f"- #{p['item']['id']} {p['item'].get('title')}" for p in fp]
+    out += ["", "**Examples of what it would publish** (real headlines)"]
+    for tier in (importance.MAJOR, importance.SIGNIFICANT, importance.NOTABLE):
+        sel = [p for p in pub if p["tier"] == tier]
+        out.append(f"- {tier} ({len(sel)}):")
+        out += [f"  - {p['at']:%m-%d %H:%M} {p['how']}: {(p['item'].get('title') or '')[:110]}" for p in sel[:8]]
     return out
 
 
@@ -181,6 +225,7 @@ def main() -> None:
             d = r["decisions"].get(i)
             why = d.reason if d else ("a repeat: " + r["repeats"][i] if i in r["repeats"] else "a market move while market posts are paused")
             lines.append(f"- #{i} {(it.get('title') or '')[:100]}: {why}")
+    lines += quality_report(r)
     text = "\n".join(lines)
     print(text)
     if args.md:
