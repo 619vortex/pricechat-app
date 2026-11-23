@@ -77,9 +77,8 @@ code.env { margin: 0 4px 0 0; }
 .side-project p { margin: 0; }
 .side-project-links { display: flex; gap: 8px; flex-wrap: wrap; }
 .side-project-links .btn { text-decoration: none; display: inline-flex; align-items: center; }
-.side-project-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
-.side-project-facts dt { color: var(--muted); }
-.side-project-facts dd { margin: 0; overflow-wrap: anywhere; }
+.side-project-unavailable { padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); }
+.side-project-unavailable b { color: var(--text); }
 .ai-pill { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .kill-indicator { color: var(--bad); font-size: 13px; font-weight: 700; text-decoration: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

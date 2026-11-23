@@ -147,6 +147,8 @@ export function Layout() {
   const { area, page } = locate(pathname);
   const terminal = isTerminalPath(pathname);
   const side = isSideProjectPath(pathname);  // a side project's page belongs to no section: none is highlighted
+  // owner, 2026-11-23: Side Projects only for a signed-in admin (or the local dashboard, where no login is asked)
+  const signedIn = Boolean(admin.session && (admin.session.authenticated || !admin.session.required));
   const todo = home.data?.todo ?? [];
   const waiting = (keys: string[] = []) => todo.filter((t) => keys.includes(t.key)).reduce((n, t) => n + t.count, 0);
   const s = home.data?.status;
@@ -178,12 +180,12 @@ export function Layout() {
           })}
         </nav>
         <div className="sidebar-foot">
-          <nav className="side-projects" aria-label="Side projects">
+          {signedIn && <nav className="side-projects" aria-label="Side projects">
             <span className="side-projects-head">Side Projects</span>
             {SIDE_PROJECTS.map((p) => (
               <NavLink key={p.to} to={p.to} className={({ isActive }) => `side-project-link${isActive ? " active" : ""}`} title={p.about}>{p.label}</NavLink>
             ))}
-          </nav>
+          </nav>}
           {s?.kill_switch && <Link to="/settings" className="kill-indicator">Emergency stop is ON</Link>}
           {admin.session?.required && (
             <button className="signout" onClick={() => void admin.signOut()}>Sign out{admin.session.username ? ` (${admin.session.username})` : ""}</button>
