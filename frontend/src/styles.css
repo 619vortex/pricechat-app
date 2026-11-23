@@ -67,6 +67,19 @@ code.env { margin: 0 4px 0 0; }
 .nav-count { min-width: 22px; height: 22px; padding: 0 7px; border-radius: 99px; background: var(--warn); color: #1d1300; font-size: 12px; font-weight: 700;
   display: grid; place-items: center; }
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 8px; }
+/* Side Projects (owner, 2026-11-23): separate projects the admin only links to, at the bottom of the sidebar */
+.side-projects { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--border); }
+.side-projects-head { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 0 4px 4px; }
+.side-project-link { padding: 7px 8px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 550; }
+.side-project-link:hover { background: var(--surface-2); color: var(--text); }
+.side-project-link.active { background: var(--surface-2); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+.side-project { display: grid; gap: 14px; max-width: 720px; }
+.side-project p { margin: 0; }
+.side-project-links { display: flex; gap: 8px; flex-wrap: wrap; }
+.side-project-links .btn { text-decoration: none; display: inline-flex; align-items: center; }
+.side-project-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
+.side-project-facts dt { color: var(--muted); }
+.side-project-facts dd { margin: 0; overflow-wrap: anywhere; }
 .ai-pill { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .kill-indicator { color: var(--bad); font-size: 13px; font-weight: 700; text-decoration: none; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }

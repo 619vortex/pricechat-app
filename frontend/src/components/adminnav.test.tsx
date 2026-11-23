@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Overview } from "../pages/Overview";
 import { Layout } from "./Layout";
-import { AREAS, isTerminalPath, locate, searchJump } from "./nav";
+import { AREAS, isTerminalPath, locate, searchJump, SIDE_PROJECTS, isSideProjectPath } from "./nav";
 import { PageHeader } from "./ui";
 
 /** TEST FIXTURES only: a fake admin home API. */
@@ -64,6 +64,10 @@ describe("Admin navigation map", () => {
     expect(paths.length).toBeGreaterThan(50);
     for (const raw of ["", ...paths]) {
       const concrete = "/" + raw.replace(/\/\*$/, "").replace(/:[a-z]+/g, "x");
+      if (isSideProjectPath(concrete)) {  // owner, 2026-11-23: a side project is in no section, only under Side Projects
+        expect(SIDE_PROJECTS.map((x) => x.to)).toContain(concrete);
+        continue;
+      }
       expect([raw, locate(concrete).area.key]).toEqual([raw, expectedSection(raw)]);
     }
     expect(locate("/arena").area.key).toBeDefined();  // still resolves (it redirects to /realm)

@@ -38,6 +38,7 @@ const XIntelPage = lazy(() => import("./pages/terminal/XIntelPage").then((m) => 
 const TerminalNewsDesk = lazy(() => import("./pages/x/NewsDesk").then((m) => ({ default: m.NewsDesk })));
 const TerminalTrending = lazy(() => import("./pages/x/TrendingTopics").then((m) => ({ default: m.TrendingTopics })));
 const WorldMonitorPage = lazy(() => import("./pages/WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
+const GummyBakedPage = lazy(() => import("./pages/sideprojects/GummyBakedPage").then((m) => ({ default: m.GummyBakedPage })));
 const TradingOSPage = lazy(() => import("./pages/TradingOS").then((m) => ({ default: m.TradingOSPage })));
 const pf = () => import("./pages/pokemon/portfolio");
 const PortfolioPage = lazy(() => pf().then((m) => ({ default: m.PortfolioPage })));
@@ -77,6 +78,7 @@ export function AdminApp() {
             <Route path="rank-rewards" element={<CommunityHub />} />
             <Route path="realm" element={<RealmAdminPage />} />
             <Route path="vpn" element={<VpnAdminPage />} />
+            <Route path="side-projects/gummy-baked" element={<GummyBakedPage />} />
             <Route path="kalshi" element={<SystemHub />} />
             <Route path="arena" element={<Navigate to="/realm" replace />} />
             <Route path="trading-os" element={<TradingOSPage />} />

@@ -77,6 +77,31 @@ export const AREAS: NavArea[] = [
   },
 ];
 
+/** Side Projects (owner, 2026-11-23): separate projects the admin only links to, at the very bottom of the sidebar. They keep their own
+ *  backend, database and sign-in; nothing of theirs is stored in or read by Price Chat. Not one of the six sections (no bottom-bar item). */
+export interface SideProject { to: string; label: string; about: string }
+export const SIDE_PROJECTS: SideProject[] = [
+  { to: "/side-projects/gummy-baked", label: "GUMMY & BAKED Audit", about: "The separate public audit of the GUMMY/BAKED airdrop campaign: open its site and moderation." },
+];
+
+export function isSideProjectPath(path: string): boolean {
+  return path.startsWith("/side-projects/");
+}
+
+const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+
+/** Where the GUMMY & BAKED audit lives: VITE_GUMMY_AUDIT_URL and VITE_GUMMY_AUDIT_ADMIN_URL once it's online
+ *  (moderation is a separate origin), else its local dev server (public :8000, moderation :8001). */
+export function gummyBaked(): { siteUrl: string; adminUrl: string; online: boolean } {
+  const site = (env.VITE_GUMMY_AUDIT_URL ?? "").trim();
+  const admin = (env.VITE_GUMMY_AUDIT_ADMIN_URL ?? "").trim();
+  return {
+    siteUrl: site || "http://127.0.0.1:8000/",
+    adminUrl: admin || (site ? "" : "http://127.0.0.1:8001/moderation.html"),  // moderation is its own origin, never guessed from the site's
+    online: Boolean(site),
+  };
+}
+
 /** The page (and its section) for a path: exact match first, then a page's sub-paths. */
 export function locate(path: string): { area: NavArea; page: NavPage } {
   const p = path.replace(/\/+$/, "") || "/";
@@ -100,6 +125,7 @@ export function jumpTargets(): JumpTarget[] {
     out.push({ to: a.pages[0].to, label: a.label, section: "Section", about: a.pages.map((p) => p.label).join(", ") });
     if (a.pages.length > 1) for (const p of a.pages) out.push({ to: p.to, label: p.label, section: a.label, about: p.about });
   }
+  for (const p of SIDE_PROJECTS) out.push({ to: p.to, label: p.label, section: "Side Projects", about: p.about });
   return out;
 }
 
