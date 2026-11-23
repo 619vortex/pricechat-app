@@ -108,3 +108,5 @@ class TtPost(IdMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     metrics_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # rollback build for PR #14: the column migration 0120 added (unused by this code; it keeps its server default)
+    text_ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
