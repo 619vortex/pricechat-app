@@ -45,6 +45,7 @@ class Web:
         self.hn: list[dict[str, Any]] = []
         self.calls: list[str] = []
         self.posted: list[bytes] = []
+        self.uploaded: list[bytes] = []  # pictures sent to X's media upload (owner, 2026-11-23: no tweet goes as words alone)
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         host, path = request.url.host, request.url.path
@@ -80,6 +81,9 @@ class Web:
             return httpx.Response(200, json=reddit_listing(self.reddit.get(sub, []), self.now))
         if host == "api.x.com" and path.startswith("/2/trends/by/woeid"):
             return httpx.Response(200, json={"data": self.x_trends})
+        if host == "api.x.com" and path == "/2/media/upload" and request.method == "POST":
+            self.uploaded.append(request.content)
+            return httpx.Response(200, json={"data": {"id": "1880000000000000001"}})
         if host == "api.x.com" and path == "/2/tweets" and request.method == "POST":
             self.posted.append(request.content)
             return httpx.Response(201, json={"data": {"id": "1990000000000000777", "text": "t"}})

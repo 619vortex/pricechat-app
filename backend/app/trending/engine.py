@@ -634,10 +634,25 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
         post.status, post.note = "queued", f"X guard: {problem}"
         db.commit()
         return "blocked"
+    image = b""
+    if not post.text_ok and not has_link(post.text):
+        # owner, 2026-11-23: the News Desk's rule on this lane too. A tweet goes with a licensed picture (the Visual Editor's, as the
+        # News Desk's X posts) or a link (X shows the linked page's own card); with neither it is held for the owner, never sent as words alone
+        image, meta = await picture_for(db, post, topic, now)
+        if not image:
+            post.status, post.hold_reason = "held", f"{NO_PICTURE}: {meta.get('why') or 'no licensed picture passed the Visual Editor'}"[:500]
+            post.note = "Add a link (Edit), try the picture again, or choose Post without picture"
+            db.commit()
+            logger.info("trending: post %s held: %s", post.id, post.hold_reason)
+            return "held"
     client = make_x_client(db, settings, runtime)
     try:
+        media = None
+        if image:
+            upload_permit = guard.issue_news_permit(req)  # permits are single use: the upload and the post each need one
+            media = [await client.upload_image(image, permit=upload_permit)]
         permit = guard.issue_news_permit(req)
-        data = await client.create_post(post.text, permit=permit)
+        data = await client.create_post(post.text, permit=permit, media_ids=media)
     except XUnavailableError as e:
         post.status = "uncertain" if "in time" in str(e) else ("failed" if post.attempts >= MAX_ATTEMPTS else "queued")
         post.error = f"X unavailable: {str(e)[:200]}"
@@ -682,6 +697,50 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
     db.commit()
     logger.info("trending published %s (post %s)", x_id, post.id)
     return "published"
+
+
+NO_PICTURE = "No picture and no link"
+LINK = re.compile(r"https://[^\s/]+\.[^\s/]+")
+
+
+def has_link(text: str) -> bool:
+    """A real https link in the tweet: X then shows the linked page's own card."""
+    return bool(LINK.search(text or ""))
+
+
+async def picture_for(db: Session, post: TtPost, topic: TtTopic | None, now: datetime) -> tuple[bytes, dict[str, Any]]:
+    """The trend's picture from the News Desk's Visual Editor (licensed photos, its library, its drawn cards; every licence checked),
+    for a stand-in event that is never stored. (b"", {"why": ...}) when nothing passes."""
+    from app.models.newsdesk import NdEvent
+    from app.newsdesk import visual
+
+    head = ((topic.title if topic is not None else "") or (post.text or "").split("\n")[0]).strip()
+    ev = NdEvent(key=f"trending:{post.id}", kind="news", title=head, headline=head, summary="", topic="", label="", evidence="",
+                 category=post.category or "news", sources=[{"name": x.get("name", ""), "url": x.get("url", "")} for x in post.sources or []],
+                 facts={}, released_at=now)
+    try:
+        image, meta = await visual.for_event(ev, db=db, platform="x", style="clean", now=now)
+    except Exception as e:  # noqa: BLE001 - no picture is a hold, never a crash
+        logger.info("trending: picture for post %s failed (%s)", post.id, type(e).__name__)
+        return b"", {"why": f"the picture step failed ({type(e).__name__})"}
+    finally:
+        if ev in db:
+            db.expunge(ev)
+    return (image or b""), meta or {}
+
+
+def release_held(db: Session, post: TtPost, action: str) -> TtPost:
+    """The owner's decision on a tweet held for having no picture and no link: "retry" looks for a picture again, "text" lets it go as
+    words alone. Either way it goes back to pending: it still needs the owner's Approve."""
+    if post.status != "held" or not (post.hold_reason or "").startswith(NO_PICTURE):
+        raise ValueError("Only a tweet held for having no picture and no link can be released here.")
+    if action not in ("retry", "text"):
+        raise ValueError("Unknown action.")
+    post.text_ok = action == "text"
+    post.status, post.hold_reason = "pending", None
+    post.note = "You chose to post it without a picture: approve it to send" if post.text_ok else "It will look for a picture again when approved"
+    db.commit()
+    return post
 
 
 LATENCY_KEEP = 30
@@ -1207,7 +1266,8 @@ def post_out(p: TtPost) -> dict[str, Any]:
     return {"id": p.id, "topic_id": p.topic_id, "category": p.category, "status": p.status, "text": p.text, "edited": bool(p.original_text), "angle": p.angle,
             "writer": p.writer, "score": p.score, "sources": p.sources, "checks": p.checks, "hold_reason": p.hold_reason, "note": p.note, "error": p.error,
             "x_id": p.x_id, "url": f"https://x.com/i/status/{p.x_id}" if p.x_id else None, "metrics": p.metrics, "created_at": _iso(p.created_at),
-            "published_at": _iso(p.published_at), "expires_at": _iso(p.expires_at), "cashtags": gates.cashtags(p.text),
+            "published_at": _iso(p.published_at), "expires_at": _iso(p.expires_at), "cashtags": gates.cashtags(p.text), "text_ok": bool(p.text_ok),
+            "no_picture": p.status == "held" and (p.hold_reason or "").startswith(NO_PICTURE),
             "sensitive": sensitive.classify(p.source_text) if p.source_text else None}
 
 
