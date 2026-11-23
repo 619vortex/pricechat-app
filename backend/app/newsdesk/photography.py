@@ -24,6 +24,7 @@ saliency box whole and only crops and resizes: nothing is stretched or altered. 
 from __future__ import annotations
 
 import logging
+import dataclasses
 import re
 import time
 from dataclasses import dataclass
@@ -223,7 +224,6 @@ LIBRARY: tuple[Subject, ...] = (
     Subject("imf", "The IMF", r"(?-i:\bIMF(?:'s|’s)?\b)|\binternational monetary fund\b", (
         "File:11 International Monetary Fund IMF in Washington DC USA - Creative Commons CC-BY.jpg",  # the name on the wall
         "File:International Monetary Fund (IMF) (53844898894).jpg",
-        "File:IMF building HR.jpg",
     )),
     Subject("world_bank", "The World Bank", r"\bworld bank\b", (
         "File:The World Bank Group (53844804648).jpg",
@@ -240,6 +240,18 @@ LIBRARY: tuple[Subject, ...] = (
 # at before it went in (official White House photos are public domain; Kremlin, Web Summit and Commons photographers' files are CC BY/BY-SA/
 # CC0, re-verified live). A pair is used when the story names both; otherwise the person named first. CAPTIONS says who is pictured, where
 # and when, drawn with the credit: an archive photo never passes for today's meeting. Never in a story of violence (clean.picture).
+# owner, 2026-11-23 (photo audit): the photographer as they ask to be credited, where Commons' Artist field is an uploader account or too
+# long for the corner of the picture (it was cut to "Gage Skidmore from Surprise…"). Every name here is the author the file's record gives.
+CREDITS: dict[str, str] = {
+    "File:Michael Saylor (54559609943).jpg": "Gage Skidmore",  # "Please attribute to Gage Skidmore if used elsewhere."
+    "File:Michael Saylor (54345839472).jpg": "Gage Skidmore",
+    "File:Michael Saylor (54345839687).jpg": "Gage Skidmore",
+    "File:11 International Monetary Fund IMF in Washington DC USA - Creative Commons CC-BY.jpg": "Marek Ślusarczyk (Tupungato)",
+    "File:Visite de Christine Lagarde, Présidente de la Banque centrale européenne le Jeudi 20 avril 2023 à l’Ecole polytechnique (52834400095).jpg":
+        "J. Barande / Ecole polytechnique",  # "© Ecole polytechnique / Institut Polytechnique de Paris / J.Barande"
+    "File:Official portrait of Treasury Secretary Scott Bessent.jpg": "US Department of the Treasury",
+}
+
 CAPTIONS: dict[str, str] = {
     # owner, 2026-11-23 (library expansion): who, where and when, so an archive photo never passes for today's event
     "File:Chairman Warsh answers reporters' questions at the FOMC press conference on June 17, 2026 (2).jpg": "Fed Chair Kevin Warsh at the FOMC press conference, June 2026",
@@ -247,7 +259,6 @@ CAPTIONS: dict[str, str] = {
     "File:Visite de Christine Lagarde, Présidente de la Banque centrale européenne le Jeudi 20 avril 2023 à l’Ecole polytechnique (52834400095).jpg": "Christine Lagarde at the Ecole polytechnique, April 2023",
     "File:AC SO Karlspreisverleihung 2026 14. Mai Krönungssaal Christine Lagarde I.jpg": "Christine Lagarde in Aachen, May 2026",
     "File:P20250929DT-0078 President Donald Trump and Israeli Prime Minister Benjamin Netanyahu hold a joint press conference.jpg": "Benjamin Netanyahu at the White House, September 2025",
-    "File:MGR0373 (53847540280).jpg": "Narendra Modi arriving in Vienna, July 2024",
     "File:Recep Tayyip Erdoğan, M11 Arnavutköy-Halkalı etabının açılış töreninde 3.jpg": "Recep Tayyip Erdogan in Istanbul, June 2026",
     "File:Sam Altman speaking at TED.jpg": "Sam Altman at TED, April 2025",
     "File:Sam Altman November 2022.jpg": "Sam Altman, November 2022",
@@ -344,9 +355,6 @@ PEOPLE: tuple[Subject, ...] = (
     )),
     Subject("netanyahu", "Benjamin Netanyahu", r"\bnetanyahu(?:'s|’s)?\b", (
         "File:P20250929DT-0078 President Donald Trump and Israeli Prime Minister Benjamin Netanyahu hold a joint press conference.jpg",
-    )),
-    Subject("modi", "Narendra Modi", r"(?-i:\bModi(?:'s|’s)?\b)", (
-        "File:MGR0373 (53847540280).jpg",
     )),
     Subject("erdogan", "Recep Tayyip Erdogan", r"\berdo[gğ]an(?:'s|’s)?\b", (
         "File:Recep Tayyip Erdoğan, M11 Arnavutköy-Halkalı etabının açılış töreninde 3.jpg",
@@ -514,6 +522,8 @@ async def library_photo(subject: Subject, *, transport: Any = None, records: lis
             by_url = {p.url: p for p in recs}
             for url in rotation(records or [], list(by_url)):
                 p = by_url[url]
+                if (named := CREDITS.get(str(p.title))):
+                    p = dataclasses.replace(p, creator=named)
                 img = await photos.fetch(client, p, min_width=MIN_SOURCE if p.width >= p.height else 0, colour=False)
                 if img is None or editor.pixel_problem(img, ui=False, sharp_min=LIBRARY_SHARP_MIN):  # an editor looked at it: only blur and fading can change
                     continue

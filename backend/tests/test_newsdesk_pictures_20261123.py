@@ -344,3 +344,47 @@ def test_a_headline_naming_a_person_gets_their_dated_captioned_photo(head: str, 
     got = photography.people_of(head)
     assert got is not None and got[0].key == key
     assert all(photography.CAPTIONS.get(f) for f in got[0].files)  # who, where and when: an archive photo never passes for today's event
+
+
+# --- 8. the photo audit (owner, 2026-11-23: "verify that every new photo's licence, attribution, identity and caption are correct") ---------
+
+def test_the_photographer_is_credited_by_the_name_they_ask_for_not_a_cut_off_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from app.newsdesk import photography, photos
+
+    saylor = photography.BY_KEY["saylor"]
+    rec = photos.LicensedPhoto(title=saylor.files[0], url="https://upload.wikimedia.org/x.jpg", page="https://commons.wikimedia.org/wiki/x",
+                               creator="Gage Skidmore from Surprise, AZ, United States of America", provider="wikimedia", source="wikimedia",
+                               licence="CC BY-SA 2.0", licence_url="https://creativecommons.org/licenses/by-sa/2.0", width=3000, height=2000)
+
+    async def records(client: Any, subject: Any) -> list[Any]:
+        return [rec]
+
+    async def fetch(client: Any, p: Any, min_width: int = 0, colour: bool = True) -> Image.Image:
+        return Image.effect_noise((3000, 2000), 80).convert("RGB")
+
+    monkeypatch.setattr(photography, "_records", records)
+    monkeypatch.setattr(photos, "fetch", fetch)
+    monkeypatch.setattr(editor, "pixel_problem", lambda *a, **k: "")  # the picture itself is not under test here
+    got = asyncio.run(photography.library_photo(saylor))
+    assert got is not None and got[1]["credit"] == "Photo: Gage Skidmore / Wikimedia Commons (CC BY-SA 2.0)"
+    assert "…" not in got[1]["credit"]
+
+
+def test_every_credit_override_belongs_to_a_library_file_and_fits_the_corner() -> None:
+    from app.newsdesk import photography
+
+    files = {f for s in (*photography.LIBRARY, *photography.PEOPLE) for f in s.files}
+    for f, who in photography.CREDITS.items():
+        assert f in files, f
+        assert len(who) <= 32, who  # photos.LicensedPhoto.credit cuts at 32 characters
+
+
+def test_photos_that_failed_the_audit_are_out() -> None:
+    from app.newsdesk import photography
+
+    files = {f for s in (*photography.LIBRARY, *photography.PEOPLE) for f in s.files}
+    assert "File:IMF building HR.jpg" not in files  # an IMF photo labelled public domain: the IMF is not a US federal agency
+    assert "File:MGR0373 (53847540280).jpg" not in files  # Modi small behind a guard: not recognisable
+    assert photography.people_of("Modi meets Putin in Moscow") is None or photography.people_of("Modi meets Putin in Moscow")[0].key != "modi"
