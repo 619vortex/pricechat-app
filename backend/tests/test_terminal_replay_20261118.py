@@ -64,7 +64,7 @@ async def test_replay_major_event_through_the_whole_pipeline(case: str, a: str, 
     await _desk(db, BETWEEN)
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released", NdEvent.key.notlike("story:past%"))).first()
     assert ev is not None, [(e.title, e.status, e.why) for e in db.scalars(select(NdEvent).where(NdEvent.key.notlike("story:past%")))]
-    assert ev.slot == "breaking" and "major breaking" in ev.why, ev.why
+    assert ev.slot == "breaking" and "breaking (major" in ev.why and ev.facts["editor"]["tier"] == "major", ev.why  # the editor's tier (2026-11-23)
     tg_at = BETWEEN + timedelta(seconds=20)
     sent = await lane.tick(db, get_settings(), live["tg"], tg_at)
     assert sent.get("sent"), sent

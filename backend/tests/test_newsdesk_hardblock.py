@@ -205,7 +205,7 @@ def test_breaking_near_a_slot_goes_now_as_that_slots_post_and_never_crowds_anoth
     got = events.release(db, near, p)
     upcoming = events.next_slot(near, p)
     assert got is not None and got.id == ev.id and got.slot == "slot" and got.facts["slot_at"] == upcoming.isoformat() and got.facts["early"]
-    assert "instead of waiting for it" in got.why and got.facts["latency"]["event_to_release_min"] == 25
+    assert "instead of waiting for it" in got.why and got.facts["latency"]["event_to_release_min"] == 25 and got.facts["editor"]["tier"] == "major"
     db.commit()
     assert events.slot_filled(db, upcoming, p) is not None  # the slot had its post: the day's count is unchanged
     _news(db, "b3b", "Bank of Japan raises rates in a surprise move", 60, ["Financial Times", "Bloomberg"], age_min=20, now=upcoming + timedelta(minutes=2),
@@ -219,7 +219,7 @@ def test_breaking_near_a_slot_goes_now_as_that_slots_post_and_never_crowds_anoth
     assert events.release(db, BETWEEN, events.policy({})) is None  # 60 minutes after the last post: under the 90-minute gap
     _news(db, "b4m", MAJOR, 72, ["Financial Times", "Bloomberg"], age_min=25, now=BETWEEN)
     got = events.release(db, BETWEEN, events.policy({}))  # a verified major event isn't held by the gap (owner, 2026-11-18)
-    assert got is not None and got.slot == "breaking" and "major breaking" in got.why
+    assert got is not None and got.slot == "breaking" and "breaking (major" in got.why
 
 
 def test_at_most_two_breaking_posts_a_day(db: Session) -> None:
@@ -271,16 +271,24 @@ def test_routine_political_controversy_or_talk_never_breaks(db: Session, title: 
 
 
 @pytest.mark.parametrize(("title", "topic"), [
-    ("Missile strike hits Saudi oil terminal", "geopolitics"),
-    ("US imposes sweeping sanctions on Russian oil exports", "geopolitics"),
+    ("Missile strike hits Saudi oil terminal", "geopolitics"),  # major: breaks at once
+    ("US imposes sweeping sanctions on Russian oil exports", "geopolitics"),  # significant: the next slot
     ("Binance halts withdrawals after $400 million hack", "hack"),
     ("US inflation jumps to 4.1%, highest in two years", "macro"),
 ])
 def test_financial_market_or_hard_geopolitical_news_breaks(db: Session, title: str, topic: str) -> None:
+    """Owner, 2026-11-23: immediate breaking ONLY for a verified MAJOR event; everything else of importance takes the very next slot (the
+    11-10 rule "financial, market or major geopolitical news breaks" is narrowed to MAJOR). None of them is lost: the slot carries it."""
     ev = _news(db, "b9", title, 74, ["Financial Times", "Bloomberg"], age_min=20, now=BETWEEN, topic=topic)
     got = events.release(db, BETWEEN, events.policy({}))
-    assert got is not None and got.id == ev.id and got.slot == "breaking", title
-    assert got.why.startswith("breaking (")
+    if ev.facts["editor"]["tier"] == "major":
+        assert got is not None and got.id == ev.id and got.slot == "breaking" and got.why.startswith("breaking (major"), title
+        return
+    assert got is None and ev.facts["editor"]["tier"] == "significant" and "it takes the next slot" in ev.facts["breaking_miss"], title
+    db.commit()
+    nxt = events.next_slot(BETWEEN, events.policy({})) + timedelta(minutes=1)
+    got = events.release(db, nxt, events.policy({}))
+    assert got is not None and got.id == ev.id and got.slot == "slot", title
 
 
 def _story(title: str, tier: int = 1, source: str = "Reuters") -> Any:
@@ -342,20 +350,23 @@ def test_neither_a_routine_controversy_nor_a_routine_price_level_fills_a_slot(db
     c1 = _news(db, "c1", "Defiant Hegseth defends Iran war as he faces impeachment vote", 67, ["Bloomberg", "Financial Times", "The National"], age_min=30)
     brent = _news(db, "c2", "Brent falls below $90 a barrel for first time since August", 60, ["CNBC", "The Guardian"], age_min=30, topic="macro")
     assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
-    assert "why should anyone care?" in brent.why and c1.status == "candidate"
+    # 2026-11-23: the editor's verdict (app/newsdesk/importance) is the recorded reason: nothing happened that the headline states
+    assert "nothing happened" in brent.why and c1.status == "candidate" and c1.facts["editor"]["tier"] == "noise"
 
 
 def test_a_controversy_alone_needs_twelve_more_points(db: Session) -> None:
     ev = _news(db, "c3", "Defiant Hegseth defends Iran war as he faces impeachment vote", 67, ["Bloomberg", "Financial Times"], age_min=30)
     assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
-    assert "routine political controversy" in ev.why and "under the bar of 56" in ev.why
+    # 2026-11-23: the editor's verdict (app/newsdesk/importance) is the recorded reason: nothing happened that the headline states
+    assert "nothing happened" in ev.why and ev.facts["editor"]["tier"] == "noise"
 
 
 def test_a_controversy_with_no_outcome_never_fills_a_slot_however_it_scores(db: Session) -> None:
     """Owner, 2026-11-18: multiple credible sources don't make something interesting; routine political statements must not qualify."""
     ev = _news(db, "c4", "Defiant Hegseth defends Iran war as he faces impeachment vote", 90, ["Bloomberg", "Financial Times", "Reuters"], age_min=30)
     assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
-    assert ev.status == "candidate" and "not published" in ev.why
+    # 2026-11-23: the editor's verdict (app/newsdesk/importance) is the recorded reason: nothing happened that the headline states (the 90 score is the old virality number: it no longer decides)
+    assert ev.status == "candidate" and "nothing happened" in ev.why
 
 
 def test_slot_ranking_puts_todays_news_first(db: Session) -> None:

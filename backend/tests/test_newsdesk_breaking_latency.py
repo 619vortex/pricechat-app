@@ -52,7 +52,7 @@ async def test_the_bahrain_drone_attack_breaks_between_slots(client: Any, db: Se
     }
     await _desk_tick(db)
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
-    assert ev.slot == "breaking" and ("major geopolitical event" in ev.why or "hard geopolitical event" in ev.why) and events.verified_important(ev)
+    assert ev.slot == "breaking" and "breaking (major" in ev.why and ev.facts["editor"]["tier"] == "major" and events.verified_important(ev)
     assert ev.facts["latency"]["event_to_release_min"] <= 20  # minutes, not the 150 of production
 
 
@@ -67,6 +67,7 @@ async def test_a_held_back_story_says_why_in_the_logs(client: Any, db: Session, 
         await _desk_tick(db)  # a second pass: the same reason is not logged again
     assert db.scalar(select(NdEvent.id).where(NdEvent.status == "released")) is None
     misses = [r.getMessage() for r in caplog.records if "not breaking" in r.getMessage()]
-    assert len(misses) == 1 and "under the breaking bar" in misses[0] and "KHARKIV" in misses[0].upper()
+    # owner, 2026-11-23: only a verified MAJOR event breaks; three killed in Kharkiv (two outlets) is significant: the next slot, said once
+    assert len(misses) == 1 and "not major: it takes the next slot" in misses[0] and "KHARKIV" in misses[0].upper()
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "candidate")).one()
-    assert "under the breaking bar" in ev.facts["breaking_miss"]
+    assert "not major: it takes the next slot" in ev.facts["breaking_miss"]

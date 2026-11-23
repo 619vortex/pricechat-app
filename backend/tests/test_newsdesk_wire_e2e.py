@@ -73,8 +73,11 @@ async def test_admin_can_switch_back_to_clean(client: Any, db: Session, live: di
     cap = tg.sent[0]["caption"]
     # clean's own rules: sources · @thepricechat on one line; no real photo of this story exists in the test, so a text post (2026-11-16: no
     # stand-in photo, no headline card). No JUST IN: owner, 2026-11-18, a label only for a MAJOR consequence within 90 minutes of the report
-    assert not cap.startswith("<b>JUST IN:</b>") and cap.endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')
     ev = db.scalars(select(NdEvent).where(NdEvent.status == "released")).one()
+    # 2026-11-23: the editor rates a missile strike on Saudi Aramco's oil terminal MAJOR (an attack on energy), so JUST IN is the owner's rule
+    # applied, not broken; the label follows the tier
+    assert cap.startswith("<b>JUST IN:</b>") == (ev.facts["editor"]["tier"] == "major")
+    assert cap.endswith(' · <a href="https://t.me/thepricechat">@thepricechat</a>')
     assert ev.facts["visual"]["style"] == "clean" and tg.sent[0]["image"] is None
 
 
@@ -148,9 +151,14 @@ def test_a_material_update_breaks_and_replies_to_its_original(db: Session) -> No
     up.kind, up.parent_id = "update", parent.id
     up.facts = {**up.facts, "development": "halted withdrawals"}
     db.commit()
-    got = events.release(db, BETWEEN, events.policy({}))
-    assert got is not None and got.id == up.id and got.slot == "breaking" and "material development" in got.why
-    assert events.release(db, BETWEEN, events.policy({"post_style": "classic"})) is None
+    # owner, 2026-11-23: only a verified MAJOR event breaks between slots. A material update that is not major (a withdrawal halt after a
+    # $40M hack: significant) no longer breaks in the wire style: it takes the next slot, still as an update of its original
+    assert events.release(db, BETWEEN, events.policy({})) is None
+    assert up.facts["editor"]["tier"] != "major" and "it takes the next slot" in up.facts["breaking_miss"]
+    db.commit()
+    nxt = events.next_slot(BETWEEN, events.policy({})) + timedelta(minutes=1)
+    got = events.release(db, nxt, events.policy({}))
+    assert got is not None and got.id == up.id and got.slot == "slot" and got.kind == "update" and got.parent_id == parent.id
 
 
 def test_filler_ranks_lower_and_a_surprising_story_takes_the_slot(db: Session) -> None:
@@ -163,4 +171,4 @@ def test_filler_ranks_lower_and_a_surprising_story_takes_the_slot(db: Session) -
     db.commit()
     only = _news(db, "f3", "Analysts say bitcoin price could test $100,000 next", 60, ["CoinDesk", "The Block"], age_min=30, now=slot, topic="macro")
     assert events.release(db, slot, events.policy({})) is None
-    assert "filler or speculation" in only.why
+    assert "a reaction piece" in only.why and only.facts["editor"]["tier"] == "noise"  # the editor's reason (2026-11-23)

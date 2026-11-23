@@ -233,7 +233,17 @@ def places_of(head: str) -> set[str]:
     return out
 
 
-def same_event(a: Event, b: Event) -> bool:
+# a country, its people, its capital or its leader names a side of a war, not one event in it (production 2026-11-23: "RUSSIAN" made "11 killed
+# in Russian strike on Ukraine's Dymer" a repeat of "Ukraine behind attacks on Russian ships near Libya", and "France confirms its troops are in
+# Ukraine" a repeat of a Crimea Bridge strike)
+NATIONAL = re.compile(r"^(?:RUSSIA\w*|UKRAIN\w*|KYIV|KIEV|MOSCOW|KREMLIN|IRAN\w*|TEHRAN|ISRAEL\w*|GAZA|US|USA|AMERICA\w*|WASHINGTON|CHINA|CHINESE|"
+                      r"BEIJING|TAIWAN\w*|SAUDI\w*|RIYADH|BAHRAIN\w*|KUWAIT\w*|QATAR\w*|YEMEN\w*|HOUTHIS?|LEBAN\w*|HEZBOLLAH|SYRIA\w*|IRAQ\w*|"
+                      r"EU|EUROPE\w*|NATO|ZELENSK\w*|PUTIN|TRUMP|NETANYAHU|XI|KHAMENEI|~MIDDLE EAST)$")
+WAVE_HOURS = 12.0
+
+
+
+def same_event(a: Event, b: Event, hours_apart: float | None = None) -> bool:
     """One real-world event, told twice: the same kind of event (a tanker attack and a missile strike are both the war) with the same
     specific actor or place, or the same conflict in the same region. Never just a shared keyword: two Nvidia stories (its CEO's scandal,
     its earnings) are two events; two FAA stories about one ground stop are one."""
@@ -241,10 +251,18 @@ def same_event(a: Event, b: Event) -> bool:
         # one war is not one event: the same specific target/actor named, or the SAME belligerents exchanging fire within the window. Replay
         # 2026-11-15..18: "Ukraine, Russia race to build military satellite networks" must not block a drone strike on Russia's petrochemical
         # capital; "US strikes Iranian missile site" then "ADNOC ship attacked in Hormuz" (same Gulf exchange) stays one event
-        if {x for x in a.anchors & b.anchors if not x.startswith(("$", "~"))}:
+        if {x for x in a.anchors & b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}:
             return True
         if not (a.regions & b.regions):
             return False
+        if hours_apart is not None and hours_apart > WAVE_HOURS:
+            return False  # the same war a day later is another event (more deaths, a new target), unless a specific place or thing is shared
+        # a wave is one side firing: "11 killed in Russian strike on Ukraine's Dymer" is not the wave of "Ukraine behind attacks on Russian ships";
+        # and two strikes on different named targets are two events
+        own_a = {x[:3] for x in a.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}
+        own_b = {x[:3] for x in b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}
+        if own_a and own_b and not (own_a & own_b):
+            return False  # both name a specific place or thing, and none in common ("FINLAND" and "FINNISH" are one: first letters)
         fire_a, fire_b = bool(HARD_CONFLICT.search(a.title or "")), bool(HARD_CONFLICT.search(b.title or ""))
         if not (fire_a and fire_b):
             return False
@@ -653,7 +671,8 @@ def told(db: Any, now: datetime, hours: int = 168, *, skip_event: int | None = N
 def repeat_of(title: str, summary: str, history: list[Told], now: datetime) -> str:
     """"" when this is a new event or a substantial development of one already told; else why it is a repeat."""
     ev = event_of(title, summary)
-    same = [h for h in history if same_event(ev, h.event) and now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)]
+    same = [h for h in history if now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)
+            and same_event(ev, h.event, hours_apart=abs((now - h.at).total_seconds()) / 3600)]
     if not same:
         return ""
     if (dev := development(ev, [h.event for h in same], f"{title} {summary or ''}")):
@@ -666,7 +685,8 @@ def repeat_of(title: str, summary: str, history: list[Told], now: datetime) -> s
 
 def development_of(title: str, summary: str, history: list[Told], now: datetime) -> str:
     ev = event_of(title, summary)
-    same = [h for h in history if same_event(ev, h.event) and now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)]
+    same = [h for h in history if now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)
+            and same_event(ev, h.event, hours_apart=abs((now - h.at).total_seconds()) / 3600)]
     return development(ev, [h.event for h in same], f"{title} {summary or ''}") if same else ""
 
 

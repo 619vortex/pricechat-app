@@ -302,9 +302,8 @@ def delivery_gate(db: Any, ev: Any, now: datetime, platform: str | None = None) 
         rep = newsworthy.repeat_of(ev.title or ev.headline or "", ev.summary or "", history, now)
         if rep:
             return f"repeat: {rep}"
-        outlets = len([x for x in (ev.sources or []) if isinstance(x, dict)])
-        if ev.kind == "news" and not (a := newsworthy.qualify(ev.title or ev.headline or "", ev.summary or "", outlets=outlets)).ok and a.strength == "none":
-            return f"not newsworthy: {a.reason}"  # the last word before a send: a rule tightened after release still holds
+        # owner, 2026-11-23 (one decision pipeline): whether a story is worth a post is decided once, at release (app/newsdesk/importance).
+        # Judging it again here with a different rule refused 8 released events on both platforms in a week, their slots used and nothing sent.
     return ""
 
 

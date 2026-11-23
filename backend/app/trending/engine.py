@@ -444,11 +444,13 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
     # owner, 2026-11-18: popular is not the same as newsworthy. Nothing goes out on its own without a concrete, source-stated reason to care
     # (app/newsdesk/newsworthy); momentum, outlet counts and dramatic words never stand in for one. Production: trend post 765 "Democrats
     # probe whether Lutnick helped Cantor avoid Nvidia losses" went out on the fast lane with viral 31.
-    from app.newsdesk import newsworthy
+    # owner, 2026-11-23: the same editorial judgement as the News Desk (app/newsdesk/importance), not a second rule: production refused "AI
+    # rally set to add $2 trillion to Nasdaq-100" as "no concrete consequence". Posting on its own needs at least a significant story
+    from app.newsdesk import importance
 
-    nw = newsworthy.qualify(getattr(topic, "title", "") or "", b.summary if b is not None else "", outlets=len(b.outlets) if b is not None else 0)
-    if not nw.ok:
-        return False, f"not newsworthy: {nw.reason}"
+    d = importance.judge(getattr(topic, "title", "") or "", b.summary if b is not None else "", outlets=len(b.outlets) if b is not None else 1)
+    if d.rank < importance.ORDER[importance.SIGNIFICANT]:
+        return False, f"not newsworthy enough to post on its own: {d.reason}"
     return True, None
 
 
@@ -525,12 +527,12 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     # owner, 2026-11-18/19: a queued post is judged by the LATEST editorial rules first, whatever else it waits for. Before, a post
     # next to a News Desk slot reported only "spacing" (the time-dependent failure of
     # test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes near 04:00 UTC) and its editorial verdict waited.
-    from app.newsdesk import newsworthy
+    from app.newsdesk import importance
 
     titles = [str(x.get("title") or "") for x in post.sources or []]
     told = [t for t in (titles[:1] + [(post.text or "").split("\n")[0]]) if t]
-    checked = [newsworthy.qualify(t, post.source_text or "", outlets=len(post.sources or [])) for t in told]
-    if checked and all(a.strength == "none" for a in checked):
+    checked = [importance.judge(t, post.source_text or "", outlets=len(post.sources or []) or 1) for t in told]
+    if checked and all(d.tier == importance.NOISE for d in checked):
         return f"not newsworthy: {checked[0].reason}"
     incident = incident_post(db, post)
     fast = fast_post(db, post)

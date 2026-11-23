@@ -52,7 +52,10 @@ EVENT_SAID = re.compile(r"\b(attacks?|attacked|arson|sabotage|strikes?|struck|ha
                         r"shot down|downed|invad\w+|behind)\b", re.I)
 
 
-CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b)", re.I)
+# production 2026-11-22: "Two injured, one critically, in Iranian attack on industrial plant in Bahrain" was refused as a round-up: a clause
+# that opens with a preposition, or a two-word aside ("one critically"), belongs to the same sentence
+CONTINUATION = re.compile(r"^(?:[\"'‘“]?\w+ing\b|as\b|after\b|while\b|amid\b|says?\b|said\b|according\b|in\b|on\b|at\b|near\b|from\b|with\b|"
+                          r"during\b|into\b|off\b|over\b|one\b|both\b|all\b|including\b)", re.I)
 
 
 def is_roundup(title: str) -> bool:
@@ -134,9 +137,13 @@ def event_problems(ev: Any, rows: list[Any] | None = None) -> list[str]:
         return []
     title = getattr(ev, "title", "") or ""
     problems = []
-    why = weak_story(title, getattr(ev, "summary", "") or "")
-    if why:
-        problems.append(f"not worth a post: {why}")
+    from app.newsdesk import importance
+
+    # owner, 2026-11-23: the same test as at release (importance.judge on the story's content, without the time fade), never a second,
+    # different one: what the editor calls noise is stopped here too (a headline rewritten, or released before a rule changed)
+    d = importance.judge_event(ev, age_min=None) if hasattr(ev, "evidence") else importance.judge(title, getattr(ev, "summary", "") or "")
+    if d.tier == importance.NOISE:
+        problems.append(f"not worth a post: {d.reason}")
     lead = title
     for r in rows or []:
         other = str(getattr(r, "title", "") or "")

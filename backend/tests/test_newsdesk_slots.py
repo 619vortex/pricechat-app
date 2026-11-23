@@ -96,7 +96,7 @@ async def test_a_story_that_clears_the_bar_fills_the_slot_and_nothing_else_goes_
     await decide(db, SLOT + timedelta(minutes=40))
     assert len(released(db)) == 1  # the slot has its post
     waiting = db.scalar(select(NdEvent).where(NdEvent.status == "candidate"))
-    assert waiting is not None and "waiting for the next slot (12:00 Dubai)" in waiting.why
+    assert waiting is not None and "waiting for the 12:00 Dubai slot" in waiting.why
     verified(db, "Zentra exchange says hackers drained $700 million from its hot wallet", now=SLOT + timedelta(hours=3, minutes=55), hours=0)
     await decide(db, SLOT + timedelta(hours=4, minutes=1))
     nxt = released(db)
@@ -157,7 +157,7 @@ async def test_a_small_price_move_never_takes_a_slot(db: Session) -> None:
     db.commit()
     await decide(db, SLOT + timedelta(minutes=1))
     db.refresh(ev)
-    assert ev.status == "candidate" and "a move on its own needs 70" in ev.why
+    assert ev.status == "candidate" and "a routine move for this asset" in ev.why  # the editor's verdict (2026-11-23)
     assert [e.kind for e in released(db)] == ["recap"]
 
 

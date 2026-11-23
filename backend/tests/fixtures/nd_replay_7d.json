@@ -29933,7 +29933,9 @@
     ]
    },
    "label": "publish",
-   "label_why": "the biggest US index rally in years, verified by price data"
+   "label_why": "the biggest US index rally in years, verified by price data",
+   "first_seen": "2026-11-23 14:45:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -29954,7 +29956,9 @@
    },
    "evidence_note": "Yahoo chart API; market posts paused",
    "label": "publish",
-   "label_why": "mega-cap move of a size seen once in decades"
+   "label_why": "mega-cap move of a size seen once in decades",
+   "first_seen": "2026-11-23 14:45:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -29975,7 +29979,9 @@
    },
    "evidence_note": "14:31 UTC 'SI=F not verified: Hyperliquid trade.xyz SILVER 44.19 vs Yahoo 43.49: 1.63% apart' (second-source check refused; spot oracle vs front-month future)",
    "label": "publish",
-   "label_why": "verified-by-two-sources would have shown the same move; the disagreement is basis, not error"
+   "label_why": "verified-by-two-sources would have shown the same move; the disagreement is basis, not error",
+   "first_seen": "2026-11-23 14:30:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -29996,7 +30002,9 @@
    },
    "evidence_note": "Yahoo chart API; market posts paused",
    "label": "publish",
-   "label_why": "a 4% gold day is rare"
+   "label_why": "a 4% gold day is rare",
+   "first_seen": "2026-11-23 14:35:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30012,7 +30020,9 @@
    "virality": 72,
    "evidence_note": "newsworthy PUBLISH (strong); 12:00 UTC slot skipped: 'the last 2 posts were all geopolitics: feed diversity holds a third in a row'",
    "label": "publish",
-   "label_why": "oil infrastructure hit"
+   "label_why": "oil infrastructure hit",
+   "first_seen": "2026-11-23 11:30:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30044,7 +30054,9 @@
    "virality": 58,
    "evidence_note": "REJECT: no concrete consequence",
    "label": "publish",
-   "label_why": "a warship sunk: hard event (one of the Libya stories should go)"
+   "label_why": "a warship sunk: hard event (one of the Libya stories should go)",
+   "first_seen": "2026-11-23 12:00:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30076,7 +30088,9 @@
    "virality": 69,
    "evidence_note": "REJECT: no concrete consequence; Trending held its topic as 'covered by the News Desk (event 1162, candidate)' and expired it",
    "label": "publish",
-   "label_why": "mega-cap CEO reinstated, stock +27% (+36% close)"
+   "label_why": "mega-cap CEO reinstated, stock +27% (+36% close)",
+   "first_seen": "2026-11-23 14:00:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30108,7 +30122,9 @@
    "virality": 68,
    "evidence_note": "REJECT: no concrete consequence; not breaking (68 < 70)",
    "label": "publish",
-   "label_why": "$44B takeover, one of the year's largest deals"
+   "label_why": "$44B takeover, one of the year's largest deals",
+   "first_seen": "2026-11-23 14:39:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30124,7 +30140,9 @@
    "virality": 77,
    "evidence_note": "Trending: pending 'not newsworthy: why should anyone care? no concrete consequence'",
    "label": "publish",
-   "label_why": "the rally itself, with a stated figure"
+   "label_why": "the rally itself, with a stated figure",
+   "first_seen": "2026-11-23 14:00:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30140,7 +30158,9 @@
    "virality": 70,
    "evidence_note": "Trending: 'not newsworthy'",
    "label": null,
-   "label_why": "no figure; the cash-session move is the story"
+   "label_why": "no figure; the cash-session move is the story",
+   "first_seen": "2026-11-23 11:40:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
@@ -30156,7 +30176,9 @@
    "virality": 74,
    "evidence_note": "04:00 UTC slot: 'not worth a post: a routine statement or talks with no outcome (calls on)'",
    "label": "stay_out",
-   "label_why": "a statement; the outcome (1162) is the story"
+   "label_why": "a statement; the outcome (1162) is the story",
+   "first_seen": "2026-11-23 02:52:00",
+   "first_seen_approx": true
   },
   {
    "source": "production logs 2026-11-23 (after the backup)",
