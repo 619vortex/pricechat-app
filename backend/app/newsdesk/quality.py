@@ -208,4 +208,100 @@ def checks_same(a: str, b: str) -> bool:
     return network.related(a, b)
 
 
-__all__ = ["event_problems", "feature", "is_roundup", "same_story", "talk_only", "weak_story"]
+# --- one incident, told in other words (owner, 2026-11-23: "eliminate the duplicate pairs without suppressing genuinely new developments") ----
+# The 7-day backtest of the new pipeline published the FBI crime-database breach four times ("FBI crime database hacked: CNN", "USDA, FBI
+# breached by hackers ...", "FBI national crime database suffers suspected breach", "FBI investigates apparent hack of critical crime
+# database"), the SEC's $37M crypto-fraud case twice, the Anthropic IPO six times and the Bahrain plant attack twice: same_story (wording) and
+# the event-family rule (newsworthy.repeat_of) both missed them. Two headlines are one incident when they name the same specific actor or
+# thing (never a country, a capital or a leader) AND the same kind of thing happening to it, or state the same sum, or, in a conflict, the
+# same sides and the same struck object within a day.
+INCIDENT_KIND = {  # word -> the kind of incident it names
+    **{w: "listing" for w in ("ipo", "ipos", "listing", "debut", "debuts", "trading debut", "public trading", "priced", "prices shares", "valuing")},
+    **{w: "breach" for w in ("hack", "hacked", "hacks", "hackers", "breach", "breached", "exploit", "exploited", "heist", "theft", "stolen", "drained",
+                              "compromise", "compromised", "attack on its systems")},
+    **{w: "fraud" for w in ("fraud", "scam", "fake", "charges", "charged", "sues", "sued", "settlement")},
+    **{w: "outage" for w in ("outage", "outages", "ground stop", "went down", "goes down")},
+    **{w: "bridge" for w in ("bridge",)}, **{w: "refinery" for w in ("refinery", "refineries")},
+    **{w: "plant" for w in ("plant", "facility", "factory")}, **{w: "port" for w in ("port", "naval base", "harbour", "harbor")},
+    **{w: "ship" for w in ("ship", "ships", "tanker", "tankers", "warship", "warships", "vessel", "vessels")},
+    **{w: "database" for w in ("database",)}, **{w: "pipeline" for w in ("pipeline", "pipelines")},
+    **{w: "airport" for w in ("airport", "airbase", "air base")}, **{w: "base" for w in ("base", "military site", "missile site", "launch site")},
+}
+_KIND_RX = re.compile(r"\b(" + "|".join(sorted((re.escape(w) for w in INCIDENT_KIND), key=len, reverse=True)) + r")\b", re.I)
+INSTITUTION = re.compile(r"\b(FBI|SEC|DOJ|CFTC|FTC|IRS|NSA|CIA|USDA|FAA|IMF|ECB|OPEC|NATO|IAEA|UN)\b")
+ALIAS = {"KERCH": "CRIMEA", "CRIMEAN": "CRIMEA"}  # one bridge, two names
+SOURCES = {"CNN", "BBC", "REUTERS", "AP", "AFP", "BLOOMBERG", "CNBC", "WSJ", "FT"}  # "...: CNN" names who reported it, not who it is about
+CONFLICT_OBJECTS = {"bridge", "refinery", "plant", "port", "ship", "pipeline", "airport", "base"}
+INCIDENT_WINDOW_H = 72.0  # a hack, a fraud case, a listing, an outage: one story for three days
+CONFLICT_WINDOW_H = 24.0  # a strike on the same bridge two days later is a new strike
+
+
+def incident_kinds(title: str) -> set[str]:
+    return {INCIDENT_KIND[m.group(1).lower()] for m in _KIND_RX.finditer(title or "") if m.group(1).lower() in INCIDENT_KIND}
+
+
+def same_incident(a: str, b: str, hours_apart: float) -> bool:
+    """Whether two headlines report one incident (see the rules above)."""
+    from app.newsdesk import newsworthy
+
+    ea, eb = newsworthy.event_of(a or ""), newsworthy.event_of(b or "")
+
+    def own(e: Any, title: str) -> set[str]:
+        names = {ALIAS.get(x, x) for x in e.anchors if not x.startswith(("$", "~")) and not newsworthy.NATIONAL.match(x) and x not in SOURCES}
+        return names | {m.group(1).upper() for m in INSTITUTION.finditer(title or "")}  # the FBI, the SEC: actors here, even if not "anchors"
+
+    shared = own(ea, a) & own(eb, b)
+    ka, kb = incident_kinds(a), incident_kinds(b)
+    conflict = ea.kin() == "conflict" or eb.kin() == "conflict"
+    window = CONFLICT_WINDOW_H if conflict else INCIDENT_WINDOW_H
+    if hours_apart > window:
+        return False
+    institutional = bool(shared) and all(INSTITUTION.fullmatch(x) for x in shared)
+    if shared and (ka & kb) and not (institutional and not (ka & kb) - {"fraud"}):
+        return True  # an agency bringing two different cases is not one incident: it needs the same sum (below) or the same object
+    if shared and conflict and ea.kin() == eb.kin() == "conflict":
+        return True  # the same named place or unit attacked ("Qeshm") within a day
+    if ea.money and eb.money and abs(ea.money - eb.money) / max(ea.money, eb.money) <= 0.05 and (shared or ka & kb):
+        return True  # the same sum: "$37M fraud" and "More Than $37 Million"
+    if not (conflict and ea.states & eb.states and (ka & kb & CONFLICT_OBJECTS)):
+        return False
+    pa, pb = _places(ea), _places(eb)
+    return not (pa and pb and not (pa & pb))  # "Kyiv bridge" and "Crimean bridge" are two bridges
+
+
+COUNTRY_WORD = re.compile(r"^(?:RUSSIA\w*|UKRAIN\w*|IRAN\w*|ISRAEL\w*|US|USA|AMERICA\w*|CHINA|CHINESE|SAUDI\w*|BAHRAIN\w*|KUWAIT\w*|QATAR\w*|"
+                          r"YEMEN\w*|HOUTHIS?|LEBAN\w*|SYRIA\w*|IRAQ\w*|EU|EUROPE\w*|NATO|ZELENSK\w*|PUTIN|TRUMP|NETANYAHU|XI|KHAMENEI|KREMLIN)$")
+
+
+def _places(e: Any) -> set[str]:
+    """The specific places and things a conflict headline names: cities (Kyiv), regions (Crimea), units; never a country or its leader."""
+    return {ALIAS.get(x, x) for x in e.anchors if not x.startswith(("$", "~")) and not COUNTRY_WORD.match(x)}
+
+
+def _named_as_party(title: str, rx: "re.Pattern[str]") -> bool:
+    """Whether a country appears as an actor or a target, not only as an owner ("Russia's bridge")."""
+    return any(not re.match(r"\s*['’]s\b", title[m.end():]) for m in rx.finditer(title))
+
+
+def incident_development(new_title: str, new_summary: str, before: list[str]) -> str:
+    """What is materially new against the earlier headlines of one incident ("" = nothing): newsworthy.development's rules (more deaths, a
+    new country drawn in, a move or sum at least 1.5 to 2 times the size, a hard outcome), plus the first market move of a listing or a
+    company (a debut that jumps 35% after a headline about the pricing)."""
+    from app.newsdesk import newsworthy
+
+    new = newsworthy.event_of(new_title or "", new_summary or "")
+    old = [newsworthy.event_of(t) for t in before]
+    dev = newsworthy.development(new, old, f"{new_title} {new_summary or ''}")
+    if dev.endswith("drawn into the conflict"):
+        # a country named only as an owner ("Russia's Prized Kerch Bridge Struck") is not a new party to the conflict
+        fresh = [x.strip() for x in dev[: -len(" drawn into the conflict")].split(",")]
+        party = [st for st in fresh if st in newsworthy.STATES and _named_as_party(new_title or "", newsworthy.STATES[st])]
+        dev = f"{', '.join(party)} drawn into the conflict" if party else ""
+    if dev:
+        return dev
+    if new.pct >= 10 and all(not o.pct for o in old):
+        return f"the first market move: {new.pct:g}%"
+    return ""
+
+
+__all__ = ["event_problems", "feature", "incident_development", "incident_kinds", "is_roundup", "same_incident", "same_story", "talk_only", "weak_story"]

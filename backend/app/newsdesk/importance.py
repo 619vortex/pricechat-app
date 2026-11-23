@@ -134,9 +134,16 @@ OPINION = _rx(r"^(?:opinion|analysis|explainer|review|letters?|comment|editorial
               r"how to|should you|is it time to|winners and losers|the week in|things to watch|in charts?)\b")
 QUESTION = re.compile(r"\?\s*['\"’”]?\s*$")
 REACTION = _rx(r"\b(reacts?|reacted|reaction|experts? (?:say|warn)|analysts? (?:say|warn)|could everything|breaks? silence|downplays?|"
-               r"shrugs? off|shrugged off|is proof|proves that|shows why|lessons? from|what .{1,30} means)\b")
+               r"shrugs? off|shrugged off|is proof|proves that|shows why|lessons? from|what .{1,30} means|"
+               r"points to)\b")
+# a correspondent's piece or a data write-up about an event, never the event itself, whatever it mentions: "BBC reports from Kyiv
+# bridge hit by Russian attack", "Ethereum block builders received the most in a $3.4 million vault hack, data shows"
+PIECE = _rx(r"\b(reports from|data shows?|analysis shows?|study finds?|a look inside|inside the|is proof|proves that|shows why|lessons? from|"
+            r"rights group|new report|report finds|watchdog says)\b")
 HEDGE = _rx(r"\b(reportedly|allegedly|rumou?r\w*|unconfirmed|sources say|according to sources|people familiar|report:|: report\b|said to|"
             r"- report\b|considering|weighs?|mulls?|could|may|might)\b")
+SPECULATIVE = _rx(r"\b(could|may|might|would)\b")
+FORECAST_MOVE = _rx(r"\b(on track for|set for|heading for|poised for|on course for|headed for)\b")
 # a forecast or plan with nothing done yet ("set to add $2 trillion" DURING a rally is a move under way: a stated move still counts)
 NOT_YET = _rx(r"\b(set to|expected to|poised to|on track to|projected to|forecast to|plans? to|planning to|aims? to|seeks? to|prepares?|preparing|readies|"
               r"backs?|backed|endorses?|endorsed|"
@@ -183,7 +190,7 @@ def _move_points(head: str) -> tuple[float, str]:
     if m:
         pct = max(pct, int(m.group(1).replace(",", "")) / 450.0)  # a ~45,000 Dow: 450 points is about 1%
     if INDEX.search(head):
-        lines, what = ((4.0, 30.0), (2.5, 26.0), (1.5, 18.0), (0.8, 10.0)), "a stock-market move"
+        lines, what = ((4.0, 30.0), (2.5, 22.0), (1.5, 16.0), (0.8, 10.0)), "a stock-market move"
     elif CRYPTO_MAJOR.search(head):
         lines, what = ((10.0, 28.0), (6.0, 22.0), (4.0, 16.0), (2.5, 8.0)), "a bitcoin/ether move"
     elif METAL_OIL.search(head):
@@ -191,8 +198,10 @@ def _move_points(head: str) -> tuple[float, str]:
     elif MEGA.search(head):
         # 3% is a routine day for a mega-cap (owner, 2026-11-18: "Nvidia NVDA stock up 3% as earnings beat" is not a post)
         lines, what = ((20.0, 28.0), (10.0, 22.0), (6.0, 14.0)), "a major company's share move"
-    else:
+    elif re.search(r"\b(shares?|stocks?|price|valuation|market cap|token|coin)\b", head, re.I):
         lines, what = ((30.0, 16.0), (15.0, 8.0)), "a share move"
+    else:
+        lines, what = (), ""  # a % that is not a price ("attacks surge by 350%"): only a stated record of a market below can count
     for at, points in lines:
         if pct >= at:
             return points, f"{what} of {pct:g}%"
@@ -252,6 +261,8 @@ def _noise(head: str) -> str:
     why = quality.feature(t)
     if why:
         return why
+    if PIECE.search(t):
+        return "a correspondent's piece or a data write-up about an event, not the event"
     if REACTION.search(t) and not _hard(t)[0]:
         return "a reaction piece, not the event"
     return ""
@@ -275,7 +286,7 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
     later = nw.AFTERMATH.search(head) or AFTER.search(head)  # "... begin receiving payments from $305m bankruptcy": an old event's aftermath, not new money
     usd = 0.0 if later else nw.money_of(head)
     if usd and nw.HOLDINGS.search(head):
-        usd /= 10  # what a fund holds is not money that moved: "cuts Bitmine's holdings to $11.8 billion"
+        usd = 0.0  # what a fund holds is not money that moved ("Goldman Sachs More Than Doubles Its Bitcoin ETF Holdings to $1.28 Billion": a filing)
     money = _money_points(usd)
     if money:
         found.append(f"${usd / 1e12:,.1f} trillion" if usd >= 1e12 else f"${usd / 1e9:,.1f}B" if usd >= 1e9 else f"${usd / 1e6:,.0f}M")
@@ -293,6 +304,11 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
         people = 10.0
         found.append("people hurt")
     hard, hard_name = _hard(head)
+    if hard_name == "a market-structure decision" and move:
+        hard, hard_name = 0.0, ""  # a price move naming an exchange ("Nvidia Turmoil Drags Nasdaq Down 2.5%") is not a market-structure decision
+    if hard and SPECULATIVE.search(head):
+        hard, hard_name = 0.0, ""
+        found.append("speculation")
     if hard_name == "an attack that hit" and ENERGY_OR_SHIPPING.search(head):
         hard += 10.0
         hard_name = "an attack on energy or shipping"
@@ -331,6 +347,12 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
     if NOT_YET.search(head) and not move:
         doubt += 14.0
         found.append("nothing done yet")
+    if nw.HOLDINGS.search(head) and not people and hard_name in ("", "a market-structure decision"):
+        doubt += 12.0  # a disclosed position (a filing), not something that happened today
+        found.append("a disclosed position")
+    elif FORECAST_MOVE.search(head):
+        doubt += 10.0  # "S&P 500 is on track for the worst week since ...": a move that may not happen, told before the close
+        found.append("a forecast")
     if doubt:
         parts["doubt"] = -doubt
     age = float(age_min or 0)
@@ -342,6 +364,11 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
     if tier == MAJOR and not verified:
         tier = SIGNIFICANT
         found.append("one outlet: major only once confirmed")
+    if tier == MAJOR and money and not hard and not move and not people:
+        # a sum on its own (flows, holdings, sales, a valuation) is never breaking news: "US spot Bitcoin ETFs are almost $1 billion short of a
+        # record monthly outflow" broke as major in the backtest
+        tier = SIGNIFICANT
+        found.append("a sum, no event: not major")
     if kind == "news" and age > STALE_MIN:
         return Decision(NOISE, score, f"stale: first reported {int(age // 60)} h ago", found, parts, verified)
     detail = ", ".join(f"{k} {v:+.0f}" for k, v in parts.items())

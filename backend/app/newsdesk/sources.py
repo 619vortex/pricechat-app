@@ -291,38 +291,16 @@ async def xyz_prices(transport: Any = None) -> dict[str, tuple[float, float]]:
     return out
 
 
-# the Nasdaq Composite and the Dow, which trade.xyz doesn't carry (owner, 2026-11-23: "Add independent second-source price verification for
-# Nasdaq and Dow"): Nasdaq's own quote service. The Composite is quoted directly (COMP, about 15 minutes delayed); the Dow through DIA, the ETF
-# that tracks it at 1/100 of the index (checked 2026-11-23 12:13 ET: DIA $495.72 x 100 vs ^DJI 49,678: 0.21% apart; COMP +6.67% vs ^IXIC
-# +7.57% minutes apart on a 7% day). {Yahoo symbol: (Nasdaq symbol, asset class, factor to the index's level, what it is)}
-NASDAQ_SECOND = {"^IXIC": ("COMP", "index", 1.0, "Nasdaq.com COMP"), "^DJI": ("DIA", "etf", 100.0, "Nasdaq.com DIA (Dow ETF) x100")}
-NASDAQ_TOLERANCE = 1.0  # percent, before the allowance for the size of the move
-NASDAQ_TTL = 60.0
-_nasdaq: dict[str, tuple[float, float]] = {}
-# the basis between two markets widens with the move: a perpetual's oracle vs a futures front month, a delayed quote vs a live one. On a 6% day
-# silver's trade.xyz oracle and COMEX were 1.63% apart (refused at a flat 1.5%, production 2026-11-23): the tolerance grows by this share of
-# the move. A unit error or a wrong instrument is still many times outside it.
+# The Nasdaq Composite and the Dow have no second source the desk may read (owner, 2026-11-23: verify them from the actual Railway environment,
+# never DIA x 100 as the Dow): trade.xyz has neither index; Nasdaq.com answers a browser but stalls any automated reader that says who it is
+# (checked 2026-11-23: our User-Agent times out, a browser's gets 200; we do not pretend to be a browser); Cboe's DJX feed is behind a
+# Cloudflare challenge; WSJ's quote API needs a site token. So a Nasdaq-only or Dow-only move is never published automatically (one source:
+# held, events.held_market). A market-wide US move is verified on its S&P 500 member (trade.xyz) and prints the Nasdaq and the Dow beside it
+# as Yahoo's figures. A keyed market-data provider would add them (owner's decision).
+# the basis between two markets widens with the move: a perpetual's oracle vs a futures front month. On a 6% day silver's trade.xyz oracle
+# and COMEX were 1.63% apart (refused at a flat 1.5%, production 2026-11-23): the tolerance grows by this share of the move. A unit error or
+# a wrong instrument is still many times outside it.
 MOVE_ALLOWANCE = 0.25
-
-
-async def nasdaq_level(symbol: str, transport: Any = None) -> float:
-    """The second market's level for a Yahoo index symbol (NASDAQ_SECOND), read at most once a minute. Raises when it can't be read."""
-    import time
-
-    nsym, cls, factor, _ = NASDAQ_SECOND[symbol]
-    got = _nasdaq.get(nsym)
-    if got is not None and time.monotonic() - got[0] <= NASDAQ_TTL:
-        return got[1]
-    async with httpx.AsyncClient(transport=transport, timeout=8, headers={**UA, "Accept": "application/json"}) as c:
-        r = await c.get(f"https://api.nasdaq.com/api/quote/{nsym}/info", params={"assetclass": cls})
-        r.raise_for_status()
-        data = (r.json() or {}).get("data") or {}
-    last = str(((data.get("primaryData") or {}).get("lastSalePrice")) or "").replace("$", "").replace(",", "").strip()
-    level = float(last) * factor
-    if level <= 0:
-        raise ValueError("no price")
-    _nasdaq[nsym] = (time.monotonic(), level)
-    return level
 
 
 async def call_second(fn: Any, item: dict[str, Any], price: float, market: Any = None, change: float = 0.0) -> tuple[bool, str]:
@@ -340,12 +318,12 @@ async def call_second(fn: Any, item: dict[str, Any], price: float, market: Any =
 
 
 def has_second(item: dict[str, Any]) -> bool:
-    return bool(item.get("hl")) or str(item.get("symbol") or "") in XYZ or str(item.get("symbol") or "") in NASDAQ_SECOND
+    return bool(item.get("hl")) or str(item.get("symbol") or "") in XYZ
 
 
 async def second_opinion(item: dict[str, Any], price: float, market: Any = None, transport: Any = None, change: float | None = None) -> tuple[bool, str]:
-    """Crypto must agree with Hyperliquid; indices, stocks and commodities with a trade.xyz market must agree with its oracle price; the Nasdaq
-    Composite and the Dow with Nasdaq's quote (NASDAQ_SECOND). The tolerance grows with the move (`change`, %, MOVE_ALLOWANCE). A disagreement
+    """Crypto must agree with Hyperliquid; indices, stocks and commodities with a trade.xyz market must agree with its oracle price. The
+    tolerance grows with the move (`change`, %, MOVE_ALLOWANCE). A disagreement
     ("... apart") is a refusal and a safety anomaly. Owner, 2026-11-23: "No automatic major-move publishing without reliable verification": a
     second market that can't be read is a refusal too (not an anomaly: nothing disagreed). An instrument with no second market at all keeps one
     source and says so."""
@@ -363,14 +341,6 @@ async def second_opinion(item: dict[str, Any], price: float, market: Any = None,
         diff = abs(other - price) / price * 100
         tol = XYZ_TOLERANCE.get(str(item.get("group") or ""), 1.5) + allowance
         return diff <= tol, f"Hyperliquid trade.xyz {XYZ[symbol][4:]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart (tolerance {tol:.2f}%)"
-    if not name and symbol in NASDAQ_SECOND:
-        try:
-            other = await nasdaq_level(symbol, transport)
-        except Exception as e:  # noqa: BLE001 - unreadable: not verified
-            return False, f"not verified: {NASDAQ_SECOND[symbol][3]} couldn't be read ({type(e).__name__})"
-        diff = abs(other - price) / price * 100
-        tol = NASDAQ_TOLERANCE + allowance
-        return diff <= tol, f"{NASDAQ_SECOND[symbol][3]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart (tolerance {tol:.2f}%)"
     if not name:
         return True, "one price source (Yahoo Finance)"
     try:

@@ -807,7 +807,7 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
         verified = "several assets, one price source (Yahoo Finance)"
     else:
         verified = "one price source (Yahoo Finance)" if not m.item.get("hl") else "one price source (Yahoo Finance): no second opinion available"
-    two = confirmed  # a second market compared and agreed (Hyperliquid, trade.xyz, Nasdaq.com)
+    two = confirmed  # a second market compared and agreed (Hyperliquid, trade.xyz)
     round_level = m.kind == "milestone" and m.level > 0 and (m.level / (m.item.get("step") or m.level)) % 10 == 0
     score = virality.market(kind=m.kind, group=str(m.item.get("group") or "stock"), ratio=m.ratio, two_sources=two, symbol_key=m.key, round_level=round_level,
                             engagement=_engagement_points(adj, "move"))
@@ -1007,6 +1007,48 @@ def memory(db: Session, ev: NdEvent, covered: list[editorial.Covered], now: date
     if rep:
         ev.status, ev.why = "superseded", f"a repeat: {rep}"
         return ev.why
+    return _same_incident(db, ev, now)
+
+
+def _root(db: Session, ev: NdEvent) -> NdEvent:
+    seen = 0
+    while ev.parent_id and seen < 10:
+        parent = db.get(NdEvent, ev.parent_id)
+        if parent is None:
+            break
+        ev, seen = parent, seen + 1
+    return ev
+
+
+def _same_incident(db: Session, ev: NdEvent, now: datetime, p: "Policy | None" = None) -> str:
+    """One incident told in other words (quality.same_incident), against what was released in the last 72 hours. Nothing new: folded away
+    (superseded). A material development (quality.incident_development): it goes as an UPDATE of the original (kind update, parent_id: the
+    lanes reply to the original), at most updates_per_story per story. Owner, 2026-11-23: no duplicates, never at the cost of a real
+    development."""
+    if ev.kind not in ("news", "update"):
+        return ""
+    p = p or POLICY
+    title = ev.title or ev.headline or ""
+    out = list(db.scalars(select(NdEvent).where(NdEvent.status == RELEASED, NdEvent.id != ev.id, NdEvent.kind.in_(("news", "update")),
+                                                NdEvent.released_at >= now - timedelta(hours=quality.INCIDENT_WINDOW_H))))
+    same = [e for e in out if quality.same_incident(e.title or e.headline or "", title, (now - _utc(e.released_at, now)).total_seconds() / 3600)]
+    if not same:
+        return ""
+    root = _root(db, min(same, key=lambda e: _utc(e.released_at, now)))
+    if ev.kind == "update" and ev.parent_id == root.id:
+        return ""  # already this story's update: the update rules (events.development) decided
+    thread = [root] + list(db.scalars(select(NdEvent).where(NdEvent.parent_id == root.id, NdEvent.status == RELEASED)))
+    dev = quality.incident_development(title, ev.summary or "", [e.title or e.headline or "" for e in thread])
+    if not dev:
+        ev.status, ev.why = "superseded", f"the same incident as #{root.id} (\"{(root.headline or root.title or '')[:80]}\"), nothing materially new"
+        ev.facts = {**(ev.facts or {}), "merged_into": root.id}
+        return ev.why
+    updates = sum(1 for e in thread if e.id != root.id)
+    if updates >= p.updates_per_story:
+        ev.status, ev.why = "superseded", f"a development of #{root.id} ({dev}), but it already had {updates} updates"
+        return ev.why
+    ev.kind, ev.parent_id = "update", root.id
+    ev.facts = {**(ev.facts or {}), "development": dev, "new_because": dev}
     return ""
 
 
@@ -1171,6 +1213,10 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             importance.record(ev, d, "slot", "waiting", now, f"the slot is open, but under {int(p.min_gap.total_seconds() // 60)} minutes since the last post: {d.reason}")
         return None
     for ev, d in ranked:
+        if d.tier == importance.NOTABLE and not d.verified and ev.kind in ("news", "update"):
+            # owner, 2026-11-23 (quality above quantity): a minor story from one unofficial outlet never takes a post
+            importance.record(ev, d, "slot", "waiting", now, f"a notable story from one outlet: it fills a slot only once confirmed ({d.reason})")
+            continue
         if d.tier == importance.NOTABLE:
             run = editorial.diversity(ev, covered, now)[1]
             if run:

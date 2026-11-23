@@ -72,7 +72,22 @@ def run(paused: bool = True) -> dict:
                 return f"same story as #{p['item']['id']}"
         told = [newsworthy.Told("released", f"#{p['item']['id']}", p["item"].get("title") or "", p["at"],
                                 newsworthy.event_of(p["item"].get("title") or "", p["item"].get("summary") or "")) for p in published]
-        return newsworthy.repeat_of(head, it.get("summary") or "", told, now)
+        r = newsworthy.repeat_of(head, it.get("summary") or "", told, now)
+        if r:
+            return r
+        # one incident in other words (quality.same_incident): nothing new -> a repeat; a development -> an UPDATE of the original (2 a story)
+        same = [p for p in published if quality.same_incident(p["item"].get("title") or "", head, (now - p["at"]).total_seconds() / 3600)]
+        if not same:
+            return ""
+        root = min(same, key=lambda p: p["at"]).get("root") or min(same, key=lambda p: p["at"])["item"]["id"]
+        thread = [p for p in published if p["item"]["id"] == root or p.get("root") == root]
+        dev = quality.incident_development(head, it.get("summary") or "", [p["item"].get("title") or "" for p in thread])
+        if not dev:
+            return f"the same incident as #{root}, nothing new"
+        if sum(1 for p in thread if p.get("root") == root) >= 2:
+            return f"a development of #{root} ({dev}), but it already had 2 updates"
+        it["_update_of"], it["_development"] = root, dev
+        return ""
 
     def verdict(it: dict, now: datetime) -> importance.Decision:
         age = (now - it["_seen"]).total_seconds() / 60
@@ -103,7 +118,8 @@ def run(paused: bool = True) -> dict:
         return sorted(out, key=lambda x: (-x[1].rank, -x[1].score, str(x[0]["id"])))
 
     def publish(it: dict, d: importance.Decision, now: datetime, how: str) -> None:
-        published.append({"item": it, "at": now, "how": how, "tier": d.tier, "score": round(d.score), "reason": d.reason, "desk": _desk(it)})
+        published.append({"item": it, "at": now, "how": how, "tier": d.tier, "score": round(d.score), "reason": d.reason, "desk": _desk(it),
+                          **({"root": it["_update_of"], "update": it["_development"]} if it.get("_update_of") else {})})
 
     now = start
     while now <= end:
@@ -133,6 +149,8 @@ def run(paused: bool = True) -> dict:
             if last is None or now - last >= MIN_GAP:
                 recent = sorted([p for p in published if now - p["at"] <= timedelta(hours=12)], key=lambda p: p["at"], reverse=True)
                 for it, d in waiting(now):
+                    if d.tier == importance.NOTABLE and not d.verified and (it.get("kind") or "news") in ("news", "update"):
+                        continue  # a minor story from one outlet never takes a post
                     if d.tier == importance.NOTABLE:
                         desk = _desk(it)
                         if desk != "other" and len(recent) >= 2 and all(p["desk"] == desk for p in recent[:2]):
@@ -169,9 +187,13 @@ def quality_report(r: dict) -> list[str]:
             if hours > 48:
                 continue
             ta, tb = a["item"].get("title") or "", b["item"].get("title") or ""
-            same = quality.same_story(ta, tb) or newsworthy.same_event(newsworthy.event_of(ta), newsworthy.event_of(tb), hours_apart=hours)
-            if same:
+            linked = b.get("root") in (a["item"]["id"], a.get("root")) and b.get("root") is not None
+            same = quality.same_story(ta, tb) or quality.same_incident(ta, tb, hours) or                 newsworthy.same_event(newsworthy.event_of(ta), newsworthy.event_of(tb), hours_apart=hours)
+            if same and not linked:
                 dups.append((a, b, hours))
+    ups = [p for p in pub if p.get("root")]
+    out += ["", f"**Published as an UPDATE of an earlier post** (a development of the same incident): {len(ups)}"]
+    out += [f"- #{p['item']['id']} \"{(p['item'].get('title') or '')[:80]}\" updates #{p['root']}: {p['update']}" for p in ups]
     out += ["", f"**Possible duplicates among the published** (same story, or the same event by the cross-lane rule, within 48 h): {len(dups)}"]
     out += [f"- #{a['item']['id']} \"{(a['item'].get('title') or '')[:70]}\" / #{b['item']['id']} \"{(b['item'].get('title') or '')[:70]}\" ({h:.0f} h apart)"
             for a, b, h in dups[:12]]
