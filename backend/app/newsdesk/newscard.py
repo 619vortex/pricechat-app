@@ -40,7 +40,8 @@ def render(ev: Any, now: datetime) -> bytes | None:
         stamp = f.get("as_of") or f.get("published_at")
         at = _aware(datetime.fromisoformat(str(stamp)), now) if stamp else now
         stat = str(f.get("stat") or "") if (getattr(ev, "kind", "") in ("market", "update", "data") or f.get("symbol")) else ""
-        return card.render(headline, b, names, at, stat=stat, spark=list(f.get("spark") or []))
+        window = str(f.get("window") or "") if stat and f.get("kind") in ("move", "wide") else ""
+        return card.render(headline, b, names, at, stat=stat, spark=list(f.get("spark") or []), stat_window=window)
     except Exception as e:  # noqa: BLE001 - the fallback never breaks the lane: without it the post is held, as before
         logger.warning("newsdesk newscard: event %s: the card could not be drawn (%s)", getattr(ev, "id", None), type(e).__name__)
         return None

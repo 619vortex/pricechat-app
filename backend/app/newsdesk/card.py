@@ -44,8 +44,14 @@ def _wrap(d: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width
     return lines
 
 
-def render(headline: str, brief: Brief, sources: list[str], at: datetime, *, stat: str = "", spark: list[float] | None = None) -> bytes:
-    """stat: the one figure the story gives (a dollar amount, the measured move), shown large. spark: our own prices over the last day."""
+STAT_WINDOW = {"15m": "IN 15 MINUTES", "1h": "IN 1 HOUR", "4h": "IN 4 HOURS", "24h": "IN 24 HOURS", "day": "SINCE THE LAST CLOSE"}
+
+
+def render(headline: str, brief: Brief, sources: list[str], at: datetime, *, stat: str = "", spark: list[float] | None = None,
+           stat_window: str = "") -> bytes:
+    """stat: the one figure the story gives (a dollar amount, the measured move), shown large. spark: our own prices over the last day.
+    stat_window: the measured move's own window ("1h"), printed over the figure, so a 1-hour move beside the 24-hour chart is never read
+    as the day's (2026-11-24 review of the branded card)."""
     accent = ACCENT.get(brief.label, KIWI_GREEN)
     img = Image.new("RGB", (W, H), BG)
     # a soft glow of the label's colour from the top left, so a red card reads as red at a glance
@@ -86,6 +92,9 @@ def render(headline: str, brief: Brief, sources: list[str], at: datetime, *, sta
             while fsize > 50 and d.textlength(stat, font=_anton(fsize)) > 300:
                 fsize -= 8
             d.text((col_x + 300, mid - (40 if len(spark) >= 4 else 0)), stat, font=_anton(fsize), fill=colour, anchor="rm")
+            if STAT_WINDOW.get(stat_window):
+                d.text((col_x + 300, mid - (40 if len(spark) >= 4 else 0) - fsize // 2 - 26), STAT_WINDOW[stat_window], font=_inter(18, "Bold"),
+                       fill=MUTED, anchor="rm")
         if len(spark) >= 4:
             ax = price_axis.axis(min(spark), max(spark))  # log past a phi (1.618x) range, else linear
             top, height = mid + 40 if stat else mid - 60, 110

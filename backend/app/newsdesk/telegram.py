@@ -191,7 +191,8 @@ async def compose(settings: Settings, ev: NdEvent, transport: Any = None, *, db:
         result = brief.check(plain, source_text=told, names=names, brief=b, max_len=MAX_LEN)
         if result.ok:
             at = _aware(datetime.fromisoformat(f["as_of"] if f.get("as_of") else f["published_at"]), now) if (f.get("as_of") or f.get("published_at")) else now
-            png = card.render(ev.headline, b, names, at or now, stat=str(f.get("stat") or ""), spark=list(f.get("spark") or []))
+            png = card.render(ev.headline, b, names, at or now, stat=str(f.get("stat") or ""), spark=list(f.get("spark") or []),
+                              stat_window=str(f.get("window") or "") if f.get("kind") in ("move", "wide") else "")
             return {"headline": ev.headline, "summary": summary, "html": h, "plain": plain, "sources": srcs, "writer": origin, "card": png, "choice": choice,
                     "link": f"event:{ev.id}", "title": ev.title, "source": (srcs[0]["name"] if srcs else "Price Chat")[:60], "fingerprint": checks.fingerprint(ev.headline),
                     "label": b.label, "evidence": ev.evidence}, ""

@@ -515,7 +515,11 @@ async def _write(settings: Any, ev: Any, rows: list[Any] | None = None, transpor
     rejected: list[str] = []
 
     def check(c: Copy) -> list[str]:
-        return verify_copy(c, src) + viral.draft_problems(ev, c, rows) + (list(extra(c, src)) if extra is not None else [])
+        from app.newsdesk import moves
+
+        return verify_copy(c, src) + viral.draft_problems(ev, c, rows) + (list(extra(c, src)) if extra is not None else []) \
+            + moves.cross_problems(getattr(ev, "facts", None), {"headline": c.headline, "short": c.short, "context": c.context, "stakes": c.stakes,
+                                                                "question": c.question})
 
     named = " ".join([getattr(ev, "summary", "") or "", *[getattr(r, "summary", "") or "" for r in rows or []]])  # sentence-case text: where names show
     drafted = local_copy(ev)

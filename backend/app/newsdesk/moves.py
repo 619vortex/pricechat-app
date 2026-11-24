@@ -5,6 +5,7 @@ A move counts only from bars at or before `now`, and only while the latest bar i
 Each window has its own alert line per asset group (the move must beat it); `ratio` is how many times over the line it went.
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -409,6 +410,35 @@ def cross_line(m: Move, cross: list[dict[str, Any]]) -> str:
         return ""
     figs = ", ".join(f"{c['name']} {'+' if c['change'] > 0 else '−' if c['change'] < 0 else ''}{abs(c['change']):.1f}%" for c in cross)
     return f"{SAME_WINDOW.get(m.window, 'Meanwhile')}: {figs}."
+
+
+# Words that would turn a related market's figure into a cause or an effect ("Bitcoin slides as Nasdaq drops", "gold weighed on
+# silver"). Co-movement in the desk's own words ("In the same hour: Nasdaq -1.5%") is the only way the figures are printed.
+CAUSAL = re.compile(r"\b(as|after|amid|on|because|due|thanks|driven|drove|drives?|drag\w*|weigh\w*|lift\w*|follow\w*|track\w*|led|lead\w*|"
+                    r"spark\w*|trigger\w*|fuel\w*|caus\w*|behind|pressur\w*|spill\w*|contagion|sen[dt]\w*|push\w*|pull\w*|hit\w*|"
+                    r"knock\w*|boost\w*|spook\w*|rattl\w*|response|reaction|react\w*|link\w*|tied|blam\w*|so|therefore|hence)\b", re.I)
+
+
+def cross_problems(facts: dict[str, Any] | None, texts: dict[str, str]) -> list[str]:
+    """Review of the cross-asset context (2026-11-24): a writer's copy may use a related market's figure only as the desk prints it, in
+    its own sentence that starts with the same-window words. Never in the headline, and never in a sentence that links it to the move as a
+    cause or an effect: no source says one moved the other. [] when the copy is clean or the event carries no related markets."""
+    names = [str(c.get("name") or "") for c in (facts or {}).get("cross") or [] if c.get("name")]
+    if not names:
+        return []
+    starts = tuple(SAME_WINDOW.values()) + ("Meanwhile",)
+    problems = []
+    for where, text in texts.items():
+        for sentence in re.split(r"(?<=[.!?])\s+", str(text or "")):
+            hit = next((n for n in names if re.search(rf"\b{re.escape(n)}\b", sentence, re.I)), None)
+            if hit is None:
+                continue
+            if where in ("headline", "short"):
+                problems.append(f"the {where} names {hit}, a related market: its figure is context, never the story")
+            elif not sentence.strip().startswith(starts) and CAUSAL.search(sentence):
+                problems.append(f"the {where} links {hit}'s move to this one (\"{sentence.strip()[:80]}\"): a related market's figure is context, "
+                                f"never a cause or an effect")
+    return problems
 
 
 def watch_items(watchlist: list[dict[str, Any]]) -> list[dict[str, Any]]:
