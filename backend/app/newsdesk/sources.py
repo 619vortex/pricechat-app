@@ -137,9 +137,81 @@ RETIRED_FEEDS = {"https://feeds.content.dowjones.io/public/rss/mw_marketpulse"}
 STALE_AFTER = timedelta(days=7)  # a feed whose newest item is older than this is broken, whatever its HTTP status says
 
 
+# --- feed licences (owner, 2026-11-24: "use only commercially permitted feeds"; audit docs/newsdesk/feed-licences/) -------
+# Each outlet's terms for reusing its headlines with a link in a commercial channel, as read on 2026-11-24 (quotes and URLs in the
+# report). An outlet not named here is "unclear": no grant was found, so it is treated as not permitted.
+PERMITTED, LICENCE_NEEDED, NON_COMMERCIAL, UNCLEAR = "permitted", "licence needed", "non-commercial", "unclear"
+FEED_LICENCE: dict[str, str] = {
+    **{n: PERMITTED for n in (
+        "Federal Reserve", "ECB", "SEC", "White House", "CFTC", "BLS", "UN News", "FAA",
+        # 2026-11-24 compliant additions (COMPLIANT_FEEDS): US federal works (17 U.S.C. 105), UK Open Government Licence v3, CC BY 4.0,
+        # central banks whose terms allow reuse with credit, MIT
+        "CFTC Enforcement", "SEC Statements", "Bitcoin Optech", "OCC", "White House Actions", "UN Press", "US Defense Releases",
+        "US Defense News", "US Justice Dept", "UK Prime Minister", "UK Ministry of Defence", "UK FCDO", "HM Treasury", "European Commission",
+        "USGS Earthquakes", "NOAA Hurricane Center", "US Energy Dept", "UK Energy Dept", "Fed Speeches", "Bank of Canada", "RBA", "RBNZ",
+        "BIS", "US Census Indicators", "UK ONS")},
+    **{n: LICENCE_NEEDED for n in ("BBC", "New York Times", "Le Monde", "Bank of Japan", "Reddit", "Financial Times", "CryptoSlate",
+                                   "The Defiant", "Bitcoin Magazine", "Meduza")},
+    **{n: NON_COMMERCIAL for n in ("NPR", "Al Jazeera", "CNBC", "MarketWatch", "Bloomberg", "The Guardian", "Cointelegraph", "Decrypt",
+                                   "The Block", "OilPrice", "France 24", "Bank of England", "CNA", "NBC News", "CBS News", "Axios",
+                                   "The National", "The War Zone", "Breaking Defense", "Defense One", "Fox Business", "Seeking Alpha",
+                                   "CoinDesk", "Politico", "ABC Australia", "Mining.com", "The Independent", "Sky News", "ABC News",
+                                   "The Washington Post", "South China Morning Post")},
+    **{n: UNCLEAR for n in ("Unchained", "DW", "gCaptain", "Moscow Times")},
+}
+# Live, parseable, robots-allowed feeds whose terms permit commercial reuse with credit (each checked 2026-11-24). Read only under the
+# "compliant" policy: they are primary sources (regulators, governments, central banks), slower than newsrooms, and the conditions in the
+# report apply (UN: credit and tell the UN; OGL and CC BY: the attribution statement in the channel bio; no seals or logos).
+COMPLIANT_FEEDS: list[dict[str, Any]] = [
+    {"name": "CFTC Enforcement", "url": "https://www.cftc.gov/RSS/RSSENF/rssenf.xml", "tier": 0, "category": "crypto"},
+    {"name": "SEC Statements", "url": "https://www.sec.gov/news/statements.rss", "tier": 0, "category": None},
+    {"name": "Bitcoin Optech", "url": "https://bitcoinops.org/feed.xml", "tier": 2, "category": "crypto"},
+    {"name": "OCC", "url": "https://www.occ.gov/rss/occ_news.xml", "tier": 0, "category": "economics"},
+    {"name": "White House Actions", "url": "https://www.whitehouse.gov/presidential-actions/feed/", "tier": 0, "category": "politics"},
+    {"name": "UN Press", "url": "https://press.un.org/en/rss.xml", "tier": 0, "category": "politics"},
+    {"name": "US Defense Releases", "url": "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=9&Site=945&max=10", "tier": 0,
+     "category": "politics"},
+    {"name": "US Defense News", "url": "https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945&max=10", "tier": 0,
+     "category": "politics"},
+    {"name": "US Justice Dept", "url": "https://www.justice.gov/news/rss?type=press_release&m=1", "tier": 0, "category": "politics"},
+    {"name": "UK Prime Minister", "url": "https://www.gov.uk/search/news-and-communications.atom?content_purpose_supergroup%5B%5D=news_and_communications"
+                                         "&organisations%5B%5D=prime-ministers-office-10-downing-street", "tier": 0, "category": "politics"},
+    {"name": "UK Ministry of Defence", "url": "https://www.gov.uk/government/organisations/ministry-of-defence.atom", "tier": 0, "category": "politics"},
+    {"name": "UK FCDO", "url": "https://www.gov.uk/government/organisations/foreign-commonwealth-development-office.atom", "tier": 0, "category": "politics"},
+    {"name": "HM Treasury", "url": "https://www.gov.uk/government/organisations/hm-treasury.atom", "tier": 0, "category": "economics"},
+    {"name": "European Commission", "url": "https://ec.europa.eu/commission/presscorner/api/rss?language=en", "tier": 0, "category": "politics"},
+    {"name": "USGS Earthquakes", "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.atom", "tier": 0, "category": None},
+    {"name": "NOAA Hurricane Center", "url": "https://www.nhc.noaa.gov/index-at.xml", "tier": 0, "category": None},
+    {"name": "US Energy Dept", "url": "https://www.energy.gov/rss/newsroom.xml", "tier": 0, "category": "commodities"},
+    {"name": "UK Energy Dept", "url": "https://www.gov.uk/government/organisations/department-for-energy-security-and-net-zero.atom", "tier": 0,
+     "category": "commodities"},
+    {"name": "Fed Speeches", "url": "https://www.federalreserve.gov/feeds/speeches.xml", "tier": 0, "category": "economics"},
+    {"name": "Bank of Canada", "url": "https://www.bankofcanada.ca/content_type/press-releases/feed/", "tier": 0, "category": "economics"},
+    {"name": "RBA", "url": "https://www.rba.gov.au/rss/rss-cb-media-releases.xml", "tier": 0, "category": "economics"},
+    {"name": "RBNZ", "url": "https://www.rbnz.govt.nz/feeds/news", "tier": 0, "category": "economics"},
+    {"name": "BIS", "url": "https://www.bis.org/doclist/all_pressrels.rss", "tier": 0, "category": "economics"},
+    {"name": "US Census Indicators", "url": "https://www.census.gov/economic-indicators/indicator.xml", "tier": 0, "category": "economics"},
+    {"name": "UK ONS", "url": "https://www.ons.gov.uk/releasecalendar?rss", "tier": 0, "category": "economics"},
+]
+
+
+def licence_of(feed: dict[str, Any]) -> str:
+    return FEED_LICENCE.get(str(feed.get("name") or "").strip(), UNCLEAR)
+
+
 def feeds_for(stored: list[dict[str, Any]], state: dict[str, Any]) -> list[dict[str, Any]]:
-    """The stored feeds plus the tiered additions not already there (by address)."""
+    """The stored feeds plus the tiered additions not already there (by address).
+
+    state["feeds_policy"] (owner's choice, 2026-11-24): "all" (the default: every feed as before) or "compliant" (only feeds whose terms
+    permit commercial reuse, FEED_LICENCE, plus COMPLIANT_FEEDS; a stored feed the audit doesn't name is left out until it is checked)."""
     stored = [f for f in stored if f.get("url") not in RETIRED_FEEDS]
+    if state.get("feeds_policy") == "compliant":
+        out, have = [], set()
+        for f in [*stored, *EXTRA_FEEDS, *WORLDMONITOR_FEEDS, *COMPLIANT_FEEDS]:
+            if f.get("url") not in have and licence_of(f) == PERMITTED:
+                have.add(f.get("url"))
+                out.append(f)
+        return out
     if state.get("extra_feeds") is False:
         return list(stored)
     have = {f.get("url") for f in stored}

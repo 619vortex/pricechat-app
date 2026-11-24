@@ -175,6 +175,9 @@ async def test_priority_subjects_rank_first_but_never_lower_the_bar(db: Session)
 async def test_telegram_and_x_each_deliver_the_market_check_in_their_own_format(db: Session) -> None:
     now = SLOT + timedelta(minutes=1)
     await decide(db, now)
+    row = engine.settings_row(db)  # the owner's switch off (2026-11-24: the branded card is the default fallback; off = the hold below)
+    row.state = {**(row.state or {}), "card_fallback": False}
+    db.commit()
     tg = Tg()
     out = await lane.tick(db, get_settings(), tg, now, quotes={})
     # owner, 2026-11-23: the market check has no source article and (with no quotes here) no verified chart or photo: it waits for the
