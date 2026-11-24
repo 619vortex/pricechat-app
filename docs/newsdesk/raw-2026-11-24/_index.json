@@ -1,0 +1,940 @@
+{
+ "binance_BTCUSDT_1h_1119_1122": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&startTime=1795046400000&endTime=1795305600000&limit=1000",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:34+00:00"
+ },
+ "binance_ETHUSDT_1h_1119_1122": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&startTime=1795046400000&endTime=1795305600000&limit=1000",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:35+00:00"
+ },
+ "binance_BTCUSDT_1d_since_2024_09": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=1725148800000&limit=1000",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:36+00:00"
+ },
+ "coinbase_ETHUSD_1h_1119_1121": {
+  "url": "https://api.exchange.coinbase.com/products/ETH-USD/candles?granularity=3600&start=2026-11-19T12:00:00Z&end=2026-11-21T00:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:37+00:00"
+ },
+ "coinbase_BTCUSD_1h_1121": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600&start=2026-11-21T00:00:00Z&end=2026-11-21T12:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:37+00:00"
+ },
+ "coinbase_BTCUSD_1d_2025_11": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2025-11-10T00:00:00Z&end=2025-11-20T00:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:38+00:00"
+ },
+ "kraken_XBTCAD_1h": {
+  "url": "https://api.kraken.com/0/public/OHLC?pair=XBTCAD&interval=60&since=1795089600",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:39+00:00"
+ },
+ "kraken_USDCAD_1h": {
+  "url": "https://api.kraken.com/0/public/OHLC?pair=USDCAD&interval=60&since=1795089600",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:39+00:00"
+ },
+ "hl_candles_1h_xyz_GOLD": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:40+00:00"
+ },
+ "hl_candles_1h_xyz_SILVER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:41+00:00"
+ },
+ "hl_candles_1h_xyz_BRENTOIL": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:BRENTOIL",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:42+00:00"
+ },
+ "hl_candles_1h_xyz_CL": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:CL",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:43+00:00"
+ },
+ "hl_candles_1h_xyz_COPPER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:COPPER",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:43+00:00"
+ },
+ "hl_candles_1h_xyz_SP500": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:44+00:00"
+ },
+ "hl_candles_1h_xyz_XYZ100": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:45+00:00"
+ },
+ "hl_candles_1h_xyz_NVDA": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:NVDA",
+    "interval": "1h",
+    "startTime": 1794700800000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:46+00:00"
+ },
+ "hl_candles_5m_1119_xyz_SP500": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795096800000,
+    "endTime": 1795102200000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:47+00:00"
+ },
+ "hl_candles_5m_1119_xyz_XYZ100": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795096800000,
+    "endTime": 1795102200000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:41:47+00:00"
+ },
+ "yahoo_1h_GC_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:48+00:00"
+ },
+ "yahoo_1h_SI_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:49+00:00"
+ },
+ "yahoo_1h_BZ_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:50+00:00"
+ },
+ "yahoo_1h_CL_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/CL%3DF?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:51+00:00"
+ },
+ "yahoo_1h_HG_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:51+00:00"
+ },
+ "yahoo_1h_idx_GSPC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:52+00:00"
+ },
+ "yahoo_1h_idx_IXIC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:53+00:00"
+ },
+ "yahoo_1h_idx_DJI": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EDJI?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:53+00:00"
+ },
+ "yahoo_1h_NVDA": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1794700800&period2=1795478400&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:54+00:00"
+ },
+ "yahoo_5m_idx_GSPC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1795046400&period2=1795478400&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:55+00:00"
+ },
+ "yahoo_5m_idx_IXIC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?period1=1795046400&period2=1795478400&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:55+00:00"
+ },
+ "yahoo_5m_idx_DJI": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EDJI?period1=1795046400&period2=1795478400&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:56+00:00"
+ },
+ "yahoo_GC_F_2y": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?range=2y&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:41:57+00:00"
+ },
+ "nasdaq_NVDA_since2025": {
+  "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2024-12-01&todate=2026-11-24&limit=600",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:43:00+00:00"
+ },
+ "binance_BTCUSDT_1m_1120_1500": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795186800000&limit=35",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:02+00:00"
+ },
+ "coinbase_BTCUSD_1m_1120_1500": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T15:00:00Z&end=2026-11-20T15:35:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:04+00:00"
+ },
+ "binance_BTCUSDT_1m_1120_1300": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795179300000&limit=35",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:04+00:00"
+ },
+ "coinbase_BTCUSD_1m_1120_1300": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T12:55:00Z&end=2026-11-20T13:30:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:05+00:00"
+ },
+ "binance_BTCUSDT_1m_1120_1700": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795193700000&limit=35",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:06+00:00"
+ },
+ "coinbase_BTCUSD_1m_1120_1700": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T16:55:00Z&end=2026-11-20T17:30:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:07+00:00"
+ },
+ "binance_BTCUSDT_1m_1121_0355": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795233300000&limit=35",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:08+00:00"
+ },
+ "coinbase_BTCUSD_1m_1121_0355": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-21T03:55:00Z&end=2026-11-21T04:30:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:09+00:00"
+ },
+ "yahoo_5m_ANT": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/ANT?period1=1795096800&period2=1795123800&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:10+00:00"
+ },
+ "yahoo_5m_NVDA_1120": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1795183200&period2=1795478400&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:10+00:00"
+ },
+ "yahoo_5m_SI_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1795118400&period2=1795143600&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:11+00:00"
+ },
+ "yahoo_5m_GC_F_1118": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794934800&period2=1795041000&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:12+00:00"
+ },
+ "yahoo_5m_metals_1123_SI": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1795438800&period2=1795449600&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:13+00:00"
+ },
+ "yahoo_5m_metals_1123_GC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1795438800&period2=1795449600&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:13+00:00"
+ },
+ "yahoo_5m_HG_F_1123": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?period1=1795392000&period2=1795478400&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:14+00:00"
+ },
+ "yahoo_5m_HGH27_1123": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HGH27.CMX?period1=1795392000&period2=1795478400&interval=5m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:45:15+00:00"
+ },
+ "hl_candles_5m_1123_xyz_SILVER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:16+00:00"
+ },
+ "hl_candles_5m_1123_xyz_GOLD": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:17+00:00"
+ },
+ "hl_candles_5m_1123_xyz_COPPER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:COPPER",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:18+00:00"
+ },
+ "hl_candles_5m_1123_xyz_SP500": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:18+00:00"
+ },
+ "hl_candles_5m_1123_xyz_XYZ100": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:19+00:00"
+ },
+ "hl_candles_5m_1123_xyz_NVDA": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:NVDA",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:20+00:00"
+ },
+ "hl_candles_5m_1118_1120_xyz_SILVER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "5m",
+    "startTime": 1794934800000,
+    "endTime": 1795143600000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:21+00:00"
+ },
+ "hl_candles_5m_1118_1120_xyz_GOLD": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "5m",
+    "startTime": 1794934800000,
+    "endTime": 1795143600000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:22+00:00"
+ },
+ "hl_candles_5m_1120_xyz_SP500": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795114800000,
+    "endTime": 1795210200000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:23+00:00"
+ },
+ "hl_candles_5m_1120_xyz_XYZ100": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795114800000,
+    "endTime": 1795210200000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:24+00:00"
+ },
+ "hl_candles_5m_1120_xyz_NVDA": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:NVDA",
+    "interval": "5m",
+    "startTime": 1795114800000,
+    "endTime": 1795210200000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:45:25+00:00"
+ },
+ "hl_candles_5m_1119pm_xyz_SP500": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795105800000,
+    "endTime": 1795108500000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:47:18+00:00"
+ },
+ "hl_candles_5m_1119pm_xyz_XYZ100": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795105800000,
+    "endTime": 1795108500000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:47:19+00:00"
+ },
+ "yahoo_1h_BZF27_NYM": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZF27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:47:20+00:00"
+ },
+ "yahoo_1h_BZG27_NYM": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZG27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:47:21+00:00"
+ },
+ "yahoo_1h_CLZ26_NYM": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/CLZ26.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:47:21+00:00"
+ },
+ "yahoo_1h_CLF27_NYM": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/CLF27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:47:22+00:00"
+ },
+ "hl_candles_1d_2026_xyz_GOLD": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "1d",
+    "startTime": 1767225600000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:47:51+00:00"
+ },
+ "hl_candles_1d_2026_xyz_SILVER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "1d",
+    "startTime": 1767225600000,
+    "endTime": 1795478400000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:47:53+00:00"
+ },
+ "nasdaq_SLV_2026": {
+  "url": "https://api.nasdaq.com/api/quote/SLV/historical?assetclass=etf&fromdate=2026-01-01&todate=2026-11-24&limit=300",
+  "retrieved_utc": "2026-11-24T06:48:36+00:00"
+ },
+ "nasdaq_GLD_2026": {
+  "url": "https://api.nasdaq.com/api/quote/GLD/historical?assetclass=etf&fromdate=2026-01-01&todate=2026-11-24&limit=300",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:47:55+00:00"
+ },
+ "nasdaq_SLV_1116": {
+  "url": "https://api.nasdaq.com/api/quote/SLV/historical?assetclass=etf&fromdate=2026-11-13&todate=2026-11-24&limit=20",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:47:55+00:00"
+ },
+ "kraken_XBTUSD_1d_720": {
+  "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1730419200",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:50:11+00:00"
+ },
+ "coinbase_BTCUSD_1d_2026_06_08": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2026-06-15T00:00:00Z&end=2026-08-15T00:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:50:11+00:00"
+ },
+ "yahoo_idx_IXIC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:11+00:00"
+ },
+ "yahoo_idx_GSPC": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:12+00:00"
+ },
+ "yahoo_idx_DJI": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EDJI?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:13+00:00"
+ },
+ "yahoo_idx_NDX": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5ENDX?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:14+00:00"
+ },
+ "yahoo_NVDA": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:14+00:00"
+ },
+ "yahoo_SI_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:15+00:00"
+ },
+ "yahoo_HG_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:16+00:00"
+ },
+ "yahoo_GC_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:16+00:00"
+ },
+ "yahoo_BTC-USD": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:17+00:00"
+ },
+ "yahoo_ETH-USD": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/ETH-USD?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:18+00:00"
+ },
+ "yahoo_ANT": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/ANT?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:18+00:00"
+ },
+ "yahoo_META": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/META?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:19+00:00"
+ },
+ "yahoo_TSLA": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/TSLA?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:20+00:00"
+ },
+ "yahoo_MSTR": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/MSTR?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:20+00:00"
+ },
+ "yahoo_CL_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/CL%3DF?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:21+00:00"
+ },
+ "yahoo_BZ_F": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:21+00:00"
+ },
+ "yahoo_HGZ26_CMX": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HGZ26.CMX?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:22+00:00"
+ },
+ "yahoo_HGH27_CMX": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HGH27.CMX?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:23+00:00"
+ },
+ "yahoo_HGF27_CMX": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HGF27.CMX?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:23+00:00"
+ },
+ "yahoo_SIZ26_CMX": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SIZ26.CMX?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:24+00:00"
+ },
+ "yahoo_SIH27_CMX": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SIH27.CMX?period1=1794268800&period2=1795564800&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:25+00:00"
+ },
+ "yahoo_SI_F_2y": {
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?range=2y&interval=1d",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:25+00:00"
+ },
+ "binance_BTCUSDT_1d": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=1794268800000&limit=16",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:26+00:00"
+ },
+ "binance_ETHUSDT_1d": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1d&startTime=1794268800000&limit=16",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:27+00:00"
+ },
+ "binance_BTCUSDT_1h_1120_1124": {
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&startTime=1795132800000&limit=1000",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:28+00:00"
+ },
+ "coinbase_BTCUSD_1d": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2026-11-10T00:00:00Z&end=2026-11-25T00:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:28+00:00"
+ },
+ "coinbase_ETHUSD_1d": {
+  "url": "https://api.exchange.coinbase.com/products/ETH-USD/candles?granularity=86400&start=2026-11-10T00:00:00Z&end=2026-11-25T00:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:29+00:00"
+ },
+ "coinbase_BTCUSD_1h_1120": {
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600&start=2026-11-20T00:00:00Z&end=2026-11-21T12:00:00Z",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:30+00:00"
+ },
+ "kraken_XBTUSD_1d": {
+  "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1794268800",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:30+00:00"
+ },
+ "kraken_XBTCAD_1d": {
+  "url": "https://api.kraken.com/0/public/OHLC?pair=XBTCAD&interval=1440&since=1794268800",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:31+00:00"
+ },
+ "kraken_ETHUSD_1d": {
+  "url": "https://api.kraken.com/0/public/OHLC?pair=ETHUSD&interval=1440&since=1794268800",
+  "post_body": null,
+  "retrieved_utc": "2026-11-24T06:37:32+00:00"
+ },
+ "hl_candles_1d_xyz_COPPER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:COPPER",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:34+00:00"
+ },
+ "hl_candles_1d_xyz_SILVER": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:35+00:00"
+ },
+ "hl_candles_1d_xyz_GOLD": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:35+00:00"
+ },
+ "hl_candles_1d_xyz_SP500": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:36+00:00"
+ },
+ "hl_candles_1d_xyz_NVDA": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:NVDA",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:37+00:00"
+ },
+ "hl_candles_1d_xyz_XYZ100": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:37+00:00"
+ },
+ "hl_candles_1d_xyz_CL": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:CL",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:38+00:00"
+ },
+ "hl_candles_1d_xyz_BRENTOIL": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:BRENTOIL",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:39+00:00"
+ },
+ "hl_candles_1d_xyz_META": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:META",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:40+00:00"
+ },
+ "hl_candles_1d_xyz_TSLA": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:TSLA",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:40+00:00"
+ },
+ "hl_candles_1d_xyz_MSTR": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:MSTR",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:41+00:00"
+ },
+ "hl_candles_1d_BTC": {
+  "url": "https://api.hyperliquid.xyz/info",
+  "post_body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "BTC",
+    "interval": "1d",
+    "startTime": 1794268800000,
+    "endTime": 1795564800000
+   }
+  },
+  "retrieved_utc": "2026-11-24T06:37:42+00:00"
+ },
+ "fred_SP500": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-11-10&coed=2026-11-25",
+  "retrieved_utc": "2026-11-24T06:37:57+00:00"
+ },
+ "fred_NASDAQCOM": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM&cosd=2026-11-10&coed=2026-11-25",
+  "retrieved_utc": "2026-11-24T06:37:58+00:00"
+ },
+ "fred_DJIA": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DJIA&cosd=2026-11-10&coed=2026-11-25",
+  "retrieved_utc": "2026-11-24T06:37:59+00:00"
+ },
+ "fred_NASDAQ100": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQ100&cosd=2026-11-10&coed=2026-11-25",
+  "retrieved_utc": "2026-11-24T06:37:59+00:00"
+ },
+ "fred_NASDAQCOM_2025": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM&cosd=2025-11-10&coed=2025-11-20",
+  "retrieved_utc": "2026-11-24T06:43:24+00:00"
+ },
+ "fred_SP500_1y": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2025-11-01&coed=2026-11-25",
+  "retrieved_utc": "2026-11-24T06:43:24+00:00"
+ },
+ "fred_DEXCAUS": {
+  "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCAUS&cosd=2026-11-16&coed=2026-11-24",
+  "retrieved_utc": "2026-11-24T06:44:30+00:00"
+ },
+ "nasdaq_COMP": {
+  "url": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:38:28+00:00"
+ },
+ "nasdaq_NVDA": {
+  "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:38:31+00:00"
+ },
+ "nasdaq_ANT": {
+  "url": "https://api.nasdaq.com/api/quote/ANT/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:38:35+00:00"
+ },
+ "nasdaq_NDX": {
+  "url": "https://api.nasdaq.com/api/quote/NDX/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:38:53+00:00"
+ },
+ "nasdaq_META": {
+  "url": "https://api.nasdaq.com/api/quote/META/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:39:03+00:00"
+ },
+ "nasdaq_TSLA": {
+  "url": "https://api.nasdaq.com/api/quote/TSLA/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:39:06+00:00"
+ },
+ "nasdaq_MSTR": {
+  "url": "https://api.nasdaq.com/api/quote/MSTR/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+  "retrieved_utc": "2026-11-24T06:39:09+00:00"
+ },
+ "googlefinance_excerpts": {
+  "url": "https://www.google.com/finance/quote/{.INX:INDEXSP,.IXIC:INDEXNASDAQ,.DJI:INDEXDJX,ANT:NASDAQ} (page text excerpts)",
+  "retrieved_utc": "2026-11-24T06:40:13+00:00"
+ },
+ "tradexyz_commodities": {
+  "url": "https://docs.trade.xyz/asset-directory/commodities.md",
+  "retrieved_utc": "2026-11-24T06:36:00+00:00"
+ },
+ "tradexyz_roll_schedules": {
+  "url": "https://docs.trade.xyz/perpetuals/specifications-and-schedules/roll-schedules.md",
+  "retrieved_utc": "2026-11-24T06:36:00+00:00"
+ }
+}

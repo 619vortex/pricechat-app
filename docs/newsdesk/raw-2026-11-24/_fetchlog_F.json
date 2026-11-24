@@ -1,0 +1,58 @@
+[
+ {
+  "name": "hl_candles_1d_2026_xyz_GOLD",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "1d",
+    "startTime": 1767225600000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:51+00:00",
+  "bytes": 45991
+ },
+ {
+  "name": "hl_candles_1d_2026_xyz_SILVER",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "1d",
+    "startTime": 1767225600000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:53+00:00",
+  "bytes": 48048
+ },
+ {
+  "name": "nasdaq_SLV_2026",
+  "url": "https://api.nasdaq.com/api/quote/SLV/historical?assetclass=etf&fromdate=2026-01-20&todate=2026-02-05&limit=20",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:54+00:00",
+  "bytes": 179
+ },
+ {
+  "name": "nasdaq_GLD_2026",
+  "url": "https://api.nasdaq.com/api/quote/GLD/historical?assetclass=etf&fromdate=2026-01-01&todate=2026-11-24&limit=300",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:55+00:00",
+  "bytes": 24557
+ },
+ {
+  "name": "nasdaq_SLV_1116",
+  "url": "https://api.nasdaq.com/api/quote/SLV/historical?assetclass=etf&fromdate=2026-11-13&todate=2026-11-24&limit=20",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:55+00:00",
+  "bytes": 1000
+ }
+]

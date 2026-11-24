@@ -1,0 +1,196 @@
+{
+ "retrieved_utc": "2026-11-24T06:31:26Z",
+ "url": "https://dapi.binance.com/dapi/v1/exchangeInfo",
+ "symbols": [
+  {
+   "symbol": "BTCUSD_PERP",
+   "pair": "BTCUSD",
+   "contractType": "PERPETUAL",
+   "deliveryDate": 4133404800000,
+   "onboardDate": 1597042800000,
+   "contractStatus": "TRADING",
+   "maintMarginPercent": "2.5000",
+   "requiredMarginPercent": "5.0000",
+   "baseAsset": "BTC",
+   "quoteAsset": "USD",
+   "marginAsset": "BTC",
+   "pricePrecision": 1,
+   "quantityPrecision": 0,
+   "baseAssetPrecision": 8,
+   "quotePrecision": 8,
+   "underlyingType": "COIN",
+   "underlyingSubType": [
+    "PoW"
+   ],
+   "triggerProtect": "0.0500",
+   "liquidationFee": "0.015000",
+   "marketTakeBound": "0.05",
+   "maxMoveOrderLimit": 10000,
+   "contractSize": 100,
+   "equalQtyPrecision": 4,
+   "filters": [
+    {
+     "filterType": "PRICE_FILTER",
+     "minPrice": "1000",
+     "tickSize": "0.1",
+     "maxPrice": "4520958"
+    },
+    {
+     "filterType": "LOT_SIZE",
+     "maxQty": "1000000",
+     "minQty": "1",
+     "stepSize": "1"
+    },
+    {
+     "minQty": "1",
+     "maxQty": "60000",
+     "stepSize": "1",
+     "filterType": "MARKET_LOT_SIZE"
+    },
+    {
+     "filterType": "MAX_NUM_ORDERS",
+     "limit": 200
+    },
+    {
+     "filterType": "MAX_NUM_ALGO_ORDERS",
+     "limit": 20
+    },
+    {
+     "filterType": "PERCENT_PRICE",
+     "multiplierDecimal": "4",
+     "multiplierDown": "0.9500",
+     "multiplierUp": "1.0500"
+    }
+   ],
+   "orderTypes": [
+    "LIMIT",
+    "MARKET",
+    "STOP",
+    "STOP_MARKET",
+    "TAKE_PROFIT",
+    "TAKE_PROFIT_MARKET",
+    "TRAILING_STOP_MARKET"
+   ],
+   "timeInForce": [
+    "GTC",
+    "IOC",
+    "FOK",
+    "GTX"
+   ],
+   "permissionSets": [
+    "GRID"
+   ]
+  },
+  {
+   "symbol": "ETHUSD_PERP",
+   "pair": "ETHUSD",
+   "contractType": "PERPETUAL",
+   "deliveryDate": 4133404800000,
+   "onboardDate": 1597734000000,
+   "contractStatus": "TRADING",
+   "maintMarginPercent": "2.5000",
+   "requiredMarginPercent": "5.0000",
+   "baseAsset": "ETH",
+   "quoteAsset": "USD",
+   "marginAsset": "ETH",
+   "pricePrecision": 2,
+   "quantityPrecision": 0,
+   "baseAssetPrecision": 8,
+   "quotePrecision": 8,
+   "underlyingType": "COIN",
+   "underlyingSubType": [
+    "Layer-1"
+   ],
+   "triggerProtect": "0.0500",
+   "liquidationFee": "0.015000",
+   "marketTakeBound": "0.05",
+   "maxMoveOrderLimit": 10000,
+   "contractSize": 10,
+   "equalQtyPrecision": 4,
+   "filters": [
+    {
+     "tickSize": "0.01",
+     "maxPrice": "306159",
+     "filterType": "PRICE_FILTER",
+     "minPrice": "50"
+    },
+    {
+     "minQty": "1",
+     "maxQty": "1000000",
+     "stepSize": "1",
+     "filterType": "LOT_SIZE"
+    },
+    {
+     "minQty": "1",
+     "stepSize": "1",
+     "filterType": "MARKET_LOT_SIZE",
+     "maxQty": "500000"
+    },
+    {
+     "limit": 200,
+     "filterType": "MAX_NUM_ORDERS"
+    },
+    {
+     "limit": 20,
+     "filterType": "MAX_NUM_ALGO_ORDERS"
+    },
+    {
+     "multiplierUp": "1.0500",
+     "multiplierDown": "0.9500",
+     "filterType": "PERCENT_PRICE",
+     "multiplierDecimal": "4"
+    }
+   ],
+   "orderTypes": [
+    "LIMIT",
+    "MARKET",
+    "STOP",
+    "STOP_MARKET",
+    "TAKE_PROFIT",
+    "TAKE_PROFIT_MARKET",
+    "TRAILING_STOP_MARKET"
+   ],
+   "timeInForce": [
+    "GTC",
+    "IOC",
+    "FOK",
+    "GTX"
+   ],
+   "permissionSets": [
+    "GRID"
+   ]
+  }
+ ],
+ "contractSize_by_symbol": {
+  "BTCUSD_PERP": 100,
+  "AAVEUSD_PERP": 10,
+  "ADAUSD_PERP": 10,
+  "AVAXUSD_PERP": 10,
+  "BCHUSD_PERP": 10,
+  "BNBUSD_PERP": 10,
+  "DOGEUSD_PERP": 10,
+  "DOTUSD_PERP": 10,
+  "ETCUSD_PERP": 10,
+  "ETHUSD_PERP": 10,
+  "FILUSD_PERP": 10,
+  "LINKUSD_PERP": 10,
+  "LTCUSD_PERP": 10,
+  "NEARUSD_PERP": 10,
+  "SOLUSD_PERP": 10,
+  "SUIUSD_PERP": 10,
+  "TRXUSD_PERP": 10,
+  "UNIUSD_PERP": 10,
+  "XLMUSD_PERP": 10,
+  "XRPUSD_PERP": 10,
+  "BNBUSD_261225": 10,
+  "BTCUSD_261225": 100,
+  "ETHUSD_261225": 10,
+  "SOLUSD_261225": 10,
+  "XRPUSD_261225": 10,
+  "BTCUSD_270326": 100,
+  "ETHUSD_270326": 10,
+  "XRPUSD_270326": 10,
+  "BNBUSD_270326": 10,
+  "SOLUSD_270326": 10
+ }
+}
