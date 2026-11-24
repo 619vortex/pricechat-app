@@ -570,7 +570,15 @@ async def tick(db: Session, settings: Settings, client: Any, now: datetime | Non
             continue
         if (ev.facts or {}).get("text_ok"):  # the owner released it as words alone (Terminal), in whichever format composed it
             message["text_ok"] = True
-        if not has_picture(message):  # any format: no picture, no article preview, no owner's choice -> waiting in the Terminal
+        if not has_picture(message):  # owner, 2026-11-24: the branded Price Chat card before holding (app/newsdesk/newscard)
+            from app.newsdesk import newscard
+
+            png = newscard.fallback(db, ev, now)
+            if png:
+                message["card"] = png
+                message["choice"] = {**(message.get("choice") or {}), "picture": "branded card"}
+                ev.facts = {**(ev.facts or {}), "visual": {**((ev.facts or {}).get("visual") or {}), "telegram": "branded card"}}
+        if not has_picture(message):  # any format: no picture, no article preview, no card, no owner's choice -> waiting in the Terminal
             events.mark(ev, "telegram", "held", "no picture and no article preview")
             logger.info("tgnews: event %s held for review: no picture and no article preview", ev.id)
             db.commit()

@@ -137,6 +137,9 @@ async def test_a_world_monitor_event_breaks_on_telegram_and_x_at_once_as_text(cl
     ev = db.get(NdEvent, ev.id)
     assert ev.tg_status == "delivered" and ev.facts["visual"]["kind"] == "link_preview"  # owner, 2026-11-23: the article's own preview, never bare text
     x = live["x"]
+    desk_row = engine.settings_row(db)  # owner's switch off (2026-11-24: the branded card is the default fallback; off = the old hold)
+    desk_row.state = {**(desk_row.state or {}), "card_fallback": False}
+    db.commit()
     # owner, 2026-11-23: no licensed picture and no article link on X, so X waits for the owner; released as words alone, it goes
     assert await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=1)) == "held" and x.posts == []
     from app.terminal import feed

@@ -787,6 +787,14 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
                 if isinstance((post.facts or {}).get("viral"), dict):  # what the post actually carried, for what engagement learns
                     post.facts = {**post.facts, "viral": {**post.facts["viral"], "format": str(meta.get("kind") or "")}}
                 if not image and not (post.facts or {}).get("text_ok") and "https://" not in post.text:
+                    # owner, 2026-11-24: no licensed picture and no link card: the branded Price Chat card (app/newsdesk/newscard)
+                    from app.newsdesk import newscard
+
+                    image = newscard.fallback(db, ev, now) or image
+                    if image:
+                        meta = {**(meta or {}), "kind": "branded card"}
+                        ev.facts = {**(ev.facts or {}), "visual": meta}
+                if not image and not (post.facts or {}).get("text_ok") and "https://" not in post.text:
                     # owner, 2026-11-23: never a text-only post on its own. A post that carries its article's link shows X's own card of
                     # that article (the owner's X-links switch decides that); without a link and without a licensed picture it waits for
                     # the owner in the Terminal
