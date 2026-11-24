@@ -8,7 +8,7 @@ import { GpuRender } from "./GpuRender";
 import { NetworkSwitches, PostStyleSwitch } from "./NetworkSwitches";
 import { ViralEngine } from "./ViralEngine";
 import { WorldMonitor } from "./WorldMonitor";
-import { Corrections, MarketPause, type HeldFigure } from "./MarketSafety";
+import { Corrections, MarketPause, type ClassPause, type HeldFigure } from "./MarketSafety";
 
 /** Admin › X › News Desk: Price Chat's automatic news account. The server decides everything; this page shows it and holds the switches. */
 
@@ -18,7 +18,7 @@ export type DeskPost = { id: number; kind: string; category: string; priority: s
   error: string | null; url: string | null; metrics: Record<string, number | string>; created_at: string | null; published_at: string | null; expires_at: string | null; facts: Record<string, unknown> };
 type Feed = { name: string; url: string; tier: number; category: string | null };
 type Watch = { symbol: string; name: string; group: string; category: string };
-export type DeskSettings = { market_pause?: boolean; market_pause_reason?: string | null; liq_pause?: boolean; liq_pause_reason?: string | null; held_figures?: HeldFigure[]; automation: boolean; mode: "dry_run" | "live"; kill_switch: boolean; paused_until: string | null; pause_reason: string | null; target_per_day: number; max_breaking_per_day: number;
+export type DeskSettings = { market_pause?: boolean; market_pause_reason?: string | null; liq_pause?: boolean; liq_pause_reason?: string | null; class_pause?: ClassPause; held_figures?: HeldFigure[]; automation: boolean; mode: "dry_run" | "live"; kill_switch: boolean; paused_until: string | null; pause_reason: string | null; target_per_day: number; max_breaking_per_day: number;
   breaking_gap_minutes: number; sensitivity: string; categories: Record<string, boolean>; feeds: Feed[]; watchlist: Watch[] };
 export type Desk = { settings: DeskSettings; blocked: string | null; last_run: (Record<string, unknown> & { at?: string }) | null; feed_problems: Record<string, string>;
   x: { configured: boolean; can_write: boolean; status: string; account: string | null; blocked_until: string | null }; writer: "model" | "headlines";
@@ -116,7 +116,7 @@ export function NewsDesk() {
       {error ? <ApiErrorBanner error={error} /> : null}
       <PostStyleSwitch />
       <MarketPause paused={s.market_pause ?? true} reason={s.market_pause_reason ?? null} held={s.held_figures ?? []} busy={busy}
-                   liqPaused={s.liq_pause ?? false} liqReason={s.liq_pause_reason ?? null}
+                   liqPaused={s.liq_pause ?? false} liqReason={s.liq_pause_reason ?? null} classPause={s.class_pause ?? {}}
                    save={(change) => act(() => request("/x/newsdesk/settings", body("PUT", change)))} />
       <Card title="News Desk">
         <p className="muted">Reads news and prices around the clock, verifies them, and posts to X without you. Runs on the server, so this page can be closed.</p>

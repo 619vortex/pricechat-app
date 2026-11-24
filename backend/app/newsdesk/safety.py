@@ -117,12 +117,18 @@ def liquidation_problem(coin: str, total: float, hourly_history: list[float], ma
     return ""
 
 
-def recent(state: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
-    """The anomalies inside TRIP_WINDOW, after the owner's last resume."""
+def reset_key(scope: str) -> str:
+    """Where the owner's resume of one scope ("liq" or an asset class) is kept (2026-11-24 review: resuming liquidation posts used the one
+    shared reset, which also wiped a price problem half-way to its own stop)."""
+    return f"breaker_reset_{scope}"
+
+
+def recent(state: dict[str, Any], now: datetime, scope: str = "") -> list[dict[str, Any]]:
+    """The anomalies inside TRIP_WINDOW, after the owner's last resume: the full resume (breaker_reset_at) and, for a scope, that scope's own."""
     since = now - TRIP_WINDOW
-    reset = state.get("breaker_reset_at")
-    if reset:
-        since = max(since, _aware(datetime.fromisoformat(str(reset)), now))
+    for reset in (state.get("breaker_reset_at"), state.get(reset_key(scope)) if scope else None):
+        if reset:
+            since = max(since, _aware(datetime.fromisoformat(str(reset)), now))
     return [a for a in state.get("anomalies") or [] if _aware(datetime.fromisoformat(str(a["at"])), now) >= since]
 
 
@@ -159,7 +165,7 @@ async def settle(db: Any, now: datetime, *, settings: Any = None) -> int:
         window_min = int(TRIP_WINDOW.total_seconds() // 60)
         recent_rows = recent(state, now)
         price_rows = [a for a in recent_rows if a.get("kind") not in LIQUIDATION_KINDS]
-        liq_rows = [a for a in recent_rows if a.get("kind") in LIQUIDATION_KINDS]
+        liq_rows = [a for a in recent(state, now, "liq") if a.get("kind") in LIQUIDATION_KINDS]
         if distinct(liq_rows) >= TRIP_COUNT and not state.get("liq_pause"):
             # scoped: liquidation data pauses liquidation posts only, never the price news checked against two markets
             liq_tripped = f"{distinct(liq_rows)} implausible liquidation figures within {window_min} minutes"
@@ -171,7 +177,7 @@ async def settle(db: Any, now: datetime, *, settings: Any = None) -> int:
         paused_classes = dict(state.get("class_pause") or {})
         broad = distinct(price_rows) >= BROAD_TRIP_COUNT  # many problems across classes at once: the price feed itself is suspect
         for cls in PRICE_CLASSES:  # 2026-11-24: a price-data problem pauses its own asset class only (copper never silences the Nasdaq)
-            rows_c = [a for a in price_rows if price_class(str(a.get("subject") or "")) == cls]
+            rows_c = [a for a in recent(state, now, cls) if a.get("kind") not in LIQUIDATION_KINDS and price_class(str(a.get("subject") or "")) == cls]
             if not rows_c or cls in paused_classes or (distinct(rows_c) < TRIP_COUNT and not broad):
                 continue
             if market_on:

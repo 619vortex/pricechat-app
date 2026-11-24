@@ -9,7 +9,7 @@ from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
 from app.db.base import utcnow
 from app.models.newsdesk import NdPost
-from app.newsdesk import engine, sources
+from app.newsdesk import engine, safety, sources
 from app.newsdesk import telegram as telegram_lane
 from app.services.agent_service import get_agent_config
 from app.api.routes.newsdesk_editorial import router as editorial_router  # noqa: E402,I001
@@ -110,8 +110,8 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
     if "liq_pause" in data:
         on = bool(data.pop("liq_pause"))
         state = {**(s.state or {}), "liq_pause": on}
-        if not on:  # resumed: liquidation anomalies count afresh from now
-            state["breaker_reset_at"] = utcnow().isoformat()
+        if not on:  # resumed: liquidation anomalies count afresh from now (their own count only: a price problem keeps its count)
+            state[safety.reset_key("liq")] = utcnow().isoformat()
             state.pop("liq_pause_reason", None)
             state.pop("liq_pause_at", None)
         s.state = state
@@ -120,7 +120,8 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
         state = dict(s.state or {})
         classes = dict(state.get("class_pause") or {})
         state["class_pause"] = {} if "all" in clear else {k: v for k, v in classes.items() if k not in clear}
-        state["breaker_reset_at"] = utcnow().isoformat()
+        for cls in (safety.PRICE_CLASSES if "all" in clear else clear):  # each resumed class counts afresh; the others keep their count
+            state[safety.reset_key(cls)] = utcnow().isoformat()
         s.state = state
     if "categories" in data:
         data["categories"] = {c: bool(data["categories"].get(c, False)) for c in sources.CATEGORIES}

@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Corrections, MarketPause } from "./MarketSafety";
 
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -48,6 +48,29 @@ describe("Liquidation pause", () => {
     fireEvent.click(screen.getByText("Resume liquidation posts"));
     expect(save).toHaveBeenCalledWith({ liq_pause: false });
     expect(confirm).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Scoped pauses (2026-11-24 review)", () => {
+  beforeEach(cleanup);  // earlier tests in this file leave their renders mounted
+  afterEach(cleanup);
+  it("shows each paused asset class and resumes only that class after a confirmation", async () => {
+    const save = vi.fn(async () => undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const view = render(<MarketPause paused={false} reason={null} held={[]} busy={false} save={save} liqPaused
+                        classPause={{ crypto: { at: new Date().toISOString(), reason: "automatic: 3 implausible or contradicted crypto figures within 60 minutes" } }} />);
+    expect(view.getByText("Crypto market posts paused")).toBeTruthy();
+    expect(view.getByText(/3 implausible or contradicted crypto figures/)).toBeTruthy();
+    fireEvent.click(view.getByText("Resume crypto posts"));
+    expect(save).toHaveBeenCalledWith({ class_pause_clear: ["crypto"] });
+  });
+
+  it("can pause liquidation posts again once they are on, without touching price posts", async () => {
+    const save = vi.fn(async () => undefined);
+    const view = render(<MarketPause paused={false} reason={null} held={[]} busy={false} save={save} />);
+    expect(view.getByText("Liquidation posts on")).toBeTruthy();
+    fireEvent.click(view.getByText("Pause liquidation posts"));
+    expect(save).toHaveBeenCalledWith({ liq_pause: true });
   });
 });
 
