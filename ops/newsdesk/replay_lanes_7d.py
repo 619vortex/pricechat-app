@@ -97,6 +97,8 @@ class Story:
     best_title: str = ""
     published: dict[str, Any] | None = None
     fate: str = ""
+    best_seen: datetime | None = None
+    arrivals: list[tuple[datetime, str, frozenset[str]]] = field(default_factory=list)  # (seen, title, outlets) per member: no look-ahead
 
 
 def load(path: Path, logs: Path | None, start: datetime, end: datetime) -> tuple[list[Story], list[dict[str, Any]]]:
@@ -155,6 +157,7 @@ def load(path: Path, logs: Path | None, start: datetime, end: datetime) -> tuple
     for r in raw:
         if r["kind"] not in ("news", "update"):
             st = Story(len(stories), r["title"], r["seen"], set(r["outlets"]), [r["ref"]], [r["title"]], r["kind"], r["facts"], r["official"])
+            st.arrivals.append((r["seen"], r["title"], frozenset(r["outlets"])))
             st.fate = r["why"]
             stories.append(st)
             continue
@@ -176,6 +179,7 @@ def load(path: Path, logs: Path | None, start: datetime, end: datetime) -> tuple
         home.members.append(r["ref"])
         home.titles.append(r["title"])
         home.outlets |= r["outlets"]
+        home.arrivals.append((r["seen"], r["title"], frozenset(r["outlets"])))
         home.official = home.official or r["official"]
     # production posts onto stories
     for p in prod:
@@ -202,11 +206,20 @@ def _judge(st: Story, now: datetime) -> Any:
     if st.kind in ("market", "data", "recap"):
         return importance.judge(st.title, "", kind=st.kind, facts=st.facts, age_min=age)
     best = None
-    for title in st.titles[:8]:
-        d = importance.judge(title, "", outlets=len(st.outlets), official=st.official, age_min=age)
+    # only what had arrived by `now`: a headline or outlet first seen later never decides an earlier moment
+    arrived = [a for a in st.arrivals if a[0] <= now] or st.arrivals[:1]
+    outlets = len(set().union(*(a[2] for a in arrived))) if arrived else len(st.outlets)
+    titles: list[tuple[str, datetime]] = []
+    for seen_t, title, _o in arrived:
+        if title not in [t for t, _ in titles]:
+            titles.append((title, seen_t))
+    for title, seen_t in titles[:8]:
+        # production judges each event by its own first report (events._age): a headline's age runs from its own arrival
+        d = importance.judge(title, "", outlets=outlets, official=st.official, age_min=(now - seen_t).total_seconds() / 60)
         if best is None or (d.rank, d.score) > (best.rank, best.score):
             best = d
             st.best_title = title
+            st.best_seen = seen_t
     return best
 
 
@@ -221,7 +234,9 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
 
     def assets(s: Story) -> set[str]:
         f = s.facts or {}
-        return {str(a) for a in (f.get("assets") or [])} | ({str(f["symbol"])} if f.get("symbol") else set())
+        from app.newsdesk import editorial  # production's canonical names (events.canon_assets): "^GSPC" and "SPX" are one asset
+        raw = {str(a) for a in (f.get("assets") or [])} | ({str(f["symbol"])} if f.get("symbol") else set())
+        return {a.upper() if a.upper().startswith("LIQ:") else editorial.canon(a) for a in raw}
 
     def repeat(st: Story, at: datetime) -> str:
         ev = newsworthy.event_of(st.best_title or st.title, "")
@@ -242,7 +257,8 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
         return ""
 
     def publish(st: Story, d: Any, at: datetime, how: str) -> None:
-        st.published = {"at": at, "how": how, "tier": d.tier, "score": round(d.score, 1), "reason": d.reason, "title": st.best_title or st.title}
+        st.published = {"at": at, "how": how, "tier": d.tier, "score": round(d.score, 1), "reason": d.reason, "title": st.best_title or st.title,
+                        "decisive_seen": st.best_seen or st.seen}
         published.append({"story": st, **st.published})
         out_events.append((at, newsworthy.event_of(st.best_title or st.title, ""), st))
         done.add(st.sid)
@@ -264,7 +280,7 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
             if d is None or d.tier != importance.MAJOR:
                 continue
             verified = d.verified or st.kind in ("market", "data")
-            if not verified or (now - st.seen).total_seconds() / 60 > BREAKING_AGE:
+            if not verified or (now - (st.best_seen or st.seen)).total_seconds() / 60 > BREAKING_AGE:
                 continue
             if last is not None and now - last < MIN_GAP:
                 break
@@ -330,7 +346,9 @@ def report(stories: list[Story], prod: list[dict[str, Any]], published: list[dic
         st = p["story"]
         first_prod = min((x["at"] for x in st.prod), default=None)
         rows.append({"story": st.sid, "title": p.get("title") or st.title, "seen": st.seen.isoformat(), "published": p["at"].isoformat(), "how": p["how"],
-                     "tier": p["tier"], "score": p["score"], "delay_min": mins(p["at"], st.seen), "outlets": len(st.outlets),
+                     "tier": p["tier"], "score": p["score"], "delay_min": mins(p["at"], st.seen),
+                     # from the headline that decided it (a development reported hours after the story began is news from its own arrival)
+                     "delay_from_decisive_min": mins(p["at"], p["decisive_seen"]), "outlets": len(st.outlets),
                      "lanes": sorted({m.split(":")[0] for m in st.members}),
                      "production": [f"{x['ref']} at {x['at']:%m-%d %H:%M}" for x in st.prod],
                      "production_delay_min": mins(first_prod, st.seen) if first_prod else None, "reason": p["reason"]})
@@ -359,7 +377,7 @@ def report(stories: list[Story], prod: list[dict[str, Any]], published: list[dic
                 break
         seen_prod.append(p)
     delays = [r["delay_min"] for r in rows]
-    breaking = [r["delay_min"] for r in rows if r["how"] == "breaking"]
+    breaking = [r["delay_from_decisive_min"] for r in rows if r["how"] == "breaking"]
     pd = [mins(min(x["at"] for x in s.prod), s.seen) for s in stories if s.prod]
     slots = dict(sorted((getattr(simulate, "slots", {}) or {}).items()))
     return {"window": [start.isoformat(), end.isoformat()], "stories": len(stories),

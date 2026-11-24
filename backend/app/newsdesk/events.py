@@ -1155,8 +1155,8 @@ def _release(db: Session, ev: NdEvent, d: "importance.Decision", now: datetime, 
 def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], waiting: list[NdEvent]) -> NdEvent | None:
     """Schedule "slots", with importance first (owner, 2026-11-23):
     1. a MAJOR market move on a priority asset goes now (its own lane, _release_market_major);
-    2. a MAJOR verified story goes now, outside the slot plan, the diversity rule and the breaking lane's daily caps; only the minimum gap
-       between posts and the MAJOR_PER_DAY flood guard hold it. A SIGNIFICANT verified story scoring breaking_bar or more may break too,
+    2. a MAJOR verified story goes now, outside the slot plan, the diversity rule and any daily count; only the minimum gap between
+       posts and the burst guard (MAJOR_BURST in BURST_WINDOW) hold it. A SIGNIFICANT verified story scoring breaking_bar or more may break too,
        within the lane's caps (breaking_per_day, breaking_gap). Close to an unfilled slot either goes AS that slot's post;
     3. an open slot takes the best SIGNIFICANT story, else the best NOTABLE one; diversity only ranks, except that two posts in a row from
        one desk hold a NOTABLE story; a story failing the factual checks is rejected and the next one is tried;

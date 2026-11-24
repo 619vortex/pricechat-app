@@ -126,3 +126,45 @@ CLASSIC = [  # the judgement must also hold for the kinds of event the desk exis
 def test_classic_events_get_an_editors_tier(title: str, want: set[str]) -> None:
     d = imp.judge(title, outlets=3)
     assert d.tier in want, d.reason
+
+
+# the final 7-day replay of both lanes (11-17 -> 11-24, production backup of 11-24 10:46 UTC)
+FINAL_REPLAY = [
+    # an adjective is not an act: "convicted" names the person; the sum alone is a slot story
+    ("Convicted FTX swindler Bankman-Fried misses out on $37B Anthropic IPO windfall", 4, {SIG, NOT}),
+    ("Bankman-Fried convicted of fraud on all seven counts", 4, {SIG, MAJOR}),
+    # a chart pattern is not a death
+    ("Bitcoin Enters Death Cross as Anthropic IPO Fails to Lift Wall Street", 4, {NOISE, NOT}),
+    # a hack's follow-up (funds moving, laundered, recovered) is not a new hack
+    ("Binance Hack Wallet Moves Another $142 Million in ETH", 9, {SIG}),
+    ("Binance hack laundering ramps up as $149 million in bitcoin mixed through coinjoins: Elliptic", 3, {SIG}),
+    ("US moves to recover over $1B in crypto stolen by North Korean hackers in Binance heist", 8, {SIG}),
+    # a % over four weeks is not a move that just happened
+    ("Jito's JTO Falls 46% in 28 Days, Lagging BTC and ETH", 8, {NOT, NOISE}),
+    # the % belongs to its own clause's subject
+    ("Bitcoin rebounds 17% from $55K lows as Nvidia rally sparks $500M crypto liquidations", 21, {MAJOR}),
+    # a person's fortune is the move's echo
+    ("Jensen Huang’s Wealth Rises $36 Billion as Nvidia Surge Burns Short Sellers for $12 Billion", 3, {SIG}),
+]
+
+
+@pytest.mark.parametrize("title,outlets,want", FINAL_REPLAY)
+def test_final_replay_headlines(title: str, outlets: int, want: set[str]) -> None:
+    d = imp.judge(title, "", outlets=outlets)
+    assert d.tier in want, (title, d.reason)
+
+
+def test_a_crypto_move_is_the_crypto_s_own_percent() -> None:
+    assert imp._pct_in_clause_of("Bitcoin rebounds 17% as Nvidia rallies", imp.CRYPTO_MAJOR)
+    assert not imp._pct_in_clause_of("Bitcoin crashes to $59,000 as Anthropic falls 25%", imp.CRYPTO_MAJOR)
+    d = imp.judge("Bitcoin crashes to $59,000 as Solana falls 25%", "", outlets=4)
+    assert "bitcoin/ether move" not in d.reason
+
+
+def test_a_mega_cap_s_day_move_of_ten_percent_is_major() -> None:
+    # Nvidia -14.0% on 2026-11-20 (verified: Nasdaq official close 125.53 vs 145.98), its biggest drop since January 2025
+    d = imp.judge("NVIDIA TUMBLES 14.0% IN 24 HOURS TO $125.53", "", kind="market", facts={"assets": ["NVDA"], "change_pct": -14.0})
+    assert d.tier == MAJOR, d.reason
+    # a stock outside the largest companies keeps the 20% line
+    d = imp.judge("ACME TUMBLES 14.0% IN 24 HOURS TO $12.53", "", kind="market", facts={"assets": ["ACME"], "change_pct": -14.0})
+    assert d.tier != MAJOR, d.reason

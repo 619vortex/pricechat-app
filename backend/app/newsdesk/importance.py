@@ -86,7 +86,7 @@ HARD = [
     (20.0, "a central-bank decision", _rx(r"\b(fed|federal reserve|ecb|bank of england|boe|bank of japan|boj|pboc|snb|rba)\b.{0,40}"
                                           r"\b(cuts?|hikes?|raises?|lowers?|holds?|keeps?|leaves?|pauses?)\b.{0,20}\brates?\b")),
     (18.0, "a takeover or deal", _rx(r"\b(to (?:buy|acquire)|acquires?|acquired|agrees? to (?:buy|acquire|merge)|takeover|merger|buyout)\b")),
-    (18.0, "an enforcement action", _rx(r"\b(arrest(?:ed|s)?|charged|indicted|convicted|sentenced|sues|sued|fines?|fined|raid(?:s|ed)|"
+    (18.0, "an enforcement action", _rx(r"\b(arrest(?:ed|s)?|charged|indicted|convicted(?!\s+(?:[\w.'’-]+\s+){0,2}(?:swindler|fraudster|felon|killer|murderer|criminal|founder|boss|executive|trader|spy|terrorist))|sentenced|sues|sued|fines?|fined|raid(?:s|ed)|"
                                         r"sanctions? on|imposes? sanctions|sanctioned|bans?|banned|blocks?|blocked|curbs?|export controls?|"
                                         # 2026-11-24: government and court acts the replay missed ("U.S. adds Megaspeed to trade blacklist",
                                         # "Circle, World Liberty ordered to keep tokens frozen", "Ten under formal investigation")
@@ -242,9 +242,9 @@ def _move_points(head: str) -> tuple[float, str]:
         pct = max(pct, int(m.group(1).replace(",", "")) / 450.0)  # a ~45,000 Dow: 450 points is about 1%
     if INDEX.search(head) and (not pct or _index_pct(head)):
         lines, what = ((4.0, 30.0), (2.5, 22.0), (1.5, 16.0), (0.8, 10.0)), "a stock-market move"
-    elif CRYPTO_MAJOR.search(head):
+    elif CRYPTO_MAJOR.search(head) and (not pct or _pct_in_clause_of(head, CRYPTO_MAJOR)):
         lines, what = ((10.0, 28.0), (6.0, 22.0), (4.0, 16.0), (2.5, 8.0)), "a bitcoin/ether move"
-    elif METAL_OIL.search(head):
+    elif METAL_OIL.search(head) and (not pct or _pct_in_clause_of(head, METAL_OIL)):
         lines, what = ((6.0, 28.0), (4.0, 22.0), (2.5, 14.0), (1.5, 8.0)), "a commodity move"
     elif MEGA.search(head) and _company_moved(head):
         # 3% is a routine day for a mega-cap (owner, 2026-11-18: "Nvidia NVDA stock up 3% as earnings beat" is not a post)
@@ -343,6 +343,13 @@ CONTEXT_SHARE = 0.5
 # killing something that isn't a person ("Market rout kills 50 basis points of December Fed rate hike bets", 2026-11-23)
 RESULTS = re.compile(r"\b(beats?|beat|misses?|missed|tops?|topped) (?:analysts['’]? |wall street )?(?:estimates|expectations|forecasts)\b|"
                      r"\b(?:quarterly|q[1-4]) (?:results|earnings|revenue)\b", re.I)
+# the stolen funds of an earlier hack moving, laundered, traced or recovered: a follow-up, never a new hack
+HACK_FOLLOWUP = re.compile(r"\b(?:hack(?:er|ers)?|heist|exploit(?:er)?|theft|stolen)\b.{0,60}\b(?:wallets?|moves?|moved|launder\w*|mix(?:ed|es|ing)|"
+                           r"push(?:es|ed)?|routes?|routed|funnel\w*|bridg\w*|swap(?:s|ped)?|transfers?|transferred)\b|"
+                           r"\b(?:launder\w*|recover\w*|mixed through|coinjoins?|traced?|seized? .{0,30}stolen)\b", re.I)
+# a person's fortune moving with a market (2026-11-24 replay: "Jensen Huang's Wealth Rises $36 Billion" broke as major after the Nvidia move)
+PERSONAL_WEALTH = re.compile(r"\b(?:wealth|net worth|fortune|richest|billionaires?)\b", re.I)
+DEATH_IDIOM = re.compile(r"\b(death cross(?:es)?|dead[- ]cat bounces?|dead money|deadlock\w*)\b", re.I)
 KILL_NOT_PEOPLE = re.compile(r"\bkill\w*\s+(?:off\s+)?(?:\d[\d,.]*\s*(?:basis points?|bps|bp|%|percent)|(?:the\s+|a\s+|any\s+|all\s+|its\s+)?"
                              r"(?:bets?|hopes?|deals?|chances?|plans?|rally|rallies|momentum|odds|bills?|ideas?|talks|jobs|projects?|features?|products?))\b", re.I)
 BACKGROUND = re.compile(r"(?:,\s*|\s)(?:(?:hours|days|weeks|a day|a week|minutes)\s+)?(?:after|following|in the wake of|amid)\s", re.I)
@@ -444,7 +451,7 @@ def _facts(text: str, summary: str, head: str) -> Facts:
     f.people = 30.0 if deaths >= 50 else 24.0 if deaths >= 10 else 18.0 if deaths >= 1 else 0.0
     if deaths:
         f.found.append(f"{deaths} killed")
-    elif re.search(r"\b(kill\w*|dead|deaths?|death toll)\b", text, re.I) and not THREAT.search(text) and not KILL_NOT_PEOPLE.search(text):
+    elif re.search(r"\b(kill\w*|dead|deaths?|death toll)\b", DEATH_IDIOM.sub(" ", text), re.I) and not THREAT.search(text) and not KILL_NOT_PEOPLE.search(text):
         f.people = 16.0
         f.found.append("people killed")
     if INJURED.search(text) and not f.people:
@@ -499,6 +506,18 @@ def _index_pct(head: str) -> bool:
     own = re.search(rf"\b(?:{names})\b[^%]{{0,30}}?[-+−]?\d+(?:\.\d+)?\s?%", head, re.I)
     company_first = re.search(rf"^[^%]{{0,40}}?\b(?:{MOVE.pattern[3:-3]})\b\s+[-+−]?\d+(?:\.\d+)?\s?%[^%]{{0,60}}\b(?:{names})\b", head, re.I)
     return bool(own) and not (company_first and not re.match(rf"\s*(?:{names})\b", head, re.I))
+
+
+CLAUSE_BREAK = re.compile(r"\s+(?:as|after|while|amid|but|despite|following|when|with)\s+|[;,:]\s+|\s[-–—|]\s", re.I)
+
+
+def _pct_in_clause_of(head: str, subject: re.Pattern[str]) -> bool:
+    """Is the headline's first % in the same clause as the subject? ("Bitcoin rebounds 17% as Nvidia rallies": yes; "Bitcoin crashes to
+    $59,000 as Anthropic falls 25%": no, the 25% is Anthropic's, 2026-11-24 replay)"""
+    for clause in CLAUSE_BREAK.split(head):
+        if re.search(r"\d\s?%", clause):
+            return bool(subject.search(clause))
+    return True
 
 
 def _company_moved(head: str) -> bool:
@@ -633,6 +652,12 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
     if ORDER[tier] > ORDER[NOTABLE] and HUMAN_INTEREST.search(st.main or head) and not main.money and not main.move:
         tier = NOTABLE
         found.append("human interest")
+    if tier == MAJOR and PERSONAL_WEALTH.search(head):
+        tier = SIGNIFICANT  # "Jensen Huang's Wealth Rises $36 Billion as Nvidia Surge ...": a person's fortune is the move's echo, not breaking news
+        found.append("a person's fortune: not major")
+    if tier == MAJOR and hard_name == "a hack or theft" and HACK_FOLLOWUP.search(head):
+        tier = SIGNIFICANT  # "Binance Hack Wallet Moves Another $142 Million in ETH" broke as major three times in the 2026-11-24 replay
+        found.append("the follow-up of an earlier hack: not major")
     if tier == MAJOR and routine_war(head, main, WARS if wars is None else wars, st.main):
         tier = SIGNIFICANT  # strikes inside an established war (Russia-Ukraine) are near-daily: major only on escalation (new state, mass deaths, a chokepoint)
         found.append("within an ongoing war, no escalation: not major")
@@ -647,11 +672,13 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
 
 
 LONG_PERIOD = _rx(r"\bover the past (?:year|\d+ (?:days|weeks|months|years))\b|\byear-to-date\b|\bytd\b|\bthis year so far\b|"
-                  r"\b(?:in|over) (?:the last |the past )?(?:\d+|two|three|four|five|six|eight|twelve) (?:weeks|months|years)\b|\bvs\.? the \w+ over\b")
+                  r"\b(?:in|over) (?:the last |the past )?(?:\d+|two|three|four|five|six|eight|twelve) (?:weeks|months|years)\b|"
+                  r"\b(?:in|over) (?:the last |the past )?(?:[7-9]|\d{2,}) (?:trading )?days\b|\bvs\.? the \w+ over\b")
 # a week's move (2026-11-24: "The week's winners and losers: Strategy -30.3%" broke as major): a slot story at most
 WEEK_PERIOD = _rx(r"\b(?:for the week|this week|the week['’]s|weekly|on the week|in a week|week-to-date|(?:worst|best|biggest) week)\b")
 # a record of volumes, not of a price ("India's Oil Imports Hit Record High as Saudi Shipments Surge", 2026-11-24)
 VOLUME_NOT_PRICE = _rx(r"\b(imports?|exports?|output|production|demand|shipments?|inventor(?:y|ies)|stockpiles?|sales|purchases|holdings)\b")
+MEGA_TICKERS = {"NVDA", "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "TSLA", "AVGO", "TSM", "BRK-B", "JPM", "NFLX", "ORCL"}
 MARKET_CORE = {"SPX", "IXIC", "DJI", "NDX", "BTC", "ETH", "GOLD", "SILVER", "OIL", "US-STOCKS"}
 
 
@@ -678,6 +705,8 @@ def _judge_move(head: str, f: dict[str, Any], age_min: float | None) -> Decision
         lines = ((10.0, 34.0), (6.0, 22.0), (4.0, 16.0))
     elif assets & {"GOLD", "SILVER", "OIL"}:
         lines = ((6.0, 34.0), (4.0, 22.0), (2.5, 16.0))
+    elif assets & MEGA_TICKERS:
+        lines = ((10.0, 34.0), (6.0, 22.0), (4.0, 14.0))  # the largest companies: Nvidia -14% on 2026-11-20 is major news on its own
     elif assets:
         lines = ((20.0, 34.0), (10.0, 22.0), (6.0, 14.0))  # a single stock the desk watches (Nvidia +36% on 2026-11-23)
     else:
