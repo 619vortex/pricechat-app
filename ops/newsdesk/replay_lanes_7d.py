@@ -217,6 +217,7 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
     now = start
     done: set[int] = set()
     slot_done: set[datetime] = set()
+    slot_log: dict[str, str] = {}  # slot (UTC) -> what filled it, or why it stayed empty
 
     def assets(s: Story) -> set[str]:
         f = s.facts or {}
@@ -299,11 +300,18 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
                     continue
                 publish(st, d, now, f"slot {h:02d}:00 UTC")
                 slot_done.add(slot)
+                slot_log[slot.isoformat()] = f"{d.tier}: {(st.best_title or st.title)[:90]}"
                 break
             else:
                 if not ranked:
                     slot_done.add(slot)  # nothing worth posting: the slot stays empty
+                    slot_log[slot.isoformat()] = "EMPTY: no significant or notable story waiting"
+                elif now - slot >= SLOT_CATCH_UP - STEP:
+                    slot_done.add(slot)
+                    slot_log[slot.isoformat()] = "EMPTY: everything waiting was a repeat"
+
         now += STEP
+    simulate.slots = slot_log  # type: ignore[attr-defined]
     return published
 
 
@@ -353,7 +361,9 @@ def report(stories: list[Story], prod: list[dict[str, Any]], published: list[dic
     delays = [r["delay_min"] for r in rows]
     breaking = [r["delay_min"] for r in rows if r["how"] == "breaking"]
     pd = [mins(min(x["at"] for x in s.prod), s.seen) for s in stories if s.prod]
+    slots = dict(sorted((getattr(simulate, "slots", {}) or {}).items()))
     return {"window": [start.isoformat(), end.isoformat()], "stories": len(stories),
+            "slots": {"total": len(slots), "empty": sum(1 for v in slots.values() if v.startswith("EMPTY")), "detail": slots},
             "story_lanes": dict(Counter("both" if len({m.split(':')[0] for m in s.members}) > 1 else s.members[0].split(":")[0] for s in stories if s.members)),
             "days": {k: dict(v) for k, v in sorted(days.items())},
             "replay_published": len(published), "replay_by_tier": dict(Counter(p["tier"] for p in published)),
@@ -379,6 +389,11 @@ def main() -> None:
     stories, prod = load(a.export, a.logs, start, end)
     published = simulate(stories, start, end)
     r = report(stories, prod, published, start, end)
+    # production's own slot record (nd_settings.state.skipped_slots): the slots it left empty, with its reason
+    st = (json.loads(a.export.read_text(encoding="utf-8"))["tables"].get("nd_settings") or [{}])[0].get("state")
+    st = json.loads(st) if isinstance(st, str) else (st or {})
+    skipped = {k: v for k, v in (st.get("skipped_slots") or {}).items() if start.isoformat()[:13] <= k[:13] <= end.isoformat()[:13]}
+    r["production_skipped_slots"] = {"count": len(skipped), "detail": skipped}
     if a.json:
         a.json.write_text(json.dumps(r, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
