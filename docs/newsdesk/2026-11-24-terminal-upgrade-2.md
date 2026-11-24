@@ -64,3 +64,13 @@ Re-checked against the raw Binance candles kept in `docs/incidents/2026-11-21-te
 - Rollback:
   - Backend: `railway up --service api` from `D:/pc-wt/rollback-1772c9e/backend` (linked). bf26f789 is now REMOVED and can't be redeployed.
   - Frontend: `vercel promote pricechat-cgz2t89xr-price-chat.vercel.app`.
+
+## Correction G approved (owner, 2026-11-25)
+
+The owner approved G, a reply to silver X post 142 (252 characters). The owner publishes it by hand; Price Chat sends nothing.
+
+```
+Correction: this post measured silver's fall from the close two days earlier ($45.00). Against the previous day's close ($44.32), silver was down about 6% when we posted, not 6.7%. Silver closed the day down 7.4%, its biggest one-day fall since 15 May.
+```
+
+All corrections are now settled: A, B, C, E, F and G approved; D not needed (the original never reached X).
