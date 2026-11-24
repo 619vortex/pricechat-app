@@ -78,7 +78,9 @@ HARD = [
     # "Russian missiles crash in Poland": weapons landing in a state, not yet called an attack (2026-11-23, NATO sent AWACS after it)
     (20.0, "a military incident", _rx(r"\b(missiles?|drones?|rockets?)\b.{0,15}\b(crash(?:es|ed)?|land(?:s|ed)?|f[ae]ll|falls|stray(?:s|ed)?)\b")),
     (22.0, "a hack or theft", _rx(r"\b(hack(?:ed|s)?|exploit(?:ed)?|drained|stolen|(?<!grand )theft|breach(?:ed)?|heist|compromised)\b")),
-    (22.0, "a failure", _rx(r"\b(defaults?|defaulted|bankrupt\w*|insolven\w*|collaps(?:es|ed)|halts? withdrawals|freezes? withdrawals|"
+    # a failure happening now ("files for bankruptcy"), not an old one named as an adjective ("bankrupt FTX's missed fortune", 2026-11-24)
+    (22.0, "a failure", _rx(r"\b(defaults?|defaulted|(?:files?|filed|filing) for bankruptcy|(?:declares?|declared|enters?|entered) bankruptcy|"
+                              r"(?:goes|went|gone) bankrupt|insolven\w*|collaps(?:es|ed)|halts? withdrawals|freezes? withdrawals|"
                               r"depegs?|depegged)\b")),
     (20.0, "a central-bank decision", _rx(r"\b(fed|federal reserve|ecb|bank of england|boe|bank of japan|boj|pboc|snb|rba)\b.{0,40}"
                                           r"\b(cuts?|hikes?|raises?|lowers?|holds?|keeps?|leaves?|pauses?)\b.{0,20}\brates?\b")),
@@ -250,14 +252,16 @@ def _move_points(head: str) -> tuple[float, str]:
     for at, points in lines:
         if pct >= at:
             return points, f"{what} of {pct:g}%"
-    if EXTREME.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head) or METAL_OIL.search(head) or MEGA.search(head)
+    if EXTREME.search(head) and not VOLUME_NOT_PRICE.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head) or METAL_OIL.search(head) or MEGA.search(head)
                                  or nw.MAJOR_ASSET.search(head)):  # "XRP crashes to its lowest since November 2024"
         return 18.0, "a record or multi-year extreme in a major market"
     if nw.INDEX_REGIME.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head)):
+        if WEEK_PERIOD.search(head):
+            return 16.0, "a week's record in a major market"  # "tech's worst week on Wall Street since 2020": a slot story
         return 32.0, "a market regime (a correction, a bear market, a halt)"  # an index shock: major (owner's replay, 2026-11-18)
     background = BACKGROUND_MOVE.search(head)
     if SHARP.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head) or METAL_OIL.search(head) or MEGA.search(head)) and not pct \
-            and not background:  # "Bitcoin's plunge below $60,000 triggers a buying spree": the plunge is background, not the event
+            and not background and not VOLUME_NOT_PRICE.search(head):  # "Bitcoin's plunge below $60,000 triggers a buying spree": background; "shipments surge": volumes
         return 12.0, "a sharp move in a major market (no figure stated)"
     if COMPANY_SHARP.search(head) and not pct and not background:
         return 8.0, "a company's shares moved sharply (no figure stated)"
@@ -272,6 +276,9 @@ def states_named(head: str) -> set[str]:
 def _hard(head: str) -> tuple[float, str]:
     states = [k for k, rx in nw.STATES.items() if rx.search(head)]
     m = ATTACK_VERB.search(head)
+    if m and m.group(0).lower().startswith("hit") and re.match(r"\s+(?:a |an |the )?(?:new |fresh |all-time |multi-year )?(?:record|high|low|peak|level|milestone|"
+                                                                 r"bottom|top|\$|\d)", head[m.end():], re.I):
+        m = None  # "India's oil imports hit record high": a figure of speech, not a strike
     if m and m.group(0).lower().startswith("target") and not ACTOR_OR_TARGET.search(head):
         m = None  # "US escalates sanctions on Iran, targets 'shadow banking' networks": a policy aimed at someone, not a strike
     if m and (states or ACTOR_OR_TARGET.search(head)) and not THREAT.search(head[:m.start()]) and not HEDGE.search(head) \
@@ -614,7 +621,9 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
 LONG_PERIOD = _rx(r"\bover the past (?:year|\d+ (?:days|weeks|months|years))\b|\byear-to-date\b|\bytd\b|\bthis year so far\b|"
                   r"\b(?:in|over) (?:the last |the past )?(?:\d+|two|three|four|five|six|eight|twelve) (?:weeks|months|years)\b|\bvs\.? the \w+ over\b")
 # a week's move (2026-11-24: "The week's winners and losers: Strategy -30.3%" broke as major): a slot story at most
-WEEK_PERIOD = _rx(r"\b(?:for the week|this week|the week['’]s|weekly|on the week|in a week|week-to-date)\b")
+WEEK_PERIOD = _rx(r"\b(?:for the week|this week|the week['’]s|weekly|on the week|in a week|week-to-date|(?:worst|best|biggest) week)\b")
+# a record of volumes, not of a price ("India's Oil Imports Hit Record High as Saudi Shipments Surge", 2026-11-24)
+VOLUME_NOT_PRICE = _rx(r"\b(imports?|exports?|output|production|demand|shipments?|inventor(?:y|ies)|stockpiles?|sales|purchases|holdings)\b")
 MARKET_CORE = {"SPX", "IXIC", "DJI", "NDX", "BTC", "ETH", "GOLD", "SILVER", "OIL", "US-STOCKS"}
 
 

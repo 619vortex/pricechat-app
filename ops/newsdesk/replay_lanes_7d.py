@@ -218,10 +218,20 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
     done: set[int] = set()
     slot_done: set[datetime] = set()
 
+    def assets(s: Story) -> set[str]:
+        f = s.facts or {}
+        return {str(a) for a in (f.get("assets") or [])} | ({str(f["symbol"])} if f.get("symbol") else set())
+
     def repeat(st: Story, at: datetime) -> str:
         ev = newsworthy.event_of(st.best_title or st.title, "")
+        market = st.kind in ("market", "data", "recap")
         for t0, e0, s0 in out_events:
             if at - t0 > SAME_WINDOW:
+                continue
+            if market or s0.kind in ("market", "data", "recap"):
+                # production's market repeat: the same asset within 24 h (events._shares_asset), never templated wording
+                if market and s0.kind in ("market", "data", "recap") and assets(st) & assets(s0) and at - t0 < timedelta(hours=24):
+                    return f"same asset as story {s0.sid} ({s0.title[:60]}) within 24 h"
                 continue
             if newsworthy.same_event(ev, e0, hours_apart=(at - t0).total_seconds() / 3600) or coordinate.same_story(
                     st.best_title or st.title, s0.best_title or s0.title):  # production's repeat check: what was told vs what is new

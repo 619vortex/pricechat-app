@@ -242,6 +242,14 @@ NATIONAL = re.compile(r"^(?:RUSSIA\w*|UKRAIN\w*|KYIV|KIEV|MOSCOW|KREMLIN|IRAN\w*
                       r"BEIJING|TAIWAN\w*|SAUDI\w*|RIYADH|BAHRAIN\w*|KUWAIT\w*|QATAR\w*|YEMEN\w*|HOUTHIS?|LEBAN\w*|HEZBOLLAH|SYRIA\w*|IRAQ\w*|"
                       r"EU|EUROPE\w*|NATO|ZELENSK\w*|PUTIN|TRUMP|NETANYAHU|XI|KHAMENEI|~MIDDLE EAST)$")
 WAVE_HOURS = 12.0
+# the sides of each region's war: a state named in two stories that is NOT one of them was struck (or drawn in), which identifies the event
+BELLIGERENTS = {"UKRAINE_WAR": {"RUSSIA", "UKRAINE"}, "GULF": {"IRAN", "US", "ISRAEL"}, "LEVANT": {"ISRAEL", "LEBANON", "SYRIA"},
+                "RED_SEA": {"YEMEN", "SAUDI", "US"}, "TAIWAN_STRAIT": {"CHINA", "TAIWAN"}}
+
+
+def _plain(anchor: str) -> str:
+    """An anchor without its possessive ("UKRAINE'S" is Ukraine, a side of the war, not a place in it)."""
+    return re.sub(r"['’]S$", "", anchor)
 
 
 
@@ -261,8 +269,13 @@ def same_event(a: Event, b: Event, hours_apart: float | None = None) -> bool:
             return False  # the same war a day later is another event (more deaths, a new target), unless a specific place or thing is shared
         # a wave is one side firing: "11 killed in Russian strike on Ukraine's Dymer" is not the wave of "Ukraine behind attacks on Russian ships";
         # and two strikes on different named targets are two events
-        own_a = {x[:3] for x in a.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}
-        own_b = {x[:3] for x in b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}
+        # 2026-11-24: a third state struck inside a war region ("Poland says two Russian missiles crashed on its soil", "Poland hit by at
+        # least one Russian missile", "Russian missile hits Poland ... says Tusk": one event told three times in the replay)
+        third = (a.states & b.states) - set().union(*(BELLIGERENTS.get(r, set()) for r in a.regions & b.regions)) - {"US"}
+        if third and HARD_CONFLICT.search(a.title or "") and HARD_CONFLICT.search(b.title or "") and (hours_apart is None or hours_apart <= WAVE_HOURS):
+            return True
+        own_a = {x[:3] for x in a.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(_plain(x))}
+        own_b = {x[:3] for x in b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(_plain(x))}
         if own_a and own_b and not (own_a & own_b):
             return False  # both name a specific place or thing, and none in common ("FINLAND" and "FINNISH" are one: first letters)
         if bool(own_a) != bool(own_b) and a.states and b.states:
