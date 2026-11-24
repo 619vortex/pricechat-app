@@ -254,11 +254,21 @@ def class_paused(state: dict[str, Any], symbol: str) -> str:
     return f"{CLASS_WORD[cls]} market posts are paused ({got.get('reason') or 'safety stop'})" if got else ""
 
 
+# Production's one automatic market pause, verified liquidation-only from the 2026-11-23 10:45 UTC backup (nd_settings.state.anomalies: seven
+# PIEVERSE implausible_liquidations readings from 09:25 to 09:56 UTC, no price anomaly). The desk keeps only the last KEEP anomalies, so by
+# deploy time those rows may have rolled off: this records the evidence. Nothing else is migrated without its own liquidation-only record.
+KNOWN_LIQUIDATION_TRIPS = {"2026-11-22T09:35:38"}
+
+
 def migrate_pause(db: Any, now: datetime) -> str:
-    """Once: an AUTOMATIC market_pause set by the old, unscoped safety stop is moved to the scope its anomalies justify (production 2026-11-22
-    09:35 UTC: "automatic: 3 implausible or contradicted figures" from PIEVERSE liquidation readings paused every market post for days).
-    Liquidation anomalies -> liq_pause; price anomalies -> their asset classes. The owner's own pause (no "automatic:" reason) is never
-    touched. Returns what was done ("" = nothing). Never raises."""
+    """Once: an AUTOMATIC market_pause that LIQUIDATION data tripped (the old, unscoped safety stop) becomes a liquidation pause (owner,
+    2026-11-24: "Ensure only liquidation-triggered automatic pauses migrate to liquidation scope"). Production 2026-11-22 09:35 UTC: three
+    PIEVERSE liquidation readings paused every market post until 11-24, so the 11-23 US rally never went out.
+
+    Migrates only when the trip's own anomalies (within TRIP_WINDOW of market_pause_at) are all liquidation readings, or the trip is one
+    verified from a backup (KNOWN_LIQUIDATION_TRIPS) and no price anomaly is recorded near it. A trip with any price anomaly, or with no
+    record at all, stays exactly as it is (the owner resumes it). Never touched: the emergency stop (kill_switch), a timed pause
+    (paused_until), the owner's own market_pause (a reason without "automatic:"). Returns what was done ("" = nothing). Never raises."""
     try:
         from app.models.newsdesk import NdSettings
 
@@ -272,27 +282,25 @@ def migrate_pause(db: Any, now: datetime) -> str:
         at = state.get("market_pause_at")
         t0 = _aware(datetime.fromisoformat(str(at)), now) if at else None
         near = [a for a in state.get("anomalies") or []
-                if t0 is None or abs((_aware(datetime.fromisoformat(str(a["at"])), now) - t0).total_seconds()) <= TRIP_WINDOW.total_seconds()]
+                if t0 is not None and abs((_aware(datetime.fromisoformat(str(a["at"])), now) - t0).total_seconds()) <= TRIP_WINDOW.total_seconds()]
         liq = [a for a in near if a.get("kind") in LIQUIDATION_KINDS]
         price = [a for a in near if a.get("kind") not in LIQUIDATION_KINDS]
-        done = []
-        if liq or not price:  # no record of what tripped it: the liquidation scope (the smaller one) is the conservative reading of 11-22
-            state["liq_pause"], state["liq_pause_reason"], state["liq_pause_at"] = True, f"{reason} (moved from market_pause {now:%Y-%m-%d})", str(at or now.isoformat())
-            done.append("liquidation posts")
-        classes = dict(state.get("class_pause") or {})
-        for cls in sorted({price_class(str(a.get("subject") or "")) for a in price}):
-            classes[cls] = {"at": str(at or now.isoformat()), "reason": f"{reason} (moved from market_pause {now:%Y-%m-%d})"}
-            done.append(f"{cls} posts")
-        if classes:
-            state["class_pause"] = classes
+        known = str(at or "")[:19] in KNOWN_LIQUIDATION_TRIPS
+        if price or not (liq or known):
+            logger.info("newsdesk safety: the automatic market pause (%s) is left as it is: %s", reason,
+                        "price anomalies tripped it" if price else "no record shows it was liquidation-only")
+            return ""
+        evidence = f"{len(liq)} liquidation readings recorded near the trip" if liq else "verified liquidation-only from the 2026-11-23 backup"
+        state["liq_pause"], state["liq_pause_reason"] = True, f"{reason} (liquidation-only: moved from market_pause {now:%Y-%m-%d})"
+        state["liq_pause_at"] = str(at or now.isoformat())
         state["market_pause"] = False
-        state["pause_migrated"] = {"at": now.isoformat(), "from": reason, "to": done}
+        state["pause_migrated"] = {"at": now.isoformat(), "from": reason, "to": "liquidation posts", "evidence": evidence}
         state.pop("market_pause_reason", None)
         state.pop("market_pause_at", None)
-        s.state = state
+        s.state = state  # kill_switch, paused_until and pause_reason are columns of the row: not read, not written here
         db.commit()
-        logger.warning("newsdesk safety: the automatic market pause (%s) now holds only %s", reason, ", ".join(done))
-        return ", ".join(done)
+        logger.warning("newsdesk safety: the automatic market pause (%s) now holds only liquidation posts (%s)", reason, evidence)
+        return "liquidation posts"
     except Exception as e:  # noqa: BLE001
         db.rollback()
         logger.warning("newsdesk safety: moving the automatic market pause failed (%s)", type(e).__name__)

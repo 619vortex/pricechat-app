@@ -176,3 +176,52 @@ async def test_the_owners_own_market_pause_is_never_moved(db: Session) -> None:
     assert safety.migrate_pause(db, NOW) == ""
     db.refresh(row)
     assert row.state["market_pause"] is True and events.market_paused(db)
+
+
+async def test_a_price_triggered_automatic_pause_is_never_migrated(db: Session) -> None:
+    # owner, 2026-11-24: "Ensure only liquidation-triggered automatic pauses migrate to liquidation scope"
+    at = (NOW - timedelta(hours=5)).isoformat()
+    mixed = [{"kind": "implausible_liquidations", "subject": "DOGE", "why": "w", "at": at},
+             {"kind": "second_source", "subject": "HG=F", "why": "w", "at": at}, {"kind": "implausible_move", "subject": "^GSPC", "why": "w", "at": at}]
+    row = desk(db, {"market_pause": True, "market_pause_reason": "automatic: 3 implausible or contradicted figures within 60 minutes",
+                    "market_pause_at": at, "anomalies": mixed})
+    assert safety.migrate_pause(db, NOW) == ""
+    db.refresh(row)
+    assert row.state["market_pause"] is True and not row.state.get("liq_pause") and events.market_paused(db)
+
+
+async def test_an_automatic_pause_with_no_record_stays_paused(db: Session) -> None:
+    row = desk(db, {"market_pause": True, "market_pause_reason": "automatic: 3 implausible or contradicted figures within 60 minutes",
+                    "market_pause_at": (NOW - timedelta(days=3)).isoformat(), "anomalies": []})
+    assert safety.migrate_pause(db, NOW) == ""
+    db.refresh(row)
+    assert row.state["market_pause"] is True and events.market_paused(db)
+
+
+async def test_productions_verified_liquidation_trip_migrates_even_after_its_rows_rolled_off(db: Session) -> None:
+    # the 11-23 backup showed seven PIEVERSE liquidation readings around 2026-11-22 09:35:38 UTC and no price anomaly; by deploy time the
+    # desk's last-50 anomaly list holds only later figures (NVDA, XAG...), far from the trip
+    later = [{"kind": "implausible_liquidations", "subject": "NVDA", "why": "w", "at": "2026-11-23T14:10:00+00:00"}] * 50
+    row = desk(db, {"market_pause": True, "market_pause_reason": "automatic: 3 implausible or contradicted figures within 60 minutes",
+                    "market_pause_at": "2026-11-22T09:35:38.393492+00:00", "anomalies": later})
+    assert safety.migrate_pause(db, NOW + timedelta(days=3)) == "liquidation posts"
+    db.refresh(row)
+    assert row.state["market_pause"] is False and row.state["liq_pause"] is True
+    assert row.state["pause_migrated"]["evidence"].startswith("verified liquidation-only")
+
+
+async def test_the_emergency_stop_and_a_timed_pause_are_never_touched(db: Session) -> None:
+    # owner, 2026-11-24: "Preserve all manually activated emergency stops"
+    from app.models.newsdesk import NdSettings
+
+    at = (NOW - timedelta(days=2)).isoformat()
+    liq = [{"kind": "implausible_liquidations", "subject": "PIEVERSE", "why": "w", "at": at}] * 3
+    row = desk(db, {"market_pause": True, "market_pause_reason": "automatic: 3 implausible or contradicted figures within 60 minutes",
+                    "market_pause_at": at, "anomalies": liq})
+    s = db.get(NdSettings, 1)
+    s.kill_switch, s.paused_until, s.pause_reason = True, NOW + timedelta(hours=6), "owner: stop everything"
+    db.commit()
+    assert safety.migrate_pause(db, NOW) == "liquidation posts"
+    db.refresh(s)
+    assert s.kill_switch is True and s.pause_reason == "owner: stop everything" and s.paused_until is not None
+    assert s.state["liq_pause"] is True  # only the automatic, liquidation-only market pause moved
