@@ -340,5 +340,76 @@ def detect(quotes: dict[str, sources.Quote], watchlist: list[dict[str, Any]], no
     return sorted(found, key=lambda m: -m.ratio)
 
 
+# --- cross-asset context (owner, 2026-11-24) ---------------------------------------------------------------------------------------
+# A market post says what the markets around it did over the SAME window, measured the same way, so a reader sees whether a move is the
+# asset's own or the whole market's. Figures only: no cause is ever stated or implied here (a cause comes only from a corroborated story).
+RELATED: dict[str, tuple[str, ...]] = {
+    "CRYPTO": ("^IXIC", "GC=F", "CL=F"), "BTC-USD": ("^IXIC", "GC=F", "ETH-USD"), "ETH-USD": ("BTC-USD", "^IXIC", "GC=F"),
+    "SOL-USD": ("BTC-USD", "^IXIC"), "XRP-USD": ("BTC-USD", "^IXIC"),
+    "US-STOCKS": ("BTC-USD", "GC=F", "CL=F"), "^GSPC": ("BTC-USD", "GC=F", "CL=F"), "^IXIC": ("BTC-USD", "GC=F", "CL=F"),
+    "^DJI": ("BTC-USD", "GC=F", "CL=F"), "NVDA": ("^IXIC", "BTC-USD"), "TSLA": ("^IXIC", "BTC-USD"), "AAPL": ("^IXIC",),
+    "GC=F": ("^GSPC", "BTC-USD", "SI=F"), "SI=F": ("GC=F", "^GSPC", "BTC-USD"), "CL=F": ("^GSPC", "GC=F", "BTC-USD"),
+    "BZ=F": ("^GSPC", "GC=F", "BTC-USD"), "HG=F": ("^GSPC", "GC=F", "CL=F"),
+}
+SAME_WINDOW = {"15m": "In the same 15 minutes", "1h": "In the same hour", "4h": "In the same 4 hours", "24h": "In the same 24 hours",
+               "day": "Since the same close"}
+
+
+def related_items(m: Move) -> list[dict[str, Any]]:
+    by = {x["symbol"]: x for x in watch_items(sources.DEFAULT_WATCHLIST)}
+    return [by[s] for s in RELATED.get(m.symbol, ()) if s in by]
+
+
+def _same_window_change(m: Move, q: sources.Quote, item: dict[str, Any]) -> float | None:
+    end = m.as_of.timestamp()
+    last = [b for b in q.bars if b[0] <= end + 60 and b[1] > 0]
+    if not last or end - last[-1][0] > FRESH:
+        return None  # its market is shut or its price is old: nothing is printed rather than a stale figure
+    price = last[-1][1]
+    equity = item.get("group") in EQUITY_GROUPS
+    if m.window == "day":
+        if equity:
+            then = q.previous_close
+        elif m.ref_at is not None:
+            then = price_at(q, m.ref_at.timestamp(), tolerance=1800)
+        else:
+            then = None
+    elif m.window in WINDOWS:
+        secs = WINDOWS[m.window]
+        then = price_near(q, end - secs, before=end) if equity else price_at(q, end - secs, tolerance=max(600, int(secs * 0.05)))
+    else:
+        return None
+    if not then or then <= 0:
+        return None
+    change = (price - then) / then * 100
+    if safety.plausible_move(str(item.get("group") or "stock"), m.window or "24h", change):
+        return None  # a broken bar never becomes context
+    return change
+
+
+def cross_asset(m: Move, quotes: dict[str, sources.Quote], now: datetime) -> list[dict[str, Any]]:
+    """What the related markets did over the move's own window (at most three), measured from their own quotes; [] for a level or an
+    extreme (no window), or when no related market has a fresh price."""
+    if m.kind not in ("move", "wide") or not m.window:
+        return []
+    out = []
+    members = {n for n, _ in m.members}
+    for item in related_items(m):
+        q = quotes.get(item["symbol"])
+        if q is None or not q.bars or item.get("name") in members:
+            continue
+        change = _same_window_change(m, q, item)
+        if change is not None:
+            out.append({"name": str(item.get("name") or item["symbol"]), "symbol": item["symbol"], "change": round(change, 2)})
+    return out[:3]
+
+
+def cross_line(m: Move, cross: list[dict[str, Any]]) -> str:
+    if not cross:
+        return ""
+    figs = ", ".join(f"{c['name']} {'+' if c['change'] > 0 else '−' if c['change'] < 0 else ''}{abs(c['change']):.1f}%" for c in cross)
+    return f"{SAME_WINDOW.get(m.window, 'Meanwhile')}: {figs}."
+
+
 def watch_items(watchlist: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(watchlist) + [x for x in EXTRA_MOVERS if x["symbol"] not in {w["symbol"] for w in watchlist}]

@@ -301,6 +301,15 @@ async def _refresh_market(ev: Any, now: datetime, transport: Any, watchlist: lis
         return HOLD, disagree
     u = assess(sym, m.change, m.ratio, now) if kind in ("move", "wide") else None
     extra = since_line(m, u) if u is not None else ""
+    if kind in ("milestone", "high", "low") and f.get("milestone"):
+        extra = headline.milestone_line(m, f["milestone"])  # the record line, from the daily closes read minutes ago
+    cross: list[dict[str, Any]] = []
+    if kind in ("move", "wide") and moves.related_items(m):
+        try:  # the related markets re-read too: the same freshness rule as the move itself, or the line is left out
+            cross = moves.cross_asset(m, {**quotes, **await (fetch or _fetch)(moves.related_items(m), transport)}, now)
+        except Exception as e:  # noqa: BLE001 - context never holds the post
+            logger.info("newsdesk livedata: related markets for %s: %s", sym, type(e).__name__)
+    extra = " ".join(x for x in (extra, moves.cross_line(m, cross)) if x)
     head = headline.market(m)
     before = ev.headline or ""
     ev.title = ev.headline = head
@@ -309,6 +318,10 @@ async def _refresh_market(ev: Any, now: datetime, transport: Any, watchlist: lis
           "members": m.members, "spark": m.spark or f.get("spark") or [], "stat": stat_of(m), "told": market_told(m, head, extra), **move_facts(m, str(f.get("verified") or ""), extra)}
     if u is not None:
         nf["urgency"] = u.out()
+    if cross:
+        nf["cross"] = cross
+    else:
+        nf.pop("cross", None)  # never a context line from an earlier read
     ev.facts = nf
     _forget_old_figures(ev, before)
     q = quotes.get(sym) or max(fresh, key=lambda x: x.as_of)

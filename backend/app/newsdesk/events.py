@@ -493,7 +493,7 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
     for m in moves.detect(quotes, sources.DEFAULT_WATCHLIST if watchlist is None else watchlist, now):
         if not enabled.get(str(m.item.get("category") or "crypto"), True):
             continue
-        out["markets"] += await _offer_move(db, m, recent, now, adj, p, second_opinion, market, daily)
+        out["markets"] += await _offer_move(db, m, recent, now, adj, p, second_opinion, market, daily, quotes)
     if liquidations and enabled.get("crypto", True):
         try:
             out["markets"] += _offer_liquidations(db, recent, now, adj, p)
@@ -757,7 +757,7 @@ def _fill(ev: NdEvent, v: chaos.Verdict, score: virality.Score, facts: dict[str,
 
 
 async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: datetime, adj: dict[str, float], p: Policy, second_opinion: Any, market: Any,
-                      daily: dict[str, Any] | None = None) -> int:
+                      daily: dict[str, Any] | None = None, quotes: dict[str, Any] | None = None) -> int:
     assets = sorted({moves.KEYS.get(sym, sym) for sym in ([m.symbol] if m.kind != "wide" else [])} | ({"BTC", "ETH", "SOL", "XRP"} if m.symbol == "CRYPTO" else set())
                     | ({"SPX", "IXIC", "DJI"} if m.symbol == "US-STOCKS" else set()))
     direction = "up" if m.up else "down"
@@ -827,6 +827,8 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
     ms = moves.milestone_context(m, (daily or {}).get(m.symbol) or [], now) if m.kind in ("milestone", "high", "low") else {}
     if ms:
         extra = headline.milestone_line(m, ms)
+    cross = moves.cross_asset(m, quotes or {}, now)  # the markets around it over the same window (figures only, never a cause)
+    extra = " ".join(x for x in (extra, moves.cross_line(m, cross)) if x)
     head = headline.market(m)
     told = livedata.market_told(m, head, extra)
     tk = moves.CASHTAG.get(m.symbol)
@@ -837,7 +839,8 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
              "tickers": tickers, "falling": not m.up,
              "risk": False, "told": told, "spark": m.spark, "stat": f"{'+' if m.change > 0 else '-'}{abs(m.change):.1f}%" if m.kind in ("move", "wide") else writer_money(m),
              "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else "", **({"urgency": u.out()} if u is not None else {}),
-             "round_level": round_level, **({"milestone": ms} if ms else {}), **livedata.move_facts(m, verified, extra)}
+             "round_level": round_level, **({"milestone": ms} if ms else {}), **({"cross": cross} if cross else {}),
+             **livedata.move_facts(m, verified, extra)}
     url = f"https://finance.yahoo.com/quote/{m.symbol}" if m.symbol not in ("CRYPTO", "US-STOCKS") else "https://finance.yahoo.com/markets/"
     src = [{"name": "Yahoo Finance", "url": url, "at": m.as_of.isoformat()}]
     if live:
