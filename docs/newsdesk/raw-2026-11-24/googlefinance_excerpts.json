@@ -1,0 +1,32 @@
+{
+ "SP500": {
+  "url": "https://www.google.com/finance/quote/.INX:INDEXSP",
+  "retrieved_utc": "2026-11-24T06:40:13+00:00",
+  "excerpt": "7,237.17 arrow_upward +4.73% ( +326.78 ) 1D Nov 23, 4:42:33 PM GMT-5",
+  "previous_close_field": null
+ },
+ "NASDAQCOMP": {
+  "url": "https://www.google.com/finance/quote/.IXIC:INDEXNASDAQ",
+  "retrieved_utc": "2026-11-24T06:40:14+00:00",
+  "excerpt": "24,089.56 arrow_upward +6.51% ( +1,471.83 ) 1D Nov 23, 5:15:59 PM GMT-5",
+  "previous_close_field": null
+ },
+ "DOW": {
+  "url": "https://www.google.com/finance/quote/.DJI:INDEXDJX",
+  "retrieved_utc": "2026-11-24T06:40:16+00:00",
+  "excerpt": "49,595.31 arrow_upward +3.01% ( +1,447.98 ) 1D Nov 23, 4:42:39 PM GMT-5",
+  "previous_close_field": null
+ },
+ "NVDA": {
+  "url": "https://www.google.com/finance/quote/NVDA:NASDAQ",
+  "retrieved_utc": "2026-11-24T06:40:17+00:00",
+  "excerpt": null,
+  "previous_close_field": null
+ },
+ "ANT": {
+  "url": "https://www.google.com/finance/quote/ANT:NASDAQ",
+  "retrieved_utc": "2026-11-24T06:40:19+00:00",
+  "excerpt": "$87.64 arrow_downward -1.43% ( -1.27 ) 1D Nov 23, 4:00:01 PM GMT-5",
+  "previous_close_field": null
+ }
+}
