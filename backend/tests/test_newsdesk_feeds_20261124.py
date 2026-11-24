@@ -68,14 +68,17 @@ async def test_only_a_refusal_is_retried_and_only_once(status: int, requests: in
 # --- new outlets: consistent with the outlet-trust lists -------------------------------------------------------------------------------
 
 
-def test_new_world_outlets_are_recognised_wherever_outlets_are_counted() -> None:
+def test_world_outlets_are_recognised_wherever_outlets_are_counted() -> None:
+    # outlets other lanes may report (Trending's news search), recognised by name; their RSS feeds are not read by the desk (owner,
+    # 2026-11-24: only commercially permitted feeds)
     from app.trending import rank, sensitive
     from app.trending import sources as tsources
 
     new = {"The Independent", "Sky News", "ABC News", "The Washington Post", "South China Morning Post"}
-    feeds = {f["name"]: f for f in sources.EXTRA_FEEDS}
-    assert new <= set(feeds) and all(feeds[n]["tier"] == 1 for n in new)
-    assert "https://feeds.bbci.co.uk/news/rss.xml" in {f["url"] for f in sources.EXTRA_FEEDS if f["name"] == "BBC"}
+    withdrawn = {"https://www.independent.co.uk/news/world/rss", "https://feeds.skynews.com/feeds/rss/world.xml",
+                 "https://abcnews.go.com/abcnews/internationalheadlines", "https://feeds.washingtonpost.com/rss/world",
+                 "https://www.scmp.com/rss/91/feed", "https://feeds.bbci.co.uk/news/rss.xml"}
+    assert not withdrawn & {f["url"] for f in [*sources.DEFAULT_FEEDS, *sources.EXTRA_FEEDS, *sources.WORLDMONITOR_FEEDS]}
     for name in new | {"BBC", "The Guardian"}:
         assert tsources.reliable_outlet(name), name
     mainstream = {sensitive.outlet_key(m) for m in rank.MAINSTREAM}
@@ -91,8 +94,8 @@ def test_no_feed_address_is_read_twice() -> None:
     assert len(extra) == len(set(extra))
     assert all(u.startswith("https://") for u in every)
     # feeds_for drops an addition the stored list already has
-    got = [f["url"] for f in sources.feeds_for([{"name": "BBC", "url": "https://feeds.bbci.co.uk/news/rss.xml"}], {})]
-    assert got.count("https://feeds.bbci.co.uk/news/rss.xml") == 1
+    got = [f["url"] for f in sources.feeds_for([{"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/"}], {})]
+    assert got.count("https://www.coindesk.com/arc/outboundfeeds/rss/") == 1
 
 
 # --- feed health: rest, log once, recover ----------------------------------------------------------------------------------------------

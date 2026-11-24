@@ -95,16 +95,9 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "BLS", "url": "https://www.bls.gov/feed/bls_latest.rss", "tier": 0, "category": "economics"},
     {"name": "Bank of England", "url": "https://www.bankofengland.co.uk/rss/news", "tier": 0, "category": "economics"},
     {"name": "Bank of Japan", "url": "https://www.boj.or.jp/en/rss/whatsnew.xml", "tier": 0, "category": "economics"},
-    # fast world desks (2026-11-24: more independent mainstream outlets, so a major world story reaches two-outlet verification sooner).
-    # Each checked live that day: fresh, dated, parseable, allowed by the site's robots.txt; named as app/trending's RELIABLE_OUTLETS and
-    # MAINSTREAM spell them. Measured: BBC top stories and ABC News a new item every ~10 min, The Independent and SCMP every ~15 min,
-    # Sky News and The Washington Post every few hours (short lists, but early on big breaking stories).
-    {"name": "BBC", "url": "https://feeds.bbci.co.uk/news/rss.xml", "tier": 1, "category": None},
-    {"name": "The Independent", "url": "https://www.independent.co.uk/news/world/rss", "tier": 1, "category": "politics"},
-    {"name": "Sky News", "url": "https://feeds.skynews.com/feeds/rss/world.xml", "tier": 1, "category": "politics"},
-    {"name": "ABC News", "url": "https://abcnews.go.com/abcnews/internationalheadlines", "tier": 1, "category": "politics"},
-    {"name": "The Washington Post", "url": "https://feeds.washingtonpost.com/rss/world", "tier": 1, "category": "politics"},
-    {"name": "South China Morning Post", "url": "https://www.scmp.com/rss/91/feed", "tier": 1, "category": None},
+    # 2026-11-24: six fast world feeds (BBC top stories, The Independent, Sky News, ABC News, The Washington Post, SCMP) were prepared here
+    # and withdrawn before release: the owner allows only feeds whose terms permit commercial use, and these publishers' RSS terms say
+    # personal, non-commercial. Every feed is being checked against its terms before any is added again.
 ]
 # World Monitor (owner, 2026-11-10: "integrate World Monitor as an additional global intelligence source"). World Monitor's code is
 # AGPL-3.0 and its hosted API's terms forbid public redistribution below the $299.99/month Business plan, so neither is used. Its source
