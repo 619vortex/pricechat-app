@@ -69,7 +69,14 @@ def test_these_never_break(title: str, most: str) -> None:
 @pytest.mark.parametrize("title", [
     "Nvidia reinstates Jensen Huang as CEO. Stock skyrockets 27%",
     "Missile strike hits Saudi oil terminal",
-    "11 killed in Russian strike on Ukraine’s Dymer in Kyiv region",
+    "Middle East latest: IRGC says three tankers ablaze in Strait of Hormuz",
 ])
 def test_major_news_still_breaks(title: str) -> None:
     assert importance.judge(title, outlets=3).tier == importance.MAJOR
+
+
+def test_a_strike_inside_an_established_war_takes_the_next_slot_not_breaking() -> None:
+    # 2026-11-24: Russia-Ukraine strikes are near-daily; major only on escalation (another state, 50+ killed, global energy supply)
+    d = importance.judge("11 killed in Russian strike on Ukraine’s Dymer in Kyiv region", outlets=3)
+    assert d.tier == importance.SIGNIFICANT and "ongoing war" in d.reason
+    assert importance.judge("Russian strike kills 60 in Kyiv", outlets=3).tier == importance.MAJOR
