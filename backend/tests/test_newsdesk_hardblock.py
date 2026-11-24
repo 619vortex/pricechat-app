@@ -208,8 +208,9 @@ def test_breaking_near_a_slot_goes_now_as_that_slots_post_and_never_crowds_anoth
     assert "instead of waiting for it" in got.why and got.facts["latency"]["event_to_release_min"] == 25 and got.facts["editor"]["tier"] == "major"
     db.commit()
     assert events.slot_filled(db, upcoming, p) is not None  # the slot had its post: the day's count is unchanged
-    _news(db, "b3b", "Bank of Japan raises rates in a surprise move", 60, ["Financial Times", "Bloomberg"], age_min=20, now=upcoming + timedelta(minutes=2),
-          topic="macro")
+    # an expected decision is significant: it waits for the next slot (a SURPRISE hike is major since 2026-11-24 and would break)
+    _news(db, "b3b", "Bank of Japan raises rates by 25 basis points as expected", 60, ["Financial Times", "Bloomberg"], age_min=20,
+          now=upcoming + timedelta(minutes=2), topic="macro")
     assert events.release(db, upcoming + timedelta(minutes=2), p) is None
     db.query(NdEvent).delete()
     db.add(NdEvent(key="prev", kind="news", title="Fed holds rates", headline="FED HOLDS RATES", topic="macro", evidence="official", status="released",
