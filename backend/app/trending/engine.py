@@ -29,6 +29,10 @@ PENDING_TTL = timedelta(hours=6)  # a suggestion nobody approved goes stale
 QUEUED_TTL = timedelta(hours=4)
 MAX_NEW_PER_SCAN = 5
 ALERT_AFTER = 3  # failed reads in a row before the owner hears about a source
+# reads in a row that brought a problem (any: also those that never alert, such as GDELT's timeouts) before a source rests between reads.
+# 2026-11-24: GDELT timed out on every one of 82 reads in a day, each holding the scan up to 8 s and logging a line.
+REST_AFTER = 3
+REST_MAX = 60  # minutes: an official source (FAA, status pages) that comes back is read again within the hour
 MAX_ATTEMPTS = 3
 OPEN = ("pending", "queued", "publishing")
 SENT = ("published", "publishing", "uncertain", "dry_run")
@@ -70,6 +74,8 @@ def _due(name: str, state: dict[str, Any], now: datetime) -> bool:
     wait = sources.INTERVAL.get(name, 30)
     if h.get("plan"):  # not on this X plan: ask again once a day
         wait = 24 * 60
+    elif wait and int(h.get("misses") or 0) >= REST_AFTER:  # failing read after read: rest, doubling up to REST_MAX (a recovery is seen within it)
+        wait = min(max(wait, REST_MAX), wait * 2 ** (int(h["misses"]) - REST_AFTER + 1))
     try:
         return now - _aware(datetime.fromisoformat(last)) >= timedelta(minutes=wait)  # type: ignore[operator]
     except ValueError:
@@ -139,7 +145,8 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
             usage["cost_usd"][name] = round(float(usage["cost_usd"].get(name, 0)) + float(meta["cost_usd"]), 4)
         health[name] = {"name": sources.NAMES[name], "last_scan": now.isoformat(), "items": len(items), "stored": stored[name],
                         "status": "unavailable" if unavailable else "error" if failing else "idle" if idle else "ok", "problem": problem, "partial": meta.get("partial") or "",
-                        "fails": int(prev.get("fails") or 0) + 1 if failing else 0, "last_ok": now.isoformat() if not problem else prev.get("last_ok"),
+                        "fails": int(prev.get("fails") or 0) + 1 if failing else 0,
+                        "misses": int(prev.get("misses") or 0) + 1 if problem and not unavailable else 0, "last_ok": now.isoformat() if not problem else prev.get("last_ok"),
                         "plan": bool(meta.get("plan")), "auth": meta.get("auth"), "rate_limits": meta.get("rate_limits") or {}}
     state["health"], state["usage"] = health, usage
     s.state = state

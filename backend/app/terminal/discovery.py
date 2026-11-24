@@ -190,7 +190,9 @@ def parse_gdelt(body: dict[str, Any]) -> list[Item]:
 async def gdelt(client: httpx.AsyncClient, opts: dict[str, Any]) -> Result:
     url = GDELT.format(q=quote(GDELT_QUERY), n=int(opts.get("max_records") or 75), span=quote(str(opts.get("timespan") or "60min")))
     try:
-        r = await client.get(url, headers=_get_headers(), timeout=8)
+        # 2026-11-24: from Railway every read failed to connect (ConnectTimeout, 82 of 82); from elsewhere GDELT answered a single request
+        # 429 after a 14 s wait. A short connect timeout gives up fast; app/trending/engine._due rests the source after REST_AFTER misses.
+        r = await client.get(url, headers=_get_headers(), timeout=httpx.Timeout(8, connect=4))
     except httpx.HTTPError as e:
         return [], f"GDELT: {type(e).__name__}", {"requests": 1, "idle": True}
     if r.status_code == 429:
