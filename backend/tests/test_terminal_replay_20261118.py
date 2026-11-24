@@ -109,13 +109,9 @@ async def test_x_posts_on_its_own_when_telegram_refuses_its_caption(client: Any,
     await lane.tick(db, get_settings(), live["tg"], BETWEEN + timedelta(seconds=20))
     db.expire_all()
     assert db.get(NdEvent, ev.id).tg_status == "skipped" and live["tg"].sent == []
+    # owner, 2026-11-24: no licensed picture and no link card: the branded Price Chat card (before: held for the owner, 2026-11-23)
     result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(seconds=50))
-    assert result == "held" and live["x"].posts == []  # owner, 2026-11-23: no picture and no link: X waits for the owner
-    from app.terminal import feed
-
-    feed.release_held(db, ev.id, "text", BETWEEN + timedelta(seconds=55))
-    result = await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(seconds=60))
-    assert result == "published" and len(live["x"].posts) == 1
+    assert result == "published" and len(live["x"].posts) == 1 and live["x"].posts[0]["media"]
     assert "qeshm" in live["x"].posts[0]["text"].lower()
     await engine.deliver_x(db, engine.settings_row(db), get_settings(), None, 0, BETWEEN + timedelta(minutes=2))
     assert len(live["x"].posts) == 1  # once
