@@ -239,6 +239,15 @@ class Settings(BaseSettings):
     bm_tick_seconds: int = Field(60, ge=15, le=3600)
     bm_max_video_mb: int = Field(120, ge=5, le=1024)
     bm_worker_bootstrap_sha256: str | None = None  # sha256 of a worker token kept on the worker machine (see queue.worker_for)
+    # --- Terminal Intelligence Engine channel (app/intel; docs/intelligence/2026-11-25-terminal-intelligence-engine.md §4.1) ---
+    # OFF by default: with intel_enabled False nothing is enqueued, the intel.tick job isn't even registered, no paid call is made.
+    intel_enabled: bool = False
+    intel_daily_usd_cap: float = Field(3.0, ge=0)  # the shared AI ledger's hard daily cap (owner approved $3/day); over it: rules
+    intel_worker_token_sha256: str | None = None  # sha256 of the PC's pci_ token (python -m app.intel.tokens); the token stays on the PC
+    intel_cloud_model: str = "claude-haiku-5-5"  # intel.analyze when the PC can't (offline, timeout, breaking cloud-first)
+    intel_breaking_cloud_first: bool = True  # breaking: cloud answers; the PC (if online) gets a shadow copy for comparison
+    intel_embed_dim: int = Field(768, ge=16, le=4096)  # nomic-embed-text v1.5
+    intel_tick_seconds: int = Field(15, ge=5, le=600)
     # --- Price Chat Vault (docs/VAULT.md): the curated storefront of vintage Japanese cards from approved sellers ---
     vault_ebay_sellers: str = "mayumicardshop|Mayumi Card Shop"  # username|display name, comma-separated; synced via the Browse API
     vault_sync_seconds: int = Field(10800, ge=900, le=21600)  # eBay's licence: displayed listings at most 6 h older than eBay's
