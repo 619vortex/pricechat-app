@@ -622,6 +622,11 @@ async def find_photo(ev: Any, *, used: set[str], transport: Any, panel: bool, re
     one photo per story, and the vision check when the model is available. None: the post goes as text, never with a stand-in."""
     from app.newsdesk import editor, photography, photos, visual
 
+    if not editor.can_look(settings):
+        # owner, 2026-11-19: without a visual check a searched photo is never published, so nothing is searched: no Commons or Openverse
+        # requests that can only end in a refusal (2026-11-24: production's two Openverse 504s were such searches for a war story)
+        logger.info("visual editor: no search for event %s: the vision check is off (library photos only)", getattr(ev, "id", None))
+        return None
     b = editor.brief(ev)
     sensitive = visual.is_sensitive(ev)
     plans: list[tuple[list[str], list[str]]] = []
@@ -906,13 +911,15 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
         return text_only(base, f"no {subject.name} photograph available")
     if kind in ("data", "market", "recap"):
         return text_only(base, "no photograph of this asset")
-    text = f"{ev.headline} {ev.title}"
+    # the source's title first when the headline is set in capitals (photography.story_text: "XI" hid Xi Jinping, 2026-11-24 audit)
+    text = photography.story_text(str(ev.headline or ""), str(ev.title or ""))
     # the people a story is about (owner, 2026-11-19: "Trump/Xi/Zelensky story -> relevant real photograph of the people"), from the
     # editor's people library: before a company or market subject only when named first, and never for an act of violence (a war's diplomacy
-    # is about the leaders; a strike is about the strike: its own photograph or text)
+    # is about the leaders; a strike is about the strike: its own photograph or text). A broad subject (stock markets in general) never
+    # comes before a person the story names.
     who = photography.people_of(text)
     lib_at = photography.subject_of(text)
-    lib_pos = lib_at.rx().search(text).start() if lib_at is not None else len(text)  # type: ignore[union-attr]
+    lib_pos = lib_at.rx().search(text).start() if lib_at is not None and not lib_at.fallback else len(text)  # type: ignore[union-attr]
     if who is not None and who[1] <= lib_pos and not ACT_OF_VIOLENCE.search(text):
         got = await photography.library_photo(who[0], transport=transport, records=records)
         if got is not None:
@@ -920,13 +927,14 @@ async def picture(ev: Any, *, used: set[str] | None = None, transport: Any = Non
     if b.cls in ("conflict", "disaster"):  # the event itself, dated, or nothing
         got = await find_photo(ev, used=used, transport=transport, panel=False, records=records)
         return _photo_out(got, base, platform) if got is not None else text_only(base, f"no dated photograph of this {b.cls}")
-    text = f"{ev.headline} {ev.title}"
     person = person_subject(ev)
     lib = photography.subject_of(text)
-    if person and not (lib and lib.rx().search(text).start() < text.find(person.split()[-1])):
+    if person and not (lib and not lib.fallback and lib.rx().search(text).start() < text.find(person.split()[-1])):
         got = await find_photo(ev, used=used, transport=transport, panel=False, records=records)  # the person first in its plans
         if got is not None:
             return _photo_out(got, base, platform)
+    if lib is not None and lib.key in photography.PORTRAITS and ACT_OF_VIOLENCE.search(text):
+        lib = None  # a company shown by its chief's portrait: never on a story of violence (validation.audit_image's rule, applied before)
     if lib is not None:
         got = await photography.library_photo(lib, transport=transport, records=records)
         if got is not None:

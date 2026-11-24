@@ -66,7 +66,10 @@ CONFLICT = _rx(r"(?<![-\w])(?<!trade )(?<!price )(?<!bidding )(?<!talent )(?<!cu
 # of violence itself: a strike, an attack, a missile, casualties.
 MARKET_CONSEQUENCE = _rx(r"\b(prices?|markets?|stocks?|shares|equities|bets|odds|rate (?:hikes?|cuts?)|yields?|bonds?|basis points|bps|"
                          r"inflation|ipos?|investors?|traders?|earnings|futures|sell-?offs?|rout|rall(?:y|ies|ied)|soar\w*|surg\w*|"
-                         r"slump\w*|tumbl\w*|plung\w*|demand|supply|exports?|imports?|costs?)\b")
+                         r"slump\w*|tumbl\w*|plung\w*|demand|supply|exports?|imports?|costs?|"
+                         # 2026-11-24 audit: "Oil gains on Iran war worries" and "Iran war set to hike UK energy bills" are about a market
+                         r"oil|crude|brent|wti|gold|silver|copper|wheat|grains?|lng|natural gas|bitcoin|crypto|dollar|rouble|ruble|"
+                         r"currenc(?:y|ies)|energy bills)\b")
 VIOLENT_ACT = _rx(r"\b(killed|kills? \d|kills? (?:at least|dozens|hundreds|thousands|scores|civilians|people|soldiers|children)|"
                   r"\d[\d,]* (?:dead|killed|wounded|injured)|deaths|casualt(?:y|ies)|struck|strikes? (?:on|against|in|at)|air ?strikes?|"
                   r"attack(?:s|ed)? (?:on|against)|missiles?|shelling|bombard\w*|explosions?|blasts?|bomb(?:s|ed|ing)?|invasion|invad\w*|"
@@ -276,6 +279,14 @@ def vision_config(settings: Any = None) -> tuple[str, str, str]:
     if not key or not model:
         return "", "", "the image check is on but has no newsdesk_vision_api_key or model"
     return key, model, ""
+
+
+def can_look(settings: Any = None) -> bool:
+    """Whether the vision check can look at a photo here (switched on, keyed, with a model). Off: library photos or no photo."""
+    try:
+        return bool(vision_config(settings)[0])
+    except Exception:  # noqa: BLE001
+        return False
 
 
 VISION_PROMPT = """You are the photo editor of a financial breaking-news channel. A post will carry the attached image.
