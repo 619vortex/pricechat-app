@@ -1110,6 +1110,14 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         JobSpec("pokemon.sync", "Pokémon data sync", "Import sales / prices / population from connected, licensed Pokémon data providers",
                 s.job_pokemon_sync_seconds, pokemon_sync, initial_delay_seconds=900, timeout_seconds=600),
     ]
+    if s.intel_enabled:  # Terminal Intelligence Engine channel: OFF by default, and then not even registered (docs/intelligence/)
+        async def intel_tick(ctx: JobContext) -> dict[str, Any]:
+            from app.intel import router as intel_router
+
+            return await intel_router.tick(ctx.db, ctx.now, s)
+
+        specs.append(JobSpec("intel.tick", "Intelligence: PC/cloud router", "Expire the PC worker's leases and answer what it didn't (Claude under the daily AI cap, else today's rules). Analysis only: never publishes",
+                             s.intel_tick_seconds, intel_tick, initial_delay_seconds=30, timeout_seconds=300))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs
