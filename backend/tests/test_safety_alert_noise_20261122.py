@@ -98,13 +98,29 @@ async def bad_prices(db: Session, subjects: list[str], start: datetime = NOW) ->
 async def test_market_posts_resumed_still_trip_the_stop_on_bad_price_data_and_tell_the_owner(db: Session, told: list[tuple[str, str]]) -> None:
     row = desk(db, {"market_pause": False})  # the owner resumed market posts
     assert not events.market_paused(db)
-    await bad_prices(db, ["^GSPC", "GC=F", "BTC-USD"])  # three different price figures that can't be believed
+    await bad_prices(db, ["^GSPC", "^IXIC", "^DJI"])  # three different index figures that can't be believed
     db.refresh(row)
-    assert row.state["market_pause"] is True and row.state["market_pause_reason"].startswith("automatic: 3 implausible")
-    assert events.market_paused(db)
+    # 2026-11-24: scoped to the class (indices); the owner's switch, crypto, stocks and commodities stay on
+    assert row.state["market_pause"] is False and row.state["class_pause"]["index"]["reason"].startswith("automatic: 3 implausible")
+    assert not events.market_paused(db) and set(row.state["class_pause"]) == {"index"}
     assert [k for k, _ in told].count("newsdesk:safety:stop") == 1 and any("SAFETY STOP" in t for _, t in told)
-    await bad_prices(db, ["SI=F", "CL=F", "^IXIC"], NOW + timedelta(minutes=15))  # now paused: no second stop
+    from app.models.newsdesk import NdEvent
+
+    idx = NdEvent(key="i", kind="market", title="t", headline="h", topic="move", facts={"symbol": "^GSPC", "two_sources": True})
+    gold = NdEvent(key="g", kind="market", title="t", headline="h", topic="move", facts={"symbol": "GC=F", "two_sources": True})
+    assert "index market posts are paused" in events.held_market(db, idx) and events.held_market(db, gold) == ""
+    await bad_prices(db, ["^RUT", "^VIX", "^FTSE"], NOW + timedelta(minutes=15))  # indices already paused: no second stop
     assert [k for k, _ in told].count("newsdesk:safety:stop") == 1
+
+
+async def test_one_bad_figure_per_class_pauses_nothing_but_a_broad_failure_pauses_every_class_involved(db: Session, told: list[tuple[str, str]]) -> None:
+    row = desk(db, {"market_pause": False})
+    await bad_prices(db, ["^GSPC", "GC=F", "BTC-USD"])  # one problem in each of three classes: each figure is held, nothing is paused
+    db.refresh(row)
+    assert not row.state.get("class_pause") and "newsdesk:safety:stop" not in [k for k, _ in told]
+    await bad_prices(db, ["SI=F", "ETH-USD", "NVDA"], NOW + timedelta(minutes=10))  # six across classes within the hour: the feed is suspect
+    db.refresh(row)
+    assert set(row.state["class_pause"]) == {"index", "commodity", "crypto", "stock"} and row.state["market_pause"] is False
 
 
 async def test_one_figure_reread_every_pass_is_one_anomaly_and_trips_nothing(db: Session, told: list[tuple[str, str]]) -> None:
@@ -136,6 +152,27 @@ async def test_bad_liquidation_data_pauses_liquidation_posts_never_price_news(db
 async def test_with_an_unpaused_default_an_unset_switch_counts_as_on(db: Session, told: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(events, "MARKET_PAUSE_DEFAULT", False)  # the same rule as events.market_paused, whatever the default
     row = desk(db, {})
-    await bad_prices(db, ["^GSPC", "GC=F", "BTC-USD"])
+    await bad_prices(db, ["BTC-USD", "ETH-USD", "SOL-USD"])
     db.refresh(row)
-    assert row.state["market_pause"] is True and [k for k, _ in told].count("newsdesk:safety:stop") == 1
+    assert set(row.state["class_pause"]) == {"crypto"} and [k for k, _ in told].count("newsdesk:safety:stop") == 1
+
+
+async def test_the_old_automatic_market_pause_moves_to_the_scope_its_anomalies_justify(db: Session) -> None:
+    # production 2026-11-22 09:35 UTC: "automatic: 3 implausible or contradicted figures" from PIEVERSE liquidation readings held every
+    # market post until 11-24 (the 11-23 US rally never went out). On the first pass it becomes a liquidation pause only.
+    at = (NOW - timedelta(days=2)).isoformat()
+    liq = [{"kind": "implausible_liquidations", "subject": "PIEVERSE", "why": "w", "at": at}] * 3
+    row = desk(db, {"market_pause": True, "market_pause_reason": "automatic: 3 implausible or contradicted figures within 60 minutes",
+                    "market_pause_at": at, "anomalies": liq})
+    assert safety.migrate_pause(db, NOW) == "liquidation posts"
+    db.refresh(row)
+    assert row.state["market_pause"] is False and row.state["liq_pause"] is True and not row.state.get("class_pause")
+    assert row.state["pause_migrated"]["from"].startswith("automatic") and not events.market_paused(db)
+    assert safety.migrate_pause(db, NOW) == ""  # once
+
+
+async def test_the_owners_own_market_pause_is_never_moved(db: Session) -> None:
+    row = desk(db, {"market_pause": True, "market_pause_reason": "paused by the owner"})
+    assert safety.migrate_pause(db, NOW) == ""
+    db.refresh(row)
+    assert row.state["market_pause"] is True and events.market_paused(db)

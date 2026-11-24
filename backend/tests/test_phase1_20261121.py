@@ -89,12 +89,13 @@ async def test_held_figures_are_recorded_and_three_in_an_hour_pause_market_posts
         safety.note("implausible_move", f"SYM{i}", "a broken bar", change=-99.0)
         await safety.settle(db, NOW + timedelta(minutes=i * 10))
     db.refresh(desk)
-    assert desk.state["market_pause"] is True and desk.state["market_pause_reason"].startswith("automatic: 3 implausible")
-    assert len(desk.state["anomalies"]) == 3 and events.market_paused(db)
+    # 2026-11-24: scoped to the asset class the figures came from (unknown symbols are stocks); the owner's market_pause stays off
+    assert desk.state["market_pause"] is False and desk.state["class_pause"]["stock"]["reason"].startswith("automatic: 3 implausible")
+    assert len(desk.state["anomalies"]) == 3 and not events.market_paused(db)
     assert any(k == "newsdesk:safety:stop" and "SAFETY STOP" in t for k, t in told)
     assert sum(1 for k, _ in told if k.startswith("newsdesk:safety:implausible_move")) == 3
     out = engine.settings_out(desk)
-    assert out["market_pause"] is True and out["market_pause_reason"].startswith("automatic") and len(out["held_figures"]) == 3
+    assert out["market_pause"] is False and set(out["class_pause"]) == {"stock"} and len(out["held_figures"]) == 3
 
 
 def test_two_held_figures_alone_never_stop_anything(db: Session) -> None:

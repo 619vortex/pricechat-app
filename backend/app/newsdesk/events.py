@@ -464,6 +464,7 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
                  market: Any = None, second_opinion: Any = None, desk_state: dict[str, Any] | None = None, liquidations: bool = True,
                  daily: dict[str, Any] | None = None) -> dict[str, Any]:
     """One pass of the desk. Safe to run from both lanes: event keys are unique and release is one row at a time."""
+    safety.migrate_pause(db, now)  # once: the old unscoped automatic market pause moves to the scope its anomalies justify (2026-11-24)
     p = policy(desk_state)
     adj = engagement.adjustments(db, now)
     recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - TRACK)))
@@ -1782,8 +1783,21 @@ def held_market(db: Session, ev: NdEvent) -> str:
         return ""
     if market_paused(db):
         return "market-data posts are paused"
-    if liquidation_post(ev) and liquidations_paused(db):
-        return "liquidation posts are paused (liquidation data held as implausible)"
+    if liquidation_post(ev):
+        if liquidations_paused(db):
+            return "liquidation posts are paused (liquidation data held as implausible)"
+    else:  # 2026-11-24: a price-data safety stop holds only its own asset class (state.class_pause), never liquidation-paused or other classes
+        from app.models.newsdesk import NdSettings
+
+        s = db.get(NdSettings, 1)
+        state = (s.state or {}) if s is not None else {}
+        if state.get("class_pause"):
+            f = ev.facts or {}
+            symbols = [str(f.get("symbol") or "")] + [str(x.get("symbol") or "") for x in (f.get("figures") or []) if isinstance(x, dict)]
+            for sym in [x for x in symbols if x and x != "CRYPTO"]:
+                why = safety.class_paused(state, sym)
+                if why:
+                    return why
     if ev.kind in ("market", "update") and not liquidation_post(ev) and (ev.facts or {}).get("two_sources") is False:
         # owner, 2026-11-23: "No automatic major-move publishing without reliable verification"
         return f"not verified by a second market ({str((ev.facts or {}).get('verified') or 'one price source')[:120]}): a measured move goes out only when two markets agree"

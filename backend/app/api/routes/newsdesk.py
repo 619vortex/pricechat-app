@@ -66,6 +66,7 @@ class SettingsInput(StrictInput):
     kill_switch: bool | None = None
     market_pause: bool | None = None  # no desk-measured market post (moves, data posts, market checks, liquidations) released or delivered
     liq_pause: bool | None = None  # liquidation posts only (the safety stop sets it on liquidation-data problems; price news goes on)
+    class_pause_clear: list[Literal["crypto", "index", "stock", "commodity", "all"]] | None = None  # resume asset classes the safety stop paused
     resume: bool | None = None
     target_per_day: int | None = Field(None, ge=1, le=48)
     max_breaking_per_day: int | None = Field(None, ge=0, le=24)
@@ -113,6 +114,13 @@ def update(payload: SettingsInput, db: DbSession, runtime: Runtime) -> dict[str,
             state["breaker_reset_at"] = utcnow().isoformat()
             state.pop("liq_pause_reason", None)
             state.pop("liq_pause_at", None)
+        s.state = state
+    if "class_pause_clear" in data:  # 2026-11-24: resume asset classes a price-data safety stop paused; anomalies count afresh from now
+        clear = set(data.pop("class_pause_clear") or [])
+        state = dict(s.state or {})
+        classes = dict(state.get("class_pause") or {})
+        state["class_pause"] = {} if "all" in clear else {k: v for k, v in classes.items() if k not in clear}
+        state["breaker_reset_at"] = utcnow().isoformat()
         s.state = state
     if "categories" in data:
         data["categories"] = {c: bool(data["categories"].get(c, False)) for c in sources.CATEGORIES}

@@ -189,9 +189,65 @@ def _liq_implausible(db: Session, coin: str, total: float, since_ms: int) -> str
         hours[int(t) // 3_600_000] = hours.get(int(t) // 3_600_000, 0.0) + float(usd or 0)
     history = [v for v in hours.values() if v > 0]
     why = safety.liquidation_problem(coin, total, history)
-    if not why or "ceiling" in why:
-        return why  # believed, or above the absolute ceiling (no market context changes that)
-    return safety.liquidation_problem(coin, total, history, hour_market(coin, since_ms))
+    if "ceiling" in why:
+        return why  # above the absolute ceiling: no market context changes that
+    # 2026-11-24: always against the same contract's hour on a recorded venue (one read per coin-hour, cached), so a unit error is caught
+    # even for a coin with a short history, and a thin coin's real flush isn't held for being "N times its typical hour"
+    market = venue_hour_market(coin, since_ms) or hour_market(coin, since_ms)
+    return safety.liquidation_problem(coin, total, history, market) if market else why
+
+
+_VENUE_MARKET: dict[tuple[str, int], dict[str, Any] | None] = {}  # (coin, hour) -> the same contract's hour on OKX
+
+
+def venue_hour_market(coin: str, since_ms: int, fetch: Any = None) -> dict[str, Any] | None:
+    """The hour of a liquidation flush on the SAME contract at a venue whose liquidations we record: OKX's {coin}-USDT-SWAP (it lists the
+    crypto, stock and metal perpetuals Binance and Bybit liquidate: NVDA, XAG, XAU, SOXS, SNDK...; production on Railway can read OKX,
+    not Binance). {range_ratio, volume_ratio, volume_usd, venue}: the two hourly candles the 60 minutes span, against every two-candle
+    window of the week before, by median; volume_usd is the quote (USDT) value traded. None when OKX can't be read or doesn't list it."""
+    import statistics
+
+    key = (coin, since_ms // 3_600_000)
+    if key in _VENUE_MARKET:
+        return _VENUE_MARKET[key]
+    out: dict[str, Any] | None = None
+    try:
+        if fetch is None:
+            def fetch(inst: str, after_ms: int) -> list[list[str]]:
+                with httpx.Client(timeout=6, headers={"User-Agent": "PriceChat/1.0 (+https://pricechat.live)"}) as c:
+                    r = c.get("https://www.okx.com/api/v5/market/history-candles",
+                              params={"instId": inst, "bar": "1H", "after": str(after_ms), "limit": "100"})
+                    r.raise_for_status()
+                    body = r.json()
+                    return list(body.get("data") or []) if str(body.get("code")) == "0" else []
+        inst, end = f"{coin}-USDT-SWAP", since_ms + 2 * 3_600_000 + 1
+        rows: list[list[str]] = []
+        after = end
+        for _ in range(2):  # 200 hours: the week before plus the flush
+            page = fetch(inst, after)
+            if not page:
+                break
+            rows += page
+            after = int(page[-1][0])
+        # OKX candle: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm], newest first
+        bars = sorted({int(b[0]): (int(b[0]), float(b[2]), float(b[3]), float(b[1]), float(b[4]), float(b[7])) for b in rows
+                       if int(b[0]) <= since_ms + 3_600_000}.values())
+        if len(bars) >= 26:
+            def window(a: tuple, b: tuple) -> tuple[float, float]:
+                hi, lo, op = max(a[1], b[1]), min(a[2], b[2]), a[3]
+                return ((hi - lo) / op if op > 0 else 0.0), a[5] + b[5]
+            now_rng, now_vol = window(bars[-2], bars[-1])
+            past = [window(bars[i], bars[i + 1]) for i in range(max(0, len(bars) - 170), len(bars) - 3)]
+            mr, mv = statistics.median(r for r, _ in past), statistics.median(v for _, v in past)
+            out = {"range_ratio": now_rng / mr if mr > 0 else 0.0, "volume_ratio": now_vol / mv if mv > 0 else 0.0, "volume_usd": now_vol,
+                   "venue": "OKX"}
+    except Exception as e:  # noqa: BLE001 - unreadable: Hyperliquid, then the history rule alone
+        logger.info("liquidations: OKX candles for %s unreadable (%s)", coin, type(e).__name__)
+        out = None
+    _VENUE_MARKET[key] = out
+    while len(_VENUE_MARKET) > 500:
+        _VENUE_MARKET.pop(next(iter(_VENUE_MARKET)))
+    return out
 
 
 def liquidation_topics(db: Session, now: datetime, listed: set[str] | None = None) -> list[Any]:

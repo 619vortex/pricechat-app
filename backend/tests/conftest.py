@@ -463,6 +463,16 @@ def _no_second_market_reads(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_liquidation_market_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TEST FIXTURE: a liquidation hour's market context (OKX's same contract, then Hyperliquid) is never read over the network in tests:
+    unreadable, so only the ceilings and the history rule apply. Tests of the market rule pass their own fetch or set these."""
+    from app.brand_manager import sources as bm_sources
+
+    monkeypatch.setattr(bm_sources, "venue_hour_market", lambda *_a, **_k: None)
+    monkeypatch.setattr(bm_sources, "hour_market", lambda *_a, **_k: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_learned_casing(monkeypatch: pytest.MonkeyPatch) -> None:
     """TEST FIXTURE: the casing vocabulary the desk learns from its feeds (app/newsdesk/wire.learn_vocabulary) starts empty in every test."""
     from app.newsdesk import wire

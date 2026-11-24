@@ -286,7 +286,9 @@ async def xyz_prices(transport: Any = None) -> dict[str, tuple[float, float]]:
         r = await c.post("https://api.hyperliquid.xyz/info", json={"type": "metaAndAssetCtxs", "dex": "xyz"})
         r.raise_for_status()
         meta, ctxs = r.json()
-    out = {str(a.get("name")): (float(x.get("oraclePx") or 0), float(x.get("markPx") or 0)) for a, x in zip(meta["universe"], ctxs)}
+    # (oracle, mark, price 24 hours ago): the third lets a move be compared like for like (FUTURES_BASIS below)
+    out = {str(a.get("name")): (float(x.get("oraclePx") or 0), float(x.get("markPx") or 0), float(x.get("prevDayPx") or 0))
+           for a, x in zip(meta["universe"], ctxs)}
     _xyz = (time.monotonic(), out)
     return out
 
@@ -301,6 +303,14 @@ async def xyz_prices(transport: Any = None) -> dict[str, tuple[float, float]]:
 # and COMEX were 1.63% apart (refused at a flat 1.5%, production 2026-11-23): the tolerance grows by this share of the move. A unit error or
 # a wrong instrument is still many times outside it.
 MOVE_ALLOWANCE = 0.25
+# 2026-11-24: comparing LEVELS of a perpetual's oracle and a COMEX/NYMEX futures contract measures the futures basis, not the data: on 11-23
+# copper's trade.xyz oracle and Yahoo's HG=F were 2.6-3.0% apart on every pass and every copper move was held as "two markets disagreeing".
+# Equivalent instruments are compared on what they share: for a futures symbol (Yahoo "=F") the level only has to be the same instrument
+# within FUTURES_BASIS (a unit error or a wrong market is far outside it), and a day-sized move (|change| >= MOVE_CHECK_MIN) must show on
+# trade.xyz too: the same direction and at least MOVE_CONFIRM_SHARE of its size over trade.xyz's own last 24 hours.
+FUTURES_BASIS = 5.0
+MOVE_CHECK_MIN = 2.0
+MOVE_CONFIRM_SHARE = 0.33
 
 
 async def call_second(fn: Any, item: dict[str, Any], price: float, market: Any = None, change: float = 0.0) -> tuple[bool, str]:
@@ -339,8 +349,21 @@ async def second_opinion(item: dict[str, Any], price: float, market: Any = None,
             return False, "not verified: no trade.xyz price"
         other = got[0]
         diff = abs(other - price) / price * 100
-        tol = XYZ_TOLERANCE.get(str(item.get("group") or ""), 1.5) + allowance
-        return diff <= tol, f"Hyperliquid trade.xyz {XYZ[symbol][4:]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart (tolerance {tol:.2f}%)"
+        futures = symbol.endswith("=F")
+        tol = (FUTURES_BASIS if futures else XYZ_TOLERANCE.get(str(item.get("group") or ""), 1.5)) + allowance
+        said = f"Hyperliquid trade.xyz {XYZ[symbol][4:]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart (tolerance {tol:.2f}%)"
+        if diff > tol:
+            return False, said
+        prev = float(got[2]) if len(got) > 2 and got[2] else 0.0
+        if futures and change is not None and abs(float(change)) >= MOVE_CHECK_MIN:
+            if prev <= 0:
+                return False, f"not verified: trade.xyz {XYZ[symbol][4:]} has no 24-hour price to compare the {float(change):+.2f}% move with"
+            theirs = (other / prev - 1) * 100
+            if theirs * float(change) <= 0 or abs(theirs) < MOVE_CONFIRM_SHARE * abs(float(change)):
+                return False, (f"Hyperliquid trade.xyz {XYZ[symbol][4:]} moved {theirs:+.2f}% in 24 hours vs Yahoo {float(change):+.2f}%: "
+                               f"the moves are apart (same contract family, basis {diff:.2f}%)")
+            return True, f"{said}; trade.xyz moved {theirs:+.2f}% in 24 hours vs Yahoo {float(change):+.2f}% (futures basis allowed)"
+        return True, said
     if not name:
         return True, "one price source (Yahoo Finance)"
     try:
