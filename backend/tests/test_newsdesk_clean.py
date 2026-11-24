@@ -193,6 +193,7 @@ def sees(monkeypatch: pytest.MonkeyPatch) -> list[str]:
                 "what": "the subject, clearly"}
 
     monkeypatch.setattr(editor, "vision", vision)
+    monkeypatch.setattr(editor, "can_look", lambda settings=None: True)  # switched on and keyed: searched photos may be looked at
     return looked
 
 

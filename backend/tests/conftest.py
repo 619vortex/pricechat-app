@@ -494,6 +494,9 @@ def _no_library_network(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.newsdesk import datapost
 
     datapost._last.clear()
+    from app.newsdesk import photos
+
+    monkeypatch.setattr(photos, "_openverse", {"until": 0.0, "why": ""})  # one test's Openverse failure never pauses it for the next
 
 
 @pytest.fixture(autouse=True)

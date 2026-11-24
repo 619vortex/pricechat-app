@@ -157,13 +157,13 @@ def audit_image(headline: str, image: bytes | None, meta: dict[str, Any], platfo
     elif len(credit) > CREDIT_MAX or not clean.drawable(credit):
         problems.append(f"credit too long or undrawable for a phone ({len(credit)} characters)")
     if lib:
-        people = {s.key for s in photography.PEOPLE} | {p[0].key for p in photography.PAIRS}
+        people = {s.key for s in photography.PEOPLE} | {p[0].key for p in photography.PAIRS} | {t[0].key for t in photography.TRIOS}
         named = photography.people_of(headline)
         subject = photography.subject_of(headline)
         expected = {k for k in ((named[0].key if named else ""), (subject.key if subject else "")) if k}
         if expected and lib not in expected and not meta.get("symbol_subject"):
             problems.append(f"off-subject: the {lib} photo for a story about {', '.join(sorted(expected))}")
-        if lib in people or lib == "binance":
+        if lib in people or lib in photography.PORTRAITS:
             if clean.ACT_OF_VIOLENCE.search(headline or ""):
                 problems.append(f"a portrait ({lib}) on a story of violence")
             if not str(meta.get("who") or ""):
@@ -176,7 +176,10 @@ def record_image(db: Session, platform: str, ref: str, ev: Any, image: bytes | N
     try:
         if not image or _row(db, "image", f"{platform}:{ref}") is not None:
             return
-        headline = str(getattr(ev, "headline", "") or getattr(ev, "title", "") or "")
+        from app.newsdesk import photography
+
+        # the words the picture was chosen from (a headline in capitals is read after the source's title: photography.story_text)
+        headline = photography.story_text(str(getattr(ev, "headline", "") or ""), str(getattr(ev, "title", "") or ""))
         problems = audit_image(headline, image, meta, platform)
         data = {"platform": platform, "ref": ref, "event": getattr(ev, "id", None), "headline": headline[:300], "link": link,
                 "kind": meta.get("kind"), "library": meta.get("library"), "title": meta.get("title"), "credit": meta.get("credit_line"),
