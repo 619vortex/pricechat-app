@@ -465,6 +465,10 @@ async def decide(db: Session, now: datetime, *, quotes: dict[str, sources.Quote]
                  daily: dict[str, Any] | None = None) -> dict[str, Any]:
     """One pass of the desk. Safe to run from both lanes: event keys are unique and release is one row at a time."""
     safety.migrate_pause(db, now)  # once: the old unscoped automatic market pause moves to the scope its anomalies justify (2026-11-24)
+    try:  # established wars in the desk's own record (importance.established_wars): strikes inside them are significant, not major
+        importance.WARS = importance.established_wars(newsworthy.told(db, now), now)
+    except Exception as e:  # noqa: BLE001 - without it only Russia-Ukraine counts as established
+        logger.info("newsdesk events: established wars unreadable (%s)", type(e).__name__)
     p = policy(desk_state)
     adj = engagement.adjustments(db, now)
     recent = list(db.scalars(select(NdEvent).where(NdEvent.created_at >= now - TRACK)))

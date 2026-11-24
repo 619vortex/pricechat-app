@@ -201,6 +201,8 @@ WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eigh
 
 def deaths_of(text: str) -> int:
     t = text or ""
+    # 2026-11-24: "Market rout kills 50 basis points December Fed rate hike bets" is not 50 deaths: a number followed by a unit is a quantity
+    t = re.sub(r"\b\d[\d,.]*\s*(?:basis points?|bps|bp|points?|percent|per cent|%|jobs|seats|votes|million|billion|bn|m)\b", " ", t, flags=re.I)
     for w, n in sorted(WORDS.items(), key=lambda x: -len(x[0])):
         t = re.sub(rf"\b{w}\b", str(n), t, flags=re.I)
     return max((int(g.replace(",", "")) for m in DEATHS.finditer(t) for g in m.groups() if g), default=0)
@@ -263,6 +265,11 @@ def same_event(a: Event, b: Event, hours_apart: float | None = None) -> bool:
         own_b = {x[:3] for x in b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}
         if own_a and own_b and not (own_a & own_b):
             return False  # both name a specific place or thing, and none in common ("FINLAND" and "FINNISH" are one: first letters)
+        if bool(own_a) != bool(own_b):
+            # 2026-11-24: only one names a place or target ("drone attack hits Russian ship in Benghazi" vs "At least 4 killed in Russian
+            # drone attacks on Kyiv region"): one shared belligerent is not one event; most of the words must be shared too
+            if not (a.title_stems and b.title_stems and len(a.title_stems & b.title_stems) / len(a.title_stems | b.title_stems) >= 0.3):
+                return False
         fire_a, fire_b = bool(HARD_CONFLICT.search(a.title or "")), bool(HARD_CONFLICT.search(b.title or ""))
         if not (fire_a and fire_b):
             return False
