@@ -141,3 +141,18 @@ Correction to our 21 Nov post: Binance BTCUSD_PERP long liquidations in that hou
 
 Raw files added today: `raw/verify_20261124_*` (dapi klines and exchangeInfo excerpt, post-148 klines, endpoint probe log, binance.vision
 listing, channel scan).
+
+## 7. For approval (2026-11-24)
+
+Two historical corrections, ready word for word. Nothing is sent by Price Chat: the owner publishes each by hand after approving it.
+
+| # | Post | What | Text | Approve |
+|---|---|---|---|---|
+| 1 | Telegram 204 (2026-11-21 04:04 UTC), $10.1B | Edit the caption | A | ☐ |
+| 1 | Telegram 204 | Reply under it (also names 148) | B | ☐ |
+| 2 | Telegram 148 (2026-11-09 05:11 UTC), $17M | Edit the caption | C | ☐ |
+| - | X | Only if a copy of 204 or 148 is found on @pricechat (204 never went to X per the logs; 148 was in X dry run) | D | ☐ |
+
+Separately, the independent check found two other published figures wrong (docs/newsdesk/2026-11-24-market-verification.md): gold,
+Telegram 194 + X ("-3.6%, biggest one-day drop since March": a 20:00 UTC price; gold settled -3.16% and fell more on 2026-06-10), and
+silver, X post 880 ("-6.7% so far today" measured from a day-old close; about -5.1%). No correction is drafted for those: the owner decides.
