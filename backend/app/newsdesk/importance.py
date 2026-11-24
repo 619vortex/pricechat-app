@@ -692,6 +692,8 @@ def _canon(symbol: str) -> str:
 def _judge_move(head: str, f: dict[str, Any], age_min: float | None) -> Decision:
     """A move the desk measured itself (app/newsdesk/moves, cross-checked upstream). Its size against the asset's own history
     (app/newsdesk/urgency) is the magnitude. No cause is ever added here: a cause is only ever told from a corroborated story."""
+    if f.get("kind") in ("milestone", "high", "low"):
+        return _judge_milestone(head, f, age_min)
     level = str((f.get("urgency") or {}).get("level") or "")
     context = str((f.get("urgency") or {}).get("why") or "")
     change = abs(float(f.get("change_pct") or 0)) or nw.pct_of(head)  # a data post states its move in its headline
@@ -734,6 +736,44 @@ def _judge_move(head: str, f: dict[str, Any], age_min: float | None) -> Decision
     if tier == NOISE:
         return Decision(NOISE, score, f"a routine move: {', '.join(found)} (score {score:.0f}; {detail})", found, parts, True)
     return Decision(tier, score, f"{tier}: {', '.join(found)} (score {score:.0f}; {detail})", found, parts, True)
+
+
+def _judge_milestone(head: str, f: dict[str, Any], age_min: float | None) -> Decision:
+    """A price level or a 52-week extreme (owner, 2026-11-24). What it means, not the size of the last half hour's move (stored as 1%,
+    which judged bitcoin breaking below $60,000 on 2026-11-20 a routine move): a round number the price hasn't been on the other side of for
+    months is major for a core market; a level crossed again within weeks is chop, not news.
+    `facts.milestone` (moves.milestone_context): round, since_days (None = not in the whole record), span_days, record."""
+    ms = f.get("milestone") or {}
+    assets = {_canon(a) for a in (f.get("assets") or [])}
+    core = bool(assets & MARKET_CORE)
+    kind = str(f.get("kind") or "")
+    since = ms.get("since_days")
+    never = bool(ms) and since is None and int(ms.get("span_days") or 0) >= 365
+    long_ago = never or (since is not None and since >= 180)
+    if not ms:  # no daily record to read: a round number is a slot story at most, anything else waits
+        size, why = (16.0, "a round level, its history unread") if kind == "milestone" and f.get("round_level") else (6.0, "a level, its history unread")
+    elif ms.get("record"):
+        size, why = 34.0, f"past every daily close since {ms.get('record_from')}"
+    elif kind in ("high", "low"):
+        size, why = (22.0 if long_ago else 16.0), f"a 52-week {kind}" + (f", last there {since} days ago" if since is not None else "")
+    elif ms.get("round"):
+        size = 34.0 if long_ago else 22.0 if since is not None and since >= 30 else 8.0
+        why = "a round level" + (" not crossed in the whole record" if never else f", last on that side {since} days ago" if since is not None else "")
+    else:
+        size = 22.0 if long_ago else 16.0 if since is not None and since >= 60 else 6.0
+        why = "a level" + (f", last on that side {since} days ago" if since is not None else "")
+    if not core:
+        size = min(size, 22.0)  # a single stock's or an alt-coin's level is a slot story, never breaking on its own
+    parts = {"size": size, "reach": 8.0 if core else 2.0, "sources": 8.0}
+    age = float(age_min or 0)
+    if age > 40:
+        parts["age"] = -min(20.0, (age - 40) / 10 * 2.0)
+    score = BASE + sum(parts.values())
+    tier = tier_of(score)
+    detail = ", ".join(f"{k} {v:+.0f}" for k, v in parts.items())
+    if size < 14.0:
+        return Decision(NOISE, score, f"a routine level: {why}: crossed back and forth within weeks is not news (score {score:.0f}; {detail})", [why], parts, True)
+    return Decision(tier, score, f"{tier}: {why} (score {score:.0f}; {detail})", [why], parts, True)
 
 
 def judge_event(ev: Any, age_min: float | None = None) -> Decision:

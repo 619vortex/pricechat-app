@@ -813,7 +813,7 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
     else:
         verified = "one price source (Yahoo Finance)" if not m.item.get("hl") else "one price source (Yahoo Finance): no second opinion available"
     two = confirmed  # a second market compared and agreed (Hyperliquid, trade.xyz)
-    round_level = m.kind == "milestone" and m.level > 0 and (m.level / (m.item.get("step") or m.level)) % 10 == 0
+    round_level = m.kind == "milestone" and moves.is_round(m.symbol, m.level, moves.step_of(m.item))
     score = virality.market(kind=m.kind, group=str(m.item.get("group") or "stock"), ratio=m.ratio, two_sources=two, symbol_key=m.key, round_level=round_level,
                             engagement=_engagement_points(adj, "move"))
     # the move against the asset's own history (owner, 2026-11-20): its urgency, ranking points for the context, and the verified line
@@ -823,6 +823,10 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
         score.parts["context"] = u.points
         score.total = max(0, min(100, int(round(score.total + u.points))))
     extra = livedata.since_line(m, u) if u is not None else ""
+    # a level or a 52-week extreme: what it means in the asset's own record (owner, 2026-11-24: intelligent price milestones)
+    ms = moves.milestone_context(m, (daily or {}).get(m.symbol) or [], now) if m.kind in ("milestone", "high", "low") else {}
+    if ms:
+        extra = headline.milestone_line(m, ms)
     head = headline.market(m)
     told = livedata.market_told(m, head, extra)
     tk = moves.CASHTAG.get(m.symbol)
@@ -833,7 +837,7 @@ async def _offer_move(db: Session, m: moves.Move, recent: list[NdEvent], now: da
              "tickers": tickers, "falling": not m.up,
              "risk": False, "told": told, "spark": m.spark, "stat": f"{'+' if m.change > 0 else '-'}{abs(m.change):.1f}%" if m.kind in ("move", "wide") else writer_money(m),
              "published_at": m.as_of.isoformat(), "flag": "🇺🇸" if m.symbol == "US-STOCKS" else "", **({"urgency": u.out()} if u is not None else {}),
-             **livedata.move_facts(m, verified, extra)}
+             "round_level": round_level, **({"milestone": ms} if ms else {}), **livedata.move_facts(m, verified, extra)}
     url = f"https://finance.yahoo.com/quote/{m.symbol}" if m.symbol not in ("CRYPTO", "US-STOCKS") else "https://finance.yahoo.com/markets/"
     src = [{"name": "Yahoo Finance", "url": url, "at": m.as_of.isoformat()}]
     if live:

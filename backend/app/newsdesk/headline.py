@@ -52,6 +52,29 @@ def _money(item: dict, price: float) -> str:
     return writer.plain(price) if item.get("group") == "index" else writer.usd(price)
 
 
+def milestone_line(m: moves.Move, ctx: dict) -> str:
+    """The context a milestone post prints, from the daily closes (moves.milestone_context): only what the record shows."""
+    if not ctx:
+        return ""
+    name = str(m.item.get("name") or m.symbol)
+    side = "above" if ctx.get("up") else "below"
+    level = _money(m.item, float(ctx.get("level") or 0))
+    record_from = ctx.get("record_from") or ""
+    when = f"{int(record_from[8:10])} {_MONTHS[int(record_from[5:7]) - 1]} {record_from[:4]}" if len(record_from) == 10 else ""
+    if ctx.get("record") and when:
+        return f"{name} is {'higher' if ctx.get('up') else 'lower'} than at any daily close since {when}."
+    since = ctx.get("since") or ""
+    if not since and when:
+        return f"{name} has not closed {side} {level} since at least {when}."
+    if since:
+        d = f"{int(since[8:10])} {_MONTHS[int(since[5:7]) - 1]} {since[:4]}"
+        return f"{name} last closed {side} {level} on {d}."
+    return ""
+
+
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+
+
 def _price(item: dict, price: float) -> str:
     """A price as the market quotes it: an index level to the cent (22,810.57), a dollar price as money."""
     return writer.level(price) if item.get("group") == "index" else writer.usd(price)

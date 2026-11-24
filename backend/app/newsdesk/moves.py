@@ -235,9 +235,49 @@ def extreme(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | Non
     return None
 
 
+# Price milestones (owner, 2026-11-24: "significant Bitcoin and other asset price milestones"). `step`: a level the desk watches every this
+# much (the watchlist's own step wins); `ROUND`: the levels readers treat as round numbers ($60,000 bitcoin, $4,000 gold, S&P 7,000).
+# Production 2026-11-20 missed bitcoin breaking below $60,000: a crossing was stored as a 1% "move" and judged a routine one.
+DEFAULT_STEPS: dict[str, float] = {"BTC-USD": 5000, "ETH-USD": 500, "SOL-USD": 25, "XRP-USD": 0.5, "^GSPC": 250, "^IXIC": 1000, "^DJI": 1000,
+                                   "GC=F": 100, "SI=F": 5, "CL=F": 10, "BZ=F": 10, "HG=F": 0.5}
+ROUND: dict[str, float] = {"BTC-USD": 10000, "ETH-USD": 1000, "SOL-USD": 100, "XRP-USD": 1, "^GSPC": 1000, "^IXIC": 5000, "^DJI": 5000,
+                           "GC=F": 500, "SI=F": 10, "CL=F": 50, "BZ=F": 50, "HG=F": 1}
+
+
+def step_of(item: dict[str, Any]) -> float:
+    return float(item.get("step") or DEFAULT_STEPS.get(str(item.get("symbol") or ""), 0) or 0)
+
+
+def is_round(symbol: str, level: float, step: float) -> bool:
+    unit = ROUND.get(symbol) or (step * 10 if step else 0)
+    return bool(unit) and level > 0 and abs(level / unit - round(level / unit)) < 1e-9
+
+
+def milestone_context(m: Move, series: list[tuple[datetime, float]], now: datetime) -> dict[str, Any]:
+    """What a level means, from the asset's own daily closes (never a guess): whether it is a round number, when the price last closed on
+    the far side of it (`since`; empty = no close there in the whole record), how far back the record goes, and whether the price is past
+    every close in the record. Today's own bar is left out (it already holds today's price)."""
+    if m.kind not in ("milestone", "high", "low") or not series:
+        return {}
+    closes = [(t, c) for t, c in series if (now - (t if t.tzinfo else t.replace(tzinfo=now.tzinfo))).total_seconds() > 20 * 3600]
+    if len(closes) < 20:
+        return {}
+    up = m.up
+    level = m.level if m.kind == "milestone" else m.price
+    beyond = [t for t, c in closes if (c >= level if up else c <= level)]
+    first = closes[0][0]
+    ctx: dict[str, Any] = {
+        "level": level, "up": up, "round": m.kind == "milestone" and is_round(m.symbol, level, step_of(m.item)),
+        "since": beyond[-1].date().isoformat() if beyond else "", "since_days": (now.date() - beyond[-1].date()).days if beyond else None,
+        "record_from": first.date().isoformat(), "span_days": (now.date() - first.date()).days,
+        "record": (m.price > max(c for _, c in closes)) if up else (m.price < min(c for _, c in closes)),
+    }
+    return ctx
+
+
 def milestone(q: sources.Quote, item: dict[str, Any], now: datetime) -> Move | None:
     """A round level crossed in the last half hour and held by 0.5% (a price hovering on $50 isn't crossing it again and again)."""
-    step = item.get("step")
+    step = step_of(item)
     ts = now.timestamp()
     price, before = price_at(q, ts, tolerance=FRESH), price_at(q, ts - 1800, tolerance=900)
     if not step or not price or not before:
