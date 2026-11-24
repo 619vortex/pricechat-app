@@ -1100,7 +1100,23 @@ def review(db: Session, waiting: list[NdEvent], now: datetime, p: Policy, out: l
     return sorted(keep, key=order)
 
 
-MAJOR_PER_DAY = 6  # a hard ceiling on major breaking posts in 24 h (NdSettings.max_breaking_per_day's default): a flood guard, not a plan
+# Owner, 2026-11-24: "Do not impose an arbitrary daily limit on genuinely major breaking news." There is no daily count for MAJOR stories or
+# MAJOR market moves (it was 6 and 3 a day). What stays: the minimum gap between posts, the asset cooldown, the repeat check (one event, one
+# post) and a BURST guard, which is a malfunction detector, not a quota: more than MAJOR_BURST distinct majors released inside BURST_WINDOW
+# means a feed or a judgement is probably broken; the next one waits for a person and the owner is told.
+MAJOR_BURST = 4
+BURST_WINDOW = timedelta(minutes=60)
+MAJOR_PER_DAY = None  # removed 2026-11-24 (kept as a name for old imports)
+
+
+def major_burst(out: list[NdEvent], now: datetime) -> str:
+    """Why a major is held as a probable malfunction ("" = it isn't)."""
+    recent = [e for e in out if (e.facts or {}).get("major") or (e.facts or {}).get("market_major")]
+    recent = [e for e in recent if now - _utc(e.released_at, now) < BURST_WINDOW]
+    if len(recent) >= MAJOR_BURST:
+        return (f"{len(recent)} major posts in the last {int(BURST_WINDOW.total_seconds() // 60)} minutes: an unusual burst, held for a person "
+                "(a feed or the judgement may be broken)")
+    return ""
 
 
 def _release(db: Session, ev: NdEvent, d: "importance.Decision", now: datetime, slot_kind: str, why: str, extra: dict[str, Any] | None = None) -> NdEvent | None:
@@ -1189,7 +1205,7 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
             _note_breaking_miss(ev, f"{d.tier}, not major: it takes the next slot (only a verified major event breaks)", now)
             continue
         held = "" if gap_ok else f"under {int(p.min_gap.total_seconds() // 60)} minutes since the last post"
-        held = held or (f"{majors_today} major posts in 24 hours (the flood guard is {MAJOR_PER_DAY})" if majors_today >= MAJOR_PER_DAY else "")
+        held = held or major_burst(out, now)  # never a daily count (owner, 2026-11-24)
         if held:
             _note_breaking_miss(ev, held, now)
             importance.record(ev, d, "breaking", "waiting", now, f"{d.tier}, held from breaking: {held}")
@@ -1310,11 +1326,11 @@ def _release_market_major(db: Session, now: datetime, p: Policy, out: list[NdEve
     upcoming = next_slot(now, p)
     early = upcoming - now < p.breaking_before_slot and slot_filled(db, upcoming, p) is None
     closed = ""
-    taken = sum(1 for e in day if (e.facts or {}).get("market_major"))
-    if taken >= p.market_breaking_per_day:
-        closed = f"{taken} major market moves went out in 24 hours already (the most is {p.market_breaking_per_day}, major and significant together)"
-    elif last is not None and now - last < p.min_gap:
+    # 2026-11-24: no daily count for major moves (was market_breaking_per_day); one post per asset (the cooldown below), the gap and the burst guard
+    if last is not None and now - last < p.min_gap:
         closed = f"under {int(p.min_gap.total_seconds() // 60)} minutes since the last post"
+    else:
+        closed = major_burst(out, now)
     covered = editorial.coverage(db, now)
     for ev in sorted(majors, key=lambda e: (urgency_of(e) != urgency.MAJOR, -e.virality, e.id)):
         u = (ev.facts or {}).get("urgency") or {}
@@ -1483,9 +1499,16 @@ def note_skip(db: Session, now: datetime, p: Policy) -> None:
     row.state = {**(row.state or {}), "skipped_slots": dict(sorted(skips.items())[-24:])}
     # what the desk passed over, in the logs (2026-11-16: two overnight slots went empty and production had no record of why)
     waiting = list(db.scalars(select(NdEvent).where(NdEvent.status == "candidate")))
-    best = sorted(waiting, key=lambda e: (-e.virality, e.id))[:3]
+    # 2026-11-24: ranked by the editor's tier first (production 11-23 listed three high-virality refusals and never said why approved,
+    # lower-virality stories such as #1200 US sanctions on Iran were passed over), and an empty reason says which pause holds it
+    order = {"major": 0, "significant": 1, "notable": 2}
+    best = sorted(waiting, key=lambda e: (order.get(_tier(e), 3), -e.virality, e.id))[:6]
+
+    def _why(e: NdEvent) -> str:
+        return (e.why or held_market(db, e) or "no reason recorded")[:140]
+
     logger.info("newsdesk events: skipped the %s Dubai slot; best waiting: %s", slot_label(slot),
-                " | ".join(f"#{e.id} {int(e.virality)} {e.evidence} \"{(e.headline or e.title or '')[:70]}\": {(e.why or '')[:120]}" for e in best) or "none")
+                " | ".join(f"#{e.id} {_tier(e) or '-'} {int(e.virality)} {e.evidence} \"{(e.headline or e.title or '')[:70]}\": {_why(e)}" for e in best) or "none")
     # and why, for the owner alert when slots keep going empty (2026-11-22: every slot from 11-21 12:00 UTC was skipped and nobody was told)
     details = dict((row.state or {}).get("skip_details") or {})
     important = [e for e in waiting if _tier(e) in IMPORTANT]

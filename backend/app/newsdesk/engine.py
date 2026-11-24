@@ -513,6 +513,8 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             events.mark(ev, "x", "skipped", f"the {ev.category} category is off on X")
             continue
         cap = 10**6 if following else s.target_per_day + s.max_breaking_per_day  # following: Telegram's limits already decided it
+        if (ev.facts or {}).get("major") or (ev.facts or {}).get("market_major"):
+            cap = 10**6  # owner, 2026-11-24: no daily count on genuinely major news (the X spend guards still apply at the send)
         if ev.slot == "slot" and not following:  # the six scheduled slots are the plan: X's older 3-4 a day setting doesn't drop them
             cap = max(cap, len(events.policy(s.state or {}).slot_hours) + 1)  # +1: yesterday's same slot can still be inside a rolling 24 h
         sent = int(db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.x_status.in_(("dry_run", "published", "uncertain")), NdEvent.released_at >= now - timedelta(days=1))) or 0)

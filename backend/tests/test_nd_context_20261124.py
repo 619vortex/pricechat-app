@@ -74,3 +74,18 @@ def test_the_parts_of_a_headline() -> None:
     assert imp.structure("Yemen's Houthis claim attacks on Saudi oil refinery").claimed
     s = imp.structure("Nvidia reinstates Jensen Huang as CEO. Stock skyrockets 27%")
     assert "skyrockets 27%" in s.main and not s.context  # "as CEO" is not a background clause; two sentences, both reported
+
+
+def test_no_daily_count_on_major_news_only_a_burst_guard() -> None:
+    # owner, 2026-11-24: "Do not impose an arbitrary daily limit on genuinely major breaking news"
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from app.newsdesk import events
+
+    now = datetime(2026, 11, 23, 22, 0, tzinfo=timezone.utc)
+    spread = [SimpleNamespace(facts={"major": "x"}, released_at=now - timedelta(hours=2 * i + 1)) for i in range(10)]  # ten majors in a day
+    assert events.major_burst(spread, now) == ""
+    burst = [SimpleNamespace(facts={"major": "x"}, released_at=now - timedelta(minutes=10 * i + 5)) for i in range(4)]
+    assert "unusual burst" in events.major_burst(burst, now)
+    assert events.MAJOR_PER_DAY is None
