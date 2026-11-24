@@ -59,7 +59,8 @@ def test_a_measured_move_is_judged_against_its_own_asset_class() -> None:
 def test_only_exceptional_events_are_major() -> None:
     # owner, 2026-11-23: only a verified MAJOR event breaks; these are important but wait for the next slot
     assert imp.judge("Bybaz exchange says hackers drained $400 million from its hot wallet", outlets=2).tier == imp.SIGNIFICANT
-    assert imp.judge("Russian drone attack on Kharkiv kills three", outlets=2).tier == imp.SIGNIFICANT
+    # owner, 2026-11-24: a routine strike inside an established war, no consequence stated, is a slot filler (notable), never major
+    assert imp.judge("Russian drone attack on Kharkiv kills three", outlets=2).tier == imp.NOTABLE
     assert imp.judge("US jets strike IRGC missile launch site on Iran's Qeshm Island", outlets=2).tier == imp.MAJOR
 
 

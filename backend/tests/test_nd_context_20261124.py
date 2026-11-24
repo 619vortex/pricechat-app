@@ -26,7 +26,7 @@ CASES = [
     ("Yemen's Houthis claim attacks on Saudi oil refinery as Trump warns of new strikes", 2, {SIG}),
     # strikes inside an established war: the next slot, not breaking
     ("11 killed in Russian strike on Ukraine’s Dymer in Kyiv region", 2, {SIG}),
-    ("Ukrainian drones strike two Russian oil refineries and pumping station in overnight attack", 2, {SIG}),
+    ("Ukrainian drones strike two Russian oil refineries and pumping station in overnight attack", 2, {NOT}),  # routine war (owner 11-24)
     ("Ukraine sinks Russian warship off Libya in latest expansion of the war", 2, {SIG}),
     # background is not the news; a stance reports no event; human interest is never above a slot filler
     ("Child rescued in Ukraine after Russian drone attack kills 10", 2, {NOT}),

@@ -374,7 +374,20 @@ MILESTONE = re.compile(r"\b(?:bitcoin|btc|ether(?:eum)?|eth|s&p(?: 500)?|nasdaq(
 LEADERS = {"US": re.compile(r"\b(trump|vance|rubio|bessent|lutnick|hegseth)\b", re.I), "CHINA": re.compile(r"\bxi(?: jinping)?\b", re.I),
            "RUSSIA": re.compile(r"\b(putin|lavrov|peskov)\b", re.I), "ISRAEL": re.compile(r"\bnetanyahu\b", re.I),
            "IRAN": re.compile(r"\b(khamenei|pezeshkian|araghchi|irgc)\b", re.I)}
-NUCLEAR_SITE = re.compile(r"\bnuclear (?:site|facility|facilities|plant|reactor|program(?:me)?|base)s?\b|\b(?:natanz|fordow|isfahan|bushehr|zaporizhzhia|yongbyon|dimona)\b", re.I)
+# 2026-11-24: Zaporizhzhia is also a city of 700,000 hit near-daily ("Russian attack kills two people in Ukraine's Zaporizhzhia" scored as a
+# strike on a nuclear site): only its nuclear plant counts
+NUCLEAR_SITE = re.compile(r"\bnuclear (?:site|facility|facilities|plant|reactor|program(?:me)?|base)s?\b|\b(?:natanz|fordow|isfahan|bushehr|yongbyon|dimona)\b|"
+                          r"\bzaporizhzhia (?:nuclear|npp|power plant|plant)\b|\bznpp\b", re.I)
+# What makes a war story matter to this audience (owner, 2026-11-24: "excessive war coverage, prioritizing financial and geopolitical
+# consequences rather than routine military developments"): money, markets, supply, sanctions, a settlement, a new party, a nuclear risk.
+WAR_CONSEQUENCE = re.compile(
+    r"\b(sanction\w*|embargo\w*|tariffs?|price caps?|ceasefire|cease-fire|truce|armistice|peace (?:talks|deal|plan|agreement|summit)|negotiat\w*|"
+    r"talks|deal|agreement|exports?|imports?|output|production|supply|supplies|shortages?|prices?|markets?|stocks?|shares|bonds?|rouble|ruble|"
+    r"hryvnia|currency|default\w*|insurance|insurers|reroute\w*|halt\w*|shuts?|shut down|shutdown|suspend\w*|blackouts?|national grid|"
+    r"nato|article [45]|mobiliz\w*|martial law|nuclear|grain|corridor|pipelines?|lng|opec|aid package|\$\s?\d|billion|million barrels|"
+    r"capacity|bpd|barrels|expan\w*|spread\w*|new front|widen\w*|escalat\w*|first time)\b", re.I)
+WAR_EVENTS = ("an attack that hit", "a military incident", "an attack on energy or shipping", "a strike between major powers",
+              "a deployment or escalation", "an attack on a nuclear site")
 NATO_STATES = {"POLAND", "TURKEY", "NATO"}  # NATO members newsworthy.STATES names (the Baltics, Finland and Romania by name below)
 WARS: set[frozenset[str]] = set()  # established wars from the desk's own record, refreshed every desk pass (events.decide)
 
@@ -661,6 +674,14 @@ def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = F
     if tier == MAJOR and routine_war(head, main, WARS if wars is None else wars, st.main):
         tier = SIGNIFICANT  # strikes inside an established war (Russia-Ukraine) are near-daily: major only on escalation (new state, mass deaths, a chokepoint)
         found.append("within an ongoing war, no escalation: not major")
+    if ORDER[tier] > ORDER[NOTABLE] and (hard_name in WAR_EVENTS or ctx.hard_name in WAR_EVENTS or (main.people and states_named(st.main or head))) \
+            and main.people < 24.0 and routine_war(head, main, WARS if wars is None else wars, st.main) and not WAR_CONSEQUENCE.search(head):
+        # owner, 2026-11-24: a strike, a claim of one or a death toll inside an established war, with no consequence the headline states for
+        # markets, supply or diplomacy, is a slot filler, never ahead of a financial or geopolitical story (production 11-24 16:00 posted
+        # "Zelensky confirms Ukraine was behind drone attack on Russian cargo ship" over BlackRock's record $6B bitcoin ETF month). Ten or
+        # more killed (people >= 24) is a human toll that stays a slot story; a war that spreads ("latest expansion of the war") is a consequence
+        tier = NOTABLE
+        found.append("a routine development in an ongoing war: no market, supply or diplomatic consequence stated")
     if ORDER[tier] >= ORDER[NOTABLE] and st.threat and not any((main.money, main.move, main.people, main.hard)):
         tier = NOTABLE  # a threat is a statement: never above a slot filler ("Russia threatens Estonia with open war", "Iran vows all means")
     if kind == "news" and age > STALE_MIN:
