@@ -103,3 +103,26 @@ def test_one_war_is_many_events_in_the_desks_own_repeat_memory() -> None:
     assert not editorial._same_war_event(new, old, timedelta(hours=47))
     same = {"headline": "UKRAINIAN NAVAL DRONES SINK RUSSIAN WARSHIP IN LIBYA"}
     assert editorial._same_war_event(new, same, timedelta(hours=3))
+
+
+CLASSIC = [  # the judgement must also hold for the kinds of event the desk exists for, not only last week's
+    ("Fed cuts rates by 50 basis points in emergency move", {MAJOR}),
+    ("Fed holds rates steady as expected", {SIG, NOT}),
+    ("Israel strikes Iran nuclear site at Natanz", {MAJOR}),
+    ("China fires missiles near Taiwan in largest drills", {SIG}),
+    ("US says it will impose 50% tariffs on Chinese chips from Friday", {SIG, MAJOR}),
+    ("Trump warns China of 100% tariffs if talks fail", {NOT}),
+    ("Bitcoin claims $100,000 for the first time", {SIG, MAJOR}),
+    ("Ethereum exchange Bybit hacked for $1.5 billion", {MAJOR}),
+    ("S&P 500 plunges 6% in worst day since 2020", {MAJOR}),
+    ("Poland Says Two Russian Missiles, Drone Crashed on Its Soil", {MAJOR}),
+    ("India’s Oil Imports Hit Record High as Saudi Shipments Surge", {NOISE, NOT}),
+    ("Market rout kills 50 basis points December Fed rate hike bets", {NOISE, NOT}),
+    ("Anthropic’s record IPO collides with tech’s worst week on Wall Street since 2020", {SIG, NOT}),
+]
+
+
+@pytest.mark.parametrize("title,want", CLASSIC, ids=[c[0][:60] for c in CLASSIC])
+def test_classic_events_get_an_editors_tier(title: str, want: set[str]) -> None:
+    d = imp.judge(title, outlets=3)
+    assert d.tier in want, d.reason

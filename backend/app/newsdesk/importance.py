@@ -65,7 +65,8 @@ EXTREME = _rx(r"\b(record high|all-time high|(?:lowest|highest) (?:level |close 
               r"52-week (?:high|low))\b")
 LEVEL = _rx(r"\b(?:bitcoin|btc|ether(?:eum)?|eth|s&p(?: 500)?|nasdaq(?: composite)?|dow(?: jones)?|stocks)(?:\s+\$[a-z]{2,6})?\s+"
             r"(breaks?|broke|falls?|fell|drops?|dropped|slips?|slipped|sinks?|sank|plunges?|plunged|tumbles?|tumbled|rises?|rose|climbs?|"
-            r"climbed|jumps?|jumped|surges?|surged|soars?|soared|tops|topped|crosses|crossed|reclaims?|reclaimed)\s+(?:back\s+)?"
+            r"climbed|jumps?|jumped|surges?|surged|soars?|soared|tops|topped|crosses|crossed|reclaims?|reclaimed|claims?|claimed|hits?|reaches|reached|"
+            r"passes|passed|surpasses|surpassed)\s+(?:back\s+)?(?:above\s+|over\s+)?"
             r"(?:below|above|under|over|past|through)\s+\$?\s?\d")
 BACKGROUND_MOVE = _rx(r"['’]s\s+(?:\w+\s+)?(?:plunge|crash|surge|rout|selloff|sell-off|slump|rally|tumble|meltdown|freefall)\b")
 DOW_POINTS = re.compile(r"\bdow\b.{0,40}?\b(\d[\d,]{2,})\s*points?\b", re.I)
@@ -102,6 +103,9 @@ HARD = [
                                         r"allows?|permits?|clears?|cleared|rules? that|authori[sz]es?|authori[sz]ed)\b")),
     (18.0, "a natural disaster", _rx(r"\b(earthquake|quake|tsunami|hurricane|typhoon|cyclone|volcan\w+ erupt\w*|eruption|wildfires?|floods?)\b")),
     (16.0, "an outage", _rx(r"\b(outages?|goes down|went down|offline|ground stop|grounded)\b")),
+    (18.0, "a trade measure", _rx(r"\b(?:impos\w*|rais\w*|slap\w*|hik\w*|lift\w*|scrap\w*|cut\w*)\b.{0,30}\btariffs?\b|\btariffs?\b.{0,30}\b(?:take effect|from|starting)\b")),
+    (14.0, "a show of force", _rx(r"\b(fires?|fired|launch(?:es|ed)?|test-fires?|test-fired)\s+(?:\w+\s+){0,2}(?:missiles?|rockets?|ballistic)\b|"
+                                  r"\b(?:military|naval|live-fire|war) (?:drills?|exercises?)\b|\bdrills? (?:around|near|off) \w+")),
     (16.0, "a deployment or escalation", _rx(r"\b(troops? (?:are |were )?in|deploy(?:s|ed)|mobiliz\w*|declares? (?:war|emergency)|evacuat\w*|"
                                              r"blockade|closes? (?:the )?(?:strait|airspace|border))\b|"
                                              r"\b(?:sends?|to send|sent|dispatch\w*)\b.{0,30}\b(?:planes?|jets?|awacs|troops|warships?|carriers?|"
@@ -217,6 +221,8 @@ def _money_points(usd: float) -> float:
 def _move_points(head: str) -> tuple[float, str]:
     """A stated move of a market or a company, scaled by what is normal for that kind of asset (a 5% day is huge for the S&P, routine for a
     small token)."""
+    if MILESTONE.search(head) and not nw.pct_of(head):
+        return 18.0, "a record level in a major market"  # "Bitcoin claims $100,000 for the first time"
     if LEVEL.search(head) and (CRYPTO_MAJOR.search(head) or INDEX.search(head)) and not nw.pct_of(head):
         # "Bitcoin breaks below $70,000": a round level of bitcoin, ether or an index (a commodity's price level is routine: owner,
         # 2026-11-18, "Brent falls below $90" never fills a slot)
@@ -347,11 +353,21 @@ STANCE = (r"warns?|vows?|threatens?|urges?|calls? (?:on|for)|pledges?|promises?|
           r"denies|rejects?|slams?|blasts?|welcomes?|hails?|doubles down on|defends?|critici[sz]es?|questions|mocks?|dismisses?")
 SPEECH = re.compile(rf"^(?P<who>(?:[^\s]+\s){{0,7}}?[^\s]+)\s+(?P<verb>{FACTUAL_SAY}|{CLAIM}|{STANCE})\b\s*(?:that\s+)?(?P<rest>.*)$", re.I)
 INTENT_REST = re.compile(r"^(?:it|they|we|he|she|the \w+)?\s*(?:will|would|could|may|might|is ready to|are ready to|plans? to|intends? to|to)\b", re.I)
-THREAT_WORDS = re.compile(r"\b(war|attacks?|strikes?|retaliat\w*|all (?:available )?means|military|force|invade|invasion|nuclear|destroy)\b", re.I)
+THREAT_WORDS = re.compile(r"\b(war|attacks?|strikes?|retaliat\w*|all (?:available )?means|military|force|invade|invasion|nuclear|destroy|tariffs?|sanctions?|embargo)\b", re.I)
+DATED_MEASURE = re.compile(r"\bwill (?:impose|raise|cut|ban|halt|close|suspend|introduce|lift|end|begin|start)\b.{0,60}\b(?:from|starting|effective|on|next week|"
+                           r"tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|"
+                           r"october|november|december)\b", re.I)
 HUMAN_INTEREST = re.compile(r"\b(pulled alive|rescued|rescues|survivors?|reunited|miracle|heartbreaking|tributes?|unbothered|defiant|"
                             r"life goes on|daily life|search for .{0,40}\bmissing)\b", re.I)
 ONGOING_WARS = ({"RUSSIA", "UKRAINE"},)  # an established war: strikes between its belligerents are near-daily
 STATED_THREAT = 8.0
+MILESTONE = re.compile(r"\b(?:bitcoin|btc|ether(?:eum)?|eth|s&p(?: 500)?|nasdaq(?: composite)?|dow(?: jones)?|gold)\b.{0,15}?\b(?:claims?|hits?|reaches|reached|tops|topped|"
+                       r"crosses|crossed|passes|passed|surpasses|surpassed|breaks?|broke)\s+(?:above\s+)?\$?\d[\d,.]*\s?(?:k|trillion)?\b.{0,40}?\b(?:first time|"
+                       r"record|all-time|ever)\b", re.I)
+LEADERS = {"US": re.compile(r"\b(trump|vance|rubio|bessent|lutnick|hegseth)\b", re.I), "CHINA": re.compile(r"\bxi(?: jinping)?\b", re.I),
+           "RUSSIA": re.compile(r"\b(putin|lavrov|peskov)\b", re.I), "ISRAEL": re.compile(r"\bnetanyahu\b", re.I),
+           "IRAN": re.compile(r"\b(khamenei|pezeshkian|araghchi|irgc)\b", re.I)}
+NUCLEAR_SITE = re.compile(r"\bnuclear (?:site|facility|facilities|plant|reactor|program(?:me)?|base)s?\b|\b(?:natanz|fordow|isfahan|bushehr|zaporizhzhia|yongbyon|dimona)\b", re.I)
 NATO_STATES = {"POLAND", "TURKEY", "NATO"}  # NATO members newsworthy.STATES names (the Baltics, Finland and Romania by name below)
 WARS: set[frozenset[str]] = set()  # established wars from the desk's own record, refreshed every desk pass (events.decide)
 
@@ -389,11 +405,13 @@ def structure(head: str) -> Structure:
         return Structure(main, context)
     if re.fullmatch(CLAIM, verb, re.I):
         return Structure(main, context, claimed=True)
-    if re.fullmatch(FACTUAL_SAY, verb, re.I) and not INTENT_REST.search(rest):
+    if re.fullmatch(FACTUAL_SAY, verb, re.I) and (not INTENT_REST.search(rest) or DATED_MEASURE.search(rest)):
+        # "US says it will impose 50% tariffs on Chinese chips from Friday": a measure decided, with its date (2026-11-24)
         return Structure(main, context)  # "IRGC says three tankers ablaze", "Zelensky confirms strike on Russian warship": reported, attributed
     # a stance, or a source saying what it will do: no event reported
     threat = 0.0
-    if re.search(r"^(warns?|vows?|threatens?|says|said)$", verb) and THREAT_WORDS.search(rest) and (states_named(who) & BIG_STATE):
+    speaker = states_named(who) | {k for k, rx in LEADERS.items() if rx.search(who)}  # "Trump warns China ..." is the US speaking
+    if re.search(r"^(warns?|vows?|threatens?|says|said)$", verb) and THREAT_WORDS.search(rest) and (speaker & BIG_STATE):
         threat = STATED_THREAT
     rest_main = ". ".join(mains[1:])
     return Structure(rest_main, " ".join(x for x in (rest, context) if x), stance=verb, threat=threat)
@@ -443,12 +461,22 @@ def _facts(text: str, summary: str, head: str) -> Facts:
         # established war is a smaller, near-daily event (2026-11-23: Ukrainian drones on Russian refineries)
         hard += 10.0 if GLOBAL_ENERGY.search(head) else 4.0
         name = "an attack on energy or shipping"
+    if name.startswith("an attack") and NUCLEAR_SITE.search(text):
+        hard += 10.0  # a strike on a nuclear site
+        name = "an attack on a nuclear site"
+    elif name.startswith("an attack") and "US" not in states_named(text) and len(states_named(text) & BIG_STATE) >= 2:
+        hard += 6.0  # two major powers in a direct strike (inside an established war, routine_war still caps it: Russia-Ukraine)
+        name = "a strike between major powers" if name == "an attack that hit" else name
     if name.startswith("an attack") and "US" in states_named(text) and len(states_named(text) & BIG_STATE) >= 2:  # the clause's own parties (2026-11-24)
         hard += 8.0  # US forces striking (or struck by) another major power: an escalation (owner, 2026-11-18: never held by the gap)
         name = "a US strike involving another major power" if name == "an attack that hit" else name
     if name in ("an attack that hit", "a military incident") and "RUSSIA" in states_named(text) and states_named(text) & NATO_STATES:
         hard += 8.0  # Russian weapons hitting or landing in a NATO state: an escalation beyond the war (2026-11-20 Poland)
         name = "Russian strike on NATO territory"
+    if name == "a central-bank decision" and re.search(r"\b(emergency|surprise|unexpected(?:ly)?|unscheduled|inter-meeting)\b|"
+                                                      r"\b(?:[5-9]\d|1\d\d)\s*(?:basis points?|bps|bp)\b|\b(?:half|full) (?:a )?(?:percentage )?point\b", text, re.I):
+        hard += 14.0  # an emergency or outsized move by a central bank moves every market at once
+        name = "an emergency or outsized central-bank decision"
     if name == "an outage" and nw.SCALE_DISRUPTION.search(text):
         hard += 16.0  # "widespread Apple outage", "nationwide ground stop": millions of people at once (a major outage, owner's replay 2026-11-18)
     if name == "a natural disaster" and (m := re.search(r"\bmagnitude[- ](\d(?:\.\d)?)", text, re.I)) and float(m.group(1)) >= 7.0:
@@ -479,7 +507,7 @@ def _company_moved(head: str) -> bool:
     names = MEGA.pattern[3:-3]
     if re.search(rf"\b(?:{names})\b(?!\s+line\b)(?:['’]s)?\s+(?:(?:inc|corp|co|shares?|stock|stocks|market (?:cap|value)|valuation)\s+)?(?:{verb})\b", head, re.I):
         return True
-    return bool(re.search(rf"(?:^|[.;:]\s+|\b(?:its|their)\s+)(?:shares?|stock|stocks|market (?:cap|value)|valuation)\s+(?:{verb})\b", head, re.I))
+    return bool(re.search(rf"(?:^|[.;:,]\s+|\b(?:its|their)\s+)(?:shares?|stock|stocks|market (?:cap|value)|valuation)\s+(?:{verb})\b", head, re.I))
 
 
 def established_wars(history: list[Any], now: Any, min_told: int = 3) -> set[frozenset[str]]:
