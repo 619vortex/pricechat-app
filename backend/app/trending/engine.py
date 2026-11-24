@@ -487,8 +487,11 @@ def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool, desk_clear: bool 
         return False  # sent, sending, approved or edited by the owner: their decision stands
     if p.status == "held" and (p.hold_reason or "").startswith("No reliable source"):
         return reliable_now
-    if p.status == "held" and (p.hold_reason or "").startswith("covered by the News Desk (event") and "candidate" in (p.hold_reason or ""):
-        return desk_clear  # the News Desk never took it (coordinate.CANDIDATE_HOLD): Trending may now
+    if p.status == "held" and (p.hold_reason or "").startswith(("covered by the News Desk", "same event as", "already told")):
+        # 2026-11-24: a hold for another lane's story is re-checked against what that lane actually sent, every scan: a candidate it
+        # rejected, or an event it never delivered, no longer holds Trending (production 11-23: "covered by the News Desk (event 1162,
+        # candidate)" outlived the desk's rejection for hours)
+        return desk_clear
     return (p.score or 0) < s.hot_score and not (p.angle or "").startswith("fast")
 
 

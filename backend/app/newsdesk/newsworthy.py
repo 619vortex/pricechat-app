@@ -659,7 +659,9 @@ def told(db: Any, now: datetime, hours: int = 168, *, skip_event: int | None = N
         lead = str(((p.sources or [{}])[0] or {}).get("title") or (p.text or "").split("\n")[0])
         out.append(Told("x-trending", f"trend post {p.id}", lead, _aware(p.published_at or p.created_at, now) or now, event_of(lead, p.text or "")))
     for e in db.scalars(select(NdEvent).where(NdEvent.status == "released", NdEvent.released_at >= since)):
-        if e.id == skip_event or (e.tg_status in ("skipped", "missed", "failed") and e.x_status in ("skipped", "missed", "failed")):
+        from app.trending.coordinate import event_out
+
+        if e.id == skip_event or not event_out(e, now):  # 2026-11-24: released but never delivered (and not being sent now) told nobody
             continue
         out.append(Told("released", f"event {e.id}", e.title or e.headline, _aware(e.released_at, now) or now, event_of(e.title or e.headline, e.summary or "")))
     if platform in PLATFORM_LANES:  # a repeat is a second post about one event on the SAME platform; X and Telegram carrying it once each is one story
