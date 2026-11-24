@@ -212,6 +212,17 @@ def coverage(db: Any, now: datetime, hours: int = 72) -> list[Covered]:
 NOT_OUT = ("skipped", "missed", "failed")
 
 
+def _same_war_event(sig: dict[str, Any], old: dict[str, Any], age: timedelta) -> bool:
+    """Two geopolitics stories are one only when newsworthy's event identity says so (who, where, what kind), not by shared countries."""
+    from app.newsdesk import newsworthy
+
+    a, b = str(sig.get("headline") or ""), str(old.get("headline") or "")
+    if not a or not b:
+        return True  # nothing to compare: keep the older, broader rule
+    return newsworthy.same_event(newsworthy.event_of(a.title() if a.isupper() else a, ""), newsworthy.event_of(b.title() if b.isupper() else b, ""),
+                                 hours_apart=age.total_seconds() / 3600)
+
+
 @dataclass
 class Verdict:
     ok: bool
@@ -252,6 +263,10 @@ def judge(sig: dict[str, Any], covered: list[Covered], now: datetime, *, is_upda
                 return Verdict(True, f"the {shared} move escalated from {before:g}% to {new:g}%, a major move")
             return Verdict(False, f"same story as #{c.event_id} {hours} h ago ({shared} {old.get('direction') or ''} {before:g}%): "
                                   f"{new:g}% is not a material change", c.event_id)
+        if a == b == "geopolitics" and not _same_war_event(sig, old, age):
+            # 2026-11-24: one war is many events. "Russia, Ukraine" in common made "Zelensky confirms strike on Russian warship in Libya"
+            # (#1136) a repeat of #1053 from 47 h before; the event's identity (newsworthy.same_event) decides, not the countries named
+            continue
         if a == b or {a, b} <= {"incident", "controversy"}:
             if is_update:
                 return Verdict(True, "a development of a story already out")

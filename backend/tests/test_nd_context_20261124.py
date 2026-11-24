@@ -89,3 +89,17 @@ def test_no_daily_count_on_major_news_only_a_burst_guard() -> None:
     burst = [SimpleNamespace(facts={"major": "x"}, released_at=now - timedelta(minutes=10 * i + 5)) for i in range(4)]
     assert "unusual burst" in events.major_burst(burst, now)
     assert events.MAJOR_PER_DAY is None
+
+
+def test_one_war_is_many_events_in_the_desks_own_repeat_memory() -> None:
+    # production 11-23: #1136 "Zelensky confirms strike on Russian warship in Libya" was superseded as "same story as #1053 47 h ago
+    # (RUSSIA, UKRAINE, geopolitics)": the countries named, not the event
+    from datetime import timedelta
+
+    from app.newsdesk import editorial
+
+    new = {"headline": "‘AN EXEMPLARY UKRAINIAN OPERATION’: ZELENSKY CONFIRMS STRIKE ON RUSSIAN WARSHIP IN LIBYA"}
+    old = {"headline": "RUSSIAN MISSILE AND DRONE ATTACK ON KYIV KILLS THREE AND DAMAGES THREE DNIPRO BRIDGES"}
+    assert not editorial._same_war_event(new, old, timedelta(hours=47))
+    same = {"headline": "UKRAINIAN NAVAL DRONES SINK RUSSIAN WARSHIP IN LIBYA"}
+    assert editorial._same_war_event(new, same, timedelta(hours=3))
