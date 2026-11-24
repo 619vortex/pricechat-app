@@ -228,7 +228,7 @@ BACKUP_MAX_AGE = timedelta(hours=26)  # the nightly backup runs every 24 h
 FAILING_RUNS = 3  # an enabled job failing this many runs in a row (its own alert comes from app/alerts.job_outcome)
 KEY_SILENCE = "ops:silence:"
 KEY_FEEDS = "ops:newsdesk_feeds"
-DEAD_FEED_AFTER = timedelta(hours=24)
+DEAD_FEED_AFTER = timedelta(hours=6)  # was 24 h (2026-11-24): a dead feed costs a day of stories before the owner hears
 
 
 def dead_feeds(db: Session, now: datetime) -> list[str]:
@@ -244,13 +244,13 @@ def dead_feeds(db: Session, now: datetime) -> list[str]:
     for url, h in feeds.items():
         if not h.get("problem"):
             continue
-        last = h.get("last_ok")
+        last = h.get("last_ok") or h.get("failing_since")  # never read well (a new feed): since its first failure (resting feeds fail slowly)
         since = datetime.fromisoformat(last) if last else None
         if since is not None and since.tzinfo is None:
             since = since.replace(tzinfo=timezone.utc)
         if (since is None and int(h.get("fails") or 0) >= 288) or (since is not None and now - since >= DEAD_FEED_AFTER):
             tier = " (official source)" if h.get("tier") == 0 else ""
-            out.append(f"{h.get('name') or url}{tier}: {str(h.get('problem'))[:80]}" + (f", last good read {since:%d %b %H:%M} UTC" if since else ""))
+            out.append(f"{h.get('name') or url}{tier}: {str(h.get('problem'))[:80]}" + (f", last good read {since:%d %b %H:%M} UTC" if h.get("last_ok") else f", failing since {since:%d %b %H:%M} UTC" if since else ""))
     return sorted(out)
 
 
@@ -484,7 +484,7 @@ class Watchdog:
             # 6) news feeds failing for a day (the Federal Reserve's feed answered 404 for days, unnoticed)
             dead = dead_feeds(db, now)
             if dead:
-                out["alerts"] += await self._problem(db, KEY_FEEDS, "Price Chat alert: News Desk feeds not working for 24 h or more\n"
+                out["alerts"] += await self._problem(db, KEY_FEEDS, "Price Chat alert: News Desk feeds not working for 6 h or more\n"
                                                      + "\n".join(f"- {d}" for d in dead[:12]) + f"\nAdmin > X > News Desk > Feeds.\nTime: {_when(now)}")
             else:
                 out["recovered"] += await self._fixed(db, KEY_FEEDS, f"Price Chat: recovered\nEvery News Desk feed is answering again.\nTime: {_when(now)}")

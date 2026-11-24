@@ -456,13 +456,59 @@ def record_from_commons(page: dict[str, Any], query: str = "") -> LicensedPhoto 
         year=int(year.group(1)) if year else None, mime=info.get("mime", ""), restrictions=mv("Restrictions"), query=query)
 
 
+# Openverse's anonymous API is often unavailable (2026-11-24: production got 504 Gateway Timeout on "ukraine damage" and "ukraine attack";
+# from other networks it answers 403 with Cloudflare's "Just a moment..." challenge; it rate-limits with 429). None of that is ours to
+# fix, so after a failure Openverse is left alone for a while (its Retry-After when it sends one) and searches carry on with Commons:
+# one quiet log line per pause instead of a warning per query.
+OPENVERSE_TIMEOUT = 10  # s: a slow gateway never holds a post for long
+OPENVERSE_PAUSE = {403: 6 * 3600, 429: 30 * 60}  # a challenge means this network is blocked for now; a rate limit clears sooner
+OPENVERSE_PAUSE_DEFAULT = 15 * 60  # 5xx, timeouts, connection errors
+_openverse: dict[str, Any] = {"until": 0.0, "why": ""}
+
+
+def openverse_paused() -> str:
+    """Why Openverse is not being asked right now, or ""."""
+    import time
+
+    return str(_openverse["why"]) if time.time() < float(_openverse["until"]) else ""
+
+
+def _pause_openverse(seconds: float, why: str) -> None:
+    import time
+
+    if not openverse_paused():
+        logger.info("newsdesk photos: Openverse paused for %d min (%s); Commons only meanwhile", int(seconds // 60), why)
+    _openverse.update(until=time.time() + seconds, why=why)
+
+
+def _retry_after(r: httpx.Response) -> float | None:
+    try:
+        v = float(r.headers.get("retry-after", ""))
+    except ValueError:
+        return None
+    return min(max(v, 60.0), 24 * 3600.0)
+
+
 async def search_openverse(client: httpx.AsyncClient, query: str, limit: int = 20) -> list[LicensedPhoto]:
     """Openverse, anonymous: commercial-use licences only (license_type=commercial and an explicit allow-list), photographs, wide, large.
-    Anonymous requests get at most 20 results a page and a small daily budget, so one page per query."""
+    Anonymous requests get at most 20 results a page and a small daily budget, so one page per query. While paused after a failure
+    (OPENVERSE_PAUSE), nothing is asked and nothing is found."""
+    if openverse_paused():
+        return []
     params = {"q": query, "license_type": "commercial", "license": "by,by-sa,cc0,pdm", "category": "photograph", "aspect_ratio": "wide",
               "size": "large", "mature": "false", "page_size": str(min(limit, 20))}
-    r = await client.get(OPENVERSE, params=params, headers=UA, timeout=TIMEOUT)
-    r.raise_for_status()
+    try:
+        r = await client.get(OPENVERSE, params=params, headers=UA, timeout=OPENVERSE_TIMEOUT)
+        r.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        if status in OPENVERSE_PAUSE or status >= 500:
+            _pause_openverse(_retry_after(e.response) or OPENVERSE_PAUSE.get(status, OPENVERSE_PAUSE_DEFAULT), f"HTTP {status}")
+            return []
+        raise
+    except (httpx.TimeoutException, httpx.TransportError) as e:
+        _pause_openverse(OPENVERSE_PAUSE_DEFAULT, type(e).__name__)
+        return []
     out = []
     for rec in r.json().get("results") or []:
         lic, ver = str(rec.get("license") or ""), str(rec.get("license_version") or "")

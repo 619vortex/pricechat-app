@@ -212,6 +212,17 @@ def coverage(db: Any, now: datetime, hours: int = 72) -> list[Covered]:
 NOT_OUT = ("skipped", "missed", "failed")
 
 
+def _same_war_event(sig: dict[str, Any], old: dict[str, Any], age: timedelta) -> bool:
+    """Two geopolitics stories are one only when newsworthy's event identity says so (who, where, what kind), not by shared countries."""
+    from app.newsdesk import newsworthy
+
+    a, b = str(sig.get("headline") or ""), str(old.get("headline") or "")
+    if not a or not b:
+        return True  # nothing to compare: keep the older, broader rule
+    return newsworthy.same_event(newsworthy.event_of(a.title() if a.isupper() else a, ""), newsworthy.event_of(b.title() if b.isupper() else b, ""),
+                                 hours_apart=age.total_seconds() / 3600)
+
+
 @dataclass
 class Verdict:
     ok: bool
@@ -252,6 +263,10 @@ def judge(sig: dict[str, Any], covered: list[Covered], now: datetime, *, is_upda
                 return Verdict(True, f"the {shared} move escalated from {before:g}% to {new:g}%, a major move")
             return Verdict(False, f"same story as #{c.event_id} {hours} h ago ({shared} {old.get('direction') or ''} {before:g}%): "
                                   f"{new:g}% is not a material change", c.event_id)
+        if a == b == "geopolitics" and not _same_war_event(sig, old, age):
+            # 2026-11-24: one war is many events. "Russia, Ukraine" in common made "Zelensky confirms strike on Russian warship in Libya"
+            # (#1136) a repeat of #1053 from 47 h before; the event's identity (newsworthy.same_event) decides, not the countries named
+            continue
         if a == b or {a, b} <= {"incident", "controversy"}:
             if is_update:
                 return Verdict(True, "a development of a story already out")
@@ -302,9 +317,8 @@ def delivery_gate(db: Any, ev: Any, now: datetime, platform: str | None = None) 
         rep = newsworthy.repeat_of(ev.title or ev.headline or "", ev.summary or "", history, now)
         if rep:
             return f"repeat: {rep}"
-        outlets = len([x for x in (ev.sources or []) if isinstance(x, dict)])
-        if ev.kind == "news" and not (a := newsworthy.qualify(ev.title or ev.headline or "", ev.summary or "", outlets=outlets)).ok and a.strength == "none":
-            return f"not newsworthy: {a.reason}"  # the last word before a send: a rule tightened after release still holds
+        # owner, 2026-11-23 (one decision pipeline): whether a story is worth a post is decided once, at release (app/newsdesk/importance).
+        # Judging it again here with a different rule refused 8 released events on both platforms in a week, their slots used and nothing sent.
     return ""
 
 
@@ -654,6 +668,8 @@ TOPIC_DESK = {"macro": "macro", "geopolitics": "geopolitics", "regulation": "cry
 CATEGORY_DESK = {"economics": "macro", "politics": "geopolitics", "commodities": "commodities", "stocks": "stocks", "crypto": "crypto"}
 DIVERSITY_PENALTY = 5.0  # ranking points per post from the same desk in the last 24 h
 RUN_LIMIT = 2  # never more than this many posts in a row from one desk
+RUN_WINDOW = timedelta(hours=12)  # "in a row" means recent slots (production 2026-11-23: a post from 46 h earlier still made a
+# "run" with this morning's post, and the 08:00 UTC slot was skipped with five eligible stories waiting); the 24 h penalty still ranks
 
 
 def desk_of(ev: Any, sig: dict[str, Any] | None = None) -> str:
@@ -679,7 +695,7 @@ def diversity(ev: Any, covered: list[Covered], now: datetime) -> tuple[float, st
     same = sum(1 for c in day if desk_c(c) == desk)
     run = 0
     for c in covered:
-        if desk_c(c) != desk:
+        if now - c.at > RUN_WINDOW or desk_c(c) != desk:
             break
         run += 1
     if run >= RUN_LIMIT:

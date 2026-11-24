@@ -38,8 +38,27 @@ SAME_STORY_WINDOW = timedelta(hours=48)  # one event, one post across both lanes
 # (the breaking lane) or when a slot is under an hour away. Production 2026-11-16: "Ukraine Hits Crimean Bridge in Record Drone Strike"
 # (event #513, three outlets) was refused the breaking lane (90-minute gap, then 61 < 70), stayed a candidate, and held Trending back for
 # the rest of the day: neither lane posted it. If Trending posts first, the News Desk's X lane skips the event (engine.deliver_x).
-CANDIDATE_HOLD = timedelta(minutes=30)
+CANDIDATE_HOLD = timedelta(minutes=30)  # kept for reference only: since 2026-11-24 a candidate never holds another lane (below)
 SLOT_SOON = timedelta(minutes=60)
+# Owner, 2026-11-24: "Rejected or unpublished stories must never block another publishing lane." Production 11-23: the News Desk REJECTED
+# "Nvidia reinstates Jensen Huang as CEO. Stock skyrockets 27%" (event 1162) and Trending held its own, higher-scoring telling as "covered
+# by the News Desk (event 1162, candidate)" for hours: neither lane carried the day's biggest market story. Only what went out, or is going
+# out right now, holds another lane: a sent/sending News Desk post, or an event released less than SENDING_WINDOW ago whose delivery is
+# still due, or one actually delivered on a platform. A candidate, a rejected/expired/missed event, a held or failed post never does.
+SENDING_WINDOW = timedelta(minutes=30)
+ND_POST_LIVE = ("published", "publishing", "uncertain", "queued", "dry_run")
+DELIVERED = ("published", "delivered", "uncertain", "publishing", "dry_run")
+
+
+def event_out(e: NdEvent, now: datetime) -> bool:
+    """Has this released News Desk event gone out (or is it going out right now) on any platform?"""
+    if e.status != "released":
+        return False
+    if e.tg_status in DELIVERED or e.x_status in DELIVERED:
+        return True
+    released = _aware(e.released_at, now)
+    due = e.tg_status in ("pending", "queued") or e.x_status in ("pending", "queued")
+    return bool(due and released is not None and now - released <= SENDING_WINDOW)
 
 
 def _aware(d: datetime | None, now: datetime) -> datetime | None:
@@ -67,21 +86,19 @@ def same_story(a: str, b: str) -> bool:
 
 
 def newsdesk_conflict(db: Session, titles: list[str], now: datetime, *, fast: bool = False, topic_id: int | None = None) -> str | None:
-    """The News Desk already has this story (posted, queued, dry run, or an event released for both platforms) in the last 48 h."""
+    """The News Desk already carried this story (a post sent or sending, or a released event that went out / is going out) in the last
+    48 h. Never a candidate, a rejected or expired event, or an unsent post (owner, 2026-11-24)."""
     since = now - SAME_STORY_WINDOW
-    posts = db.scalars(select(NdPost).where(NdPost.created_at >= since, NdPost.status.notin_(("rejected", "expired", "failed"))))
+    posts = db.scalars(select(NdPost).where(NdPost.created_at >= since, NdPost.status.in_(ND_POST_LIVE)))
     for p in posts:
         theirs = [str((p.facts or {}).get(k) or "") for k in ("title", "headline")] + [p.text or ""]
         if any(same_story(t, o) for t in titles for o in theirs if o):
             return f"covered by the News Desk (post {p.id}, {p.status})"
-    evs = db.scalars(select(NdEvent).where(NdEvent.created_at >= since, NdEvent.status.in_(("released", "candidate"))))
-    nxt = next_slot(db, now)
-    slot_soon = nxt is not None and nxt - now <= SLOT_SOON
-    for e in evs:
-        if e.status == "candidate" and (fast or (not slot_soon and now - (_aware(e.created_at, now) or now) > CANDIDATE_HOLD)):
-            continue  # a fast-lane story doesn't wait for the desk to decide; the desk's X lane then skips it (engine.deliver_x)
+    for e in db.scalars(select(NdEvent).where(NdEvent.created_at >= since, NdEvent.status == "released")):
+        if not event_out(e, now):
+            continue  # released but never delivered (paused, missed, skipped on both platforms): it told nobody
         if any(same_story(t, o) for t in titles for o in (e.title, e.headline) if o):
-            return f"covered by the News Desk (event {e.id}, {e.status})"
+            return f"covered by the News Desk (event {e.id}, released)"
     # owner, 2026-11-18: the same real-world event already went out on any lane (Telegram, X, a trend post, a released event), judged by the
     # event (who, where, what kind) rather than the wording, and nothing substantially new has happened since
     from app.newsdesk import newsworthy

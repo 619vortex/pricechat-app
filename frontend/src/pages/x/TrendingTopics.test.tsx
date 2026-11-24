@@ -115,6 +115,27 @@ describe("Trending Topics", () => {
     expect(calls.some((c) => c.startsWith("POST /api/x/trending/posts/7/approve"))).toBe(true);
   });
 
+  it("offers the owner's override on a tweet held for having no picture and no link, asking first", async () => {
+    // owner, 2026-11-23: the image-or-link rule on Trending's X lane; only the owner sends a tweet as words alone, and it still needs Approve
+    const NOPIC: TrendPost = { ...POST, id: 11, status: "held", hold_reason: "No picture and no link: no licensed picture passed the Visual Editor", no_picture: true, text_ok: false };
+    serve(state({}, { held: [NOPIC, HELD] }));
+    const ask = vi.fn(() => false);
+    vi.stubGlobal("confirm", ask);
+    render(<TrendingTopics />);
+    await settle();
+    expect(screen.getAllByRole("button", { name: "Post without picture" })).toHaveLength(1);  // not on the tweet held for another reason
+    fireEvent.click(screen.getByRole("button", { name: "Post without picture" }));
+    expect(ask).toHaveBeenCalledOnce();
+    expect(calls.some((c) => c.includes("/release"))).toBe(false);  // declined: nothing sent
+    ask.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Post without picture" }));
+    await settle();
+    expect(calls.some((c) => c.startsWith("POST /api/x/trending/posts/11/release") && c.includes('"action":"text"'))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Try the picture again" }));
+    await settle();
+    expect(calls.some((c) => c.startsWith("POST /api/x/trending/posts/11/release") && c.includes('"action":"retry"'))).toBe(true);
+  });
+
   it("says when a stop is on", async () => {
     serve(state({ kill_switch: true }, { coordination: { ...state().coordination, desk_blocked: "Trending Topics' stop is on" } }));
     render(<TrendingTopics />);

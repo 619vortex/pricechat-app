@@ -1,0 +1,38 @@
+{
+ "retrieved_utc": "2026-11-24T06:31:26Z",
+ "calls": [
+  {
+   "file": "verify_20261124_dapi_klines_1h.json",
+   "url": "https://dapi.binance.com/dapi/v1/klines?symbol=BTCUSD_PERP&interval=1h&startTime=1795226400000&limit=3",
+   "status": 200
+  },
+  {
+   "file": "verify_20261124_dapi_klines_1m_0248_0348.json",
+   "url": "https://dapi.binance.com/dapi/v1/klines?symbol=BTCUSD_PERP&interval=1m&startTime=1795229280000&endTime=1795232879999&limit=60",
+   "status": 200
+  },
+  {
+   "file": "verify_20261124_fapi_btcusdt_1h.json",
+   "url": "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1h&startTime=1795226400000&limit=3",
+   "status": 200
+  },
+  {
+   "name": "allForceOrders_dapi",
+   "url": "https://dapi.binance.com/dapi/v1/allForceOrders?symbol=BTCUSD_PERP&startTime=1795229280000&endTime=1795232880000",
+   "status": 404,
+   "body_head": "<!DOCTYPE html>\n<!-- saved from url=(0032)https://www.binance.com/en/error -->\n<html>\n\n<head>\n  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-"
+  },
+  {
+   "name": "allForceOrders_fapi",
+   "url": "https://fapi.binance.com/fapi/v1/allForceOrders?symbol=BTCUSDT",
+   "status": 404,
+   "body_head": "<!DOCTYPE html>\n<!-- saved from url=(0032)https://www.binance.com/en/error -->\n<html>\n\n<head>\n  <meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-"
+  },
+  {
+   "name": "forceOrders_dapi_nokey",
+   "url": "https://dapi.binance.com/dapi/v1/forceOrders?symbol=BTCUSD_PERP",
+   "status": 401,
+   "body_head": "{\"code\":-2014,\"msg\":\"API-key format invalid.\"}"
+  }
+ ]
+}

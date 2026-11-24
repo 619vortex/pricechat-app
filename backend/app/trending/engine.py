@@ -29,6 +29,10 @@ PENDING_TTL = timedelta(hours=6)  # a suggestion nobody approved goes stale
 QUEUED_TTL = timedelta(hours=4)
 MAX_NEW_PER_SCAN = 5
 ALERT_AFTER = 3  # failed reads in a row before the owner hears about a source
+# reads in a row that brought a problem (any: also those that never alert, such as GDELT's timeouts) before a source rests between reads.
+# 2026-11-24: GDELT timed out on every one of 82 reads in a day, each holding the scan up to 8 s and logging a line.
+REST_AFTER = 3
+REST_MAX = 60  # minutes: an official source (FAA, status pages) that comes back is read again within the hour
 MAX_ATTEMPTS = 3
 OPEN = ("pending", "queued", "publishing")
 SENT = ("published", "publishing", "uncertain", "dry_run")
@@ -70,6 +74,8 @@ def _due(name: str, state: dict[str, Any], now: datetime) -> bool:
     wait = sources.INTERVAL.get(name, 30)
     if h.get("plan"):  # not on this X plan: ask again once a day
         wait = 24 * 60
+    elif wait and int(h.get("misses") or 0) >= REST_AFTER:  # failing read after read: rest, doubling up to REST_MAX (a recovery is seen within it)
+        wait = min(max(wait, REST_MAX), wait * 2 ** (int(h["misses"]) - REST_AFTER + 1))
     try:
         return now - _aware(datetime.fromisoformat(last)) >= timedelta(minutes=wait)  # type: ignore[operator]
     except ValueError:
@@ -139,7 +145,8 @@ async def read_sources(db: Session, s: TtSettings, settings: Settings, runtime: 
             usage["cost_usd"][name] = round(float(usage["cost_usd"].get(name, 0)) + float(meta["cost_usd"]), 4)
         health[name] = {"name": sources.NAMES[name], "last_scan": now.isoformat(), "items": len(items), "stored": stored[name],
                         "status": "unavailable" if unavailable else "error" if failing else "idle" if idle else "ok", "problem": problem, "partial": meta.get("partial") or "",
-                        "fails": int(prev.get("fails") or 0) + 1 if failing else 0, "last_ok": now.isoformat() if not problem else prev.get("last_ok"),
+                        "fails": int(prev.get("fails") or 0) + 1 if failing else 0,
+                        "misses": int(prev.get("misses") or 0) + 1 if problem and not unavailable else 0, "last_ok": now.isoformat() if not problem else prev.get("last_ok"),
                         "plan": bool(meta.get("plan")), "auth": meta.get("auth"), "rate_limits": meta.get("rate_limits") or {}}
     state["health"], state["usage"] = health, usage
     s.state = state
@@ -444,11 +451,13 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
     # owner, 2026-11-18: popular is not the same as newsworthy. Nothing goes out on its own without a concrete, source-stated reason to care
     # (app/newsdesk/newsworthy); momentum, outlet counts and dramatic words never stand in for one. Production: trend post 765 "Democrats
     # probe whether Lutnick helped Cantor avoid Nvidia losses" went out on the fast lane with viral 31.
-    from app.newsdesk import newsworthy
+    # owner, 2026-11-23: the same editorial judgement as the News Desk (app/newsdesk/importance), not a second rule: production refused "AI
+    # rally set to add $2 trillion to Nasdaq-100" as "no concrete consequence". Posting on its own needs at least a significant story
+    from app.newsdesk import importance
 
-    nw = newsworthy.qualify(getattr(topic, "title", "") or "", b.summary if b is not None else "", outlets=len(b.outlets) if b is not None else 0)
-    if not nw.ok:
-        return False, f"not newsworthy: {nw.reason}"
+    d = importance.judge(getattr(topic, "title", "") or "", b.summary if b is not None else "", outlets=len(b.outlets) if b is not None else 1)
+    if d.rank < importance.ORDER[importance.SIGNIFICANT]:
+        return False, f"not newsworthy enough to post on its own: {d.reason}"
     return True, None
 
 
@@ -485,8 +494,11 @@ def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool, desk_clear: bool 
         return False  # sent, sending, approved or edited by the owner: their decision stands
     if p.status == "held" and (p.hold_reason or "").startswith("No reliable source"):
         return reliable_now
-    if p.status == "held" and (p.hold_reason or "").startswith("covered by the News Desk (event") and "candidate" in (p.hold_reason or ""):
-        return desk_clear  # the News Desk never took it (coordinate.CANDIDATE_HOLD): Trending may now
+    if p.status == "held" and (p.hold_reason or "").startswith(("covered by the News Desk", "same event as", "already told")):
+        # 2026-11-24: a hold for another lane's story is re-checked against what that lane actually sent, every scan: a candidate it
+        # rejected, or an event it never delivered, no longer holds Trending (production 11-23: "covered by the News Desk (event 1162,
+        # candidate)" outlived the desk's rejection for hours)
+        return desk_clear
     return (p.score or 0) < s.hot_score and not (p.angle or "").startswith("fast")
 
 
@@ -525,12 +537,12 @@ def waiting_reason(db: Session, s: TtSettings, post: TtPost, now: datetime) -> s
     # owner, 2026-11-18/19: a queued post is judged by the LATEST editorial rules first, whatever else it waits for. Before, a post
     # next to a News Desk slot reported only "spacing" (the time-dependent failure of
     # test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes near 04:00 UTC) and its editorial verdict waited.
-    from app.newsdesk import newsworthy
+    from app.newsdesk import importance
 
     titles = [str(x.get("title") or "") for x in post.sources or []]
     told = [t for t in (titles[:1] + [(post.text or "").split("\n")[0]]) if t]
-    checked = [newsworthy.qualify(t, post.source_text or "", outlets=len(post.sources or [])) for t in told]
-    if checked and all(a.strength == "none" for a in checked):
+    checked = [importance.judge(t, post.source_text or "", outlets=len(post.sources or []) or 1) for t in told]
+    if checked and all(d.tier == importance.NOISE for d in checked):
         return f"not newsworthy: {checked[0].reason}"
     incident = incident_post(db, post)
     fast = fast_post(db, post)
@@ -634,10 +646,25 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
         post.status, post.note = "queued", f"X guard: {problem}"
         db.commit()
         return "blocked"
+    image = b""
+    if not post.text_ok and not has_link(post.text):
+        # owner, 2026-11-23: the News Desk's rule on this lane too. A tweet goes with a licensed picture (the Visual Editor's, as the
+        # News Desk's X posts) or a link (X shows the linked page's own card); with neither it is held for the owner, never sent as words alone
+        image, meta = await picture_for(db, post, topic, now)
+        if not image:
+            post.status, post.hold_reason = "held", f"{NO_PICTURE}: {meta.get('why') or 'no licensed picture passed the Visual Editor'}"[:500]
+            post.note = "Add a link (Edit), try the picture again, or choose Post without picture"
+            db.commit()
+            logger.info("trending: post %s held: %s", post.id, post.hold_reason)
+            return "held"
     client = make_x_client(db, settings, runtime)
     try:
+        media = None
+        if image:
+            upload_permit = guard.issue_news_permit(req)  # permits are single use: the upload and the post each need one
+            media = [await client.upload_image(image, permit=upload_permit)]
         permit = guard.issue_news_permit(req)
-        data = await client.create_post(post.text, permit=permit)
+        data = await client.create_post(post.text, permit=permit, media_ids=media)
     except XUnavailableError as e:
         post.status = "uncertain" if "in time" in str(e) else ("failed" if post.attempts >= MAX_ATTEMPTS else "queued")
         post.error = f"X unavailable: {str(e)[:200]}"
@@ -682,6 +709,50 @@ async def publish(db: Session, s: TtSettings, post: TtPost, settings: Settings, 
     db.commit()
     logger.info("trending published %s (post %s)", x_id, post.id)
     return "published"
+
+
+NO_PICTURE = "No picture and no link"
+LINK = re.compile(r"https://[^\s/]+\.[^\s/]+")
+
+
+def has_link(text: str) -> bool:
+    """A real https link in the tweet: X then shows the linked page's own card."""
+    return bool(LINK.search(text or ""))
+
+
+async def picture_for(db: Session, post: TtPost, topic: TtTopic | None, now: datetime) -> tuple[bytes, dict[str, Any]]:
+    """The trend's picture from the News Desk's Visual Editor (licensed photos, its library, its drawn cards; every licence checked),
+    for a stand-in event that is never stored. (b"", {"why": ...}) when nothing passes."""
+    from app.models.newsdesk import NdEvent
+    from app.newsdesk import visual
+
+    head = ((topic.title if topic is not None else "") or (post.text or "").split("\n")[0]).strip()
+    ev = NdEvent(key=f"trending:{post.id}", kind="news", title=head, headline=head, summary="", topic="", label="", evidence="",
+                 category=post.category or "news", sources=[{"name": x.get("name", ""), "url": x.get("url", "")} for x in post.sources or []],
+                 facts={}, released_at=now)
+    try:
+        image, meta = await visual.for_event(ev, db=db, platform="x", style="clean", now=now)
+    except Exception as e:  # noqa: BLE001 - no picture is a hold, never a crash
+        logger.info("trending: picture for post %s failed (%s)", post.id, type(e).__name__)
+        return b"", {"why": f"the picture step failed ({type(e).__name__})"}
+    finally:
+        if ev in db:
+            db.expunge(ev)
+    return (image or b""), meta or {}
+
+
+def release_held(db: Session, post: TtPost, action: str) -> TtPost:
+    """The owner's decision on a tweet held for having no picture and no link: "retry" looks for a picture again, "text" lets it go as
+    words alone. Either way it goes back to pending: it still needs the owner's Approve."""
+    if post.status != "held" or not (post.hold_reason or "").startswith(NO_PICTURE):
+        raise ValueError("Only a tweet held for having no picture and no link can be released here.")
+    if action not in ("retry", "text"):
+        raise ValueError("Unknown action.")
+    post.text_ok = action == "text"
+    post.status, post.hold_reason = "pending", None
+    post.note = "You chose to post it without a picture: approve it to send" if post.text_ok else "It will look for a picture again when approved"
+    db.commit()
+    return post
 
 
 LATENCY_KEEP = 30
@@ -1207,7 +1278,8 @@ def post_out(p: TtPost) -> dict[str, Any]:
     return {"id": p.id, "topic_id": p.topic_id, "category": p.category, "status": p.status, "text": p.text, "edited": bool(p.original_text), "angle": p.angle,
             "writer": p.writer, "score": p.score, "sources": p.sources, "checks": p.checks, "hold_reason": p.hold_reason, "note": p.note, "error": p.error,
             "x_id": p.x_id, "url": f"https://x.com/i/status/{p.x_id}" if p.x_id else None, "metrics": p.metrics, "created_at": _iso(p.created_at),
-            "published_at": _iso(p.published_at), "expires_at": _iso(p.expires_at), "cashtags": gates.cashtags(p.text),
+            "published_at": _iso(p.published_at), "expires_at": _iso(p.expires_at), "cashtags": gates.cashtags(p.text), "text_ok": bool(p.text_ok),
+            "no_picture": p.status == "held" and (p.hold_reason or "").startswith(NO_PICTURE),
             "sensitive": sensitive.classify(p.source_text) if p.source_text else None}
 
 

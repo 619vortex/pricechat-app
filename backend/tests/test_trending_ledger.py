@@ -156,28 +156,30 @@ def test_one_shared_signal_never_hands_a_topic_and_its_post_to_another_story(db:
     assert engine.same_topic(old, [20, 700], "UN climate chief urges speed as COP31 confronts the fossil fuel divide")  # the same event
 
 
-def test_a_stale_news_desk_candidate_no_longer_holds_a_trend_post(db: Session) -> None:
+def test_only_what_the_news_desk_sent_or_is_sending_holds_a_trend_post(db: Session) -> None:
+    # owner, 2026-11-24: "Rejected or unpublished stories must never block another publishing lane" (production 11-23: event 1162, the
+    # desk's REJECTED "Nvidia reinstates Jensen Huang as CEO. Stock skyrockets 27%", held Trending's telling for hours)
     from app.models.newsdesk import NdEvent
     from app.trending import coordinate
 
     now = utcnow()
     title = "Ukraine Hits Crimean Bridge in Record Drone Strike on Russia"
-    ev = NdEvent(key="story:test-crimea", kind="news", title=title, headline=title, status="candidate", created_at=now - timedelta(minutes=20))
+    ev = NdEvent(key="story:test-crimea", kind="news", title=title, headline=title, status="candidate", created_at=now - timedelta(minutes=5))
     db.add(ev)
     db.commit()
-    assert coordinate.newsdesk_conflict(db, [title], now) is not None  # young: the breaking lane may still take it
-    ev.created_at = now - timedelta(hours=3)
+    assert coordinate.newsdesk_conflict(db, [title], now) is None  # a candidate, however young, never holds another lane
+    ev.status = "missed"
     db.commit()
-    import unittest.mock as m
-
-    with m.patch.object(coordinate, "next_slot", lambda db, now: now + timedelta(hours=2)):
-        assert coordinate.newsdesk_conflict(db, [title], now) is None  # three hours a candidate, no slot soon: Trending may post
-    with m.patch.object(coordinate, "next_slot", lambda db, now: now + timedelta(minutes=20)):
-        assert coordinate.newsdesk_conflict(db, [title], now) is not None  # the slot is about to take it
-    ev.status = "released"
+    assert coordinate.newsdesk_conflict(db, [title], now) is None  # rejected / expired: never
+    ev.status, ev.released_at, ev.tg_status, ev.x_status = "released", now - timedelta(minutes=10), "pending", "pending"
     db.commit()
-    with m.patch.object(coordinate, "next_slot", lambda db, now: now + timedelta(hours=2)):
-        assert coordinate.newsdesk_conflict(db, [title], now) is not None  # released: one story, one post
+    assert coordinate.newsdesk_conflict(db, [title], now) is not None  # released and being sent now: one story, one post
+    ev.released_at = now - timedelta(hours=3)
+    db.commit()
+    assert coordinate.newsdesk_conflict(db, [title], now) is None  # released three hours ago and never delivered (paused): it told nobody
+    ev.tg_status = "delivered"
+    db.commit()
+    assert coordinate.newsdesk_conflict(db, [title], now) is not None  # delivered on Telegram: told
 
 
 def test_detection_is_never_before_the_first_report(db: Session) -> None:

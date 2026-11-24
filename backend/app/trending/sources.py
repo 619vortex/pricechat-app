@@ -129,7 +129,8 @@ def merged(stored: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
 
 # round-ups, archives and stock-picking lists are not a topic, whatever their words
 NOT_A_TOPIC = re.compile(r"\b(what happened in|from the archives|week in review|round-?up|recap|newsletter|morning brief|daily brief|things to know|"
-                         r"\d+ [\w ]{0,25}stocks\b|stocks? to (buy|watch)|could bounce back|an analyst says|deciphering)\b"
+                         # a listicle's small count ("5 dividend stocks"), never the end of a price ("near $61,000 as stocks soar", 2026-11-23)
+                         r"(?<![\d$,.])\d{1,2} [\w ]{0,25}stocks\b|stocks? to (buy|watch)|could bounce back|an analyst says|deciphering)\b"
                          r"|^(\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) (big |key |more |simple |good )?(questions|charts|things|takeaways|ways|lessons|reasons|signs|myths|facts)\b"
                          # 2026-11-16 production: "Four reasons to be hopeful about this year's COP" became the COP31 topic's lead
                          r"|\breasons (to be|why)\b"

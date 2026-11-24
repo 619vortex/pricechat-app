@@ -192,7 +192,9 @@ async def test_the_old_two_post_shape_cannot_happen_again(db: Session) -> None:
     assert events.canon_assets(data) == {"SILVER"}
 
 
-async def test_a_busy_market_day_is_capped(db: Session) -> None:
+async def test_a_busy_market_day_has_no_daily_count_only_a_burst_guard(db: Session) -> None:
+    # owner, 2026-11-24: "Do not impose an arbitrary daily limit on genuinely major breaking news" (this test held the 4th major move of a
+    # day until then). Three majors spread over the morning: a fourth asset's major move still goes out.
     desk_running(db, NOW, {})
     for i, asset in enumerate(("GOLD", "OIL", "BTC")):
         db.add(NdEvent(key=f"move:{asset}:x", kind="market", title=f"{asset} move", headline=f"{asset} MOVE", summary="", topic="move", evidence="price data",
@@ -202,7 +204,20 @@ async def test_a_busy_market_day_is_capped(db: Session) -> None:
     await events.decide(db, NOW, quotes={"SI=F": silver(NOW)}, watchlist=sources.DEFAULT_WATCHLIST, categories={},
                         desk_state=engine.settings_row(db).state, liquidations=False, second_opinion=agrees, daily=daily_at(NOW, 41.95))
     ev = db.scalars(select(NdEvent).where(NdEvent.key.like("move:SILVER%"))).one()
-    assert ev.status == "candidate" and "3 major market moves went out in 24 hours already" in ev.facts["breaking_miss"]
+    assert ev.status == "released" and "major market moves went out in 24 hours" not in str((ev.facts or {}).get("breaking_miss") or "")
+
+
+async def test_four_majors_inside_an_hour_hold_the_next_for_a_person(db: Session) -> None:
+    desk_running(db, NOW, {})
+    for i, asset in enumerate(("GOLD", "OIL", "BTC", "ETH")):
+        db.add(NdEvent(key=f"move:{asset}:x", kind="market", title=f"{asset} move", headline=f"{asset} MOVE", summary="", topic="move", evidence="price data",
+                       category="markets", facts={"assets": [asset], "market_major": "major", "urgency": {"level": "major"}}, virality=70.0, status="released",
+                       released_at=NOW - timedelta(minutes=58 - 12 * i), first_seen=NOW - timedelta(minutes=59), expires_at=NOW, slot="breaking"))
+    db.commit()
+    await events.decide(db, NOW, quotes={"SI=F": silver(NOW)}, watchlist=sources.DEFAULT_WATCHLIST, categories={},
+                        desk_state=engine.settings_row(db).state, liquidations=False, second_opinion=agrees, daily=daily_at(NOW, 41.95))
+    ev = db.scalars(select(NdEvent).where(NdEvent.key.like("move:SILVER%"))).one()
+    assert ev.status == "candidate" and "unusual burst" in ev.facts["breaking_miss"]
 
 
 # --- the silver photograph ---------------------------------------------------------------------------------------------------------

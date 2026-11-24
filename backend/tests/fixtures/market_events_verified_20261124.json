@@ -1,0 +1,1392 @@
+{
+ "about": "Independent verification of market events used as News Desk replay/regression examples (2026-11-16..24), done 2026-11-24 06:35-06:50 UTC. Each claim was checked against at least two sources other than Yahoo Finance where reachable; Yahoo values are listed for comparison only. Raw responses: docs/newsdesk/raw-2026-11-24/ (_index.json maps each file to its URL and retrieval time). verified: true = confirmed by >=2 independent sources; partial = the event happened but a figure, timing, date or wording differs (see note); false = the claim is wrong. Unreachable: Stooq (JavaScript bot challenge), Cboe CDN (403), CNBC quote API (403), S&P DJI site (error page). CME/COMEX settlements were not read directly: COMEX contract months are read through Yahoo's per-contract symbols and labelled as such. FRED had not yet published 11-23 for SP500/NASDAQCOM (nor 11-20 for NASDAQCOM/NASDAQ100) at retrieval.",
+ "events": [
+  {
+   "id": "2026-11-23-nasdaq-composite",
+   "date_utc": "2026-11-23",
+   "instrument": "Nasdaq Composite (^IXIC / COMP)",
+   "claim": "+6.51%, close 24,089.56",
+   "verified": true,
+   "values": [
+    {
+     "source": "Nasdaq official (api.nasdaq.com)",
+     "value": "close 24,089.56; prev 22,617.73 (11-20) -> +6.51%; day high 24,353.65 (+7.67%)",
+     "url": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_COMP.json",
+     "retrieved_utc": "2026-11-24T06:38:28+00:00"
+    },
+    {
+     "source": "Google Finance",
+     "value": "24,089.56, +6.51% (+1,471.83), Nov 23 close",
+     "url": "https://www.google.com/finance/quote/{.INX:INDEXSP,.IXIC:INDEXNASDAQ,.DJI:INDEXDJX,ANT:NASDAQ} (page text excerpts)",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/googlefinance_excerpts.json",
+     "retrieved_utc": "2026-11-24T06:40:13+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "24,089.56, +6.51%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_idx_IXIC.json",
+     "retrieved_utc": "2026-11-24T06:37:11+00:00"
+    },
+    {
+     "source": "FRED NASDAQCOM",
+     "value": "not yet published for 11-20/11-23 (latest observation 2026-11-19 = 23,879.20)",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_NASDAQCOM.csv",
+     "retrieved_utc": "2026-11-24T06:37:58+00:00"
+    }
+   ],
+   "note": "Two independent sources match Yahoo to the cent.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-23-sp500",
+   "date_utc": "2026-11-23",
+   "instrument": "S&P 500 (^GSPC / SPX)",
+   "claim": "+4.73%, close 7,237.17",
+   "verified": true,
+   "values": [
+    {
+     "source": "Google Finance",
+     "value": "7,237.17, +4.73% (+326.78)",
+     "url": "https://www.google.com/finance/quote/{.INX:INDEXSP,.IXIC:INDEXNASDAQ,.DJI:INDEXDJX,ANT:NASDAQ} (page text excerpts)",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/googlefinance_excerpts.json",
+     "retrieved_utc": "2026-11-24T06:40:13+00:00"
+    },
+    {
+     "source": "FRED SP500 (S&P Dow Jones Indices)",
+     "value": "prior close 6,910.39 (2026-11-20) matches; 11-23 not yet published at retrieval",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_SP500.csv",
+     "retrieved_utc": "2026-11-24T06:37:57+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:SP500 (perpetual; oracle follows the index)",
+     "value": "UTC-day close 7,239.5 (a perp, not the index close; within 0.03%)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1d_xyz_SP500.json",
+     "retrieved_utc": "2026-11-24T06:37:36+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SP500",
+       "interval": "1d",
+       "startTime": 1794268800000,
+       "endTime": 1795564800000
+      }
+     }
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "7,237.17, +4.73%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_idx_GSPC.json",
+     "retrieved_utc": "2026-11-24T06:37:12+00:00"
+    }
+   ],
+   "note": "Google Finance gives the close and change; FRED confirms the base (previous close). FRED's own 11-23 value was not published yet.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-23-dow",
+   "date_utc": "2026-11-23",
+   "instrument": "Dow Jones Industrial Average (^DJI)",
+   "claim": "close 49,595.31 (+3.01%)",
+   "verified": true,
+   "values": [
+    {
+     "source": "FRED DJIA",
+     "value": "49,595.31 (11-23) vs 48,147.33 (11-20) = +3.01%",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DJIA&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_DJIA.csv",
+     "retrieved_utc": "2026-11-24T06:37:59+00:00"
+    },
+    {
+     "source": "Google Finance",
+     "value": "49,595.31, +3.01% (+1,447.98)",
+     "url": "https://www.google.com/finance/quote/{.INX:INDEXSP,.IXIC:INDEXNASDAQ,.DJI:INDEXDJX,ANT:NASDAQ} (page text excerpts)",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/googlefinance_excerpts.json",
+     "retrieved_utc": "2026-11-24T06:40:13+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "49,595.31, +3.01%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EDJI?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_idx_DJI.json",
+     "retrieved_utc": "2026-11-24T06:37:13+00:00"
+    }
+   ],
+   "note": "Exact match across sources.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-23-nvda",
+   "date_utc": "2026-11-23",
+   "instrument": "NVIDIA (NVDA)",
+   "claim": "+31.48%, close 165.05",
+   "verified": true,
+   "values": [
+    {
+     "source": "Nasdaq official",
+     "value": "close $165.05; prev $125.53 -> +31.48%; high $171.50 (+36.62%), low $156.93",
+     "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_NVDA.json",
+     "retrieved_utc": "2026-11-24T06:38:31+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:NVDA",
+     "value": "UTC-day close 165.25 (perp)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1d_xyz_NVDA.json",
+     "retrieved_utc": "2026-11-24T06:37:37+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:NVDA",
+       "interval": "1d",
+       "startTime": 1794268800000,
+       "endTime": 1795564800000
+      }
+     }
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "165.05, +31.48%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_NVDA.json",
+     "retrieved_utc": "2026-11-24T06:37:14+00:00"
+    }
+   ],
+   "note": "Close confirmed. The '+36%' in the 11-23 replay log (log-nvda) is the intraday high (+36.6%), not the close.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-23-intraday-log-claims",
+   "date_utc": "2026-11-23",
+   "instrument": "S&P 500 / Nasdaq / Dow / NVDA intraday (replay log rows log-us-stocks, log-nvda)",
+   "claim": "S&P +5.4%, Nasdaq +7.6%, Dow +3.2%, Nvidia +36% (logged 14:45 UTC, vs Friday close)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) 5-minute",
+     "value": "at 14:45 UTC: S&P +4.27%, Nasdaq +6.09%, Dow +2.48%; day highs +5.57% / +7.67% / +3.45%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1795046400&period2=1795478400&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_idx_GSPC.json",
+     "retrieved_utc": "2026-11-24T06:41:55+00:00"
+    },
+    {
+     "source": "Nasdaq official",
+     "value": "COMP day high 24,353.65 = +7.67%; NVDA high 171.50 = +36.62%",
+     "url": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_COMP.json",
+     "retrieved_utc": "2026-11-24T06:38:28+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz 5-minute",
+     "value": "xyz:SP500 +4.10% and xyz:NVDA +30.96% at 14:45 vs their 11-20 21:00 price",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1123_xyz_SP500.json",
+     "retrieved_utc": "2026-11-24T06:45:18+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SP500",
+       "interval": "5m",
+       "startTime": 1795392000000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "The logged figures match the day's intraday highs, not the 14:45 values or the closes (+4.73 / +6.51 / +3.01 / +31.48). Use the closes as regression truth.",
+   "published": null,
+   "fixture_ids": [
+    "log-us-stocks",
+    "log-nvda"
+   ]
+  },
+  {
+   "id": "2026-11-20-nasdaq",
+   "date_utc": "2026-11-20",
+   "instrument": "Nasdaq Composite",
+   "claim": "-5.28%",
+   "verified": true,
+   "values": [
+    {
+     "source": "Nasdaq official",
+     "value": "22,617.73 vs 23,879.20 = -5.28%",
+     "url": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_COMP.json",
+     "retrieved_utc": "2026-11-24T06:38:28+00:00"
+    },
+    {
+     "source": "FRED NASDAQCOM",
+     "value": "11-19 close 23,879.20 matches (11-20 not yet published)",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_NASDAQCOM.csv",
+     "retrieved_utc": "2026-11-24T06:37:58+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "22,617.73, -5.28%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_idx_IXIC.json",
+     "retrieved_utc": "2026-11-24T06:37:11+00:00"
+    }
+   ],
+   "note": "Only one non-Yahoo source has the 11-20 close itself (Nasdaq, the index owner); FRED confirms the base.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-20-sp500",
+   "date_utc": "2026-11-20",
+   "instrument": "S&P 500",
+   "claim": "-3.70%",
+   "verified": true,
+   "values": [
+    {
+     "source": "FRED SP500",
+     "value": "6,910.39 vs 7,175.83 = -3.70%",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_SP500.csv",
+     "retrieved_utc": "2026-11-24T06:37:57+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:SP500",
+     "value": "UTC day 7,173.5 -> 6,978.3 (perp incl. after-hours; not a close-to-close measure)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1d_xyz_SP500.json",
+     "retrieved_utc": "2026-11-24T06:37:36+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SP500",
+       "interval": "1d",
+       "startTime": 1794268800000,
+       "endTime": 1795564800000
+      }
+     }
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "6,910.39, -3.70%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_idx_GSPC.json",
+     "retrieved_utc": "2026-11-24T06:37:12+00:00"
+    }
+   ],
+   "note": "FRED carries S&P DJI's official close.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-20-nvda",
+   "date_utc": "2026-11-20",
+   "instrument": "NVIDIA",
+   "claim": "-14.01% (close 125.53)",
+   "verified": true,
+   "values": [
+    {
+     "source": "Nasdaq official",
+     "value": "125.53 vs 145.98 = -14.01%; the biggest one-day drop since 2025-01-27 (-16.97%)",
+     "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2024-12-01&todate=2026-11-24&limit=600",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_NVDA_since2025.json",
+     "retrieved_utc": "2026-11-24T06:43:00+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:NVDA",
+     "value": "20:47 UTC 127.90; UTC-day close 129.46 (includes after-hours trading)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1120_xyz_NVDA.json",
+     "retrieved_utc": "2026-11-24T06:45:25+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:NVDA",
+       "interval": "5m",
+       "startTime": 1795114800000,
+       "endTime": 1795210200000
+      }
+     }
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "125.53, -14.01%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_NVDA.json",
+     "retrieved_utc": "2026-11-24T06:37:14+00:00"
+    }
+   ],
+   "note": "",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-19-nasdaq",
+   "date_utc": "2026-11-19",
+   "instrument": "Nasdaq Composite",
+   "claim": "-2.25%",
+   "verified": true,
+   "values": [
+    {
+     "source": "FRED NASDAQCOM",
+     "value": "23,879.20 vs 24,429.88 = -2.25%",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_NASDAQCOM.csv",
+     "retrieved_utc": "2026-11-24T06:37:58+00:00"
+    },
+    {
+     "source": "Nasdaq official",
+     "value": "same closes",
+     "url": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_COMP.json",
+     "retrieved_utc": "2026-11-24T06:38:28+00:00"
+    }
+   ],
+   "note": "",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-19-sp500",
+   "date_utc": "2026-11-19",
+   "instrument": "S&P 500",
+   "claim": "-2.02%",
+   "verified": true,
+   "values": [
+    {
+     "source": "FRED SP500",
+     "value": "7,175.83 vs 7,323.63 = -2.02%",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_SP500.csv",
+     "retrieved_utc": "2026-11-24T06:37:57+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:SP500",
+     "value": "UTC day 7,357.2 -> 7,173.7 = -2.49% (perp UTC day, not close-to-close)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1d_xyz_SP500.json",
+     "retrieved_utc": "2026-11-24T06:37:36+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SP500",
+       "interval": "1d",
+       "startTime": 1794268800000,
+       "endTime": 1795564800000
+      }
+     }
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "-2.02%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_idx_GSPC.json",
+     "retrieved_utc": "2026-11-24T06:37:12+00:00"
+    }
+   ],
+   "note": "",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-19-tg199-15min",
+   "date_utc": "2026-11-19",
+   "instrument": "US indices, 15-minute drop (Telegram 199 / event 812)",
+   "claim": "Nasdaq -1.9%, S&P 500 -1.4%, Dow -1.1% in 15 minutes (to ~17:00 UTC)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) 5-minute",
+     "value": "16:45->17:00 UTC: Nasdaq -1.73%, S&P -1.30%, Dow -1.01%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EIXIC?period1=1795046400&period2=1795478400&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_idx_IXIC.json",
+     "retrieved_utc": "2026-11-24T06:41:55+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz 5-minute",
+     "value": "xyz:SP500 7,318.1->7,222.4 = -1.31%; xyz:XYZ100 (Nasdaq-100, not the Composite) -1.88%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1119pm_xyz_SP500.json",
+     "retrieved_utc": "2026-11-24T06:47:18+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SP500",
+       "interval": "5m",
+       "startTime": 1795105800000,
+       "endTime": 1795108500000
+      }
+     }
+    }
+   ],
+   "note": "A sharp 15-minute drop did happen; S&P -1.3% (not -1.4%), Nasdaq -1.7% on 5-minute closes (the -1.9% used an intraminute price, 24,074). No independent intraday source for the Composite or the Dow was reachable.",
+   "published": "Telegram 199, X",
+   "fixture_ids": [
+    812
+   ]
+  },
+  {
+   "id": "2026-11-20-tg203",
+   "date_utc": "2026-11-20",
+   "instrument": "US indices at 20:00 UTC (Telegram 203 / X 144 / event 932)",
+   "claim": "Nasdaq -4.6%, S&P 500 -3.1% in 24 hours",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) 5-minute",
+     "value": "20:00 UTC: S&P 6,965.82 = -3.22% over 24h (-2.93% vs previous close); Nasdaq 22,811.34 = -4.80% over 24h (-4.47% vs previous close)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?period1=1795046400&period2=1795478400&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_idx_GSPC.json",
+     "retrieved_utc": "2026-11-24T06:41:55+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz 5-minute",
+     "value": "xyz:SP500 -3.21% over 24h; xyz:XYZ100 (Nasdaq-100) -4.96%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1120_xyz_SP500.json",
+     "retrieved_utc": "2026-11-24T06:45:23+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SP500",
+       "interval": "5m",
+       "startTime": 1795114800000,
+       "endTime": 1795210200000
+      }
+     }
+    },
+    {
+     "source": "Nasdaq official",
+     "value": "closes later that day: Nasdaq -5.28% (FRED: S&P -3.70%)",
+     "url": "https://api.nasdaq.com/api/quote/COMP/historical?assetclass=index&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_COMP.json",
+     "retrieved_utc": "2026-11-24T06:38:28+00:00"
+    }
+   ],
+   "note": "Intraday snapshot roughly right (S&P 24h -3.2% on two sources; the Nasdaq figure was its change vs the previous close). Superseded by the closes: regression truth should be the close-to-close moves.",
+   "published": "Telegram 203, X 144",
+   "fixture_ids": [
+    932
+   ]
+  },
+  {
+   "id": "2026-11-20-btc-below-60k",
+   "date_utc": "2026-11-20",
+   "instrument": "Bitcoin",
+   "claim": "falls below $60K for the first time since July (Telegram 202 / event 943 'now $59,350')",
+   "verified": true,
+   "values": [
+    {
+     "source": "Binance BTCUSDT daily",
+     "value": "11-20 low 57,778.35; previous day below 60,000: 2026-07-02 (low 59,588)",
+     "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=1725148800000&limit=1000",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_BTCUSDT_1d_since_2024_09.json",
+     "retrieved_utc": "2026-11-24T06:41:36+00:00"
+    },
+    {
+     "source": "Binance BTCUSDT 1h",
+     "value": "first hour below 60,000: 15:00 UTC (low 59,388); 16:00-17:00 range 58,769-60,025 (943's $59,350 at 16:07 is inside it)",
+     "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&startTime=1795046400000&endTime=1795305600000&limit=1000",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_BTCUSDT_1h_1119_1122.json",
+     "retrieved_utc": "2026-11-24T06:41:34+00:00"
+    },
+    {
+     "source": "Coinbase BTC-USD daily",
+     "value": "June 24 - July 2 2026 lows below 60k, none after until 11-20",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2026-06-15T00:00:00Z&end=2026-08-15T00:00:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1d_2026_06_08.json",
+     "retrieved_utc": "2026-11-24T06:50:11+00:00"
+    },
+    {
+     "source": "Coinbase BTC-USD 1h",
+     "value": "15:00 UTC hour low 59,314; 11-20 low 57,655",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600&start=2026-11-20T00:00:00Z&end=2026-11-21T12:00:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1h_1120.json",
+     "retrieved_utc": "2026-11-24T06:37:30+00:00"
+    },
+    {
+     "source": "Kraken XBTUSD daily",
+     "value": "11-20 low 57,661.1; last day below 60k before 11-20: 2026-07-02 (59,529.6)",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1730419200",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_XBTUSD_1d_720.json",
+     "retrieved_utc": "2026-11-24T06:50:11+00:00"
+    }
+   ],
+   "note": "Confirmed on three exchanges, including 'first time since July' (last sub-$60K day: 2026-07-02).",
+   "published": "Telegram 202, X",
+   "fixture_ids": [
+    943,
+    966
+   ]
+  },
+  {
+   "id": "2026-11-20-btc-4h",
+   "date_utc": "2026-11-20",
+   "instrument": "Bitcoin 4-hour change (Telegram 202)",
+   "claim": "-3.3% in 4H (post at 17:04 UTC)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Binance BTCUSDT 1m",
+     "value": "13:00->17:00 UTC 61,563->59,415 = -3.49%; 13:04->17:04 61,587->59,194 = -3.89%",
+     "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795193700000&limit=35",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_BTCUSDT_1m_1120_1700.json",
+     "retrieved_utc": "2026-11-24T06:45:06+00:00"
+    },
+    {
+     "source": "Coinbase BTC-USD 1m",
+     "value": "13:00->17:00 -3.51%; 13:04->17:04 -3.90%",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T16:55:00Z&end=2026-11-20T17:30:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1m_1120_1700.json",
+     "retrieved_utc": "2026-11-24T06:45:07+00:00"
+    }
+   ],
+   "note": "Direction and size right; the actual 4-hour drop was slightly larger (-3.5% to -3.9%) than stated.",
+   "published": "Telegram 202",
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-21-btc-two-year-low",
+   "date_utc": "2026-11-21",
+   "instrument": "Bitcoin",
+   "claim": "weekend plunge to a two-year low",
+   "verified": true,
+   "values": [
+    {
+     "source": "Binance BTCUSDT daily",
+     "value": "Sat 11-21 low 55,130.00: lowest since 2024-09-09 (54,591.96)",
+     "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=1725148800000&limit=1000",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_BTCUSDT_1d_since_2024_09.json",
+     "retrieved_utc": "2026-11-24T06:41:36+00:00"
+    },
+    {
+     "source": "Coinbase BTC-USD daily",
+     "value": "11-21 low 55,106",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2026-11-10T00:00:00Z&end=2026-11-25T00:00:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1d.json",
+     "retrieved_utc": "2026-11-24T06:37:28+00:00"
+    },
+    {
+     "source": "Kraken XBTUSD daily",
+     "value": "11-21 low 55,100.0: lowest in Kraken's whole 720-day window (from 2024-12-04)",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1730419200",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_XBTUSD_1d_720.json",
+     "retrieved_utc": "2026-11-24T06:50:11+00:00"
+    }
+   ],
+   "note": "Lowest price in over two years (since September 2024).",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-23-btc-rebound",
+   "date_utc": "2026-11-23",
+   "instrument": "Bitcoin",
+   "claim": "rebound to ~$61K",
+   "verified": true,
+   "values": [
+    {
+     "source": "Binance BTCUSDT daily",
+     "value": "11-22 close 61,271.08; 11-23 close 61,270.93 (high 64,603)",
+     "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&startTime=1794268800000&limit=16",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_BTCUSDT_1d.json",
+     "retrieved_utc": "2026-11-24T06:37:26+00:00"
+    },
+    {
+     "source": "Coinbase BTC-USD daily",
+     "value": "11-23 close 61,189.97 (high 64,534)",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2026-11-10T00:00:00Z&end=2026-11-25T00:00:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1d.json",
+     "retrieved_utc": "2026-11-24T06:37:28+00:00"
+    },
+    {
+     "source": "Kraken XBTUSD daily",
+     "value": "11-23 close 61,214.3",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1794268800",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_XBTUSD_1d.json",
+     "retrieved_utc": "2026-11-24T06:37:30+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only)",
+     "value": "11-23 daily bar has a null close (data gap)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_BTC-USD.json",
+     "retrieved_utc": "2026-11-24T06:37:17+00:00"
+    }
+   ],
+   "note": "Yahoo's BTC-USD daily bar for 11-23 is empty: production's single source had a gap here.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-21-btc-1046",
+   "date_utc": "2026-11-21",
+   "instrument": "Bitcoin 'so far today' (event 1046, unpublished)",
+   "claim": "-9.1% so far today, $56,269 at 04:03 UTC, 'since the 00:00 UTC daily open ($61,902)'",
+   "verified": false,
+   "values": [
+    {
+     "source": "Binance BTCUSDT 1m",
+     "value": "04:03 close 56,415 / 04:04 56,200 (price right); 11-21 00:00 open 58,951.51 -> about -4.3%",
+     "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795233300000&limit=35",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_BTCUSDT_1m_1121_0355.json",
+     "retrieved_utc": "2026-11-24T06:45:08+00:00"
+    },
+    {
+     "source": "Coinbase BTC-USD daily + 1m",
+     "value": "11-21 open 58,815.33; 04:03 56,300 -> about -4.3%",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-21T03:55:00Z&end=2026-11-21T04:30:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1m_1121_0355.json",
+     "retrieved_utc": "2026-11-24T06:45:09+00:00"
+    }
+   ],
+   "note": "Wrong reference: $61,902 was the 11-20 00:00 open (a day old). Since the 11-21 open the drop was about -4.3% to -4.5%, not -9.1%.",
+   "published": null,
+   "fixture_ids": [
+    1046
+   ]
+  },
+  {
+   "id": "2026-11-21-kraken-cad",
+   "date_utc": "2026-11-21",
+   "instrument": "Bitcoin on Kraken's CAD book (XBT/CAD)",
+   "claim": "71% bitcoin drop on one book (flash crash)",
+   "verified": true,
+   "values": [
+    {
+     "source": "Kraken XBTCAD 1h",
+     "value": "low C$24,250 at 08:00 UTC 11-21; 11-19 close C$88,811 (-72.7%)",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=XBTCAD&interval=60&since=1795089600",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_XBTCAD_1h.json",
+     "retrieved_utc": "2026-11-24T06:41:39+00:00"
+    },
+    {
+     "source": "FRED DEXCAUS (+ Binance BTCUSDT)",
+     "value": "fair value then: 57,997 USD x 1.4323 CAD/USD = C$83,069 -> the CAD low was -70.8% below fair",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCAUS&cosd=2026-11-16&coed=2026-11-24",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_DEXCAUS.csv",
+     "retrieved_utc": "2026-11-24T06:44:30+00:00"
+    },
+    {
+     "source": "Kraken USDCAD 1h",
+     "value": "Kraken's own USD/CAD book fell to 0.30001 in the same hour (FRED: 1.43)",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=USDCAD&interval=60&since=1795089600",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_USDCAD_1h.json",
+     "retrieved_utc": "2026-11-24T06:41:39+00:00"
+    },
+    {
+     "source": "Kraken XBTUSD daily",
+     "value": "USD book low that day 55,100 (no crash)",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1794268800",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_XBTUSD_1d.json",
+     "retrieved_utc": "2026-11-24T06:37:30+00:00"
+    }
+   ],
+   "note": "A Kraken CAD-market dislocation, not a bitcoin crash: about -71% against fair value on that one book; USD markets were unaffected. The dislocation ran from about 20:00 UTC 11-20 to 09:00 UTC 11-21.",
+   "published": null,
+   "fixture_ids": [
+    1078
+   ]
+  },
+  {
+   "id": "2026-11-20-eth-24h",
+   "date_utc": "2026-11-20",
+   "instrument": "Ether 24-hour change (events 941, 1021)",
+   "claim": "-8.5% to $1,596 (21:20 UTC); -8.3% to $1,615 (22:45 UTC)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Binance ETHUSDT 1h",
+     "value": "21:20: 1,602 vs 1,761 = -9.0%; 22:45: 1,623 vs 1,761 = -7.8%",
+     "url": "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&startTime=1795046400000&endTime=1795305600000&limit=1000",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/binance_ETHUSDT_1h_1119_1122.json",
+     "retrieved_utc": "2026-11-24T06:41:35+00:00"
+    },
+    {
+     "source": "Coinbase ETH-USD 1h",
+     "value": "21:20: -9.1%; 22:45: -7.9%",
+     "url": "https://api.exchange.coinbase.com/products/ETH-USD/candles?granularity=3600&start=2026-11-19T12:00:00Z&end=2026-11-21T00:00:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_ETHUSD_1h_1119_1121.json",
+     "retrieved_utc": "2026-11-24T06:41:37+00:00"
+    },
+    {
+     "source": "Kraken ETHUSD daily",
+     "value": "11-20 1,755.36 -> 1,619.32 (-7.7% UTC day)",
+     "url": "https://api.kraken.com/0/public/OHLC?pair=ETHUSD&interval=1440&since=1794268800",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/kraken_ETHUSD_1d.json",
+     "retrieved_utc": "2026-11-24T06:37:32+00:00"
+    }
+   ],
+   "note": "An 8-9% 24h drop did happen (peak about -9.2% around 20:00 UTC on both exchanges); exact figures depend on the minute. The fixture's first_seen (15:18) predates the measured figure (21:20).",
+   "published": null,
+   "fixture_ids": [
+    941,
+    1021
+   ]
+  },
+  {
+   "id": "2026-01-30-silver-crash",
+   "date_utc": "2026-01-30",
+   "instrument": "Silver",
+   "claim": "a one-day crash of ~31%",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) SI=F",
+     "value": "2026-01-30: 114.04 -> 78.29 = -31.35% (largest day in 2 years)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?range=2y&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_SI_F_2y.json",
+     "retrieved_utc": "2026-11-24T06:37:25+00:00"
+    },
+    {
+     "source": "Nasdaq official SLV (iShares Silver Trust)",
+     "value": "2026-01-30: -28.54%",
+     "url": "https://api.nasdaq.com/api/quote/SLV/historical?assetclass=etf&fromdate=2026-01-01&todate=2026-11-24&limit=300",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_SLV_2026.json",
+     "retrieved_utc": "2026-11-24T06:48:36+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:SILVER",
+     "value": "UTC day 2026-01-30: -26.86%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1d_2026_xyz_SILVER.json",
+     "retrieved_utc": "2026-11-24T06:47:53+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SILVER",
+       "interval": "1d",
+       "startTime": 1767225600000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "Real, but it happened on 2026-01-30, NOT in the 2026-11-16..24 window (it is the 31% in app/newsdesk/safety.py's calibration). Within the window silver's largest daily fall was 11-20: SI=F -7.41%, SLV -6.74%. Do not use it as a November regression event.",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-20-silver-880",
+   "date_utc": "2026-11-20",
+   "instrument": "Silver 'so far today' (event 880, published on X)",
+   "claim": "-6.7% so far today: $42.00 at 01:40 UTC vs previous close $45.00; 'biggest one-day drop since May 2026'",
+   "verified": false,
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) SI=F",
+     "value": "01:40 UTC 42.05; the previous close was 44.32 (11-19), not 45.00 (11-18's) -> about -5.1%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1795118400&period2=1795143600&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_SI_F.json",
+     "retrieved_utc": "2026-11-24T06:45:11+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:SILVER",
+     "value": "01:40 UTC 42.16",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1118_1120_xyz_SILVER.json",
+     "retrieved_utc": "2026-11-24T06:45:21+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SILVER",
+       "interval": "5m",
+       "startTime": 1794934800000,
+       "endTime": 1795143600000
+      }
+     }
+    },
+    {
+     "source": "Nasdaq official SLV",
+     "value": "11-18 40.70, 11-19 39.64 (-2.6%): 11-19 was its own down day, so 11-18's close is not 'the previous close'",
+     "url": "https://api.nasdaq.com/api/quote/SLV/historical?assetclass=etf&fromdate=2026-11-13&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_SLV_1116.json",
+     "retrieved_utc": "2026-11-24T06:47:55+00:00"
+    }
+   ],
+   "note": "Price right, reference a day stale: the true 'so far today' was about -5.1%. The day ended -7.41% (SI=F). 'Since May' also depends on the source (SLV: 2026-06-05 -8.08% and 06-24 -7.09% were bigger than -6.7%).",
+   "published": "X",
+   "fixture_ids": [
+    880
+   ]
+  },
+  {
+   "id": "2026-11-18-20-silver-24h",
+   "date_utc": "2026-11-18/20",
+   "instrument": "Silver 24-hour falls (703, 870, 901, 924, 927 ...)",
+   "claim": "-5.0% to -6.7% over 24h",
+   "verified": true,
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) SI=F 1h",
+     "value": "703: -5.37%; 870/901 (07:54-08:00 11-20): -6.92%; 924: -6.51%; 927: -6.44%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1794700800&period2=1795478400&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_SI_F.json",
+     "retrieved_utc": "2026-11-24T06:41:49+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:SILVER 1h",
+     "value": "703: -5.34%; 870/901: -6.93%; 924: -6.49%; 927: -6.35%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1h_xyz_SILVER.json",
+     "retrieved_utc": "2026-11-24T06:41:41+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SILVER",
+       "interval": "1h",
+       "startTime": 1794700800000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "Two sources agree within 0.1 pt on each (870 and 901 measure slightly bigger than claimed).",
+   "published": null,
+   "fixture_ids": [
+    703,
+    713,
+    740,
+    748,
+    757,
+    870,
+    901,
+    905,
+    910,
+    914,
+    924,
+    927,
+    962,
+    967
+   ]
+  },
+  {
+   "id": "2026-11-18-gold-743",
+   "date_utc": "2026-11-18",
+   "instrument": "Gold (Telegram 194, X)",
+   "claim": "biggest one-day drop since March 2026: -3.6%; 'Gold closed at $3,725'",
+   "verified": false,
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) GC=F 5-minute",
+     "value": "20:00 UTC 3,724.9 vs 11-17 settlement 3,864.2 = -3.60%; but the 11-18 settlement/close was 3,741.9 (-3.16%)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794934800&period2=1795041000&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_GC_F_1118.json",
+     "retrieved_utc": "2026-11-24T06:45:12+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:GOLD",
+     "value": "20:00 UTC 3,723.9 (agrees on the 20:00 price)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1118_1120_xyz_GOLD.json",
+     "retrieved_utc": "2026-11-24T06:45:22+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:GOLD",
+       "interval": "5m",
+       "startTime": 1794934800000,
+       "endTime": 1795143600000
+      }
+     }
+    },
+    {
+     "source": "Nasdaq official GLD (SPDR Gold Shares)",
+     "value": "11-18 -3.20%; bigger 2026 drops after March: 04-21 -3.67%, 06-05 -3.65%, 06-10 -4.15%, 09-28 -3.94%",
+     "url": "https://api.nasdaq.com/api/quote/GLD/historical?assetclass=etf&fromdate=2026-01-01&todate=2026-11-24&limit=300",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_GLD_2026.json",
+     "retrieved_utc": "2026-11-24T06:47:55+00:00"
+    },
+    {
+     "source": "Hyperliquid xyz:GOLD daily",
+     "value": "2026-06-10 -4.11% (UTC day)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1d_2026_xyz_GOLD.json",
+     "retrieved_utc": "2026-11-24T06:47:51+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:GOLD",
+       "interval": "1d",
+       "startTime": 1767225600000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "-3.6% was a 20:00 UTC price, not the close (gold settled -3.16%). 'Since March' is false on GLD and Hyperliquid (June 10 was bigger); only Yahoo's GC=F (-3.57% on 06-10) supports it.",
+   "published": "Telegram 194, X",
+   "fixture_ids": [
+    743
+   ]
+  },
+  {
+   "id": "2026-11-20-gold-24h",
+   "date_utc": "2026-11-20",
+   "instrument": "Gold 24-hour falls (875, 885, 897)",
+   "claim": "-5.07% (03:28), -5.19% (06:00), -5.00% (07:32)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) GC=F 1h",
+     "value": "-4.35%, -5.21%, -4.52%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794700800&period2=1795478400&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_GC_F.json",
+     "retrieved_utc": "2026-11-24T06:41:48+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:GOLD 1h",
+     "value": "-4.34%, -5.20%, -4.46%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1h_xyz_GOLD.json",
+     "retrieved_utc": "2026-11-24T06:41:40+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:GOLD",
+       "interval": "1h",
+       "startTime": 1794700800000,
+       "endTime": 1795478400000
+      }
+     }
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) GC=F daily",
+     "value": "11-20 close -4.62% (3,515.4)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794268800&period2=1795564800&interval=1d",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_GC_F.json",
+     "retrieved_utc": "2026-11-24T06:37:16+00:00"
+    }
+   ],
+   "note": "885 confirmed on both. 875 and 897 measure 0.5-0.7 pt smaller at hourly resolution (the figures depend on the exact minute). Close-to-close: -4.62%.",
+   "published": null,
+   "fixture_ids": [
+    875,
+    885,
+    897
+   ]
+  },
+  {
+   "id": "2026-11-18-19-copper-24h",
+   "date_utc": "2026-11-18/19",
+   "instrument": "Copper 24-hour falls (712, 756, 768)",
+   "claim": "-5.55%, -5.16%, -5.09%",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) HG=F (Dec 2026)",
+     "value": "-5.55%, -5.39%, -4.61%; daily 11-18 -5.30%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?period1=1794700800&period2=1795478400&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_HG_F.json",
+     "retrieved_utc": "2026-11-24T06:41:51+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:COPPER (Mar 2027)",
+     "value": "-5.49%, -5.38%, -4.69%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1h_xyz_COPPER.json",
+     "retrieved_utc": "2026-11-24T06:41:43+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:COPPER",
+       "interval": "1h",
+       "startTime": 1794700800000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "712 and 756 confirmed; 768 measures about -4.7% on both. The % moves agree although the price levels differ by ~1.5% (see the copper instrument entry).",
+   "published": null,
+   "fixture_ids": [
+    712,
+    756,
+    768
+   ]
+  },
+  {
+   "id": "2026-11-23-copper-instruments",
+   "date_utc": "2026-11-23",
+   "instrument": "Copper: Hyperliquid xyz:COPPER 5.74 vs Yahoo HG=F 5.59",
+   "claim": "the two prices disagree by ~2.7%",
+   "verified": true,
+   "values": [
+    {
+     "source": "trade.xyz docs (roll schedule)",
+     "value": "COPPER references COMEX copper futures; designated contract Z (Dec) at the start of November, rolled Z6->H7 between 2026-11-06 and 11-12 (20% a day)",
+     "url": "https://docs.trade.xyz/perpetuals/specifications-and-schedules/roll-schedules.md",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/tradexyz_roll_schedules.md",
+     "retrieved_utc": "2026-11-24T06:36:00+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) HGH27.CMX (COMEX March 2027)",
+     "value": "20:00 UTC 5.7095 vs xyz:COPPER 5.7096 (0.00% apart; within 0.04% all session)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/HGH27.CMX?period1=1795392000&period2=1795478400&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_HGH27_1123.json",
+     "retrieved_utc": "2026-11-24T06:45:15+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) HG=F (front month = HGZ26, Dec 2026)",
+     "value": "20:00 UTC 5.624: 1.52% below xyz:COPPER all day (the Dec/Mar calendar spread)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?period1=1795392000&period2=1795478400&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_HG_F_1123.json",
+     "retrieved_utc": "2026-11-24T06:45:14+00:00"
+    },
+    {
+     "source": "Hyperliquid xyz:COPPER 5-minute",
+     "value": "5.714 at 14:00 UTC, when HG=F was 5.5895 (the moment of the 5.74 vs 5.59 comparison, to within a few minutes)",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1123_xyz_COPPER.json",
+     "retrieved_utc": "2026-11-24T06:45:18+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:COPPER",
+       "interval": "5m",
+       "startTime": 1795392000000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "Not a data error: xyz:COPPER is a perpetual priced off COMEX MARCH 2027 copper (HGH27) since its 11-12 roll; Yahoo HG=F is the DECEMBER 2026 front month (HGZ26). Like-for-like: compare xyz:COPPER with HGH27.CMX (or compare % changes, which agree). The same applies to oil: xyz:CL = WTI Jan 2027 (F7) and xyz:BRENTOIL = Brent Feb 2027 (G7) after their November rolls, while Yahoo CL=F/BZ=F follow the front month. Caveat: the HGH27 price is read via Yahoo's per-contract symbol (CME's own settlement page was not read).",
+   "published": null,
+   "fixture_ids": []
+  },
+  {
+   "id": "2026-11-16-brent-509",
+   "date_utc": "2026-11-16",
+   "instrument": "Brent 1-hour fall (event 509)",
+   "claim": "Brent tumbles 4.3% in an hour to $92.25 (09:28 UTC)",
+   "verified": false,
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) BZF27.NYM (Jan 2027)",
+     "value": "09:00 UTC 95.61, flat vs 06:00 95.73",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZF27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_BZF27_NYM.json",
+     "retrieved_utc": "2026-11-24T06:47:20+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) BZG27.NYM (Feb 2027)",
+     "value": "09:00 UTC 92.99: equals BZ=F's 'fallen' price",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZG27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_BZG27_NYM.json",
+     "retrieved_utc": "2026-11-24T06:47:21+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:BRENTOIL",
+     "value": "-0.31% over that hour",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1h_xyz_BRENTOIL.json",
+     "retrieved_utc": "2026-11-24T06:41:42+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:BRENTOIL",
+       "interval": "1h",
+       "startTime": 1794700800000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "Not a market move: Yahoo's continuous BZ=F briefly switched from the Jan to the Feb contract (~3% calendar spread).",
+   "published": null,
+   "fixture_ids": [
+    509
+   ]
+  },
+  {
+   "id": "2026-11-18-oil-roll",
+   "date_utc": "2026-11-18/19",
+   "instrument": "Brent / WTI 24h falls across the contract roll (682, 714, 728, 730, 761)",
+   "claim": "Brent -5.0% to -5.3% in 24h; WTI -5.1% in 24h; Brent -3.6% in 4h",
+   "verified": false,
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) BZF27.NYM / BZG27.NYM single contracts",
+     "value": "714: -1.85% / -2.21%; 728: -2.15% / -2.25%; 761: -1.83% / -2.20%; 682 (4h): -0.65% / -0.57%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZF27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_BZF27_NYM.json",
+     "retrieved_utc": "2026-11-24T06:47:20+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) CLZ26.NYM / CLF27.NYM single contracts",
+     "value": "730 (19:10 UTC): -4.41% / -3.77%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/CLZ26.NYM?period1=1794700800&period2=1795132800&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_CLZ26_NYM.json",
+     "retrieved_utc": "2026-11-24T06:47:21+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:BRENTOIL / xyz:CL",
+     "value": "714 -2.17%, 728 -2.29%, 761 -2.17%, 682 -0.55%; WTI 730 -3.79%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1h_xyz_BRENTOIL.json",
+     "retrieved_utc": "2026-11-24T06:41:42+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:BRENTOIL",
+       "interval": "1h",
+       "startTime": 1794700800000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "Yahoo's BZ=F and CL=F rolled to the next contract around 08:00-09:00 UTC on 11-18 (WTI Dec expires 11-19). Measuring across the roll added about 2-3 pts. Real single-contract moves: Brent about -2%, WTI about -4%.",
+   "published": null,
+   "fixture_ids": [
+    682,
+    714,
+    728,
+    730,
+    761
+   ]
+  },
+  {
+   "id": "2026-11-17-brent-586",
+   "date_utc": "2026-11-17",
+   "instrument": "Brent 24h (event 586)",
+   "claim": "-5.0% in 24h to $91.47 (07:09 UTC)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) BZ=F (Jan 2027 at both ends)",
+     "value": "91.71 vs 96.42 = -4.88%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZ%3DF?period1=1794700800&period2=1795478400&interval=60m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_1h_BZ_F.json",
+     "retrieved_utc": "2026-11-24T06:41:50+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:BRENTOIL (Feb 2027)",
+     "value": "-4.59%",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_1h_xyz_BRENTOIL.json",
+     "retrieved_utc": "2026-11-24T06:41:42+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:BRENTOIL",
+       "interval": "1h",
+       "startTime": 1794700800000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "A real fall of about 4.6-4.9%, slightly under 5%.",
+   "published": null,
+   "fixture_ids": [
+    586
+   ]
+  },
+  {
+   "id": "2026-11-20-nvda-1008",
+   "date_utc": "2026-11-20",
+   "instrument": "NVIDIA intraday (event 1008, X 145)",
+   "claim": "-12.0% so far today ($128.49 at 20:47 UTC); biggest one-day drop since January 2025",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) 5-minute",
+     "value": "20:47 UTC about 127.70 (-12.5%)",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1795183200&period2=1795478400&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_NVDA_1120.json",
+     "retrieved_utc": "2026-11-24T06:45:10+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz xyz:NVDA",
+     "value": "20:47 UTC 127.90",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1120_xyz_NVDA.json",
+     "retrieved_utc": "2026-11-24T06:45:25+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:NVDA",
+       "interval": "5m",
+       "startTime": 1795114800000,
+       "endTime": 1795210200000
+      }
+     }
+    },
+    {
+     "source": "Nasdaq official",
+     "value": "close -14.01%; the previous larger drop was 2025-01-27 (-16.97%)",
+     "url": "https://api.nasdaq.com/api/quote/NVDA/historical?assetclass=stocks&fromdate=2024-12-01&todate=2026-11-24&limit=600",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_NVDA_since2025.json",
+     "retrieved_utc": "2026-11-24T06:43:00+00:00"
+    }
+   ],
+   "note": "Figures right at 20:47 and 'since January 2025' holds. X 145 went out at 00:11 UTC 11-21, after the close (-14.01%), still saying 'so far today -12.0%' (stale; see docs/incidents/2026-11-21-*).",
+   "published": "X 145",
+   "fixture_ids": [
+    929,
+    1008
+   ]
+  },
+  {
+   "id": "2026-11-19-anthropic-ipo",
+   "date_utc": "2026-11-19",
+   "instrument": "Anthropic (ANT) first trading day",
+   "claim": "ANT traded at $112.20 against its $83 IPO price (+35%) (Telegram 200, 18:11 UTC)",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "Nasdaq official",
+     "value": "11-19 open $111.50, high $115.10, low $92.72, close $97.17 (+17.1% vs $83)",
+     "url": "https://api.nasdaq.com/api/quote/ANT/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_ANT.json",
+     "retrieved_utc": "2026-11-24T06:38:35+00:00"
+    },
+    {
+     "source": "Google Finance",
+     "value": "11-23 close $87.64 (-1.43%), consistent with Nasdaq",
+     "url": "https://www.google.com/finance/quote/{.INX:INDEXSP,.IXIC:INDEXNASDAQ,.DJI:INDEXDJX,ANT:NASDAQ} (page text excerpts)",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/googlefinance_excerpts.json",
+     "retrieved_utc": "2026-11-24T06:40:13+00:00"
+    },
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) 5-minute",
+     "value": "peak 114.99 at 16:45 UTC; 18:10 UTC 94.04 (+13% vs $83) when the post went out",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/ANT?period1=1795096800&period2=1795123800&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_ANT.json",
+     "retrieved_utc": "2026-11-24T06:45:10+00:00"
+    }
+   ],
+   "note": "$112.20 is inside Nasdaq's official day range (+35.2% vs $83), so it was a real trade near the open, but stale by 18:11 UTC (~$94). The $83 IPO price comes from news reports only (CNA, Le Monde, CryptoSlate in the fixture); no issuer filing was retrieved.",
+   "published": "Telegram 200, X",
+   "fixture_ids": [
+    790
+   ]
+  },
+  {
+   "id": "2026-11-16-btc-vs-nasdaq-year",
+   "date_utc": "2026-11-16",
+   "instrument": "Bitcoin vs Nasdaq over one year (Telegram 184, X)",
+   "claim": "Bitcoin -31.1% against Nasdaq +9.9%",
+   "verified": true,
+   "values": [
+    {
+     "source": "Coinbase BTC-USD",
+     "value": "2025-11-16 close 94,183.97; 2026-11-16 close 64,816.79 (-31.2%)",
+     "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400&start=2025-11-10T00:00:00Z&end=2025-11-20T00:00:00Z",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/coinbase_BTCUSD_1d_2025_11.json",
+     "retrieved_utc": "2026-11-24T06:41:38+00:00"
+    },
+    {
+     "source": "FRED NASDAQCOM",
+     "value": "2025-11-13 22,870.36 -> 2026-11-13 25,136.27 = +9.91%",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=NASDAQCOM&cosd=2025-11-10&coed=2025-11-20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_NASDAQCOM_2025.csv",
+     "retrieved_utc": "2026-11-24T06:43:24+00:00"
+    }
+   ],
+   "note": "Confirmed (Nasdaq measured on the last close before the post, Friday 11-13).",
+   "published": "Telegram 184, X",
+   "fixture_ids": [
+    506
+   ]
+  },
+  {
+   "id": "2026-11-21-weekly",
+   "date_utc": "2026-11-13..20",
+   "instrument": "Week's winners and losers (1071, 1123, unpublished)",
+   "claim": "Strategy -30.3%, Nvidia -22.9%, Nasdaq -10.0%, S&P 500 -8.6%",
+   "verified": true,
+   "values": [
+    {
+     "source": "Nasdaq official",
+     "value": "MSTR 111.62 -> 77.80 = -30.30%; NVDA 162.85 -> 125.53 = -22.92%; COMP 25,136.27 -> 22,617.73 = -10.02%",
+     "url": "https://api.nasdaq.com/api/quote/MSTR/historical?assetclass=stocks&fromdate=2026-11-16&todate=2026-11-24&limit=20",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/nasdaq_MSTR.json",
+     "retrieved_utc": "2026-11-24T06:39:09+00:00"
+    },
+    {
+     "source": "FRED SP500",
+     "value": "7,561.67 -> 6,910.39 = -8.61%",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2026-11-10&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_SP500.csv",
+     "retrieved_utc": "2026-11-24T06:37:57+00:00"
+    }
+   ],
+   "note": "Checked the four largest index/stock figures.",
+   "published": null,
+   "fixture_ids": [
+    1071,
+    1106,
+    1123
+   ]
+  },
+  {
+   "id": "2026-11-20-sp500-1088",
+   "date_utc": "2026-11-20",
+   "instrument": "S&P 500 record wording (1088, 1097, unpublished)",
+   "claim": "the S&P 500's biggest one-day drop since November 2026: -3.7%",
+   "verified": "partial",
+   "values": [
+    {
+     "source": "FRED SP500",
+     "value": "-3.70% confirmed; but 2026-11-05 was -4.36% (bigger), so -3.70% is not a record for any period reaching back before Nov 5",
+     "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SP500&cosd=2025-11-01&coed=2026-11-25",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/fred_SP500_1y.csv",
+     "retrieved_utc": "2026-11-24T06:43:24+00:00"
+    }
+   ],
+   "note": "The figure is right; the 'since November 2026' record line is meaningless (the comparison found a bigger drop 15 days earlier).",
+   "published": null,
+   "fixture_ids": [
+    1088,
+    1097
+   ]
+  },
+  {
+   "id": "2026-11-23-metals-open",
+   "date_utc": "2026-11-23",
+   "instrument": "Silver and gold at the 11-23 open (log-silver, log-gold)",
+   "claim": "Silver +5.8%, gold +4.2% vs Friday",
+   "verified": true,
+   "values": [
+    {
+     "source": "Yahoo Finance (production's own source; comparison only) 5-minute",
+     "value": "14:35-14:40 UTC: silver +6.0 to +6.3%, gold +4.26 to +4.38% vs Friday settlement (41.03 / 3,515.4); closes +5.15% / +3.87%",
+     "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1795438800&period2=1795449600&interval=5m",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/yahoo_5m_metals_1123_SI.json",
+     "retrieved_utc": "2026-11-24T06:45:13+00:00"
+    },
+    {
+     "source": "Hyperliquid trade.xyz 5-minute",
+     "value": "silver +6.4 to +6.6%, gold +4.28 to +4.37% at the same times",
+     "url": "https://api.hyperliquid.xyz/info",
+     "raw_file": "docs/newsdesk/raw-2026-11-24/hl_candles_5m_1123_xyz_SILVER.json",
+     "retrieved_utc": "2026-11-24T06:45:16+00:00",
+     "post_body": {
+      "type": "candleSnapshot",
+      "req": {
+       "coin": "xyz:SILVER",
+       "interval": "5m",
+       "startTime": 1795392000000,
+       "endTime": 1795478400000
+      }
+     }
+    }
+   ],
+   "note": "Confirmed approximately; silver's two markets differ by about 0.35 pt (spot-referenced perp vs COMEX futures: basis, not error).",
+   "published": null,
+   "fixture_ids": [
+    "log-silver",
+    "log-gold"
+   ]
+  }
+ ]
+}

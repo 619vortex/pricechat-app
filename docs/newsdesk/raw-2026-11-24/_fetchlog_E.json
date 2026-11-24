@@ -1,0 +1,66 @@
+[
+ {
+  "name": "hl_candles_5m_1119pm_xyz_SP500",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795105800000,
+    "endTime": 1795108500000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:18+00:00",
+  "bytes": 1384
+ },
+ {
+  "name": "hl_candles_5m_1119pm_xyz_XYZ100",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795105800000,
+    "endTime": 1795108500000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:19+00:00",
+  "bytes": 1437
+ },
+ {
+  "name": "yahoo_1h_BZF27_NYM",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZF27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:20+00:00",
+  "bytes": 9653
+ },
+ {
+  "name": "yahoo_1h_BZG27_NYM",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/BZG27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:21+00:00",
+  "bytes": 9674
+ },
+ {
+  "name": "yahoo_1h_CLZ26_NYM",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/CLZ26.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:21+00:00",
+  "bytes": 9597
+ },
+ {
+  "name": "yahoo_1h_CLF27_NYM",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/CLF27.NYM?period1=1794700800&period2=1795132800&interval=60m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:47:22+00:00",
+  "bytes": 9786
+ }
+]

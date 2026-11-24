@@ -58,7 +58,7 @@ async def test_a_slot_story_posts_the_pcs_caption_with_article_links_on_telegram
     assert tg.sent[0]["image"] is None  # owner, 2026-11-19: the GPU's painted scene is never the news picture of a missile strike
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    assert ev.facts["package"]["copy"]["writer"] == "local" and ev.facts["visual"]["kind"] == "text"  # the PC's caption still goes
+    assert ev.facts["package"]["copy"]["writer"] == "local" and ev.facts["visual"]["kind"] == "link_preview"  # the PC's caption still goes (with the article's preview, owner 2026-11-23)
     # X: the same words and the article link, the same picture, posted automatically
     x = live["x"]
     # the same moment as Telegram (owner, 2026-11-11): the Telegram job hands straight to X, no 5-minute wait for X's own tick

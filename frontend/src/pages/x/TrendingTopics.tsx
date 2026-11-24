@@ -7,7 +7,7 @@ import { ApiErrorBanner, Badge, Card, Empty, Loading, Stat, relativeTime, type T
  *  Approval mode and dry run by default; Automatic needs an explicit confirmation. The server decides; this page shows it and holds the switches. */
 
 type Check = { check: string; passed: boolean; detail: string };
-export type TrendPost = { id: number; topic_id: number; category: string; status: string; text: string; edited: boolean; angle: string; writer: string; score: number;
+export type TrendPost = { id: number; topic_id: number; category: string; status: string; text: string; edited: boolean; text_ok?: boolean; no_picture?: boolean; angle: string; writer: string; score: number;
   sources: { name: string; url: string; title?: string; at?: string | null }[]; checks: Check[]; hold_reason: string | null; note: string | null; error: string | null;
   x_id: string | null; url: string | null; metrics: Record<string, number | string>; created_at: string | null; published_at: string | null; expires_at: string | null; cashtags: string[];
   sensitive?: Sensitive | null };
@@ -185,6 +185,7 @@ function PostCard({ p, busy, act, s }: { p: TrendPost; busy: boolean; act: (fn: 
       {editing ? <textarea className="input" rows={5} value={text} maxLength={280} onChange={(e) => setText(e.target.value)} aria-label="Edit tweet" style={{ width: "100%" }} />
         : <p style={{ whiteSpace: "pre-wrap", margin: "6px 0" }}>{p.text}</p>}
       {p.hold_reason && <p className="small banner banner-warn">Held: {p.hold_reason}</p>}
+      {p.text_ok && p.status !== "published" && <p className="small muted">You chose to post it without a picture.</p>}
       {p.note && !p.hold_reason && <p className="small muted">{p.note}</p>}
       {p.error && <p className="small banner banner-bad">{p.error}</p>}
       {p.sources.length > 0 && <p className="small">Backed by: {p.sources.map((x, i) => <span key={x.url}>{i ? ", " : ""}<a href={x.url} target="_blank" rel="noreferrer">{x.name}</a></span>)}</p>}
@@ -193,6 +194,10 @@ function PostCard({ p, busy, act, s }: { p: TrendPost; busy: boolean; act: (fn: 
         {p.status === "pending" && <button className="btn btn-sm btn-primary" disabled={busy || editing} onClick={() => void act(() => request(`/x/trending/posts/${p.id}/approve`, { method: "POST" }))}>{s.live ? "Approve and post" : "Approve (dry run)"}</button>}
         {editing ? <button className="btn btn-sm" disabled={busy} onClick={() => void act(async () => { await request(`/x/trending/posts/${p.id}`, body("PUT", { text })); setEditing(false); })}>Save</button>
           : p.sources.length > 0 && <button className="btn btn-sm" disabled={busy} onClick={() => setEditing(true)}>Edit</button>}
+        {p.no_picture && <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => request(`/x/trending/posts/${p.id}/release`, body("POST", { action: "retry" })))}>Try the picture again</button>}
+        {p.no_picture && <button className="btn btn-sm" disabled={busy} onClick={() => {
+          if (window.confirm("Post this tweet without a picture or link? It goes back to pending and still needs your Approve.")) void act(() => request(`/x/trending/posts/${p.id}/release`, body("POST", { action: "text" })));
+        }}>Post without picture</button>}
         <button className="btn btn-sm" disabled={busy} onClick={() => void act(() => request(`/x/trending/posts/${p.id}/reject`, { method: "POST" }))}>Reject</button>
       </div>}
     </div>

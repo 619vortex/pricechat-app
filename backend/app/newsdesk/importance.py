@@ -1,0 +1,762 @@
+"""The News Desk's editorial judgement: how important a story is, with its reasons, in ONE place (owner, 2026-11-23: "Make the Terminal
+behave like a competent, fast, independent financial news editor ... Stop patching individual symptoms").
+
+Before this module a story had to survive a chain of separate keyword gates (newsworthy's consequence lists per story type, weak_story, the
+score bar, routine controversy, filler, the held-story recheck, the breaking bar and breaking_worthy), each able to refuse on its own and
+several applied twice. Production 2026-11-16 to 11-23: 25 of 32 slots empty; refused as "no concrete consequence": Nvidia +27% on its CEO's
+return, a $44B takeover, a $12M hack, a Russian warship sunk, an attack injuring two at a Bahrain plant (docs/newsdesk/2026-11-23-diagnosis.md).
+
+What an editor asks, and what `judge` computes:
+1. Did something happen? A fact the headline states: a figure that moved (money; a % move of a market or a major company), people killed
+   or hurt, or a completed hard event (an attack that hit, a hack, a default, an arrest, a rate decision, a takeover agreed, a leader
+   ousted, sanctions imposed, an outage). No fact: noise ("nothing happened that the sources state").
+2. How big? magnitude, from the largest fact, on one scale for every kind of story: a $44B deal, a 27% move in Nvidia and a 5% S&P day are
+   measured, not matched against a list for their story type.
+3. Who does it touch? reach: a major state, a central bank, a mega-cap, a major market (indices, BTC, ETH, gold, silver, oil), a chokepoint.
+4. How sure are we? credibility: independent outlets and official sources. One unofficial outlet is never MAJOR; hedged reports and plans
+   with nothing done yet lose points.
+5. Is it still news? recency: the score fades after 90 minutes; a news story older than STALE_MIN is stale.
+6. Is it new? novelty is decided before the judgement, by the one repeat check (events.memory): a repeat never reaches this.
+Never news, whatever its figures: opinion, explainers, features, live pages, round-ups, reaction pieces, questions.
+
+Tiers, and what the scheduler (app/newsdesk/events) does with them:
+- MAJOR: verified and exceptional: the only tier that goes at once (owner, 2026-11-23), outside the slot plan and the diversity rule;
+  never outside the factual checks, the repeat check or the safety controls (emergency stop, market pause, owner block).
+- SIGNIFICANT: the next of the six slots, best first; diversity only ranks it lower.
+- NOTABLE: fills a slot when nothing better waits; two posts in a row from one desk hold it.
+- NOISE: never posted; the reason is recorded on the event.
+
+Factual verification (claims, numbers, second source, the final check) is not here and no tier weakens it: it runs after the judgement, on
+every post."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.newsdesk import newsworthy as nw
+
+MAJOR, SIGNIFICANT, NOTABLE, NOISE = "major", "significant", "notable", "noise"
+ORDER = {MAJOR: 3, SIGNIFICANT: 2, NOTABLE: 1, NOISE: 0}
+TIER_AT = ((MAJOR, 72.0), (SIGNIFICANT, 54.0), (NOTABLE, 42.0))  # score -> tier (score = BASE + size + reach + sources - doubt - age)
+BASE = 30.0  # something happened (a stated fact); a story with no fact never gets a score
+STALE_MIN = 12 * 60  # a news story first reported longer ago than this is no longer news at a slot
+
+
+def _rx(p: str) -> re.Pattern[str]:
+    return re.compile(p, re.I)
+
+
+# --- what moved ---------------------------------------------------------------------------------------------------------------------
+INDEX = _rx(r"\b(s&p(?: 500)?|nasdaq(?:-100| 100| composite)?|dow(?: jones)?|stocks|stock market|wall street|global stocks|world stocks|"
+            r"equities|stoxx|ftse|nikkei|hang seng|kospi|dax)\b")
+CRYPTO_MAJOR = _rx(r"\b(bitcoin|btc|ether(?:eum)?(?![.\w])|eth|crypto market)\b")
+METAL_OIL = _rx(r"\b(gold|silver|copper|oil|brent|wti|crude|natural gas)\b")
+MEGA = _rx(r"\b(nvidia|apple|microsoft|alphabet|google|amazon|meta|tesla|berkshire|jpmorgan|broadcom|tsmc|samsung|netflix|oracle|"
+           r"eli lilly|visa|mastercard|walmart|exxon|saudi aramco|aramco|openai|anthropic|spacex|binance|coinbase|tether|circle|strategy|microstrategy|"
+           r"amd|intel|palantir|asml|micron|qualcomm|arm holdings|salesforce|adobe|alibaba|tencent)\b")
+MOVE = _rx(r"\b(falls?|fell|drops?|dropped|slides?|slid|plunges?|plunged|tumbles?|tumbled|sinks?|sank|slumps?|slumped|crash\w*|craters?|"
+           r"rises?|rose|jumps?|jumped|surges?|surged|soars?|soared|gains?|gained|climbs?|climbed|rall(?:y|ies|ied)|rebounds?|rebounded|"
+           r"spikes?|spiked|skyrockets?|skyrocketed|rockets?|rocketed|leaps?|leapt|adds?|added|wipes?|wiped|erases?|erased|sheds?|shed|"
+           r"lowest|highest|record high|all-time high|best day|worst day|routs?|selloff|sell-off|drags?|dragged|"
+           r"(?:down|up|lower|higher) \d)\b")
+EXTREME = _rx(r"\b(record high|all-time high|(?:lowest|highest) (?:level |close )?since|(?:best|worst|biggest) (?:day|week|drop|gain|rally|fall)\w* since|"
+              r"52-week (?:high|low))\b")
+LEVEL = _rx(r"\b(?:bitcoin|btc|ether(?:eum)?|eth|s&p(?: 500)?|nasdaq(?: composite)?|dow(?: jones)?|stocks)(?:\s+\$[a-z]{2,6})?\s+"
+            r"(breaks?|broke|falls?|fell|drops?|dropped|slips?|slipped|sinks?|sank|plunges?|plunged|tumbles?|tumbled|rises?|rose|climbs?|"
+            r"climbed|jumps?|jumped|surges?|surged|soars?|soared|tops|topped|crosses|crossed|reclaims?|reclaimed|claims?|claimed|hits?|reaches|reached|"
+            r"passes|passed|surpasses|surpassed)\s+(?:back\s+)?(?:above\s+|over\s+)?"
+            r"(?:below|above|under|over|past|through)\s+\$?\s?\d")
+BACKGROUND_MOVE = _rx(r"['’]s\s+(?:\w+\s+)?(?:plunge|crash|surge|rout|selloff|sell-off|slump|rally|tumble|meltdown|freefall)\b")
+DOW_POINTS = re.compile(r"\bdow\b.{0,40}?\b(\d[\d,]{2,})\s*points?\b", re.I)
+
+# --- what happened: completed hard events (points, name, pattern); the first match names the event, the largest fact sets the size -----
+HARD = [
+    (22.0, "an attack that hit", _rx(r"\b(strikes? (?:on|at|hit)|struck|attack(?:s|ed)? (?:on|at|hits?)|attacked|bombed|shelled|shot down|downed|"
+                                     r"seiz(?:es|ed)|explosions?|blasts?|ablaze|on fire|drone strikes?|missile strikes?|"
+                                     r"(?:drone|missile) attacks?)\b")),
+    # "Russian missiles crash in Poland": weapons landing in a state, not yet called an attack (2026-11-23, NATO sent AWACS after it)
+    (20.0, "a military incident", _rx(r"\b(missiles?|drones?|rockets?)\b.{0,15}\b(crash(?:es|ed)?|land(?:s|ed)?|f[ae]ll|falls|stray(?:s|ed)?)\b")),
+    (22.0, "a hack or theft", _rx(r"\b(hack(?:ed|s)?|exploit(?:ed)?|drained|stolen|(?<!grand )theft|breach(?:ed)?|heist|compromised)\b")),
+    # a failure happening now ("files for bankruptcy"), not an old one named as an adjective ("bankrupt FTX's missed fortune", 2026-11-24)
+    (22.0, "a failure", _rx(r"\b(defaults?|defaulted|(?:files?|filed|filing) for bankruptcy|(?:declares?|declared|enters?|entered) bankruptcy|"
+                              r"(?:goes|went|gone) bankrupt|insolven\w*|collaps(?:es|ed)|halts? withdrawals|freezes? withdrawals|"
+                              r"depegs?|depegged)\b")),
+    (20.0, "a central-bank decision", _rx(r"\b(fed|federal reserve|ecb|bank of england|boe|bank of japan|boj|pboc|snb|rba)\b.{0,40}"
+                                          r"\b(cuts?|hikes?|raises?|lowers?|holds?|keeps?|leaves?|pauses?)\b.{0,20}\brates?\b")),
+    (18.0, "a takeover or deal", _rx(r"\b(to (?:buy|acquire)|acquires?|acquired|agrees? to (?:buy|acquire|merge)|takeover|merger|buyout)\b")),
+    (18.0, "an enforcement action", _rx(r"\b(arrest(?:ed|s)?|charged|indicted|convicted(?!\s+(?:[\w.'’-]+\s+){0,2}(?:swindler|fraudster|felon|killer|murderer|criminal|founder|boss|executive|trader|spy|terrorist))|sentenced|sues|sued|fines?|fined|raid(?:s|ed)|"
+                                        r"sanctions? on|imposes? sanctions|sanctioned|bans?|banned|blocks?|blocked|curbs?|export controls?|"
+                                        # 2026-11-24: government and court acts the replay missed ("U.S. adds Megaspeed to trade blacklist",
+                                        # "Circle, World Liberty ordered to keep tokens frozen", "Ten under formal investigation")
+                                        r"blacklist(?:s|ed)?|entity list|adds? .{1,40}? to (?:a |the |its )?(?:trade |entity |export |sanctions )?(?:black)?list|"
+                                        r"ordered to|court orders?|orders? .{0,30}\b(?:frozen|freeze|halt\w*)|formal investigation|"
+                                        r"under (?:formal )?investigation|files? (?:suit|action|charges)|seiz(?:es|ed))\b")),
+    (16.0, "a leadership change", _rx(r"\b(ousted|fired|resigns?|resigned|steps? down|stepped down|reinstat\w*|rehired|appointed|names? (?:new )?ceo)\b|"
+                                      r"\b(?:boss|ceo|chief|chair\w*|founder|president|head)\b.{0,20}\b(?:exits?|quits?|departs?|leaves|to leave)\b")),
+    # a mega-cap's quarterly results moving its market ("Nvidia revenue jumps 103% to $115.8 billion, beats estimates"): a scheduled event,
+    # but one that moves every market; counted only for the mega-caps (MEGA), checked in _hard
+    (14.0, "a mega-cap's results", _rx(r"\b(beats?|beat|misses?|missed|tops?|topped) (?:analysts['’]? |wall street )?(?:estimates|expectations|forecasts)\b|"
+                                     r"\b(?:quarterly|q[1-4]) (?:results|earnings|revenue)\b")),
+    (14.0, "a regulatory decision", _rx(r"\b(sec|cftc|fca|esma|occ|fdic|treasury|regulators?|watchdog)\b.{0,40}\b(advisory|guidance|approves?|approved|"
+                                        r"allows?|permits?|clears?|cleared|rules? that|authori[sz]es?|authori[sz]ed)\b")),
+    (18.0, "a natural disaster", _rx(r"\b(earthquake|quake|tsunami|hurricane|typhoon|cyclone|volcan\w+ erupt\w*|eruption|wildfires?|floods?)\b")),
+    (16.0, "an outage", _rx(r"\b(outages?|goes down|went down|offline|ground stop|grounded)\b")),
+    (18.0, "a trade measure", _rx(r"\b(?:impos\w*|rais\w*|slap\w*|hik\w*|lift\w*|scrap\w*|cut\w*)\b.{0,30}\btariffs?\b|\btariffs?\b.{0,30}\b(?:take effect|from|starting)\b")),
+    (14.0, "a show of force", _rx(r"\b(fires?|fired|launch(?:es|ed)?|test-fires?|test-fired)\s+(?:\w+\s+){0,2}(?:missiles?|rockets?|ballistic)\b|"
+                                  r"\b(?:military|naval|live-fire|war) (?:drills?|exercises?)\b|\bdrills? (?:around|near|off) \w+")),
+    (16.0, "a deployment or escalation", _rx(r"\b(troops? (?:are |were )?in|deploy(?:s|ed)|mobiliz\w*|declares? (?:war|emergency)|evacuat\w*|"
+                                             r"blockade|closes? (?:the )?(?:strait|airspace|border))\b|"
+                                             r"\b(?:sends?|to send|sent|dispatch\w*)\b.{0,30}\b(?:planes?|jets?|awacs|troops|warships?|carriers?|"
+                                             r"forces|soldiers|air defen[cs]es?|patriots?)\b")),
+    (14.0, "a ceasefire or agreement", _rx(r"\b(ceasefire|truce|peace deal|trade deal|agreement)\b.{0,30}\b(agreed|reached|signed|takes effect)\b|"
+                                           r"\b(agree|agrees|agreed|signs?|signed)\b.{0,30}\b(ceasefire|truce|deal|agreement)\b")),
+    # a routine print counts little on its own (owner, 2026-11-18: one outlet's "UK inflation accelerated to 3.6%" is not a post); a
+    # multi-year extreme adds 8 below
+    (10.0, "official economic data", _rx(r"\b(inflation|cpi|consumer prices|unemployment|jobless claims|payrolls|jobs report|gdp|retail sales)\b"
+                                         r".{0,40}\b(rises?|rose|falls?|fell|jumps?|slows?|slowed|accelerat\w*|cools?|cooled|hits?|beats?|misses?|\d)")),
+]
+# "Iran attacks Kuwait", "Ukrainian drones strike two Russian oil refineries", "Tankers hit in Strait of Hormuz": the verb of an attack with
+# an actor or a target the desk knows (a state, a weapon, a force, a ship or a facility)
+ATTACK_VERB = _rx(r"\b(attacks?|strikes?|struck|hits?|bombs?|bombed|shells?|shelled|pounds?|pounded|targets?|targeted|damaged|destroyed|sinks?|sank|sunk)\b")
+ACTOR_OR_TARGET = _rx(r"\b(drones?|missiles?|rockets?|forces|troops|army|navy|military|jets?|warships?|ships?|tankers?|vessels?|refiner(?:y|ies)|"
+                      r"plant|facility|base|airport|port|pipeline|power (?:plant|station|grid)|embassy|city|region|capital)\b")
+# attacks talked about, not one that happened: "Europeans brace for more Russian attacks", "Bridges Become Targets in Russia's War"
+NOT_AN_ATTACK = _rx(r"\b(brace for|braces for|fears? (?:of|more)|risk of|threat of|more \w+ attacks|wave of|become targets?|becomes? a target|"
+                    r"prepares? for|warns? of|calls? for)\b")
+INVESTIGATION = _rx(r"\b(probe|probes|probing|investigat(?:es|ing|ion|ed)|subpoena\w*)\b")
+SHARP = _rx(r"\b(plunges?|plunged|crash(?:es|ed)?|craters?|cratered|soars?|soared|skyrockets?|skyrocketed|surges?|surged|tumbles?|tumbled|"
+            r"routs?|selloff|sell-off|meltdown|freefall)\b")
+FINANCE = _rx(r"\b(markets?|stocks?|shares?|bonds?|yields?|treasur\w+|dollar|currency|banks?|exchanges?|crypto\w*|tokens?|coins?|stablecoins?|"
+              r"etfs?|funds?|investors?|traders?|prices?|tariffs?|trade|economy|economic|rates?|inflation|oil|gas|gold|silver|chips?|ai|ipo|"
+              r"earnings|revenue|profits?|valuation|sec|cftc|ceo|company|companies|deal)\b")
+FINANCIAL_EVENTS = {"a natural disaster", "a hack or theft", "a failure", "a central-bank decision", "a takeover or deal", "an enforcement action", "an outage",
+                    "an official investigation", "official economic data"}
+# the aftermath of an older event: "survivors begin receiving payments from $305m bankruptcy"
+AFTER = _rx(r"\b(?:from|after|over|since)\s+(?:the |its |a |an )?(?:\$[\d.,]+\s*(?:b|bn|billion|m|mn|million)\s+)?(?:\w+\s+){0,2}"
+            r"(bankruptcy|settlement|hack|crash|collapse|scandal|attack|war|deal|lawsuit)\b")
+NATURAL_AT = next(i for i, h in enumerate(HARD) if h[1] == "a natural disaster")  # "Floods hit Valencia region" is weather, not an attack
+INJURED = _rx(r"\b(injur(?:ed|es|ing|ies)|wounded|hurt|casualties)\b")
+# a threat or warning about an attack is not an attack that hit
+THREAT = _rx(r"\b(threat\w*|threatens?|warns? of|could|would|will|vows?|plans?|prepar\w*|ready to|to (?:attack|strike|hit|seize|sink))\b")
+
+# --- reach ------------------------------------------------------------------------------------------------------------------------
+BIG_STATE = {"US", "CHINA", "RUSSIA", "IRAN", "ISRAEL", "UKRAINE", "SAUDI", "NATO", "TAIWAN", "NKOREA", "INDIA"}
+CENTRAL_BANK = _rx(r"\b(fed|federal reserve|ecb|bank of england|bank of japan|pboc)\b")
+# global energy and shipping supply: an attack here moves every market (2026-11-24: a domestic refinery inside an established war is not one)
+# A Gulf producer counts only with its energy infrastructure ("Saudi oil refinery", "Kuwait's oil terminal"): "Houthis target Riyadh" is
+# an attack on a capital, not on supply (replay 2026-11-24: every Saudi-Houthi exchange broke as major)
+GLOBAL_ENERGY = _rx(r"\b(hormuz|red sea|bab el-mandeb|suez|persian gulf|gulf of oman|aramco|abqaiq|ras tanura|"
+                    r"export terminal|lng (?:terminal|plant|tanker)s?|tankers?|shipping lanes?|oil terminal)\b|"
+                    r"\b(?:saudi|kuwait\w*|qatar\w*|uae|emirati|bahrain\w*)\b.{0,30}\b(?:oil|gas|lng|refiner(?:y|ies)|terminal|pipelines?|"
+                    r"facility|plant|field)\b")
+CHOKEPOINT = GLOBAL_ENERGY
+
+# an attack on energy or shipping moves oil, gold and every market at once ("Missile strike hits Saudi oil terminal")
+ENERGY_OR_SHIPPING = _rx(r"\b(oil|gas|lng|crude|refiner(?:y|ies)|pipelines?|terminal|tankers?|shipping|strait|hormuz|red sea|suez|aramco|"
+                         r"power (?:plant|station|grid))\b")
+
+# --- never news, whatever the figures -----------------------------------------------------------------------------------------------
+OPINION = _rx(r"^(?:opinion|analysis|explainer|review|letters?|comment|editorial|podcast|watch|video|quiz)\s*[:|\-–—]|"
+              r"\b(what (?:it means|to know|we know|you need to know)|why (?:it|this) matters|here'?s (?:why|what|how)|explained|"
+              r"how to|should you|is it time to|winners and losers|the week in|things to watch|in charts?|"
+              r"what to (?:brace for|expect|watch)|what (?:comes|happens) next)\b")
+QUESTION = re.compile(r"\?\s*['\"’”]?\s*$")
+REACTION = _rx(r"\b(reacts?|reacted|reaction|experts? (?:say|warn)|analysts? (?:say|warn)|could everything|breaks? silence|downplays?|"
+               r"shrugs? off|shrugged off|is proof|proves that|shows why|lessons? from|what .{1,30} means|"
+               r"points to)\b")
+# a correspondent's piece or a data write-up about an event, never the event itself, whatever it mentions: "BBC reports from Kyiv
+# bridge hit by Russian attack", "Ethereum block builders received the most in a $3.4 million vault hack, data shows"
+PIECE = _rx(r"\b(reports from|data shows?|analysis shows?|study finds?|a look inside|inside the|is proof|proves that|shows why|lessons? from|"
+            r"rights group|new report|report finds|watchdog says|"
+            # a look back at an earlier event ("Microsoft Outage Review Finds Gaps in Server Testing", 2026-11-24)
+            r"review finds|finds gaps|post-?mortem|root cause|retrospective|one year (?:after|since|on))\b|"
+            # an analyst's view, attributed at the end ("Stocks soared, but the VIX is still at crisis level, says SA Analyst")
+            r",\s*(?:says?|said|according to)\s+(?:an?\s+|one\s+)?[\w.&' -]{0,25}\b(?:analysts?|strategists?|economists?|investors?|experts?)\s*$|"
+            # a TV segment or interview about an earlier event ("Gold Star families hear from Army about its investigation ... | 60 Minutes")
+            r"\((?:video|watch|photos?|live)\)|\|\s*(?:60 minutes|cbs (?:news|mornings)|nbc news|abc news|cnn|bbc|video|watch|podcast|interview)\b|\bhear from\b|\bsit down with\b")
+# a company's shares moving sharply with no figure, outside the mega-caps ("Capita boss exits and shares crash"): a small share move
+COMPANY_SHARP = _rx(r"\bshares?\b.{0,15}\b(crash(?:es|ed)?|plunges?|plunged|tumbles?|tumbled|soars?|soared|surges?|surged|sinks?|sank|slumps?|slumped)\b")
+# a price on one exchange's book, not the asset's market ("a 71% bitcoin drop on its Canadian dollar book", Kraken 2026-11-23)
+VENUE_LOCAL = _rx(r"\b(?:on|from)\s+(?:its|a|an|the|one)?\s*[\w$’'.\- ]{0,30}?\b(?:book|pair|order book)\b|\bflash crash on\b")
+# a deal still being discussed, or a plan meeting resistance: nothing done yet
+TALKS = _rx(r"\b(?:merger|deal|acquisition|takeover|buyout) talks\b|\bin talks\b|\b(?:hold|holds|held|to hold) talks\b|\bfaces? (?:pushback|backlash|criticism|scrutiny)\b")
+HEDGE = _rx(r"\b(reportedly|allegedly|rumou?r\w*|unconfirmed|sources say|according to sources|people familiar|report:|: report\b|said to|"
+            r"- report\b|considering|weighs?|mulls?|could|may|might)\b")
+SPECULATIVE = _rx(r"\b(could|may|might|would)\b")
+FORECAST_MOVE = _rx(r"\b(on track for|set for|heading for|poised for|on course for|headed for)\b")
+# a forecast or plan with nothing done yet ("set to add $2 trillion" DURING a rally is a move under way: a stated move still counts)
+NOT_YET = _rx(r"\b(set to|expected to|poised to|on track to|projected to|forecast to|plans? to|planning to|aims? to|seeks? to|prepares?|preparing|readies|"
+              r"backs?|backed|endorses?|endorsed|"
+              r"proposes?|proposal|to vote on|will (?:consider|decide|meet)|ahead of|preview)\b")
+
+
+@dataclass
+class Decision:
+    tier: str
+    score: float
+    reason: str  # one line the owner can read: why this tier, or why never
+    facts: list[str] = field(default_factory=list)  # what it rests on
+    parts: dict[str, float] = field(default_factory=dict)  # the score, part by part
+    verified: bool = False  # two independent outlets, an official source, or the desk's own checked market data
+
+    @property
+    def rank(self) -> int:
+        return ORDER[self.tier]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"tier": self.tier, "score": round(self.score, 1), "reason": self.reason, "facts": list(self.facts),
+                "parts": {k: round(v, 1) for k, v in self.parts.items()}, "verified": self.verified}
+
+
+def tier_of(score: float) -> str:
+    return next((t for t, at in TIER_AT if score >= at), NOISE)
+
+
+def _money_points(usd: float) -> float:
+    return 30.0 if usd >= 1e10 else 26.0 if usd >= 1e9 else 20.0 if usd >= 1e8 else 14.0 if usd >= 1e7 else 8.0 if usd >= 1e6 else 0.0
+
+
+def _move_points(head: str) -> tuple[float, str]:
+    """A stated move of a market or a company, scaled by what is normal for that kind of asset (a 5% day is huge for the S&P, routine for a
+    small token)."""
+    if MILESTONE.search(head) and not nw.pct_of(head):
+        return 18.0, "a record level in a major market"  # "Bitcoin claims $100,000 for the first time"
+    if LEVEL.search(head) and (CRYPTO_MAJOR.search(head) or INDEX.search(head)) and not nw.pct_of(head):
+        # "Bitcoin breaks below $70,000": a round level of bitcoin, ether or an index (a commodity's price level is routine: owner,
+        # 2026-11-18, "Brent falls below $90" never fills a slot)
+        return 14.0, "a round-level break in a major market"
+    if not MOVE.search(head) and not nw.INDEX_REGIME.search(head):
+        return 0.0, ""
+    pct = nw.pct_of(head)
+    if pct and VENUE_LOCAL.search(head):
+        return 8.0, f"a {pct:g}% move on one exchange's book (not the market)"
+    if pct and LONG_PERIOD.search(head):
+        return 6.0, f"a {pct:g}% move over weeks or months (not a move that just happened)"  # "Curve's CRV Falls 48% in Four Weeks"
+    if pct and WEEK_PERIOD.search(head):
+        week_pts, _ = _move_points(WEEK_PERIOD.sub(" ", head))  # the same move judged as a day's, then capped (no recursion: the week words are gone)
+        return min(week_pts, 16.0), f"a {pct:g}% move over the week"  # "Nasdaq plunges 10% for the week": a slot story
+    m = DOW_POINTS.search(head)
+    if m:
+        pct = max(pct, int(m.group(1).replace(",", "")) / 450.0)  # a ~45,000 Dow: 450 points is about 1%
+    if INDEX.search(head) and (not pct or _index_pct(head)):
+        lines, what = ((4.0, 30.0), (2.5, 22.0), (1.5, 16.0), (0.8, 10.0)), "a stock-market move"
+    elif CRYPTO_MAJOR.search(head) and (not pct or _pct_in_clause_of(head, CRYPTO_MAJOR)):
+        lines, what = ((10.0, 28.0), (6.0, 22.0), (4.0, 16.0), (2.5, 8.0)), "a bitcoin/ether move"
+    elif METAL_OIL.search(head) and (not pct or _pct_in_clause_of(head, METAL_OIL)):
+        lines, what = ((6.0, 28.0), (4.0, 22.0), (2.5, 14.0), (1.5, 8.0)), "a commodity move"
+    elif MEGA.search(head) and _company_moved(head):
+        # 3% is a routine day for a mega-cap (owner, 2026-11-18: "Nvidia NVDA stock up 3% as earnings beat" is not a post)
+        # 2026-11-24: the % must be the company's own shares ("Nvidia skyrockets 27%", "Stock skyrockets 27%"), not something it named
+        # ("Binance raises RLUSD yield as XRP rewards surge 54%"; "Circle Line reliability falls 23%" is Singapore's MRT)
+        lines, what = ((20.0, 28.0), (10.0, 20.0), (6.0, 14.0)), "a major company's share move"
+    elif re.search(r"\b(shares?|stocks?|price|valuation|market cap|token|coin)\b", head, re.I):
+        lines, what = ((30.0, 16.0), (15.0, 8.0)), "a share move"
+    else:
+        lines, what = (), ""  # a % that is not a price ("attacks surge by 350%"): only a stated record of a market below can count
+    for at, points in lines:
+        if pct >= at:
+            return points, f"{what} of {pct:g}%"
+    if EXTREME.search(head) and not VOLUME_NOT_PRICE.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head) or METAL_OIL.search(head) or MEGA.search(head)
+                                 or nw.MAJOR_ASSET.search(head)):  # "XRP crashes to its lowest since November 2024"
+        return 18.0, "a record or multi-year extreme in a major market"
+    if nw.INDEX_REGIME.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head)):
+        if WEEK_PERIOD.search(head):
+            return 16.0, "a week's record in a major market"  # "tech's worst week on Wall Street since 2020": a slot story
+        return 32.0, "a market regime (a correction, a bear market, a halt)"  # an index shock: major (owner's replay, 2026-11-18)
+    background = BACKGROUND_MOVE.search(head)
+    if SHARP.search(head) and (INDEX.search(head) or CRYPTO_MAJOR.search(head) or METAL_OIL.search(head) or MEGA.search(head)) and not pct \
+            and not background and not VOLUME_NOT_PRICE.search(head):  # "Bitcoin's plunge below $60,000 triggers a buying spree": background; "shipments surge": volumes
+        return 12.0, "a sharp move in a major market (no figure stated)"
+    if COMPANY_SHARP.search(head) and not pct and not background:
+        return 8.0, "a company's shares moved sharply (no figure stated)"
+    return 0.0, ""
+
+
+def states_named(head: str) -> set[str]:
+    plain = re.sub(r"\bUS\$", "$", head)
+    return {k for k, rx in nw.STATES.items() if rx.search(plain)}
+
+
+def _hard(head: str) -> tuple[float, str]:
+    states = [k for k, rx in nw.STATES.items() if rx.search(head)]
+    m = ATTACK_VERB.search(head)
+    if m and m.group(0).lower().startswith("hit") and re.match(r"\s+(?:a |an |the )?(?:new |fresh |all-time |multi-year )?(?:record|high|low|peak|level|milestone|"
+                                                                 r"bottom|top|\$|\d)", head[m.end():], re.I):
+        m = None  # "India's oil imports hit record high": a figure of speech, not a strike
+    if m and m.group(0).lower().startswith("target") and not ACTOR_OR_TARGET.search(head):
+        m = None  # "US escalates sanctions on Iran, targets 'shadow banking' networks": a policy aimed at someone, not a strike
+    if m and (states or ACTOR_OR_TARGET.search(head)) and not THREAT.search(head[:m.start()]) and not HEDGE.search(head) \
+            and not NOT_AN_ATTACK.search(head) and not HARD[NATURAL_AT][2].search(head):
+        return 22.0, "an attack that hit"
+    for points, name, rx in HARD:
+        m = rx.search(head)
+        if m is None:
+            continue
+        if name == "a mega-cap's results":
+            continue  # never on its own: _facts adds it beside a real figure (owner 11-18: "Nvidia stock up 3% as earnings beat" is not a post)
+        if name == "an attack that hit" and THREAT.search(head[:m.start()]):
+            continue  # "Iran threatens to strike ..." is a threat, not an attack
+        return points, name
+    if INVESTIGATION.search(head) and re.search(r"\b(sec|cftc|doj|justice department|fbi|ftc|fca|eu|european commission|regulators?|prosecutors?|"
+                                                r"congress|senate|faa|nhtsa|ofac|police)\b", head, re.I):
+        return 12.0, "an official investigation"
+    from app.newsdesk import editorial
+
+    sig = editorial.significance(head)
+    if sig is not None and sig.kind == "structure" and not nw.NOT_YET.search(head) and not NOT_YET.search(head):  # "NYSE picks Avalanche to settle tokenized stocks": how markets work changes
+        return 16.0, "a market-structure decision"
+    return 0.0, ""
+
+
+def _noise(head: str) -> str:
+    from app.newsdesk import quality
+
+    t = head.strip()
+    if not t:
+        return "no headline"
+    if OPINION.search(t):
+        return "opinion, analysis or an explainer, not an event"
+    if QUESTION.search(t):
+        return "a question, not a report"
+    if quality.is_roundup(t):
+        return "a round-up of several stories, not one story"
+    why = quality.feature(t)
+    if why:
+        return why
+    if PIECE.search(t):
+        return "a correspondent's piece or a data write-up about an event, not the event"
+    if REACTION.search(t) and not _hard(t)[0]:
+        return "a reaction piece, not the event"
+    return ""
+
+
+# --- who did what (2026-11-24) ---------------------------------------------------------------------------------------------------------
+# Owner, 2026-11-24: "Understand context instead of relying on keywords." Production's 55 headlines of 11-23/24, replayed: "Russia warns
+# Ukraine of 'dangerous trend' after Libya and Baltic attacks" scored as an attack that hit, "Child rescued in Ukraine after Russian drone
+# attack kills 10" as major, "US escalates sanctions on Iran, targets 'shadow banking'" as a US strike. A headline has a main clause (what is
+# reported) and often background ("after ..."), and a speaker's verb tells whether a fact is reported ("says", "confirms"), claimed by a party
+# ("claims"), or only a stance ("warns", "vows", "praises"). Facts count in full from what is reported, at CONTEXT_SHARE from background, and
+# not at all from a stance (a major power's threat of force is a statement worth at most a slot filler).
+CONTEXT_SHARE = 0.5
+# killing something that isn't a person ("Market rout kills 50 basis points of December Fed rate hike bets", 2026-11-23)
+RESULTS = re.compile(r"\b(beats?|beat|misses?|missed|tops?|topped) (?:analysts['’]? |wall street )?(?:estimates|expectations|forecasts)\b|"
+                     r"\b(?:quarterly|q[1-4]) (?:results|earnings|revenue)\b", re.I)
+# the stolen funds of an earlier hack moving, laundered, traced or recovered: a follow-up, never a new hack
+HACK_FOLLOWUP = re.compile(r"\b(?:hack(?:er|ers)?|heist|exploit(?:er)?|theft|stolen)\b.{0,60}\b(?:wallets?|moves?|moved|launder\w*|mix(?:ed|es|ing)|"
+                           r"push(?:es|ed)?|routes?|routed|funnel\w*|bridg\w*|swap(?:s|ped)?|transfers?|transferred)\b|"
+                           r"\b(?:launder\w*|recover\w*|mixed through|coinjoins?|traced?|seized? .{0,30}stolen)\b", re.I)
+# a person's fortune moving with a market (2026-11-24 replay: "Jensen Huang's Wealth Rises $36 Billion" broke as major after the Nvidia move)
+PERSONAL_WEALTH = re.compile(r"\b(?:wealth|net worth|fortune|richest|billionaires?)\b", re.I)
+DEATH_IDIOM = re.compile(r"\b(death cross(?:es)?|dead[- ]cat bounces?|dead money|deadlock\w*)\b", re.I)
+KILL_NOT_PEOPLE = re.compile(r"\bkill\w*\s+(?:off\s+)?(?:\d[\d,.]*\s*(?:basis points?|bps|bp|%|percent)|(?:the\s+|a\s+|any\s+|all\s+|its\s+)?"
+                             r"(?:bets?|hopes?|deals?|chances?|plans?|rally|rallies|momentum|odds|bills?|ideas?|talks|jobs|projects?|features?|products?))\b", re.I)
+BACKGROUND = re.compile(r"(?:,\s*|\s)(?:(?:hours|days|weeks|a day|a week|minutes)\s+)?(?:after|following|in the wake of|amid)\s", re.I)
+FACTUAL_SAY = (r"says|said|confirms?|confirmed|reports?|reported|announces?|announced|admits?|admitted|discloses?|disclosed|tells|told|"
+               r"acknowledges?|acknowledged")
+CLAIM = r"claims?|claimed"
+STANCE = (r"warns?|vows?|threatens?|urges?|calls? (?:on|for)|pledges?|promises?|demands?|insists?|praises?|condemns?|protests?|accuses?|"
+          r"denies|rejects?|slams?|blasts?|welcomes?|hails?|doubles down on|defends?|critici[sz]es?|questions|mocks?|dismisses?")
+SPEECH = re.compile(rf"^(?P<who>(?:[^\s]+\s){{0,7}}?[^\s]+)\s+(?P<verb>{FACTUAL_SAY}|{CLAIM}|{STANCE})\b\s*(?:that\s+)?(?P<rest>.*)$", re.I)
+INTENT_REST = re.compile(r"^(?:it|they|we|he|she|the \w+)?\s*(?:will|would|could|may|might|is ready to|are ready to|plans? to|intends? to|to)\b", re.I)
+THREAT_WORDS = re.compile(r"\b(war|attacks?|strikes?|retaliat\w*|all (?:available )?means|military|force|invade|invasion|nuclear|destroy|tariffs?|sanctions?|embargo)\b", re.I)
+DATED_MEASURE = re.compile(r"\bwill (?:impose|raise|cut|ban|halt|close|suspend|introduce|lift|end|begin|start)\b.{0,60}\b(?:from|starting|effective|on|next week|"
+                           r"tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|"
+                           r"october|november|december)\b", re.I)
+HUMAN_INTEREST = re.compile(r"\b(pulled alive|rescued|rescues|survivors?|reunited|miracle|heartbreaking|tributes?|unbothered|defiant|"
+                            r"life goes on|daily life|search for .{0,40}\bmissing)\b", re.I)
+ONGOING_WARS = ({"RUSSIA", "UKRAINE"},)  # an established war: strikes between its belligerents are near-daily
+STATED_THREAT = 8.0
+MILESTONE = re.compile(r"\b(?:bitcoin|btc|ether(?:eum)?|eth|s&p(?: 500)?|nasdaq(?: composite)?|dow(?: jones)?|gold)\b.{0,15}?\b(?:claims?|hits?|reaches|reached|tops|topped|"
+                       r"crosses|crossed|passes|passed|surpasses|surpassed|breaks?|broke)\s+(?:above\s+)?\$?\d[\d,.]*\s?(?:k|trillion)?\b.{0,40}?\b(?:first time|"
+                       r"record|all-time|ever)\b", re.I)
+LEADERS = {"US": re.compile(r"\b(trump|vance|rubio|bessent|lutnick|hegseth)\b", re.I), "CHINA": re.compile(r"\bxi(?: jinping)?\b", re.I),
+           "RUSSIA": re.compile(r"\b(putin|lavrov|peskov)\b", re.I), "ISRAEL": re.compile(r"\bnetanyahu\b", re.I),
+           "IRAN": re.compile(r"\b(khamenei|pezeshkian|araghchi|irgc)\b", re.I)}
+NUCLEAR_SITE = re.compile(r"\bnuclear (?:site|facility|facilities|plant|reactor|program(?:me)?|base)s?\b|\b(?:natanz|fordow|isfahan|bushehr|zaporizhzhia|yongbyon|dimona)\b", re.I)
+NATO_STATES = {"POLAND", "TURKEY", "NATO"}  # NATO members newsworthy.STATES names (the Baltics, Finland and Romania by name below)
+WARS: set[frozenset[str]] = set()  # established wars from the desk's own record, refreshed every desk pass (events.decide)
+
+
+@dataclass
+class Structure:
+    main: str  # the text whose facts count in full
+    context: str = ""  # background ("after ..."), or what a stance talks about
+    stance: str = ""  # the speaker's verb when the headline reports only a stance
+    claimed: bool = False  # a party's claim of its own action
+    threat: float = 0.0  # a major power's stated threat of force
+
+
+def structure(head: str) -> Structure:
+    """Split a headline into what it reports and its background, and read the speaker's verb."""
+    text = head.strip()
+    context = ""
+    sentences = [s for s in re.split(r"(?<=[a-z0-9%)’'\"])\.\s+(?=[A-Z])", text) if s]
+    mains, ctxs = [], []
+    for s in sentences:  # "Nvidia reinstates Jensen Huang as CEO. Stock skyrockets 27%": two reported facts
+        m = BACKGROUND.search(s)
+        if m and m.start() > 8:
+            mains.append(s[:m.start()].strip(" ,"))
+            ctxs.append(s[m.end():].strip())
+        else:
+            mains.append(s)
+    main = ". ".join(mains)
+    context = " ".join(ctxs)
+    first = mains[0] if mains else ""
+    sp = SPEECH.match(re.sub(r"^[‘'\"“][^’'\"”]{3,80}[’'\"”]\s*[:\-–—]\s*", "", first))
+    if not sp:
+        return Structure(main, context)
+    who, verb, rest = sp.group("who"), sp.group("verb").lower(), sp.group("rest")
+    if re.search(r"\b(as|while|and|but)$", who, re.I) or len(who) > 70:
+        return Structure(main, context)
+    if re.fullmatch(CLAIM, verb, re.I):
+        return Structure(main, context, claimed=True)
+    if re.fullmatch(FACTUAL_SAY, verb, re.I) and (not INTENT_REST.search(rest) or DATED_MEASURE.search(rest)):
+        # "US says it will impose 50% tariffs on Chinese chips from Friday": a measure decided, with its date (2026-11-24)
+        return Structure(main, context)  # "IRGC says three tankers ablaze", "Zelensky confirms strike on Russian warship": reported, attributed
+    # a stance, or a source saying what it will do: no event reported
+    threat = 0.0
+    speaker = states_named(who) | {k for k, rx in LEADERS.items() if rx.search(who)}  # "Trump warns China ..." is the US speaking
+    if re.search(r"^(warns?|vows?|threatens?|says|said)$", verb) and THREAT_WORDS.search(rest) and (speaker & BIG_STATE):
+        threat = STATED_THREAT
+    rest_main = ". ".join(mains[1:])
+    return Structure(rest_main, " ".join(x for x in (rest, context) if x), stance=verb, threat=threat)
+
+
+@dataclass
+class Facts:
+    money: float = 0.0
+    move: float = 0.0
+    people: float = 0.0
+    hard: float = 0.0
+    hard_name: str = ""
+    found: list[str] = field(default_factory=list)
+
+
+def _facts(text: str, summary: str, head: str) -> Facts:
+    """The facts one clause states, each sized (states and reach are read on the whole headline)."""
+    f = Facts()
+    later = nw.AFTERMATH.search(text) or AFTER.search(text)  # "... begin receiving payments from $305m bankruptcy": an old event's aftermath, not new money
+    usd = 0.0 if later else nw.money_of(text)
+    if usd and nw.HOLDINGS.search(text):
+        usd = 0.0  # what a fund holds is not money that moved ("Goldman Sachs More Than Doubles Its Bitcoin ETF Holdings to $1.28 Billion": a filing)
+    f.money = _money_points(usd)
+    if f.money:
+        f.found.append(f"${usd / 1e12:,.1f} trillion" if usd >= 1e12 else f"${usd / 1e9:,.1f}B" if usd >= 1e9 else f"${usd / 1e6:,.0f}M")
+    f.move, move_what = _move_points(text)
+    if f.move:
+        f.found.append(move_what)
+    deaths = nw.deaths_of(text) or (nw.deaths_of(summary or "") if re.search(r"\b(kill\w*|dead|deaths?|death toll)\b", text, re.I) else 0)
+    f.people = 30.0 if deaths >= 50 else 24.0 if deaths >= 10 else 18.0 if deaths >= 1 else 0.0
+    if deaths:
+        f.found.append(f"{deaths} killed")
+    elif re.search(r"\b(kill\w*|dead|deaths?|death toll)\b", DEATH_IDIOM.sub(" ", text), re.I) and not THREAT.search(text) and not KILL_NOT_PEOPLE.search(text):
+        f.people = 16.0
+        f.found.append("people killed")
+    if INJURED.search(text) and not f.people:
+        f.people = 10.0
+        f.found.append("people hurt")
+    hard, name = _hard(text)
+    if name == "a market-structure decision" and f.move:
+        hard, name = 0.0, ""  # a price move naming an exchange ("Nvidia Turmoil Drags Nasdaq Down 2.5%") is not a market-structure decision
+    if hard and SPECULATIVE.search(text):
+        hard, name = 0.0, ""
+        f.found.append("speculation")
+    if name == "an attack that hit" and ENERGY_OR_SHIPPING.search(text):
+        # an attack on global supply (Hormuz, the Red Sea, Gulf producers, tankers) moves every market; a domestic refinery inside an
+        # established war is a smaller, near-daily event (2026-11-23: Ukrainian drones on Russian refineries)
+        hard += 10.0 if GLOBAL_ENERGY.search(head) else 4.0
+        name = "an attack on energy or shipping"
+    if name.startswith("an attack") and NUCLEAR_SITE.search(text):
+        hard += 10.0  # a strike on a nuclear site
+        name = "an attack on a nuclear site"
+    elif name.startswith("an attack") and "US" not in states_named(text) and len(states_named(text) & BIG_STATE) >= 2:
+        hard += 6.0  # two major powers in a direct strike (inside an established war, routine_war still caps it: Russia-Ukraine)
+        name = "a strike between major powers" if name == "an attack that hit" else name
+    if name.startswith("an attack") and "US" in states_named(text) and len(states_named(text) & BIG_STATE) >= 2:  # the clause's own parties (2026-11-24)
+        hard += 8.0  # US forces striking (or struck by) another major power: an escalation (owner, 2026-11-18: never held by the gap)
+        name = "a US strike involving another major power" if name == "an attack that hit" else name
+    if name in ("an attack that hit", "a military incident") and "RUSSIA" in states_named(text) and states_named(text) & NATO_STATES:
+        hard += 8.0  # Russian weapons hitting or landing in a NATO state: an escalation beyond the war (2026-11-20 Poland)
+        name = "Russian strike on NATO territory"
+    if name == "a central-bank decision" and re.search(r"\b(emergency|surprise|unexpected(?:ly)?|unscheduled|inter-meeting)\b|"
+                                                      r"\b(?:[5-9]\d|1\d\d)\s*(?:basis points?|bps|bp)\b|\b(?:half|full) (?:a )?(?:percentage )?point\b", text, re.I):
+        hard += 14.0  # an emergency or outsized move by a central bank moves every market at once
+        name = "an emergency or outsized central-bank decision"
+    if name == "an outage" and nw.SCALE_DISRUPTION.search(text):
+        hard += 16.0  # "widespread Apple outage", "nationwide ground stop": millions of people at once (a major outage, owner's replay 2026-11-18)
+    if name == "a natural disaster" and (m := re.search(r"\bmagnitude[- ](\d(?:\.\d)?)", text, re.I)) and float(m.group(1)) >= 7.0:
+        hard += 6.0  # a magnitude 7+ earthquake
+    if name == "official economic data" and (EXTREME.search(text) or nw.MACRO_EXTREME.search(text)):
+        hard += 12.0  # "US inflation jumps to 4.1%, highest in two years": data at a multi-year extreme moves every market
+    if later and name == "a failure":
+        hard, name = 0.0, ""
+    if not hard and f.money and MEGA.search(text) and RESULTS.search(text):
+        hard, name = 14.0, "a mega-cap's results"  # "Nvidia revenue jumps 103% to $115.8 billion, beats estimates": the results move every market
+    f.hard, f.hard_name = hard, name
+    if hard:
+        f.found.append(name)
+    return f
+
+
+def _index_pct(head: str) -> bool:
+    """Is the headline's % the index's own ("Nasdaq sinks 4.5%"), not a company's beside it ("AMD slumps 13% as tech stocks fall")?"""
+    names = INDEX.pattern[3:-3]
+    own = re.search(rf"\b(?:{names})\b[^%]{{0,30}}?[-+−]?\d+(?:\.\d+)?\s?%", head, re.I)
+    company_first = re.search(rf"^[^%]{{0,40}}?\b(?:{MOVE.pattern[3:-3]})\b\s+[-+−]?\d+(?:\.\d+)?\s?%[^%]{{0,60}}\b(?:{names})\b", head, re.I)
+    return bool(own) and not (company_first and not re.match(rf"\s*(?:{names})\b", head, re.I))
+
+
+CLAUSE_BREAK = re.compile(r"\s+(?:as|after|while|amid|but|despite|following|when|with)\s+|[;,:]\s+|\s[-–—|]\s", re.I)
+
+
+def _pct_in_clause_of(head: str, subject: re.Pattern[str]) -> bool:
+    """Is the headline's first % in the same clause as the subject? ("Bitcoin rebounds 17% as Nvidia rallies": yes; "Bitcoin crashes to
+    $59,000 as Anthropic falls 25%": no, the 25% is Anthropic's, 2026-11-24 replay)"""
+    for clause in CLAUSE_BREAK.split(head):
+        if re.search(r"\d\s?%", clause):
+            return bool(subject.search(clause))
+    return True
+
+
+def _company_moved(head: str) -> bool:
+    """Does the headline's % move belong to a company's shares (the company itself, or its stock, shares or market value)?"""
+    verb = MOVE.pattern[3:-3]  # the move verbs, without \b( )\b
+    names = MEGA.pattern[3:-3]
+    if re.search(rf"\b(?:{names})\b(?!\s+line\b)(?:['’]s)?\s+(?:(?:inc|corp|co|shares?|stock|stocks|market (?:cap|value)|valuation)\s+)?(?:{verb})\b", head, re.I):
+        return True
+    return bool(re.search(rf"(?:^|[.;:,]\s+|\b(?:its|their)\s+)(?:shares?|stock|stocks|market (?:cap|value)|valuation)\s+(?:{verb})\b", head, re.I))
+
+
+def established_wars(history: list[Any], now: Any, min_told: int = 3) -> set[frozenset[str]]:
+    """Belligerent pairs the desk has told at least `min_told` conflict stories about in the last 7 days (newsworthy.told): an established
+    war in the desk's own record, not a fixed list (2026-11-24: Saudi-Houthi and US-Iran fighting had become near-daily)."""
+    from collections import Counter
+    from datetime import timedelta
+
+    pairs: Counter[frozenset[str]] = Counter()
+    for h in history:
+        ev = getattr(h, "event", None)
+        if ev is None or now - h.at > timedelta(days=7) or not (ev.kin() == "conflict" or ATTACK_VERB.search(ev.title or "")):
+            continue
+        big = sorted(ev.states & BIG_STATE | (ev.states & {"YEMEN", "BAHRAIN", "KUWAIT", "QATAR", "UAE", "LEBANON", "SYRIA", "IRAQ"}))
+        for i, a in enumerate(big):
+            for b in big[i + 1:]:
+                pairs[frozenset((a, b))] += 1
+    return {p for p, n in pairs.items() if n >= min_told}
+
+
+def routine_war(head: str, main: Facts, wars: set[frozenset[str]] | None = None, clause: str = "") -> bool:
+    """A strike between the belligerents of an established war, with no escalation: no other state drawn in, fewer than 50 killed, no
+    attack on global energy supply. `wars`: the established pairs from the desk's own record (established_wars); Russia-Ukraine always."""
+    states = states_named(clause or head)  # the parties of the reported strike, not states named in its background (2026-11-24)
+    if not states or GLOBAL_ENERGY.search(head) or main.people >= 30.0:
+        return False
+    return any(states <= war for war in (*ONGOING_WARS, *(wars or ())))
+
+
+def judge(title: str, summary: str = "", *, outlets: int = 1, official: bool = False, age_min: float | None = None, kind: str = "news",
+          facts: dict[str, Any] | None = None, wars: set[frozenset[str]] | None = None) -> Decision:
+    """The verdict on one story or measured move. Pure: no database, no network. Only the headline's own facts count (a summary's
+    background never makes a story bigger than its headline says), except the death toll a summary states for the headline's event."""
+    head = re.sub(r"\s+", " ", (title or "").strip())
+    live = re.match(r"^[\w .'’-]{2,40}\b(?:latest|live)\s*[:\-–—]\s*(.+)$", head, re.I)
+    if live:  # "Middle East latest: Bahrain says civilian industrial facility damaged in Iran attack": the event after the label
+        head = live.group(1)
+    if kind in ("market", "data", "recap"):
+        return _judge_move(head, facts or {}, age_min)
+    noise = _noise(head)
+    if noise:
+        return Decision(NOISE, 0.0, noise)
+    parts: dict[str, float] = {}
+    # 2026-11-24: who did what. Facts count in full from what the headline REPORTS (its main clause, or what a source says happened); an
+    # "after ..." clause is background and a stance ("warns", "vows", "praises") reports no event (structure, below)
+    st = structure(head)
+    main = _facts(st.main, summary, head) if st.main else Facts()
+    ctx = _facts(st.context, "", head) if st.context else Facts()
+    found = list(main.found)
+    if st.stance:
+        found.append(f"a statement ({st.stance})")
+    sizes = sorted((main.money, main.move, main.people, main.hard, st.threat), reverse=True)
+    main_facts = any((main.money, main.move, main.people, main.hard))
+    framed = bool(st.stance) or bool(HUMAN_INTEREST.search(st.main or head))
+    # background is context beside a main event, or under a stance / human-interest framing; when the main clause states only a consequence
+    # ("Chainflip founder admits heavy losses after second hack drains $12M") the "after" clause is the event itself (never major on its own)
+    share = CONTEXT_SHARE if (main_facts or framed) else 1.0
+    ctx_size = max(ctx.money, ctx.move, ctx.people, ctx.hard) * share
+    if ctx_size:
+        found += [f"background: {x}" for x in ctx.found if not x.startswith("speculation")]
+    if sizes[0] == 0 and ctx_size == 0:
+        why = "nothing happened that the headline states: no figure that moved, nobody hurt, no completed event"
+        if st.stance:
+            why = f"a statement ({st.stance}) with no event it reports: {why}"
+        return Decision(NOISE, 0.0, why)
+    if st.threat and sizes[0] == st.threat:
+        found.append("a stated threat by a major power")
+    parts["size"] = sizes[0] + 0.35 * max(sizes[1], ctx_size) if sizes[0] else ctx_size  # the largest fact sets the size; a second adds a little
+    hard_name, move, money, people, hard = main.hard_name, main.move, main.money, main.people, main.hard
+    plain = re.sub(r"\bUS\$", "$", head)
+    states = {k for k, rx in nw.STATES.items() if rx.search(plain)}
+    reach = (6.0 if states & BIG_STATE else 0.0) + (2.0 if len(states) >= 2 else 0.0) + (5.0 if MEGA.search(head) or CENTRAL_BANK.search(head) else 0.0) \
+        + (5.0 if INDEX.search(head) or CRYPTO_MAJOR.search(head) or METAL_OIL.search(head) or CHOKEPOINT.search(head) or nw.MAJOR_ASSET.search(head) else 0.0)
+    if not reach and not FINANCE.search(head) and hard_name not in FINANCIAL_EVENTS and ctx.hard_name not in FINANCIAL_EVENTS:
+        reach = -12.0  # not about markets, money or a major power: a local or human-interest story for this audience
+        found.append("off-topic for markets")
+    parts["reach"] = min(reach, 12.0)
+    n = max(int(outlets or 0), 1)
+    parts["sources"] = min((8.0 if n >= 3 else 5.0 if n == 2 else 0.0) + (4.0 if official else 0.0), 10.0)
+    verified = bool(official) or n >= 2
+    doubt = 0.0
+    if HEDGE.search(head):
+        doubt += 12.0
+        found.append("hedged")
+    if TALKS.search(head) and not move:
+        doubt += 12.0  # "merger talks", "faces pushback": nothing decided yet
+        found.append("talks or resistance, nothing decided")
+    elif NOT_YET.search(head) and not move:
+        doubt += 14.0
+        found.append("nothing done yet")
+    if nw.HOLDINGS.search(head) and not people and hard_name in ("", "a market-structure decision"):
+        doubt += 12.0  # a disclosed position (a filing), not something that happened today
+        found.append("a disclosed position")
+    elif FORECAST_MOVE.search(head):
+        doubt += 10.0  # "S&P 500 is on track for the worst week since ...": a move that may not happen, told before the close
+        found.append("a forecast")
+    if doubt:
+        parts["doubt"] = -doubt
+    age = float(age_min or 0)
+    fade = 0.0 if age <= 90 else min(14.0, (age - 90) / 60 * 2.0)
+    if fade:
+        parts["age"] = -fade
+    score = BASE + sum(parts.values())
+    tier = tier_of(score)
+    if tier == MAJOR and not verified:
+        tier = SIGNIFICANT
+        found.append("one outlet: major only once confirmed")
+    if tier == MAJOR and money and not hard and not move and not people:
+        # a sum on its own (flows, holdings, sales, a valuation) is never breaking news: "US spot Bitcoin ETFs are almost $1 billion short of a
+        # record monthly outflow" broke as major in the backtest
+        tier = SIGNIFICANT
+        found.append("a sum, no event: not major")
+    # 2026-11-24 (owner: understand context, not keywords; replay of production's 55 headlines of 11-23/24)
+    if tier == MAJOR and st.claimed:
+        tier = SIGNIFICANT  # "Houthis claim attacks on Saudi oil refinery": a party's claim of its own action, not yet confirmed
+        found.append("claimed by a party: major only once confirmed")
+    if ORDER[tier] > ORDER[NOTABLE] and not main_facts and not st.threat and framed:
+        tier = NOTABLE  # every fact is background ("Child rescued ... after Russian drone attack kills 10", "UN warns ... drone attacks threaten")
+        found.append("its facts are background: the headline reports a statement or a reaction")
+    elif tier == MAJOR and not main_facts:
+        tier = SIGNIFICANT  # an "after ..." clause alone never breaks as major
+        found.append("its event is in an 'after' clause: not major")
+    if ORDER[tier] > ORDER[NOTABLE] and HUMAN_INTEREST.search(st.main or head) and not main.money and not main.move:
+        tier = NOTABLE
+        found.append("human interest")
+    if tier == MAJOR and PERSONAL_WEALTH.search(head):
+        tier = SIGNIFICANT  # "Jensen Huang's Wealth Rises $36 Billion as Nvidia Surge ...": a person's fortune is the move's echo, not breaking news
+        found.append("a person's fortune: not major")
+    if tier == MAJOR and hard_name == "a hack or theft" and HACK_FOLLOWUP.search(head):
+        tier = SIGNIFICANT  # "Binance Hack Wallet Moves Another $142 Million in ETH" broke as major three times in the 2026-11-24 replay
+        found.append("the follow-up of an earlier hack: not major")
+    if tier == MAJOR and routine_war(head, main, WARS if wars is None else wars, st.main):
+        tier = SIGNIFICANT  # strikes inside an established war (Russia-Ukraine) are near-daily: major only on escalation (new state, mass deaths, a chokepoint)
+        found.append("within an ongoing war, no escalation: not major")
+    if ORDER[tier] >= ORDER[NOTABLE] and st.threat and not any((main.money, main.move, main.people, main.hard)):
+        tier = NOTABLE  # a threat is a statement: never above a slot filler ("Russia threatens Estonia with open war", "Iran vows all means")
+    if kind == "news" and age > STALE_MIN:
+        return Decision(NOISE, score, f"stale: first reported {int(age // 60)} h ago", found, parts, verified)
+    detail = ", ".join(f"{k} {v:+.0f}" for k, v in parts.items())
+    if tier == NOISE:
+        return Decision(NOISE, score, f"too small to post: {', '.join(found)} (score {score:.0f} of {TIER_AT[-1][1]:.0f}; {detail})", found, parts, verified)
+    return Decision(tier, score, f"{tier}: {', '.join(found)} (score {score:.0f}; {detail})", found, parts, verified)
+
+
+LONG_PERIOD = _rx(r"\bover the past (?:year|\d+ (?:days|weeks|months|years))\b|\byear-to-date\b|\bytd\b|\bthis year so far\b|"
+                  r"\b(?:in|over) (?:the last |the past )?(?:\d+|two|three|four|five|six|eight|twelve) (?:weeks|months|years)\b|"
+                  r"\b(?:in|over) (?:the last |the past )?(?:[7-9]|\d{2,}) (?:trading )?days\b|\bvs\.? the \w+ over\b")
+# a week's move (2026-11-24: "The week's winners and losers: Strategy -30.3%" broke as major): a slot story at most
+WEEK_PERIOD = _rx(r"\b(?:for the week|this week|the week['’]s|weekly|on the week|in a week|week-to-date|(?:worst|best|biggest) week)\b")
+# a record of volumes, not of a price ("India's Oil Imports Hit Record High as Saudi Shipments Surge", 2026-11-24)
+VOLUME_NOT_PRICE = _rx(r"\b(imports?|exports?|output|production|demand|shipments?|inventor(?:y|ies)|stockpiles?|sales|purchases|holdings)\b")
+MEGA_TICKERS = {"NVDA", "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "TSLA", "AVGO", "TSM", "BRK-B", "JPM", "NFLX", "ORCL"}
+MARKET_CORE = {"SPX", "IXIC", "DJI", "NDX", "BTC", "ETH", "GOLD", "SILVER", "OIL", "US-STOCKS"}
+
+
+def _canon(symbol: str) -> str:
+    from app.newsdesk import editorial
+
+    s = str(symbol or "")
+    return {"^GSPC": "SPX", "^IXIC": "IXIC", "^DJI": "DJI", "^NDX": "NDX", "BTC-USD": "BTC", "ETH-USD": "ETH"}.get(s) or editorial.canon(s) or s
+
+
+def _judge_move(head: str, f: dict[str, Any], age_min: float | None) -> Decision:
+    """A move the desk measured itself (app/newsdesk/moves, cross-checked upstream). Its size against the asset's own history
+    (app/newsdesk/urgency) is the magnitude. No cause is ever added here: a cause is only ever told from a corroborated story."""
+    level = str((f.get("urgency") or {}).get("level") or "")
+    context = str((f.get("urgency") or {}).get("why") or "")
+    change = abs(float(f.get("change_pct") or 0)) or nw.pct_of(head)  # a data post states its move in its headline
+    assets = {_canon(a) for a in (f.get("assets") or [])}
+    core = bool(assets & MARKET_CORE)
+    # 2026-11-24: a "significant" move is significant (it scored exactly the major line of 72 before: silver -5.3% in 24 h broke as major)
+    size = {"major": 36.0, "significant": 22.0}.get(level, 16.0 if f.get("exceptional") else 6.0)
+    if assets & {"SPX", "IXIC", "DJI", "NDX", "US-STOCKS"}:
+        lines: tuple[tuple[float, float], ...] = ((4.0, 34.0), (2.5, 22.0), (1.5, 16.0))
+    elif assets & {"BTC", "ETH"}:
+        lines = ((10.0, 34.0), (6.0, 22.0), (4.0, 16.0))
+    elif assets & {"GOLD", "SILVER", "OIL"}:
+        lines = ((6.0, 34.0), (4.0, 22.0), (2.5, 16.0))
+    elif assets & MEGA_TICKERS:
+        lines = ((10.0, 34.0), (6.0, 22.0), (4.0, 14.0))  # the largest companies: Nvidia -14% on 2026-11-20 is major news on its own
+    elif assets:
+        lines = ((20.0, 34.0), (10.0, 22.0), (6.0, 14.0))  # a single stock the desk watches (Nvidia +36% on 2026-11-23)
+    else:
+        lines = ()
+    size = max(size, next((pts for at, pts in lines if change >= at), 0.0))  # the move's size for its asset class, when history is short
+    if size < 14.0 and not EXTREME.search(head):
+        # neither major nor significant for its own history, not exceptional, under its asset's lines: a routine move never takes a slot
+        # (production: "BTC longs liquidated: $8 million in an hour")
+        return Decision(NOISE, BASE + size, f"a routine move for this asset ({change:g}%" + (f", urgency {level}" if level else "") + "): "
+                        "only a major or significant move, or an exceptional one, is a post", [f"{change:g}% move"], {"size": size}, True)
+    if EXTREME.search(head):
+        size += 4.0  # "biggest one-day drop since March": rare for this asset
+    if LONG_PERIOD.search(head):
+        size = min(size, 8.0)  # "Bitcoin vs the Nasdaq over the past year": a comparison over months, not a move that just happened
+    elif WEEK_PERIOD.search(head):
+        size = min(size, 18.0)  # a week's move: a slot story, never breaking
+    parts = {"size": size, "reach": 8.0 if core else 2.0, "sources": 8.0}
+    age = float(age_min or 0)
+    if age > 40:
+        parts["age"] = -min(20.0, (age - 40) / 10 * 2.0)  # a market move is old fast
+    score = BASE + sum(parts.values())
+    tier = tier_of(score)
+    found = [f"{change:g}% move"] + ([f"urgency {level}"] if level else []) + ([context] if context else [])
+    detail = ", ".join(f"{k} {v:+.0f}" for k, v in parts.items())
+    if tier == NOISE:
+        return Decision(NOISE, score, f"a routine move: {', '.join(found)} (score {score:.0f}; {detail})", found, parts, True)
+    return Decision(tier, score, f"{tier}: {', '.join(found)} (score {score:.0f}; {detail})", found, parts, True)
+
+
+def judge_event(ev: Any, age_min: float | None = None) -> Decision:
+    from app.newsdesk import events
+
+    return judge(ev.title or ev.headline or "", ev.summary or "", outlets=len(events.outlets_of(ev)), official=(getattr(ev, "evidence", "") == "official"),
+                 age_min=age_min, kind=getattr(ev, "kind", "news") or "news", facts=ev.facts or {})
+
+
+def record(ev: Any, d: Decision | None, stage: str, outcome: str, at: Any, why: str = "") -> None:
+    """The event's decision history (newest last, at most 20 lines): what the desk decided at each step and why. The same verdict again
+    updates the last line's time instead of adding one. ev.why always carries the latest line in words."""
+    f = dict(ev.facts or {})
+    hist = list(f.get("decisions") or [])
+    line = {"at": at.isoformat() if hasattr(at, "isoformat") else str(at), "stage": stage, "outcome": outcome, "why": why or (d.reason if d else "")}
+    if d is not None:
+        line |= {"tier": d.tier, "score": round(d.score, 1)}
+    if hist and all(hist[-1].get(k) == line.get(k) for k in ("stage", "outcome", "why", "tier")):
+        hist[-1]["last_at"] = line["at"]
+    else:
+        hist.append(line)
+    f["decisions"] = hist[-20:]
+    if d is not None:
+        f["editor"] = d.as_dict()
+    ev.facts = f
+    ev.why = (line["why"] or outcome)[:1000]

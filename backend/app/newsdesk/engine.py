@@ -104,6 +104,27 @@ def score_story(tier: int, strength: float, others: int, age_hours: float) -> fl
     return round({0: 3.0, 1: 2.0}.get(tier, 1.0) + strength + min(others, 2) - min(age_hours / 12, 2.0), 2)
 
 
+# A feed failing read after read rests (2026-11-24: The Guardian's three feeds failed every tick for a day, one log line each tick): after
+# FEED_REST_AFTER failures in a row it is read again only after FEED_REST_FIRST, doubling up to FEED_REST_MAX, so a recovery is still seen
+# within the hour. Admin keeps showing the problem; the owner hears once, from the watchdog (app/observability.dead_feeds).
+FEED_REST_AFTER = 3
+FEED_REST_FIRST = timedelta(minutes=10)
+FEED_REST_MAX = timedelta(hours=1)
+
+
+def feed_resting(prev: dict[str, Any], now: datetime) -> bool:
+    """Skip this feed this tick? Only after FEED_REST_AFTER failures in a row, and only until its rest is over."""
+    fails, checked = int(prev.get("fails") or 0), prev.get("checked")
+    if fails < FEED_REST_AFTER or not checked:
+        return False
+    try:
+        last = datetime.fromisoformat(checked)
+    except (TypeError, ValueError):
+        return False
+    last = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
+    return now - last < min(FEED_REST_MAX, FEED_REST_FIRST * 2 ** (fails - FEED_REST_AFTER))
+
+
 async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: datetime) -> dict[str, Any]:
     """New stories from every feed. Each is stored on its own: a link already in the table (a feed recycling a URL, such as a
     daily round-up, or a story stored a week ago) is skipped, never allowed to roll back everyone else's (2026-11-08 outage)."""
@@ -117,12 +138,21 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     feeds = sources.feeds_for(s.feeds or [], s.state or {})
     gate = asyncio.Semaphore(8)  # fetched in parallel (35+ feeds; one slow site never holds up the tick), stored in list order below
 
-    async def fetch(feed: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
+    async def fetch(feed: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None] | None:
+        if feed_resting(before_health.get(feed["url"]) or {}, now):
+            return None
         async with gate:
             return await sources.fetch_feed(client, feed)
 
     fetched = await asyncio.gather(*(fetch(f) for f in feeds))
-    for feed, (items, problem) in zip(feeds, fetched):
+    started, resting, recovered = [], [], []  # logged once each, not every tick
+    for feed, got in zip(feeds, fetched):
+        prev = before_health.get(feed["url"]) or {}
+        if got is None:  # resting (feed_resting): its last answer stands, unread
+            health[feed["url"]] = {**prev, "name": feed["name"], "tier": feed.get("tier", 2), "via": feed.get("via"), "new": 0, "resting": True}
+            problems[feed["url"]] = prev.get("problem") or "failing"
+            continue
+        items, problem = got
         newest = max((it["at"] for it in items if it.get("at")), default=None)
         if not problem and newest is not None and now - (newest if newest.tzinfo else newest.replace(tzinfo=now.tzinfo)) > sources.STALE_AFTER:
             problem = f"stale: newest item {newest:%d %b %Y}"
@@ -131,10 +161,18 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
         if problem:
             problems[feed["url"]] = problem
         before = fresh
-        prev = before_health.get(feed["url"]) or {}
+        fails = int(prev.get("fails") or 0) + 1 if problem else 0
         health[feed["url"]] = {"name": feed["name"], "tier": feed.get("tier", 2), "items": len(items), "newest": newest.isoformat() if newest else None, "problem": problem,
-                               "via": feed.get("via"), "fails": int(prev.get("fails") or 0) + 1 if problem else 0,
-                               "last_ok": now.isoformat() if not problem else prev.get("last_ok")}
+                               "via": feed.get("via"), "fails": fails, "checked": now.isoformat(),
+                               "last_ok": now.isoformat() if not problem else prev.get("last_ok"),
+                               "failing_since": (prev.get("failing_since") or now.isoformat()) if problem else None}
+        label = f"{feed['name']}: {problem}"
+        if problem and fails == 1:
+            started.append(label)
+        elif problem and fails == FEED_REST_AFTER:
+            resting.append(label)
+        elif not problem and int(prev.get("fails") or 0) >= FEED_REST_AFTER:
+            recovered.append(feed["name"])
         for it in sources.recent(items, now):
             if it["link"] in seen:
                 continue
@@ -172,8 +210,13 @@ async def collect(db: Session, s: NdSettings, client: httpx.AsyncClient, now: da
     db.commit()
     for line in incident_stored[:10]:  # production evidence: when an incident story first reached the desk (Admin › Trending shows the rest)
         logger.info("newsdesk: incident story stored: %s", line)
-    if problems:
-        logger.info("newsdesk: feed problems: %s", "; ".join(f"{health[u]['name']}: {p}" for u, p in problems.items()))
+    if started:
+        logger.info("newsdesk: feed problems: %s", "; ".join(started))
+    if resting:
+        logger.info("newsdesk: feeds failing %d reads in a row, now read at most every %d-%d min until they answer: %s", FEED_REST_AFTER,
+                    FEED_REST_FIRST.seconds // 60, FEED_REST_MAX.seconds // 60, "; ".join(resting))
+    if recovered:
+        logger.info("newsdesk: feeds answering again: %s", ", ".join(recovered))
     return {"new_stories": fresh, "feed_problems": problems, "feed_health": health}
 
 
@@ -470,6 +513,8 @@ async def deliver_x(db: Session, s: NdSettings, settings: Settings, runtime: XRu
             events.mark(ev, "x", "skipped", f"the {ev.category} category is off on X")
             continue
         cap = 10**6 if following else s.target_per_day + s.max_breaking_per_day  # following: Telegram's limits already decided it
+        if (ev.facts or {}).get("major") or (ev.facts or {}).get("market_major"):
+            cap = 10**6  # owner, 2026-11-24: no daily count on genuinely major news (the X spend guards still apply at the send)
         if ev.slot == "slot" and not following:  # the six scheduled slots are the plan: X's older 3-4 a day setting doesn't drop them
             cap = max(cap, len(events.policy(s.state or {}).slot_hours) + 1)  # +1: yesterday's same slot can still be inside a rolling 24 h
         sent = int(db.scalar(select(func.count()).select_from(NdEvent).where(NdEvent.x_status.in_(("dry_run", "published", "uncertain")), NdEvent.released_at >= now - timedelta(days=1))) or 0)
@@ -739,6 +784,21 @@ async def publish(db: Session, s: NdSettings, post: NdPost, settings: Settings, 
                 stage = "image"
                 image, meta = await visual.for_event(ev, db=db, platform="x")
                 ev.facts = {**(ev.facts or {}), "visual": meta}
+                if isinstance((post.facts or {}).get("viral"), dict):  # what the post actually carried, for what engagement learns
+                    post.facts = {**post.facts, "viral": {**post.facts["viral"], "format": str(meta.get("kind") or "")}}
+                if not image and not (post.facts or {}).get("text_ok") and "https://" not in post.text:
+                    # owner, 2026-11-23: never a text-only post on its own. A post that carries its article's link shows X's own card of
+                    # that article (the owner's X-links switch decides that); without a link and without a licensed picture it waits for
+                    # the owner in the Terminal
+                    why = "no licensed picture passed the Visual Editor"
+                    post.status, post.error = "held", f"held for review: {why}"
+                    from app.newsdesk import events as _events
+
+                    _events.mark(ev, "x", "held", why)
+                    _note_x(s, post, now, ok=False, outcome="held", message=post.error, stage="image")
+                    db.commit()
+                    logger.info("newsdesk: X post %s held for review: %s (event %s)", post.id, why, ev.id)
+                    return "held"
                 if image:  # the wire style's text-only post (b"") goes without a picture, as on Telegram
                     stage = "permit"
                     upload_permit = guard.issue_news_permit(req)  # permits are single use (guard.require_permit): the upload and the post each need one
@@ -935,6 +995,8 @@ def settings_out(s: NdSettings) -> dict[str, Any]:
             "market_pause": events.MARKET_PAUSE_DEFAULT if (s.state or {}).get("market_pause") is None else bool((s.state or {}).get("market_pause")),
             "market_pause_reason": (s.state or {}).get("market_pause_reason") or ("not resumed by the owner since the 2026-11-21 deploy"
                                                                                   if (s.state or {}).get("market_pause") is None and events.MARKET_PAUSE_DEFAULT else None),
+            "liq_pause": bool((s.state or {}).get("liq_pause")), "liq_pause_reason": (s.state or {}).get("liq_pause_reason"),
+            "class_pause": dict((s.state or {}).get("class_pause") or {}), "pause_migrated": (s.state or {}).get("pause_migrated"),
             "held_figures": list((s.state or {}).get("anomalies") or [])[-10:]}
 
 

@@ -201,6 +201,8 @@ WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eigh
 
 def deaths_of(text: str) -> int:
     t = text or ""
+    # 2026-11-24: "Market rout kills 50 basis points December Fed rate hike bets" is not 50 deaths: a number followed by a unit is a quantity
+    t = re.sub(r"\b\d[\d,.]*\s*(?:basis points?|bps|bp|points?|percent|per cent|%|jobs|seats|votes|million|billion|bn|m)\b", " ", t, flags=re.I)
     for w, n in sorted(WORDS.items(), key=lambda x: -len(x[0])):
         t = re.sub(rf"\b{w}\b", str(n), t, flags=re.I)
     return max((int(g.replace(",", "")) for m in DEATHS.finditer(t) for g in m.groups() if g), default=0)
@@ -233,7 +235,25 @@ def places_of(head: str) -> set[str]:
     return out
 
 
-def same_event(a: Event, b: Event) -> bool:
+# a country, its people, its capital or its leader names a side of a war, not one event in it (production 2026-11-23: "RUSSIAN" made "11 killed
+# in Russian strike on Ukraine's Dymer" a repeat of "Ukraine behind attacks on Russian ships near Libya", and "France confirms its troops are in
+# Ukraine" a repeat of a Crimea Bridge strike)
+NATIONAL = re.compile(r"^(?:RUSSIA\w*|UKRAIN\w*|KYIV|KIEV|MOSCOW|KREMLIN|IRAN\w*|TEHRAN|ISRAEL\w*|GAZA|US|USA|AMERICA\w*|WASHINGTON|CHINA|CHINESE|"
+                      r"BEIJING|TAIWAN\w*|SAUDI\w*|RIYADH|BAHRAIN\w*|KUWAIT\w*|QATAR\w*|YEMEN\w*|HOUTHIS?|LEBAN\w*|HEZBOLLAH|SYRIA\w*|IRAQ\w*|"
+                      r"EU|EUROPE\w*|NATO|ZELENSK\w*|PUTIN|TRUMP|NETANYAHU|XI|KHAMENEI|~MIDDLE EAST)$")
+WAVE_HOURS = 12.0
+# the sides of each region's war: a state named in two stories that is NOT one of them was struck (or drawn in), which identifies the event
+BELLIGERENTS = {"UKRAINE_WAR": {"RUSSIA", "UKRAINE"}, "GULF": {"IRAN", "US", "ISRAEL"}, "LEVANT": {"ISRAEL", "LEBANON", "SYRIA"},
+                "RED_SEA": {"YEMEN", "SAUDI", "US"}, "TAIWAN_STRAIT": {"CHINA", "TAIWAN"}}
+
+
+def _plain(anchor: str) -> str:
+    """An anchor without its possessive ("UKRAINE'S" is Ukraine, a side of the war, not a place in it)."""
+    return re.sub(r"['’]S$", "", anchor)
+
+
+
+def same_event(a: Event, b: Event, hours_apart: float | None = None) -> bool:
     """One real-world event, told twice: the same kind of event (a tanker attack and a missile strike are both the war) with the same
     specific actor or place, or the same conflict in the same region. Never just a shared keyword: two Nvidia stories (its CEO's scandal,
     its earnings) are two events; two FAA stories about one ground stop are one."""
@@ -241,10 +261,29 @@ def same_event(a: Event, b: Event) -> bool:
         # one war is not one event: the same specific target/actor named, or the SAME belligerents exchanging fire within the window. Replay
         # 2026-11-15..18: "Ukraine, Russia race to build military satellite networks" must not block a drone strike on Russia's petrochemical
         # capital; "US strikes Iranian missile site" then "ADNOC ship attacked in Hormuz" (same Gulf exchange) stays one event
-        if {x for x in a.anchors & b.anchors if not x.startswith(("$", "~"))}:
+        if {x for x in a.anchors & b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}:
             return True
         if not (a.regions & b.regions):
             return False
+        if hours_apart is not None and hours_apart > WAVE_HOURS:
+            return False  # the same war a day later is another event (more deaths, a new target), unless a specific place or thing is shared
+        # a wave is one side firing: "11 killed in Russian strike on Ukraine's Dymer" is not the wave of "Ukraine behind attacks on Russian ships";
+        # and two strikes on different named targets are two events
+        # 2026-11-24: a third state struck inside a war region ("Poland says two Russian missiles crashed on its soil", "Poland hit by at
+        # least one Russian missile", "Russian missile hits Poland ... says Tusk": one event told three times in the replay)
+        third = (a.states & b.states) - set().union(*(BELLIGERENTS.get(r, set()) for r in a.regions & b.regions)) - {"US"}
+        if third and HARD_CONFLICT.search(a.title or "") and HARD_CONFLICT.search(b.title or "") and (hours_apart is None or hours_apart <= WAVE_HOURS):
+            return True
+        own_a = {x[:3] for x in a.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(_plain(x))}
+        own_b = {x[:3] for x in b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(_plain(x))}
+        if own_a and own_b and not (own_a & own_b):
+            return False  # both name a specific place or thing, and none in common ("FINLAND" and "FINNISH" are one: first letters)
+        if bool(own_a) != bool(own_b) and a.states and b.states:
+            # (a story naming a place and no state, like "ADNOC ship attacked in Hormuz", is still the region's exchange: owner 11-18)
+            # 2026-11-24: only one names a place or target ("drone attack hits Russian ship in Benghazi" vs "At least 4 killed in Russian
+            # drone attacks on Kyiv region"): one shared belligerent is not one event; most of the words must be shared too
+            if not (a.title_stems and b.title_stems and len(a.title_stems & b.title_stems) / len(a.title_stems | b.title_stems) >= 0.3):
+                return False
         fire_a, fire_b = bool(HARD_CONFLICT.search(a.title or "")), bool(HARD_CONFLICT.search(b.title or ""))
         if not (fire_a and fire_b):
             return False
@@ -641,7 +680,9 @@ def told(db: Any, now: datetime, hours: int = 168, *, skip_event: int | None = N
         lead = str(((p.sources or [{}])[0] or {}).get("title") or (p.text or "").split("\n")[0])
         out.append(Told("x-trending", f"trend post {p.id}", lead, _aware(p.published_at or p.created_at, now) or now, event_of(lead, p.text or "")))
     for e in db.scalars(select(NdEvent).where(NdEvent.status == "released", NdEvent.released_at >= since)):
-        if e.id == skip_event or (e.tg_status in ("skipped", "missed", "failed") and e.x_status in ("skipped", "missed", "failed")):
+        from app.trending.coordinate import event_out
+
+        if e.id == skip_event or not event_out(e, now):  # 2026-11-24: released but never delivered (and not being sent now) told nobody
             continue
         out.append(Told("released", f"event {e.id}", e.title or e.headline, _aware(e.released_at, now) or now, event_of(e.title or e.headline, e.summary or "")))
     if platform in PLATFORM_LANES:  # a repeat is a second post about one event on the SAME platform; X and Telegram carrying it once each is one story
@@ -653,7 +694,8 @@ def told(db: Any, now: datetime, hours: int = 168, *, skip_event: int | None = N
 def repeat_of(title: str, summary: str, history: list[Told], now: datetime) -> str:
     """"" when this is a new event or a substantial development of one already told; else why it is a repeat."""
     ev = event_of(title, summary)
-    same = [h for h in history if same_event(ev, h.event) and now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)]
+    same = [h for h in history if now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)
+            and same_event(ev, h.event, hours_apart=abs((now - h.at).total_seconds()) / 3600)]
     if not same:
         return ""
     if (dev := development(ev, [h.event for h in same], f"{title} {summary or ''}")):
@@ -666,7 +708,8 @@ def repeat_of(title: str, summary: str, history: list[Told], now: datetime) -> s
 
 def development_of(title: str, summary: str, history: list[Told], now: datetime) -> str:
     ev = event_of(title, summary)
-    same = [h for h in history if same_event(ev, h.event) and now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)]
+    same = [h for h in history if now - h.at <= REPEAT_WINDOW.get(ev.kin(), DEFAULT_WINDOW)
+            and same_event(ev, h.event, hours_apart=abs((now - h.at).total_seconds()) / 3600)]
     return development(ev, [h.event for h in same], f"{title} {summary or ''}") if same else ""
 
 

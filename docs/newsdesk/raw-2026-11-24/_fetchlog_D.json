@@ -1,0 +1,306 @@
+[
+ {
+  "name": "binance_BTCUSDT_1m_1120_1500",
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795186800000&limit=35",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:02+00:00",
+  "bytes": 6076
+ },
+ {
+  "name": "coinbase_BTCUSD_1m_1120_1500",
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T15:00:00Z&end=2026-11-20T15:35:00Z",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:04+00:00",
+  "bytes": 2160
+ },
+ {
+  "name": "binance_BTCUSDT_1m_1120_1300",
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795179300000&limit=35",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:04+00:00",
+  "bytes": 5929
+ },
+ {
+  "name": "coinbase_BTCUSD_1m_1120_1300",
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T12:55:00Z&end=2026-11-20T13:30:00Z",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:05+00:00",
+  "bytes": 2137
+ },
+ {
+  "name": "binance_BTCUSDT_1m_1120_1700",
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795193700000&limit=35",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:06+00:00",
+  "bytes": 6016
+ },
+ {
+  "name": "coinbase_BTCUSD_1m_1120_1700",
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-20T16:55:00Z&end=2026-11-20T17:30:00Z",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:07+00:00",
+  "bytes": 2164
+ },
+ {
+  "name": "binance_BTCUSDT_1m_1121_0355",
+  "url": "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=1795233300000&limit=35",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:08+00:00",
+  "bytes": 6093
+ },
+ {
+  "name": "coinbase_BTCUSD_1m_1121_0355",
+  "url": "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60&start=2026-11-21T03:55:00Z&end=2026-11-21T04:30:00Z",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:09+00:00",
+  "bytes": 2159
+ },
+ {
+  "name": "yahoo_5m_ANT",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/ANT?period1=1795096800&period2=1795123800&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:10+00:00",
+  "bytes": 6772
+ },
+ {
+  "name": "yahoo_5m_NVDA_1120",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?period1=1795183200&period2=1795478400&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:10+00:00",
+  "bytes": 15686
+ },
+ {
+  "name": "yahoo_5m_SI_F",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1795118400&period2=1795143600&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:11+00:00",
+  "bytes": 7928
+ },
+ {
+  "name": "yahoo_5m_GC_F_1118",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1794934800&period2=1795041000&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:12+00:00",
+  "bytes": 27593
+ },
+ {
+  "name": "yahoo_5m_metals_1123_SI",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/SI%3DF?period1=1795438800&period2=1795449600&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:13+00:00",
+  "bytes": 4398
+ },
+ {
+  "name": "yahoo_5m_metals_1123_GC",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?period1=1795438800&period2=1795449600&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:13+00:00",
+  "bytes": 4002
+ },
+ {
+  "name": "yahoo_5m_HG_F_1123",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?period1=1795392000&period2=1795478400&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:14+00:00",
+  "bytes": 25644
+ },
+ {
+  "name": "yahoo_5m_HGH27_1123",
+  "url": "https://query1.finance.yahoo.com/v8/finance/chart/HGH27.CMX?period1=1795392000&period2=1795478400&interval=5m",
+  "body": null,
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:15+00:00",
+  "bytes": 25497
+ },
+ {
+  "name": "hl_candles_5m_1123_xyz_SILVER",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:16+00:00",
+  "bytes": 39721
+ },
+ {
+  "name": "hl_candles_5m_1123_xyz_GOLD",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:17+00:00",
+  "bytes": 39050
+ },
+ {
+  "name": "hl_candles_5m_1123_xyz_COPPER",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:COPPER",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:18+00:00",
+  "bytes": 39106
+ },
+ {
+  "name": "hl_candles_5m_1123_xyz_SP500",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:18+00:00",
+  "bytes": 39471
+ },
+ {
+  "name": "hl_candles_5m_1123_xyz_XYZ100",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:19+00:00",
+  "bytes": 41105
+ },
+ {
+  "name": "hl_candles_5m_1123_xyz_NVDA",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:NVDA",
+    "interval": "5m",
+    "startTime": 1795392000000,
+    "endTime": 1795478400000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:20+00:00",
+  "bytes": 39713
+ },
+ {
+  "name": "hl_candles_5m_1118_1120_xyz_SILVER",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SILVER",
+    "interval": "5m",
+    "startTime": 1794934800000,
+    "endTime": 1795143600000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:21+00:00",
+  "bytes": 95820
+ },
+ {
+  "name": "hl_candles_5m_1118_1120_xyz_GOLD",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:GOLD",
+    "interval": "5m",
+    "startTime": 1794934800000,
+    "endTime": 1795143600000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:22+00:00",
+  "bytes": 94217
+ },
+ {
+  "name": "hl_candles_5m_1120_xyz_SP500",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:SP500",
+    "interval": "5m",
+    "startTime": 1795114800000,
+    "endTime": 1795210200000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:23+00:00",
+  "bytes": 43616
+ },
+ {
+  "name": "hl_candles_5m_1120_xyz_XYZ100",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:XYZ100",
+    "interval": "5m",
+    "startTime": 1795114800000,
+    "endTime": 1795210200000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:24+00:00",
+  "bytes": 45409
+ },
+ {
+  "name": "hl_candles_5m_1120_xyz_NVDA",
+  "url": "https://api.hyperliquid.xyz/info",
+  "body": {
+   "type": "candleSnapshot",
+   "req": {
+    "coin": "xyz:NVDA",
+    "interval": "5m",
+    "startTime": 1795114800000,
+    "endTime": 1795210200000
+   }
+  },
+  "status": 200,
+  "retrieved_utc": "2026-11-24T06:45:25+00:00",
+  "bytes": 43723
+ }
+]

@@ -258,6 +258,8 @@ async def test_one_dead_provider_never_breaks_discovery() -> None:
     pages = [_commons_page("Binance headquarters Dubai.jpg", 1)]
     async with httpx.AsyncClient(transport=_transport(pages, ov_status=403)) as c:  # Openverse's Cloudflare challenge
         assert len(await P.discover(c, ["Binance"], ["Binance"])) == 1
+    assert P.openverse_paused() == "HTTP 403"  # left alone for a while (2026-11-24), not asked again on every query
+    P._openverse.update(until=0.0, why="")
 
     def boom(r: httpx.Request) -> httpx.Response:
         if r.url.host == "commons.wikimedia.org":

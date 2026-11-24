@@ -196,7 +196,8 @@ def test_the_most_striking_relevant_photo_wins() -> None:
     assert photography.aesthetic(pic(dark=True)) > photography.aesthetic(pic(dark=False))
 
 
-@pytest.mark.parametrize("headline,key", [("Gold hits a record", "gold"), ("Goldman Sachs cuts jobs", None), ("Asian stocks slide", None),
+# "Asian stocks slide": never Wall Street; since 2026-11-24 the general stock-market picture (no exchange, no country)
+@pytest.mark.parametrize("headline,key", [("Gold hits a record", "gold"), ("Goldman Sachs cuts jobs", None), ("Asian stocks slide", "markets"),
                                           ("S&P 500 falls 2%", "stocks"), ("Microsoft Outlook down for thousands", "microsoft"),
                                           ("Silver lining for retailers", None), ("Ethereum upgrade goes live", "ether"),
                                           ("Fed holds rates steady", "fed"), ("Investors fed up with volatility", None),  # "fed up" is not the Fed

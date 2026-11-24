@@ -121,11 +121,50 @@ async def publish(topic_id: int, payload: DraftInput, db: DbSession, runtime: Ru
     return {**result, "story": feed.story_detail(db, t)}
 
 
+@router.get("/stories/{topic_id}/picture")
+async def story_picture(topic_id: int, db: DbSession, fresh: bool = Query(False)) -> dict[str, Any]:
+    """The picture a post of this story would carry, where it comes from, its licence and credit (reads only; sends nothing)."""
+    from app.terminal import pictures
+
+    t = _topic(db, topic_id)
+    image, meta = await pictures.for_topic(db, t, utcnow(), fresh=fresh)
+    return pictures.out(image, meta)
+
+
+@router.get("/events/{event_id}/picture")
+async def event_picture(event_id: int, db: DbSession) -> dict[str, Any]:
+    """A News Desk event's picture: what its post used (or will use), or why it is held."""
+    from app.terminal import pictures
+
+    got = await pictures.for_event(db, event_id, utcnow())
+    if got is None:
+        raise HTTPException(404, "No such event.")
+    return pictures.out(*got)
+
+
+class HeldInput(StrictInput):
+    action: Literal["retry", "text", "skip"]
+
+
+@router.post("/events/{event_id}/held")
+def release_held(event_id: int, payload: HeldInput, db: DbSession) -> dict[str, Any]:
+    """The owner's decision on a post held because it had no picture: look again, send the words alone, or skip it."""
+    try:
+        return feed.release_held(db, event_id, payload.action, utcnow())
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+
+
+class TelegramInput(StrictInput):
+    text: str | None = Field(None, max_length=280)
+    text_ok: bool = False  # the owner chose to send the words without a picture (never the default)
+
+
 @router.post("/stories/{topic_id}/telegram")
-async def telegram(topic_id: int, payload: DraftInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
+async def telegram(topic_id: int, payload: TelegramInput, db: DbSession, runtime: Runtime) -> dict[str, Any]:
     t = _topic(db, topic_id)
     try:
-        result = await feed.publish_telegram(db, runtime.settings, t, payload.text)
+        result = await feed.publish_telegram(db, runtime.settings, t, payload.text, text_ok=payload.text_ok)
     except ValueError as e:
         raise HTTPException(409, str(e)) from None
     except Exception as e:  # noqa: BLE001 - Telegram not configured or unreachable: say so, nothing was sent

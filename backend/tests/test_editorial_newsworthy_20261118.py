@@ -173,7 +173,9 @@ def test_a_slot_with_only_weak_stories_stays_empty(db: Session) -> None:
     a = _news(db, "w1", "Nvidia NVDA stock up 3% as earnings beat Expectations. Neoclouds surge.", 70, ["CNBC", "Seeking Alpha"], age_min=20)
     b = _news(db, "w2", "Democrats probe whether Howard Lutnick helped Cantor avoid Nvidia losses", 66, ["Axios", "The Guardian"], age_min=20)
     assert events.release(db, SLOT + timedelta(minutes=1), events.policy({})) is None
-    assert "why should anyone care?" in a.why and "why should anyone care?" in b.why
+    # the editor's verdict (app/newsdesk/importance, 2026-11-23), recorded on each: nothing happened that the headline states
+    assert "nothing happened" in a.why and "nothing happened" in b.why
+    assert a.facts["editor"]["tier"] == b.facts["editor"]["tier"] == "noise"
 
 
 def test_a_keyword_major_no_longer_breaks_through_the_lane(db: Session) -> None:
@@ -194,7 +196,7 @@ def test_a_new_state_strike_still_breaks_through_at_once(db: Session) -> None:
     db.commit()
     ev = _news(db, "qeshm", "US jets strike IRGC missile launch site on Iran's Qeshm Island", 78, ["Reuters", "Al Jazeera"], age_min=5, now=BETWEEN)
     got = events.release(db, BETWEEN, events.policy({}))
-    assert got is not None and got.id == ev.id and got.facts["newsworthy"]["strength"] in ("strong", "major")
+    assert got is not None and got.id == ev.id and got.facts["editor"]["tier"] == "major" and got.slot == "breaking"
 
 
 # --- 5: one post = one event --------------------------------------------------------------------------------------------------------
@@ -268,7 +270,12 @@ def test_a_study_or_pilot_is_not_an_outcome(db: Session) -> None:
                  topic="crypto", evidence="two outlets", status="released", released_at=NOW, facts={}, sources=[])
     db.add(ev)
     db.commit()
-    assert editorial.delivery_gate(db, ev, NOW, "telegram").startswith("not newsworthy")
+    # 2026-11-23 (one decision pipeline): worth-a-post is decided once, at release, by the editor; the delivery gate keeps the repeat check
+    # and the owner's block only (a second, different newsworthiness rule refused 8 released events on both platforms in a week)
+    from app.newsdesk import importance
+
+    assert importance.judge(ev.title, outlets=2).tier == importance.NOISE
+    assert editorial.delivery_gate(db, ev, NOW, "telegram") == ""
 
 
 def test_a_trend_post_queued_before_the_gate_is_judged_again_before_it_goes(db: Session) -> None:

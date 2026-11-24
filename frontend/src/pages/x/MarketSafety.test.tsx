@@ -35,6 +35,22 @@ describe("Market-data posts", () => {
   });
 });
 
+describe("Liquidation pause", () => {
+  it("says price news goes on and resumes liquidation posts only after a confirmation", async () => {
+    const save = vi.fn(async () => undefined);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<MarketPause paused={false} reason={null} held={[]} busy={false} save={save} liqPaused liqReason="automatic: 3 implausible liquidation figures within 60 minutes" />);
+    expect(screen.getByText("Liquidation posts paused")).toBeTruthy();
+    expect(screen.getByText(/Price news checked against two markets goes on/)).toBeTruthy();
+    expect(screen.getByText("On")).toBeTruthy();  // market-data posts themselves stay on
+    fireEvent.click(screen.getByText("Resume liquidation posts"));
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Resume liquidation posts"));
+    expect(save).toHaveBeenCalledWith({ liq_pause: false });
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("Corrections", () => {
   it("previews first, sends nothing until confirmed, then sends with the token", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);

@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; PriceChatNewsDesk/1.0; +https://pricechat.live)",
       "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5"}
+# The same reader without the "Mozilla/5.0" prefix. Some CDNs refuse a client that calls itself Mozilla but doesn't behave like a browser
+# (2026-11-24: The Guardian answered every read 403 for a day; the identical request minus "Mozilla/5.0" gets 200, checked from the same
+# machine). Saying plainly what we are is the honest fix, not a workaround: a feed marked agent "plain" is always read this way, and any
+# feed answering 403 or 406 is asked once more this way before it counts as failed.
+PLAIN_UA = {**UA, "User-Agent": "PriceChatNewsDesk/1.0 (+https://pricechat.live)"}
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 CATEGORIES = ("crypto", "stocks", "commodities", "politics", "economics", "viral")
 # tier: 0 official, 1 major outlet, 2 specialist. category None: decided from the headline's words.
@@ -77,9 +82,9 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "tier": 1, "category": None},
     {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "tier": 1, "category": "economics"},
     {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "tier": 1, "category": "politics"},
-    {"name": "The Guardian", "url": "https://www.theguardian.com/business/rss", "tier": 1, "category": None},
-    {"name": "The Guardian", "url": "https://www.theguardian.com/business/economics/rss", "tier": 1, "category": "economics"},
-    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss", "tier": 1, "category": "politics"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/business/rss", "tier": 1, "category": None, "agent": "plain"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/business/economics/rss", "tier": 1, "category": "economics", "agent": "plain"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss", "tier": 1, "category": "politics", "agent": "plain"},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069", "tier": 1, "category": None},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362", "tier": 1, "category": "politics"},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19836768", "tier": 1, "category": "commodities"},
@@ -90,6 +95,9 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "BLS", "url": "https://www.bls.gov/feed/bls_latest.rss", "tier": 0, "category": "economics"},
     {"name": "Bank of England", "url": "https://www.bankofengland.co.uk/rss/news", "tier": 0, "category": "economics"},
     {"name": "Bank of Japan", "url": "https://www.boj.or.jp/en/rss/whatsnew.xml", "tier": 0, "category": "economics"},
+    # 2026-11-24: six fast world feeds (BBC top stories, The Independent, Sky News, ABC News, The Washington Post, SCMP) were prepared here
+    # and withdrawn before release: the owner allows only feeds whose terms permit commercial use, and these publishers' RSS terms say
+    # personal, non-commercial. Every feed is being checked against its terms before any is added again.
 ]
 # World Monitor (owner, 2026-11-10: "integrate World Monitor as an additional global intelligence source"). World Monitor's code is
 # AGPL-3.0 and its hosted API's terms forbid public redistribution below the $299.99/month Business plan, so neither is used. Its source
@@ -286,31 +294,84 @@ async def xyz_prices(transport: Any = None) -> dict[str, tuple[float, float]]:
         r = await c.post("https://api.hyperliquid.xyz/info", json={"type": "metaAndAssetCtxs", "dex": "xyz"})
         r.raise_for_status()
         meta, ctxs = r.json()
-    out = {str(a.get("name")): (float(x.get("oraclePx") or 0), float(x.get("markPx") or 0)) for a, x in zip(meta["universe"], ctxs)}
+    # (oracle, mark, price 24 hours ago): the third lets a move be compared like for like (FUTURES_BASIS below)
+    out = {str(a.get("name")): (float(x.get("oraclePx") or 0), float(x.get("markPx") or 0), float(x.get("prevDayPx") or 0))
+           for a, x in zip(meta["universe"], ctxs)}
     _xyz = (time.monotonic(), out)
     return out
+
+
+# The Nasdaq Composite and the Dow have no second source the desk may read (owner, 2026-11-23: verify them from the actual Railway environment,
+# never DIA x 100 as the Dow): trade.xyz has neither index; Nasdaq.com answers a browser but stalls any automated reader that says who it is
+# (checked 2026-11-23: our User-Agent times out, a browser's gets 200; we do not pretend to be a browser); Cboe's DJX feed is behind a
+# Cloudflare challenge; WSJ's quote API needs a site token. So a Nasdaq-only or Dow-only move is never published automatically (one source:
+# held, events.held_market). A market-wide US move is verified on its S&P 500 member (trade.xyz) and prints the Nasdaq and the Dow beside it
+# as Yahoo's figures. A keyed market-data provider would add them (owner's decision).
+# the basis between two markets widens with the move: a perpetual's oracle vs a futures front month. On a 6% day silver's trade.xyz oracle
+# and COMEX were 1.63% apart (refused at a flat 1.5%, production 2026-11-23): the tolerance grows by this share of the move. A unit error or
+# a wrong instrument is still many times outside it.
+MOVE_ALLOWANCE = 0.25
+# 2026-11-24: comparing LEVELS of a perpetual's oracle and a COMEX/NYMEX futures contract measures the futures basis, not the data: on 11-23
+# copper's trade.xyz oracle and Yahoo's HG=F were 2.6-3.0% apart on every pass and every copper move was held as "two markets disagreeing".
+# Equivalent instruments are compared on what they share: for a futures symbol (Yahoo "=F") the level only has to be the same instrument
+# within FUTURES_BASIS (a unit error or a wrong market is far outside it), and a day-sized move (|change| >= MOVE_CHECK_MIN) must show on
+# trade.xyz too: the same direction and at least MOVE_CONFIRM_SHARE of its size over trade.xyz's own last 24 hours.
+FUTURES_BASIS = 5.0
+MOVE_CHECK_MIN = 2.0
+MOVE_CONFIRM_SHARE = 0.33
+
+
+async def call_second(fn: Any, item: dict[str, Any], price: float, market: Any = None, change: float = 0.0) -> tuple[bool, str]:
+    """second_opinion (or a stand-in with the older signature, without the move's size)."""
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+        takes = "change" in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+    except (TypeError, ValueError):
+        takes = False
+    if market is None:
+        return await (fn(item, price, change=change) if takes else fn(item, price))
+    return await (fn(item, price, market, change=change) if takes else fn(item, price, market))
 
 
 def has_second(item: dict[str, Any]) -> bool:
     return bool(item.get("hl")) or str(item.get("symbol") or "") in XYZ
 
 
-async def second_opinion(item: dict[str, Any], price: float, market: Any = None, transport: Any = None) -> tuple[bool, str]:
-    """Crypto must agree with Hyperliquid; indices, stocks and commodities with a trade.xyz market must agree with its oracle price. A
-    disagreement is a refusal. An instrument with no second market, or one that can't be read right now, keeps one source and says so."""
+async def second_opinion(item: dict[str, Any], price: float, market: Any = None, transport: Any = None, change: float | None = None) -> tuple[bool, str]:
+    """Crypto must agree with Hyperliquid; indices, stocks and commodities with a trade.xyz market must agree with its oracle price. The
+    tolerance grows with the move (`change`, %, MOVE_ALLOWANCE). A disagreement
+    ("... apart") is a refusal and a safety anomaly. Owner, 2026-11-23: "No automatic major-move publishing without reliable verification": a
+    second market that can't be read is a refusal too (not an anomaly: nothing disagreed). An instrument with no second market at all keeps one
+    source and says so."""
     name = item.get("hl")
     symbol = str(item.get("symbol") or "")
+    allowance = MOVE_ALLOWANCE * abs(float(change or 0))
     if not name and symbol in XYZ:
         try:
             got = (await xyz_prices(transport)).get(XYZ[symbol])
-        except Exception as e:  # noqa: BLE001 - unreadable: one source, said so (the plausibility limits still apply)
-            return True, f"one price source (Yahoo Finance): Hyperliquid trade.xyz couldn't be read ({type(e).__name__})"
+        except Exception as e:  # noqa: BLE001 - unreadable: not verified
+            return False, f"not verified: Hyperliquid trade.xyz couldn't be read ({type(e).__name__})"
         if not got or got[0] <= 0:
-            return True, "one price source (Yahoo Finance): no trade.xyz price"
+            return False, "not verified: no trade.xyz price"
         other = got[0]
         diff = abs(other - price) / price * 100
-        tol = XYZ_TOLERANCE.get(str(item.get("group") or ""), 1.5)
-        return diff <= tol, f"Hyperliquid trade.xyz {XYZ[symbol][4:]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart"
+        futures = symbol.endswith("=F")
+        tol = (FUTURES_BASIS if futures else XYZ_TOLERANCE.get(str(item.get("group") or ""), 1.5)) + allowance
+        said = f"Hyperliquid trade.xyz {XYZ[symbol][4:]} {other:,.2f} vs Yahoo {price:,.2f}: {diff:.2f}% apart (tolerance {tol:.2f}%)"
+        if diff > tol:
+            return False, said
+        prev = float(got[2]) if len(got) > 2 and got[2] else 0.0
+        if futures and change is not None and abs(float(change)) >= MOVE_CHECK_MIN:
+            if prev <= 0:
+                return False, f"not verified: trade.xyz {XYZ[symbol][4:]} has no 24-hour price to compare the {float(change):+.2f}% move with"
+            theirs = (other / prev - 1) * 100
+            if theirs * float(change) <= 0 or abs(theirs) < MOVE_CONFIRM_SHARE * abs(float(change)):
+                return False, (f"Hyperliquid trade.xyz {XYZ[symbol][4:]} moved {theirs:+.2f}% in 24 hours vs Yahoo {float(change):+.2f}%: "
+                               f"the moves are apart (same contract family, basis {diff:.2f}%)")
+            return True, f"{said}; trade.xyz moved {theirs:+.2f}% in 24 hours vs Yahoo {float(change):+.2f}% (futures basis allowed)"
+        return True, said
     if not name:
         return True, "one price source (Yahoo Finance)"
     try:
@@ -333,8 +394,11 @@ def clean_title(title: str) -> str:
 
 async def fetch_feed(client: httpx.AsyncClient, feed: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     """(items, problem). A feed being down never stops the others."""
+    plain = feed.get("agent") == "plain"
     try:
-        r = await client.get(feed["url"], headers=UA, timeout=15, follow_redirects=True)
+        r = await client.get(feed["url"], headers=PLAIN_UA if plain else UA, timeout=15, follow_redirects=True)
+        if r.status_code in (403, 406) and not plain:  # see PLAIN_UA: asked once more, saying plainly what we are
+            r = await client.get(feed["url"], headers=PLAIN_UA, timeout=15, follow_redirects=True)
     except httpx.HTTPError as e:
         return [], type(e).__name__
     if r.status_code != 200:

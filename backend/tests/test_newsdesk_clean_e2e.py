@@ -98,7 +98,7 @@ async def test_a_city_stand_in_is_never_its_photo_and_it_gets_no_chart_it_didnt_
     _telegram_words(texts[0])
     db.expire_all()
     ev = db.get(NdEvent, ev.id)
-    assert ev.facts["visual"] == {"style": "clean", "kind": "text", "layout": "text"}
+    assert {k: ev.facts["visual"][k] for k in ("style", "kind", "layout")} == {"style": "clean", "kind": "link_preview", "layout": "link_preview"}  # owner, 2026-11-23: the article's preview
     assert not any("riyadh" in " ".join(t).lower() for t in seen)  # the stand-in is never even searched for
     x = live["x"]
     assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
@@ -125,7 +125,7 @@ async def test_nothing_real_fits_a_text_post_goes_out(client: Any, db: Session, 
     assert sent["sent"] and tg.sent == [] and len(texts) == 1
     _telegram_words(texts[0])
     db.expire_all()
-    assert db.get(NdEvent, ev.id).facts["visual"] == {"style": "clean", "kind": "text", "layout": "text"}
+    assert {k: db.get(NdEvent, ev.id).facts["visual"][k] for k in ("style", "kind", "layout")} == {"style": "clean", "kind": "link_preview", "layout": "link_preview"}  # owner, 2026-11-23
     assert await engine.follow_telegram(db, get_settings(), None, 0, at + timedelta(minutes=2)) == "published"
     assert live["x"].uploads == [] and live["x"].posts[0]["media"] is None
 

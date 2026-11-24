@@ -60,6 +60,33 @@ CONFLICT = _rx(r"(?<![-\w])(?<!trade )(?<!price )(?<!bidding )(?<!talent )(?<!cu
                r"\b(missiles?|drones?|air ?strikes?|strikes? (?:on|against|in|at)|struck|shelling|bombard\w*|troops|military|army|navy|"
                r"naval|invasion|invad\w*|offensive|ceasefire|hostage\w*|militants?|hamas|hezbollah|houthis?|idf|killed|kills|dead|deaths|"
                r"casualt(?:y|ies)|attack(?:s|ed)? (?:on|against)|gunmen|shooting|bomb\w*|explosion|blast|terror\w*)\b")
+# A war's or a figure of speech's MARKET consequence is a markets story, not a battlefield (owner, 2026-11-23: Telegram 208 "Market rout
+# kills 50 basis points December Fed rate hike bets" and 205 "Russia and Ukraine's drone war sends optical fibre prices soaring" were
+# filed as conflicts, wanted a dated war photograph and went out as text). Such a headline is a conflict only when it also reports an act
+# of violence itself: a strike, an attack, a missile, casualties.
+MARKET_CONSEQUENCE = _rx(r"\b(prices?|markets?|stocks?|shares|equities|bets|odds|rate (?:hikes?|cuts?)|yields?|bonds?|basis points|bps|"
+                         r"inflation|ipos?|investors?|traders?|earnings|futures|sell-?offs?|rout|rall(?:y|ies|ied)|soar\w*|surg\w*|"
+                         r"slump\w*|tumbl\w*|plung\w*|demand|supply|exports?|imports?|costs?|"
+                         # 2026-11-24 audit: "Oil gains on Iran war worries" and "Iran war set to hike UK energy bills" are about a market
+                         r"oil|crude|brent|wti|gold|silver|copper|wheat|grains?|lng|natural gas|bitcoin|crypto|dollar|rouble|ruble|"
+                         r"currenc(?:y|ies)|energy bills)\b")
+VIOLENT_ACT = _rx(r"\b(killed|kills? \d|kills? (?:at least|dozens|hundreds|thousands|scores|civilians|people|soldiers|children)|"
+                  r"\d[\d,]* (?:dead|killed|wounded|injured)|deaths|casualt(?:y|ies)|struck|strikes? (?:on|against|in|at)|air ?strikes?|"
+                  r"attack(?:s|ed)? (?:on|against)|missiles?|shelling|bombard\w*|explosions?|blasts?|bomb(?:s|ed|ing)?|invasion|invad\w*|"
+                  r"hostages?|gunmen|shooting|intercept\w*)\b")
+
+
+WARFARE = _rx(r"(?<![-\w])(?<!trade )(?<!price )wars?(?![-\w])(?! chest)|\b(missiles?|drones?|air ?strikes?|strikes? (?:on|against)|shelling|"
+              r"bombard\w*|troops|military|army|invasion|militants?|hamas|hezbollah|houthis?|idf|gunmen|shooting|bomb\w*|terror\w*)\b")
+
+
+def is_conflict(head: str) -> bool:
+    """A story about fighting: the conflict vocabulary, unless the headline is about what it did to a market and reports no violent act."""
+    if not CONFLICT.search(head):
+        return False
+    return not (MARKET_CONSEQUENCE.search(head) and not VIOLENT_ACT.search(head))
+
+
 DISASTER = _rx(r"\b(earthquakes?|quakes?|tsunami|floods?|flooding|hurricane|typhoon|cyclone|wildfires?|bushfires?|eruption|volcano|landslide|"
                r"tornado|storm|heatwave|drought|derail\w*|plane crash|crash(?:ed)? (?:landing|into)|collapse[ds]?)\b")
 # an incident told as background to another story (post 195: "Microsoft had rallied back to record highs. Then came the election and
@@ -118,7 +145,10 @@ def brief(ev: Any) -> Brief:
     if inc is not None and not inc.hedged and (inc.entities or inc.scope) and not PAST_CONTEXT.search(head):
         who = sorted(inc.entities)[0] if inc.entities else ""
         return Brief("cyber" if inc.kind == "cyber" else "outage", who, inc, head, year, places)
-    if CONFLICT.search(head):
+    # a natural disaster's toll ("Storm kills 3 in Texas") is a disaster, not a war, unless the headline also names fighting
+    if DISASTER.search(head) and not WARFARE.search(head):
+        return Brief("disaster", places[0] if places else "", text=head, year=year, places=places)
+    if is_conflict(head):
         return Brief("conflict", places[0] if places else "", text=head, year=year, places=places)
     if DISASTER.search(head):
         return Brief("disaster", places[0] if places else "", text=head, year=year, places=places)
@@ -249,6 +279,14 @@ def vision_config(settings: Any = None) -> tuple[str, str, str]:
     if not key or not model:
         return "", "", "the image check is on but has no newsdesk_vision_api_key or model"
     return key, model, ""
+
+
+def can_look(settings: Any = None) -> bool:
+    """Whether the vision check can look at a photo here (switched on, keyed, with a model). Off: library photos or no photo."""
+    try:
+        return bool(vision_config(settings)[0])
+    except Exception:  # noqa: BLE001
+        return False
 
 
 VISION_PROMPT = """You are the photo editor of a financial breaking-news channel. A post will carry the attached image.
