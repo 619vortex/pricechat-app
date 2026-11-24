@@ -83,10 +83,10 @@ async def test_admin_can_switch_back_to_clean(client: Any, db: Session, live: di
 
 # ---------------------------------------------------------------- the breaking lane in the wire style
 def _move(db: Session, key: str, *, ratio: float = 1.4, score: float = 76, minutes: float = 5, assets: tuple[str, ...] = ("BTC",),
-          head: str = "Bitcoin falls 6.2% in 24 hours") -> NdEvent:
+          head: str = "Bitcoin falls 10.5% in 24 hours", change: float = -10.5) -> NdEvent:
     ev = NdEvent(key=key, kind="market", title=head, headline=head.upper(), summary="", topic="move", evidence="price data", category="crypto",
                  virality=score, parts={}, status="candidate", first_seen=BETWEEN - timedelta(minutes=minutes), expires_at=BETWEEN + timedelta(minutes=40),
-                 facts={"kind": "move", "window": "24h", "ratio": ratio, "change_pct": -6.2, "assets": list(assets), "told": head, "coin": "BTC"},
+                 facts={"kind": "move", "window": "24h", "ratio": ratio, "change_pct": change, "assets": list(assets), "told": head, "coin": "BTC"},
                  sources=[{"name": "Hyperliquid", "url": "https://app.hyperliquid.xyz/trade/BTC"}])
     db.add(ev)
     db.commit()
@@ -111,7 +111,8 @@ def test_an_exceptional_measured_move_breaks_in_the_wire_style_only(db: Session)
     ("a routine move", {"ratio": 0.8}),
     ("under the market bar", {"score": 64}),
     ("no longer happening", {"minutes": 45}),
-    ("not a priority asset", {"assets": ("DOGE",), "head": "Dogecoin falls 6.2% in 24 hours"}),
+    ("not a priority asset", {"assets": ("DOGE",), "head": "Dogecoin falls 10.5% in 24 hours"}),
+    ("significant, not major: it takes a slot (2026-11-24 calibration)", {"head": "Bitcoin falls 6.2% in 24 hours", "change": -6.2}),
 ])
 def test_a_move_breaks_only_when_exceptional_strong_and_live(db: Session, why: str, kw: dict[str, Any]) -> None:
     _move(db, "m2", **kw)
@@ -119,27 +120,31 @@ def test_a_move_breaks_only_when_exceptional_strong_and_live(db: Session, why: s
     assert got is None, why
 
 
-def test_breaking_has_a_rolling_cap_and_a_daily_one(db: Session) -> None:
+def test_a_major_move_has_no_daily_or_rolling_cap(db: Session) -> None:
+    # owner, 2026-11-24: "Do not impose an arbitrary daily limit on genuinely major breaking news" (2 a day and 2 in six hours held
+    # major moves before); the gap after the last post and the burst guard remain
     _earlier_breaking(db, [2, 4])  # two in the last six hours
-    _move(db, "m3")
-    assert events.release(db, BETWEEN, events.policy({})) is None
+    got = _move(db, "m3")
+    rel = events.release(db, BETWEEN, events.policy({}))
+    assert rel is not None and rel.id == got.id and rel.slot == "breaking", got.why
     db.query(NdEvent).delete()
-    _earlier_breaking(db, [7, 12])  # two today, none in six hours: the desk's daily cap of 2 (unchanged in the wire style, 2026-11-16)
-    _move(db, "m4")
-    assert events.release(db, BETWEEN, events.policy({})) is None
+    _earlier_breaking(db, [7, 12, 15])  # three today
+    m4 = _move(db, "m4")
+    rel = events.release(db, BETWEEN, events.policy({}))
+    assert rel is not None and rel.slot == "breaking", m4.why
     db.query(NdEvent).delete()
-    _earlier_breaking(db, [7])  # one today, over six hours ago: room for one more
-    m5 = _move(db, "m5")
-    got = events.release(db, BETWEEN, events.policy({}))
-    assert got is not None and got.slot == "breaking", m5.why
+    _earlier_breaking(db, [0.1])  # six minutes ago: the gap holds it
+    _move(db, "m5")
+    assert events.release(db, BETWEEN, events.policy({})) is None
 
 
 def test_breaking_never_crowds_another_post(db: Session) -> None:
     db.add(NdEvent(key="prev", kind="news", title="Fed holds rates", headline="FED HOLDS RATES", topic="macro", evidence="official", status="released",
-                   slot="slot", released_at=BETWEEN - timedelta(minutes=60), facts={}))
+                   slot="slot", released_at=BETWEEN - timedelta(minutes=10), facts={}))
     db.commit()
     _move(db, "m6")
-    assert events.release(db, BETWEEN, events.policy({})) is None  # 60 minutes after the last post: under the 90-minute gap
+    # a major move keeps the desk's minimum gap after any post (20 minutes; it was the breaking lane's 90 before 2026-11-24: a major goes at once)
+    assert events.release(db, BETWEEN, events.policy({})) is None  # 10 minutes after the last post
 
 
 def test_a_material_update_breaks_and_replies_to_its_original(db: Session) -> None:

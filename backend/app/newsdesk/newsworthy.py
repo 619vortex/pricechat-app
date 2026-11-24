@@ -265,7 +265,8 @@ def same_event(a: Event, b: Event, hours_apart: float | None = None) -> bool:
         own_b = {x[:3] for x in b.anchors if not x.startswith(("$", "~")) and not NATIONAL.match(x)}
         if own_a and own_b and not (own_a & own_b):
             return False  # both name a specific place or thing, and none in common ("FINLAND" and "FINNISH" are one: first letters)
-        if bool(own_a) != bool(own_b):
+        if bool(own_a) != bool(own_b) and a.states and b.states:
+            # (a story naming a place and no state, like "ADNOC ship attacked in Hormuz", is still the region's exchange: owner 11-18)
             # 2026-11-24: only one names a place or target ("drone attack hits Russian ship in Benghazi" vs "At least 4 killed in Russian
             # drone attacks on Kyiv region"): one shared belligerent is not one event; most of the words must be shared too
             if not (a.title_stems and b.title_stems and len(a.title_stems & b.title_stems) / len(a.title_stems | b.title_stems) >= 0.3):

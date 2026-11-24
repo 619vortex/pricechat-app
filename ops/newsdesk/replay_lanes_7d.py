@@ -165,7 +165,8 @@ def load(path: Path, logs: Path | None, start: datetime, end: datetime) -> tuple
                 break
             if st.kind not in ("news", "update"):
                 continue
-            if any(coordinate.same_story(r["title"], x) for x in st.titles[:6]) or \
+            # one story = the same event as the cluster's LEAD title (not any member's: members chained unrelated stories together)
+            if coordinate.same_story(r["title"], st.title) or \
                     newsworthy.same_event(ev, newsworthy.event_of(st.title, ""), hours_apart=(r["seen"] - st.seen).total_seconds() / 3600):
                 home = st
                 break
@@ -222,8 +223,8 @@ def simulate(stories: list[Story], start: datetime, end: datetime) -> list[dict[
         for t0, e0, s0 in out_events:
             if at - t0 > SAME_WINDOW:
                 continue
-            if newsworthy.same_event(ev, e0, hours_apart=(at - t0).total_seconds() / 3600) or any(
-                    coordinate.same_story(a, b) for a in st.titles[:4] for b in s0.titles[:4]):
+            if newsworthy.same_event(ev, e0, hours_apart=(at - t0).total_seconds() / 3600) or coordinate.same_story(
+                    st.best_title or st.title, s0.best_title or s0.title):  # production's repeat check: what was told vs what is new
                 if newsworthy.development(ev, [e0], st.title):
                     return ""
                 return f"same event as story {s0.sid} ({s0.title[:60]})"

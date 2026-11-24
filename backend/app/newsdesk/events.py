@@ -1180,14 +1180,12 @@ def _release_slot(db: Session, now: datetime, p: Policy, out: list[NdEvent], wai
     six_h = sum(1 for e in day if e.slot == "breaking" and not (e.facts or {}).get("major") and not (e.facts or {}).get("market_major")
                 and now - _utc(e.released_at, now) < timedelta(hours=6))
 
-    def lane_held() -> str:  # the breaking lane's own caps (the wire style's measured moves)
-        if last is not None and now - last < p.breaking_gap:
-            return f"under {int(p.breaking_gap.total_seconds() // 60)} minutes since the last post"
-        if breaking_today >= p.breaking_per_day:
-            return f"{breaking_today} breaking posts in 24 hours already"
-        if p.breaking_per_6h and six_h >= p.breaking_per_6h:
-            return f"{p.breaking_per_6h} breaking posts in six hours already"
-        return ""
+    def lane_held() -> str:  # the wire style's measured moves: only MAJOR moves take this lane (owner, 2026-11-23)
+        # owner, 2026-11-24: no daily or six-hour count on genuinely major news (breaking_per_day / breaking_per_6h held major moves before);
+        # the spacing after the last post and the burst guard remain
+        if last is not None and now - last < p.min_gap:
+            return f"under {int(p.min_gap.total_seconds() // 60)} minutes since the last post"
+        return major_burst(out, now)
 
     for ev, d in ranked:
         # owner, 2026-11-23: immediate breaking ONLY for verified MAJOR events; significant and notable stories take the six slots.
