@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; PriceChatNewsDesk/1.0; +https://pricechat.live)",
       "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.9, */*;q=0.5"}
+# The same reader without the "Mozilla/5.0" prefix. Some CDNs refuse a client that calls itself Mozilla but doesn't behave like a browser
+# (2026-11-24: The Guardian answered every read 403 for a day; the identical request minus "Mozilla/5.0" gets 200, checked from the same
+# machine). Saying plainly what we are is the honest fix, not a workaround: a feed marked agent "plain" is always read this way, and any
+# feed answering 403 or 406 is asked once more this way before it counts as failed.
+PLAIN_UA = {**UA, "User-Agent": "PriceChatNewsDesk/1.0 (+https://pricechat.live)"}
 CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 CATEGORIES = ("crypto", "stocks", "commodities", "politics", "economics", "viral")
 # tier: 0 official, 1 major outlet, 2 specialist. category None: decided from the headline's words.
@@ -77,9 +82,9 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "tier": 1, "category": None},
     {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "tier": 1, "category": "economics"},
     {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "tier": 1, "category": "politics"},
-    {"name": "The Guardian", "url": "https://www.theguardian.com/business/rss", "tier": 1, "category": None},
-    {"name": "The Guardian", "url": "https://www.theguardian.com/business/economics/rss", "tier": 1, "category": "economics"},
-    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss", "tier": 1, "category": "politics"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/business/rss", "tier": 1, "category": None, "agent": "plain"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/business/economics/rss", "tier": 1, "category": "economics", "agent": "plain"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss", "tier": 1, "category": "politics", "agent": "plain"},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069", "tier": 1, "category": None},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100727362", "tier": 1, "category": "politics"},
     {"name": "CNBC", "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19836768", "tier": 1, "category": "commodities"},
@@ -90,6 +95,16 @@ EXTRA_FEEDS: list[dict[str, Any]] = [
     {"name": "BLS", "url": "https://www.bls.gov/feed/bls_latest.rss", "tier": 0, "category": "economics"},
     {"name": "Bank of England", "url": "https://www.bankofengland.co.uk/rss/news", "tier": 0, "category": "economics"},
     {"name": "Bank of Japan", "url": "https://www.boj.or.jp/en/rss/whatsnew.xml", "tier": 0, "category": "economics"},
+    # fast world desks (2026-11-24: more independent mainstream outlets, so a major world story reaches two-outlet verification sooner).
+    # Each checked live that day: fresh, dated, parseable, allowed by the site's robots.txt; named as app/trending's RELIABLE_OUTLETS and
+    # MAINSTREAM spell them. Measured: BBC top stories and ABC News a new item every ~10 min, The Independent and SCMP every ~15 min,
+    # Sky News and The Washington Post every few hours (short lists, but early on big breaking stories).
+    {"name": "BBC", "url": "https://feeds.bbci.co.uk/news/rss.xml", "tier": 1, "category": None},
+    {"name": "The Independent", "url": "https://www.independent.co.uk/news/world/rss", "tier": 1, "category": "politics"},
+    {"name": "Sky News", "url": "https://feeds.skynews.com/feeds/rss/world.xml", "tier": 1, "category": "politics"},
+    {"name": "ABC News", "url": "https://abcnews.go.com/abcnews/internationalheadlines", "tier": 1, "category": "politics"},
+    {"name": "The Washington Post", "url": "https://feeds.washingtonpost.com/rss/world", "tier": 1, "category": "politics"},
+    {"name": "South China Morning Post", "url": "https://www.scmp.com/rss/91/feed", "tier": 1, "category": None},
 ]
 # World Monitor (owner, 2026-11-10: "integrate World Monitor as an additional global intelligence source"). World Monitor's code is
 # AGPL-3.0 and its hosted API's terms forbid public redistribution below the $299.99/month Business plan, so neither is used. Its source
@@ -363,8 +378,11 @@ def clean_title(title: str) -> str:
 
 async def fetch_feed(client: httpx.AsyncClient, feed: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     """(items, problem). A feed being down never stops the others."""
+    plain = feed.get("agent") == "plain"
     try:
-        r = await client.get(feed["url"], headers=UA, timeout=15, follow_redirects=True)
+        r = await client.get(feed["url"], headers=PLAIN_UA if plain else UA, timeout=15, follow_redirects=True)
+        if r.status_code in (403, 406) and not plain:  # see PLAIN_UA: asked once more, saying plainly what we are
+            r = await client.get(feed["url"], headers=PLAIN_UA, timeout=15, follow_redirects=True)
     except httpx.HTTPError as e:
         return [], type(e).__name__
     if r.status_code != 200:
