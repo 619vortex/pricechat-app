@@ -229,7 +229,7 @@ def daily(start: float, moves_pct: list[float], end: datetime = NOW, *, base_noi
     n = 400
     for i in range(n):
         p *= 1 + (base_noise if i % 2 else -base_noise * 0.98) / 100
-        out.append((end - timedelta(days=n + len(moves_pct) - i), p))
+        out.append((end - timedelta(days=n + len(moves_pct) - 1 - i), p))  # one bar a day, no gap (2026-11-24: a gap is refused as stale)
     for i, m in enumerate(moves_pct):
         p *= 1 + m / 100
         out.append((end - timedelta(days=len(moves_pct) - 1 - i), p))

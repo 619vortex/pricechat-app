@@ -254,6 +254,29 @@ def _fresh(series: list[tuple[datetime, float]], now: datetime, days: int = 4) -
 # --- the generators ---------------------------------------------------------------------------------------------------------------
 
 
+def reference_problem(symbol: str, series: list[tuple[datetime, float]], last: Last | None) -> str | None:
+    """Strict stale-data rule (owner, 2026-11-24): a day's change is published only when the daily bars are the price's own session and the
+    session immediately before it. Production printed three day figures against the wrong reference:
+      - silver 880 (11-20 01:40 UTC, "-6.7% so far today"): Yahoo still dated the bar 11-19 (New York's calendar) while CME was trading the
+        11-20 session, so the live price had replaced 11-19's close and the "previous close" was 11-18's ($45.00, not $44.32);
+      - bitcoin 1046 (11-21 04:03 UTC, "-9.1% since the 00:00 open"): the newest daily bar was still 11-20's, so the "open" was a day old;
+      - (X 145, Nvidia, a 20:47 price posted at 00:11, is the age rule in livedata.problem.)
+    None when the bars line up; otherwise why not, and nothing is posted (the next read tries again)."""
+    if last is None or len(series) < 2:
+        return "no daily bars to measure the day from"
+    group = markethours.group_of(symbol)
+    want = markethours.trading_day(last.at, group, symbol)
+    have = markethours.bar_day(series[-1][0], group, symbol)
+    if have != want:
+        return (f"stale daily bars: the newest {symbol} bar is for {have:%d %b} but the price ({last.at:%d %b %H:%M} UTC) belongs to the "
+                f"{want:%d %b} session, so the previous close would be a day old")
+    prev_day = markethours.bar_day(series[-2][0], group, symbol)
+    expected = markethours.previous_trading_day(want, group, symbol)
+    if prev_day != expected:
+        return (f"stale daily bars: the {symbol} reference bar is for {prev_day:%d %b}, not the previous session ({expected:%d %b})")
+    return None
+
+
 def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime, last: Last | None = None) -> DataPost | None:
     """Today's move against the asset's own last 90 daily moves, and the last time it moved this much the same way. `last` says what the
     final value is (fetch_daily reads it from Yahoo); without it nothing is posted, because the words would have to guess."""
@@ -263,6 +286,10 @@ def anomaly(symbol: str, series: list[tuple[datetime, float]], now: datetime, la
     if abs(quote.price - series[-1][1]) > 1e-9 or abs(quote.prev - series[-2][1]) > 1e-9:
         return None  # the description is of another fetch
     if quote.kind in ("intraday", "utc_day") and now - quote.at > LIVE_MAX_AGE:
+        return None
+    if why := reference_problem(symbol, series, quote):
+        # a provider a session behind is a delay, not a wrong figure: logged, never counted toward the safety stop (app/newsdesk/safety)
+        logger.info("newsdesk datapost: %s not measured: %s", symbol, why)
         return None
     rets = [(series[i][0], (series[i][1] / series[i - 1][1] - 1) * 100) for i in range(1, len(series))]
     day, r = rets[-1]

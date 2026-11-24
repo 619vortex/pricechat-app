@@ -12,7 +12,7 @@ rolling 24 hours (Telegram 203's mistake); 52-week highs and round levels were s
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 FRESH = timedelta(minutes=20)
@@ -58,9 +58,52 @@ def day_word(at: datetime, now: datetime, group: str) -> str:
     return f"on {session_date(at, group):%d %b}".replace(" 0", " ")
 
 
+# NYSE full-day closures (the exchange's published calendar), so a weekday without a bar is a holiday, never a missing session
+US_HOLIDAYS = frozenset({
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26",
+    "2026-12-25", "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06",
+    "2027-11-25", "2027-12-24",
+})
+FUTURES_DAY_ROLL = timedelta(hours=6)  # CME's trading day starts at 18:00 New York time: 18:00 ET + 6 h is the next calendar day
+
+
+def trading_day(at: datetime, group: str, symbol: str = "") -> date:
+    """The session a price belongs to: the UTC day for crypto; for futures the CME trading day, which starts at 18:00 New York time the
+    evening before (silver at 01:40 UTC on 11-20 trades in the 11-20 session, though New York's date is still 11-19); for stocks and
+    indices the New York date. A weekend price belongs to the next trading day."""
+    t = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    if group in CRYPTO_GROUPS or symbol.endswith("-USD"):
+        return t.astimezone(timezone.utc).date()
+    local = t.astimezone(NEW_YORK)
+    if symbol.endswith("=F") or group == "commodity":
+        local = local + FUTURES_DAY_ROLL
+    d = local.date()
+    while d.weekday() >= 5 or d.isoformat() in US_HOLIDAYS:
+        d += timedelta(days=1)
+    return d
+
+
+def bar_day(t: datetime, group: str, symbol: str = "") -> date:
+    """The session a daily bar is stamped with (Yahoo stamps futures bars 00:00 New York, stocks at the open, crypto 00:00 UTC)."""
+    t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    if group in CRYPTO_GROUPS or symbol.endswith("-USD"):
+        return t.astimezone(timezone.utc).date()
+    return t.astimezone(NEW_YORK).date()
+
+
+def previous_trading_day(d: date, group: str, symbol: str = "") -> date:
+    if group in CRYPTO_GROUPS or symbol.endswith("-USD"):
+        return d - timedelta(days=1)
+    d -= timedelta(days=1)
+    while d.weekday() >= 5 or d.isoformat() in US_HOLIDAYS:
+        d -= timedelta(days=1)
+    return d
+
+
 def fresh(at: datetime, now: datetime) -> bool:
     t = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
     return now - t <= FRESH
 
 
-__all__ = ["FRESH", "NEW_YORK", "day_word", "fresh", "group_of", "session_date", "zone_for"]
+__all__ = ["FRESH", "NEW_YORK", "US_HOLIDAYS", "bar_day", "day_word", "fresh", "group_of", "previous_trading_day", "session_date", "trading_day",
+           "zone_for"]

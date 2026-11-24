@@ -236,6 +236,8 @@ async def _refresh_data(ev: Any, now: datetime, transport: Any) -> tuple[str, st
         return HOLD, f"no fresh daily price for {sym} could be read"
     if last.kind in LIVE_DATA and now - _utc(last.at) > LIVE_PRICE_MAX:
         return HOLD, f"the newest {sym} price is from {_utc(last.at):%H:%M} UTC, {int((now - _utc(last.at)).total_seconds() // 60)} min ago"
+    if why := datapost.reference_problem(sym, series, last):
+        return HOLD, why  # the bars are a session behind: wait for Yahoo to catch up, never print a day-old reference
     post = datapost.anomaly(sym, series, now, last)
     if post is None:
         return FADED, f"{sym} is no longer an unusual one-day move ({last.change:+.1f}% now)"
