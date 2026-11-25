@@ -1131,6 +1131,33 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         specs.append(JobSpec("intel.shadow", "Intelligence: semantic gate shadow", "Fills in what the shared semantic gate would have decided for the candidates both lanes judged, from finished analyses. Shadow only: never publishes, holds or rejects",
                              300, intel_shadow, initial_delay_seconds=60, timeout_seconds=120))
+    if s.growth_collect_enabled:  # Growth Engine G0 Market Memory: OFF by default, and then not even registered (docs/growth/)
+        async def growth_collect(ctx: JobContext) -> dict[str, Any]:
+            import asyncio
+
+            from app.growth import collectors
+
+            return await asyncio.to_thread(collectors.collect, ctx.db, settings=s)
+
+        specs.append(JobSpec("growth.collect", "Growth Engine: Market Memory", "Every 6 h: stores complete daily values from public, licence-cleared sources (Hyperliquid candles and funding, alternative.me Fear & Greed), rolls up the open-interest snapshots before their 35-day pruning and computes breadth. Idempotent; sources not cleared never run in production. Never publishes",
+                             21600, growth_collect, initial_delay_seconds=600, timeout_seconds=3600, retry_failed_seconds=1800))
+    if s.growth_enabled:  # Growth Engine G1 Originals queue: OFF by default
+        async def growth_originals(ctx: JobContext) -> dict[str, Any]:
+            import asyncio
+
+            from sqlalchemy import select as _select
+
+            from app.growth import drafts
+            from app.models.market_memory import GrDraft
+
+            out: dict[str, Any] = {"writer": drafts.apply_writer_results(ctx.db)}
+            day0 = ctx.now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if ctx.trigger == "manual" or (ctx.now.hour >= 2 and ctx.db.scalar(_select(GrDraft.id).where(GrDraft.created_at >= day0).limit(1)) is None):
+                out["generated"] = await asyncio.to_thread(drafts.generate, ctx.db, settings=s, now=ctx.now)
+            return out
+
+        specs.append(JobSpec("growth.originals", "Growth Engine: Originals drafts", "Hourly: once a day (after 02:00 UTC) runs the detectors over Market Memory and queues the best findings as drafts in Admin › X › Originals, with their numbers, calculation and chart; applies the writer's wording when it passes the figures gate. Approval only marks a draft approved: never publishes",
+                             3600, growth_originals, initial_delay_seconds=900, timeout_seconds=900))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs
