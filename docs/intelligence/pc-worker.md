@@ -13,11 +13,11 @@ and embedding jobs from Railway and answers them with local models. It only ever
    (the default), the worker can heartbeat but is never offered a job.
 3. **PC:** in `worker/worker.env` (git-ignored, see `worker.env.example`) set:
    - `INTEL_WORKER_TOKEN=pci_...`
-   - optionally `INTEL_MODEL` (default `qwen3.6:27b`; pick it from the Phase 0 benchmark), `INTEL_EMBED_MODEL` (default
+   - optionally `INTEL_MODEL` (default `qwen3.8:27b`, the primary chosen from the Phase 0 benchmark; `qwen3.6:27b` is the fallback), `INTEL_EMBED_MODEL` (default
      `nomic-embed-text`) and `INTEL_MAX_CLAIM` (1 to 4, default 1).
    - The server address comes from `PRICECHAT_SERVER` (the same one the other workers use; `PRICECHAT_API_BASE` also works), and the
      Ollama address from `INTEL_OLLAMA_URL` or `OLLAMA_URL`.
-4. **Models:** `ollama pull qwen3.6:27b` (or the model you picked) and `ollama pull nomic-embed-text`.
+4. **Models:** `ollama pull qwen3.8:27b` (and `qwen3.6:27b` as the fallback) and `ollama pull nomic-embed-text`.
 5. **Start it:** `D:\pc-gpu\venv\Scripts\pythonw.exe worker\start_intel.pyw` (any Python with `httpx` works). To test it once in a
    console, run `python -m pricechat_worker.intel --once` from `worker/`. To keep it running after logon, run the optional
    `worker\install_intel_task.ps1` yourself. Nothing installs that task automatically.
