@@ -116,10 +116,43 @@ def verify(token: str, job_id: int, nonce: str, obj: Any, signature: str) -> boo
 # --- heartbeat -------------------------------------------------------------------------------------------------------------------
 
 
+AVAIL_KEY = "avail"  # IntelWorker.info[AVAIL_KEY]: {"YYYY-MM-DDTHH" (UTC hour): [seconds online, seconds ready]} for Admin's availability
+AVAIL_KEEP = timedelta(days=15)  # Admin's window is at most 14 days; older hours are dropped at the next heartbeat
+
+
+def _hour(t: datetime) -> str:
+    return t.strftime("%Y-%m-%dT%H")
+
+
+def accrue(avail: dict[str, Any] | None, prev_seen: datetime | None, prev_ready: bool, now: datetime) -> dict[str, list[float]]:
+    """The availability record after one heartbeat. The interval since the previous heartbeat counts as online when it is no longer than
+    HEARTBEAT_FRESH (the PC was routable the whole time), and as ready when the previous heartbeat reported models and not busy (the
+    pc_online rule). Split at UTC hour boundaries. One small JSON field on the worker row: no table, no extra write."""
+    out: dict[str, list[float]] = {}
+    for k, v in (avail or {}).items():
+        if isinstance(v, list) and len(v) == 2:
+            out[str(k)] = [float(v[0] or 0), float(v[1] or 0)]
+    prev = aware(prev_seen)
+    if prev is not None and timedelta(0) < now - prev <= HEARTBEAT_FRESH:
+        t = prev
+        while t < now:
+            nxt = min(now, t.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+            secs = (nxt - t).total_seconds()
+            cell = out.setdefault(_hour(t), [0.0, 0.0])
+            cell[0] = round(min(3600.0, cell[0] + secs), 1)
+            if prev_ready:
+                cell[1] = round(min(3600.0, cell[1] + secs), 1)
+            t = nxt
+    oldest = _hour(now - AVAIL_KEEP)
+    return {k: v for k, v in sorted(out.items()) if k >= oldest}
+
+
 def heartbeat(db: Session, w: IntelWorker, models: list[str], info: dict[str, Any], now: datetime) -> dict[str, Any]:
+    old = w.info or {}
+    avail = accrue(old.get(AVAIL_KEY), w.last_seen_at, bool(old.get("models")) and not old.get("busy"), now)
     w.last_seen_at = now
     w.info = {"models": [str(m)[:80] for m in models[:50]], "version": str(info.get("version") or "")[:20],
-              "busy": bool(info.get("busy")), "gpu": str(info.get("gpu") or "")[:80]}
+              "busy": bool(info.get("busy")), "gpu": str(info.get("gpu") or "")[:80], AVAIL_KEY: avail}
     db.commit()
     return {"ok": True, "enabled": bool(_settings().intel_enabled), "lease_seconds": int(LEASE.total_seconds())}
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from app.api.deps import DbSession
 from app.config.settings import get_settings
 from app.db.base import utcnow
-from app.intel import gate
+from app.intel import dashboard, gate
 from app.intel import router as intel_router
 
 router = APIRouter(prefix="/intel", tags=["intel"])
@@ -26,3 +26,10 @@ def shadow(db: DbSession, hours: int = Query(24, ge=1, le=24 * 14), limit: int =
     s = get_settings()
     return {"shadow_enabled": bool(s.intel_shadow_enabled), "report": gate.report(db, utcnow() - timedelta(hours=hours), limit=limit),
             "router": intel_router.status(db)}
+
+
+@router.get("/dashboard")
+def intel_dashboard(db: DbSession, hours: int = Query(24, ge=1, le=dashboard.MAX_HOURS)) -> dict[str, Any]:
+    """Admin's Intelligence (shadow) page: decisions, disagreements, latency, the PC's availability, possible misses and the AI spend for
+    the window, in one read. Never enqueues a job or calls a model (app.intel.dashboard); empty sections when intel is off."""
+    return dashboard.build(db, hours)
