@@ -130,7 +130,8 @@ anything secret-looking is redacted (`engine._safe`).
 ## Learning (`learning.py`)
 
 `newsdesk.trending_metrics` (daily) reads impressions, likes, reposts, replies for the last 3 days' trend posts (owned reads,
-$0.001 each). Per category (`cat:crypto`) and per source type (`src:reddit`) weights: engagement per impression vs the average,
+$0.001 each). Since 2026-11-25 `newsdesk.x_history` (app/social/x_history.py, every 10 min) keeps `tt_posts.metrics` current
+instead, with a curve at ~1 h/6 h/24 h/72 h/7 d in `social_post_metrics`; the daily job is skipped while `X_PERF_HISTORY_ENABLED` is on. Per category (`cat:crypto`) and per source type (`src:reddit`) weights: engagement per impression vs the average,
 shrunk with 5 pseudo-posts, slope 0.5, clamped 0.8-1.2, and the product clamped again in `rank.score`. Nothing changes before 5
 measured posts. Admin › Performance shows totals, per-category stats and the weights.
 

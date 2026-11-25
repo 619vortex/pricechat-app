@@ -517,6 +517,8 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
     async def newsdesk_metrics(ctx: JobContext) -> dict[str, Any]:
         from app.newsdesk import engine as desk
 
+        if s.x_perf_history_enabled:  # newsdesk.x_history reads these posts at 1 h / 6 h / 24 h / 72 h / 7 d and keeps nd_posts.metrics current
+            raise JobSkipped("Covered by X performance history (newsdesk.x_history); X_PERF_HISTORY_ENABLED=false brings this daily read back")
         return await desk.collect_metrics(ctx.db, s, runtime.x, ctx.now)
 
     async def trending_tick(ctx: JobContext) -> dict[str, Any]:
@@ -527,7 +529,25 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
     async def trending_metrics(ctx: JobContext) -> dict[str, Any]:
         from app.trending import engine as trending
 
+        if s.x_perf_history_enabled:  # newsdesk.x_history keeps tt_posts.metrics current
+            raise JobSkipped("Covered by X performance history (newsdesk.x_history); X_PERF_HISTORY_ENABLED=false brings this daily read back")
         return await trending.collect_metrics(ctx.db, s, runtime.x, ctx.now)
+
+    async def x_history(ctx: JobContext) -> dict[str, Any]:
+        from app.social import x_history as xh
+
+        out = await xh.collect(ctx.db, s, runtime.x, ctx.now)
+        if out.get("skipped"):
+            raise JobSkipped(out["skipped"])
+        return out
+
+    async def x_followers(ctx: JobContext) -> dict[str, Any]:
+        from app.social import x_history as xh
+
+        out = await xh.snapshot_followers(ctx.db, s, runtime.x, ctx.now)
+        if out.get("skipped"):
+            raise JobSkipped(out["skipped"])
+        return out
 
     async def x_opps(ctx: JobContext) -> dict[str, Any]:
         agent_id = get_agent_config(ctx.db).id
@@ -646,6 +666,11 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                 s.job_trending_seconds, trending_tick, initial_delay_seconds=240, timeout_seconds=180),
         JobSpec("newsdesk.trending_metrics", "Trending Topics: post metrics", "Read impressions, likes, reposts and replies of the last 3 days' trend posts (owned reads)",
                 86400, trending_metrics, initial_delay_seconds=2400, timeout_seconds=120),
+        # X performance history (app/social/x_history): under newsdesk. so production's SCHEDULER_ONLY_JOBS runs them with no env change
+        JobSpec("newsdesk.x_history", "X performance history", "Metrics curve of every Price Chat X post at ~1 h, 6 h, 24 h, 72 h and 7 d (owned reads, 100 posts a request; never spends the posting reserve)",
+                s.job_x_history_seconds, x_history, initial_delay_seconds=420, timeout_seconds=180),
+        JobSpec("newsdesk.x_followers", "X followers (hourly)", "Price Chat's X followers, following and post count once an hour for the growth dashboard (one account read)",
+                s.job_x_followers_seconds, x_followers, initial_delay_seconds=480, timeout_seconds=60),
         JobSpec("x.own", "X: Price Chat's own posts", "Read Price Chat's own new X posts for Read & Earn (one incremental request, budgeted)",
                 s.job_x_own_seconds, x_own, initial_delay_seconds=90, timeout_seconds=120),
         JobSpec("x.opportunities", "X opportunities", "Find X posts where Price Chat could add value (suggestions only)", s.job_x_opportunities_seconds, x_opps, initial_delay_seconds=360),
@@ -1110,6 +1135,27 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         JobSpec("pokemon.sync", "Pokémon data sync", "Import sales / prices / population from connected, licensed Pokémon data providers",
                 s.job_pokemon_sync_seconds, pokemon_sync, initial_delay_seconds=900, timeout_seconds=600),
     ]
+    if s.intel_enabled:  # Terminal Intelligence Engine channel: OFF by default, and then not even registered (docs/intelligence/)
+        async def intel_tick(ctx: JobContext) -> dict[str, Any]:
+            from app.intel import router as intel_router
+
+            out = await intel_router.tick(ctx.db, ctx.now, s)
+            if s.intel_shadow_enabled:  # the semantic gate's shadow rows whose analysis landed (app/intel/gate): never changes a post
+                from app.intel import gate
+
+                out = {**out, "shadow": gate.refresh(ctx.db, ctx.now, s)}
+            return out
+
+        specs.append(JobSpec("intel.tick", "Intelligence: PC/cloud router", "Expire the PC worker's leases and answer what it didn't (Claude under the daily AI cap, else today's rules). Analysis only: never publishes",
+                             s.intel_tick_seconds, intel_tick, initial_delay_seconds=30, timeout_seconds=300))
+    elif s.intel_shadow_enabled:  # shadow only: analyses queued while intel was on still land on their rows
+        async def intel_shadow(ctx: JobContext) -> dict[str, Any]:
+            from app.intel import gate
+
+            return gate.refresh(ctx.db, ctx.now, s)
+
+        specs.append(JobSpec("intel.shadow", "Intelligence: semantic gate shadow", "Fills in what the shared semantic gate would have decided for the candidates both lanes judged, from finished analyses. Shadow only: never publishes, holds or rejects",
+                             300, intel_shadow, initial_delay_seconds=60, timeout_seconds=120))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs

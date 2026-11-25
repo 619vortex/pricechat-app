@@ -71,6 +71,7 @@ export const AREAS: NavArea[] = [
       { to: "/api-keys", label: "API keys", about: "Passwords and keys for the services Price Chat connects to.", kind: "panel", panel: "apikeys" },
       { to: "/activity", label: "Activity log", about: "Everything Price Chat did, newest first.", kind: "panel", panel: "activity" },
       { to: "/kalshi", label: "Kalshi bot", about: "Your Kalshi prediction-market bot on your PC: balance, fee curve and the markets it watches. Read-only.", kind: "panel", panel: "kalshi" },
+      { to: "/intelligence", label: "Intelligence (shadow)", about: "The Terminal Intelligence Engine in shadow: AI decisions next to the lanes', disagreements, possible missed stories, latency, the PC worker and AI spend. Read-only: nothing is published by AI.", kind: "tool" },
       { to: "/vpn", label: "Kiwi VPN", about: "Who can use it, whether it costs anything, servers and devices.", kind: "tool" },
       { to: "/realm", label: "Realm (test)", about: "Play Vortex Realm, the Warrior Kiwi game, to test it. Members play it in Passport → Realm.", kind: "tool" },
     ],

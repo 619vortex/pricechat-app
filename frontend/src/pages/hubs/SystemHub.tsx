@@ -65,6 +65,9 @@ export function SystemHub() {
             </ul>
           ) : <p className="muted small">{vpn.failure ? "Couldn't load Kiwi VPN." : "Loading…"}</p>}
         </HubCard>
+        <HubCard title="Intelligence (shadow)" to="/intelligence">
+          <p className="muted small">What the AI models would decide next to News Desk and Trending, possible missed stories, the PC worker and AI spend. Shadow only: nothing is published by AI.</p>
+        </HubCard>
         <HubCard title="Realm (test)" to="/realm" open="Play">
           <p className="muted small">Vortex Realm, the Warrior Kiwi game, to test it. Members play it in Passport.</p>
         </HubCard>
