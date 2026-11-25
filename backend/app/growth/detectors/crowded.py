@@ -64,12 +64,36 @@ def funding_extremes(mem: Memory, as_of: date) -> list[Finding]:
         out.append(Finding(
             key=f"funding:{'neg' if neg else 'pos'}:{as_of.isoformat()}", format="crowded", detector="funding_extremes",
             subject="HL-funding-" + ("neg" if neg else "pos"), headline=("Shorts paying longs: " if neg else "Longs paying shorts: ") + lst,
-            numbers=nums, words={}, templates=templates, window="1d", series=[f"fund:{c}" for c, *_ in pick], sources=["hyperliquid"], as_of=as_of,
+            numbers=nums | {"top": n(top[1], fmt.pct(top[1], dp=0), f"{top[0]} annualised funding")}, words={"top_coin": top[0]}, templates=templates,
+            window="1d", series=[f"fund:{c}" for c, *_ in pick], sources=["hyperliquid"], as_of=as_of,
             calculation=calc, rarity=rarity, comparatives=["most", "highest", "extreme"],
-            chart=chart("rank_table", "Hyperliquid funding, annualised", f"{as_of.isoformat()} average hourly rate × 8,760",
+            chart=chart("rank_table", "Hyperliquid funding, annualised", "",
                         [{"name": "annualised funding, %", "points": pts([(c, a) for c, a, _, _ in pick], 1)}], sources=["hyperliquid"], as_of=as_of,
-                        x_kind="label")))
+                        rows=[{"label": c, "value": round(a, 1), "display": fmt.pct(a, dp=0), "highlight": i == 0, "role": "neg" if neg else "pos"}
+                              for i, (c, a, _, _) in enumerate(pick)],
+                        hero="top", hero_role="neg" if neg else "pos",
+                        headline=("a year: what {top_coin} shorts on Hyperliquid are paying longs to stay short, the most of {total} perps" if neg else
+                                  "a year: what {top_coin} longs on Hyperliquid are paying shorts to stay long, the most of {total} perps"),
+                        dek="Funding on {date}: the day's average hourly rate, annualised (× 24 × 365) · the {count} " + ("most negative" if neg else "highest"),
+                        y_format="pct", options={"mute_unhighlighted": False}, variants=_top_funding_variant(mem, top[0], as_of, neg))))
     return out
+
+
+def _top_funding_variant(mem: Memory, coin: str, as_of: date, neg: bool) -> dict:
+    """"Other chart" for a funding list: the leader's own annualised funding over the past six months, today marked (its value IS the
+    Finding's top figure)."""
+    s = mem.get(f"fund:{coin}")
+    if not s:
+        return {}
+    s = s.upto(as_of)
+    look = max(0, len(s) - 180)
+    return {"rolling_line": {
+        "series": [{"name": f"{coin} funding", "points": [[d.isoformat(), _ann(v)] for d, v in zip(s.dates[look:], s.values[look:])], "role": "context",
+                    "label": "", "width": 2.4}],
+        "annotations": [{"type": "hline", "y": 0.0, "role": "context"},
+                        {"type": "marker", "x": as_of.isoformat(), "label": "{top}\nToday", "role": "neg" if neg else "pos", "number": "top"}],
+        "dek": "{top_coin} perp funding on Hyperliquid, daily average of the hourly rate, annualised · " + ("past six months" if look else "all stored days"),
+        "options": {"end_labels": False, "include_zero": True}}}
 
 
 def _streak(dates: list[date], values: list[float], end: int) -> int:
@@ -124,11 +148,42 @@ def funding_streak(mem: Memory, as_of: date, coins: tuple[str, ...] = ("BTC", "E
             calculation=f"daily mean hourly funding < 0 on each of the last {cur} days to {as_of.isoformat()}; longest earlier run since "
                         f"{s.first.isoformat()}: {longest} days" + (f" ending {longest_end.isoformat()}" if longest_end else "") + f" ({s.key})",
             rarity=min(1.0, 0.4 + cur / max(longest, 1) * 0.3 + (0.2 if cur > longest else 0)), comparatives=comps,
-            chart=chart("rolling_line", f"{a} funding on Hyperliquid, annualised", f"{cur} days negative",
-                        [{"name": "annualised funding, %", "points": pts([(d, _ann(v)) for d, v in zip(s.dates[look:], s.values[look:])], 2)}],
-                        annotations=[{"type": "hline", "y": 0}, {"type": "span", "x0": s.dates[len(s) - cur].isoformat(), "x1": as_of.isoformat(),
-                                                                "label": f"{cur} days"}], sources=["hyperliquid"], as_of=as_of)))
+            chart=chart("rolling_line", f"{a} funding on Hyperliquid, annualised", "",
+                        [{"name": "annualised funding, %", "points": pts([(d, _ann(v)) for d, v in zip(s.dates[look:], s.values[look:])], 2),
+                          "role": "context", "label": "", "width": 2.4}],
+                        annotations=[{"type": "hline", "y": 0.0, "role": "context"},
+                                     {"type": "xband", "x": s.dates[len(s) - cur].isoformat(), "x2": as_of.isoformat(), "role": "neg"},
+                                     {"type": "marker", "x": as_of.isoformat(), "label": "{streak} days\nbelow zero", "role": "neg"}],
+                        sources=["hyperliquid"], as_of=as_of, hero="{streak} days", hero_role="neg",
+                        headline="in a row of negative " + a + " funding on Hyperliquid: shorts are paying longs. "
+                                 + ("The longest run in Hyperliquid funding data since {since}" if cur > longest else "The longest earlier run: {longest} days"),
+                        dek=a + " perp funding on Hyperliquid, daily average of the hourly rate, annualised · " + ("past six months" if look else "since {since}"),
+                        y_format="pct", options={"end_labels": False, "include_zero": True})))
     return out
+
+
+def _oi_chart(s, px, days: int, as_of: date, nm: str) -> dict:
+    """Open interest and price over the window, each rebased by the renderer to 0% at the window's first day (the raw values are stored, so
+    the end of each line IS the Finding's change); variant: the gap between the two in percentage points."""
+    start = as_of - timedelta(days=days)
+    oi = [(d, v) for d, v in zip(s.dates, s.values) if start <= d <= as_of]
+    pr = [(d, v) for d, v in zip(px.dates, px.values) if start <= d <= as_of]
+    pm = dict(pr)
+    gap = [(d, (v / oi[0][1] - 1) * 100 - (pm[d] / pr[0][1] - 1) * 100) for d, v in oi if d in pm]
+    end = as_of.isoformat()
+    return chart("rebased_lines", f"{nm}: open interest vs price", "",
+                 [{"name": "Open interest", "points": pts(oi, 0), "role": "highlight"},
+                  {"name": "Price", "points": pts(pr, 6 if pr[0][1] < 100 else 2), "role": "context"}],
+                 annotations=[{"type": "check", "x": end, "series": 0, "number": "oi_ch"}, {"type": "check", "x": end, "series": 1, "number": "px_ch"}],
+                 sources=["derived_hl", px.source], as_of=as_of, hero="oi_ch", hero_role="highlight",
+                 headline="open interest in " + nm + " perps on Hyperliquid in {days} days, to {oi}. The price: {px_ch}",
+                 dek="Change since the window's first day, %: open interest (USD, the day's last snapshot) and the daily close", y_format="pct",
+                 options={"shade_between": [0, 1], "shade_role": "highlight"},
+                 variants={"spread_lines": {
+                     "series": [{"name": "Open interest minus price", "points": pts(gap, 2), "role": "highlight", "label": "gap"}],
+                     "annotations": [{"type": "check", "x": end, "number": "gap"}],
+                     "dek": "Open interest change minus price change since the window's first day, percentage points", "y_format": "pts",
+                     "options": {}}})
 
 
 def oi_buildup(mem: Memory, as_of: date, days: int = 30) -> list[Finding]:
@@ -159,10 +214,8 @@ def oi_buildup(mem: Memory, as_of: date, days: int = 30) -> list[Finding]:
             calculation=f"OI {fmt.raw(a, 0)} -> {fmt.raw(b, 0)} USD = {fmt.pct(oi_ch)}; close {fmt.raw(p0, 4)} -> {fmt.raw(p1, 4)} = {fmt.pct(px_ch)} "
                         f"({(as_of - timedelta(days=days)).isoformat()} to {as_of.isoformat()}; OI = the day's last 15-minute snapshot)",
             rarity=min(1.0, 0.3 + oi_ch / 200), comparatives=[],
-            chart=chart("spread_lines", f"{nm}: open interest vs price, rebased", f"OI {fmt.pct(oi_ch)} · price {fmt.pct(px_ch)}",
-                        [{"name": "open interest", "points": pts([(d, v / a * 100) for d, v in zip(s.dates, s.values) if d >= as_of - timedelta(days=days)], 2)},
-                         {"name": "price", "points": pts([(d, v / p0 * 100) for d, v in zip(px.dates, px.values) if as_of - timedelta(days=days) <= d <= as_of], 2)}],
-                        sources=["derived_hl", px.source], as_of=as_of)))
+            chart=_oi_chart(s, px, days, as_of, nm)))
+        out[-1].numbers["gap"] = n(oi_ch - px_ch, fmt.pts(oi_ch - px_ch), "open interest change minus price change, percentage points")
     return sorted(out, key=lambda f: -f.rarity)[:3]
 
 

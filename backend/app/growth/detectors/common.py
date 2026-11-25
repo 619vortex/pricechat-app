@@ -78,3 +78,13 @@ def percentile_rank(values: list[float], x: float) -> float:
 
 def whole_years(first: date, as_of: date) -> int:
     return int(((as_of - first).days) // 365.25)
+
+
+def nice_bin(values: list[float], target: int = 32) -> float:
+    """A round histogram bin width (1, 2, 2.5, 5 x 10^k) giving about `target` bins over the values' range."""
+    import math
+
+    span = (max(values) - min(values)) or 1.0
+    raw = span / target
+    mag = 10 ** math.floor(math.log10(raw))
+    return next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)

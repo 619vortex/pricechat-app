@@ -56,11 +56,18 @@ def image(draft_id: int, db: DbSession, fmt: Literal["x", "portrait"] = Query("x
     if d is None:
         raise HTTPException(404, "No such draft.")
     try:
-        png = graphics.graphic_png(d.chart, fmt)
+        png, meta = graphics.render_graphic(d.chart, fmt, d.finding)
     except graphics.RendererMissing:
         raise HTTPException(503, "renderer not installed") from None
-    except ValueError as e:
+    except ValueError as e:  # chart_spec.SpecError too: the chart can't be drawn honestly
         raise HTTPException(422, str(e)) from None
+    cache = dict(d.image_cache or {})
+    keep = ("template", "version", "spec_version", "kind", "variant_of", "theme", "size", "label_overlaps", "phone_min_text_px", "sha256", "at")
+    entry = {k: meta.get(k) for k in keep}
+    if {k: v for k, v in (cache.get(fmt) or {}).items() if k != "at"} != {k: v for k, v in entry.items() if k != "at"}:
+        cache[fmt] = entry  # render_info meta (template, version) for the growth learner
+        d.image_cache = cache
+        db.commit()
     return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=300",
                                                                   "Content-Disposition": f'inline; filename="original-{d.id}-{fmt}.png"'})
 

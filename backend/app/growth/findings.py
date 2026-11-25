@@ -85,7 +85,10 @@ class Finding:
 
 def chart(kind: str, title: str, kicker: str, series: list[dict[str, Any]], *, annotations: list[dict[str, Any]] | None = None,
           sources: list[str], as_of: date, **extra: Any) -> dict[str, Any]:
-    """The chart dict (converted to the renderer's spec by app.growth.graphics)."""
+    """The chart dict (converted to the renderer's ChartSpec by app.growth.graphics.to_spec). `extra` carries what the graphic says, as
+    templates over the Finding's numbers/words: hero (a number key or a template), hero_role, headline, dek, every annotation label; plus
+    y_format, options, rows (rank_table / heat_grid) and variants ({other kind: overrides}, Regenerate -> "Other chart"). An annotation
+    with "number": key is checked against the plotted value (the chart shows the Finding's own figures)."""
     return {"kind": kind, "title": title, "kicker": kicker, "series": series, "annotations": annotations or [],
             "source": " · ".join(src.attribution(sources)), "as_of": as_of.isoformat(), **extra}
 

@@ -1,6 +1,6 @@
 """Admin › X › Originals API (/api/originals) and the drafts service: owner auth, list / get / approve / edit / regenerate / reject,
-generate-now, the writer's results applied only when they pass the gates, the image endpoint answering 503 until the renderer branch is
-merged, and NOTHING ever reaching X or Telegram (every outbound network transport is made to fail during these tests). SYNTHETIC data."""
+generate-now, the writer's results applied only when they pass the gates, the image endpoint drawing the draft's PNG (503 only if the renderer
+is missing), and NOTHING ever reaching X or Telegram (every outbound network transport is made to fail during these tests). SYNTHETIC data."""
 
 from datetime import timedelta
 from typing import Any
@@ -83,18 +83,44 @@ def test_list_get_and_view(client: TestClient, draft: GrDraft) -> None:
     assert client.get(f"{P}/drafts/999999").status_code == 404
 
 
-def test_image_is_503_until_the_renderer_lands(client: TestClient, draft: GrDraft) -> None:
-    r = client.get(f"{P}/drafts/{draft.id}/image.png", params={"fmt": "portrait"})
-    assert r.status_code == 503 and r.json()["detail"] == "renderer not installed"
+def test_image_endpoint_returns_the_rendered_png(client: TestClient, draft: GrDraft, db: Session) -> None:
+    """The renderer is merged: the endpoint draws the draft's chart (both formats) and keeps the render meta on the draft."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    for fmt, size in (("x", (1600, 900)), ("portrait", (1080, 1350))):
+        r = client.get(f"{P}/drafts/{draft.id}/image.png", params={"fmt": fmt})
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"] == "image/png" and r.content[:8] == b"\x89PNG\r\n\x1a\n"
+        assert Image.open(BytesIO(r.content)).size == size
+    db.refresh(draft)
+    for fmt in ("x", "portrait"):
+        meta = draft.image_cache[fmt]
+        assert meta["template"] == "intel/histogram_marker" and meta["version"].startswith("pc-intel-render") and len(meta["sha256"]) == 64
+    assert client.get(f"{P}/drafts/{draft.id}").json()["render_info"]["x"]["template"] == "intel/histogram_marker"
     assert client.get(f"{P}/drafts/{draft.id}/image.png", params={"fmt": "square"}).status_code == 422
 
 
-def test_image_through_the_adapter(client: TestClient, draft: GrDraft, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_image_503_only_when_the_renderer_is_missing(client: TestClient, draft: GrDraft, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.growth import graphics
 
-    monkeypatch.setattr(graphics, "graphic_png", lambda chart, fmt: b"\x89PNG fake " + fmt.encode())
+    def missing(*_: object, **__: object) -> None:
+        raise graphics.RendererMissing("renderer not installed")
+
+    monkeypatch.setattr(graphics, "render_graphic", missing)
+    r = client.get(f"{P}/drafts/{draft.id}/image.png", params={"fmt": "portrait"})
+    assert r.status_code == 503 and r.json()["detail"] == "renderer not installed"
+
+
+def test_image_of_a_chart_that_disagrees_with_its_finding_is_refused(client: TestClient, draft: GrDraft, db: Session) -> None:
+    """A chart whose marked value isn't the Finding's figure is a 422 (SpecError), never a picture."""
+    ch = dict(draft.chart)
+    ch["annotations"] = [dict(a, x=a["x"] + 3.0) if a.get("number") == "move" else a for a in ch["annotations"]]
+    draft.chart = ch
+    db.commit()
     r = client.get(f"{P}/drafts/{draft.id}/image.png", params={"fmt": "x"})
-    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content.endswith(b"x")
+    assert r.status_code == 422 and "move" in r.json()["detail"]
 
 
 def test_approve_only_marks_it(client: TestClient, draft: GrDraft, db: Session, no_network: list[str]) -> None:
@@ -138,8 +164,19 @@ def test_regenerate_chart_variant(client: TestClient, db: Session) -> None:
     f = crowded.funding_extremes(Memory.from_points(data), AS_OF)[0]
     d = drafts.create(db, f, use_writer=False)
     assert d is not None and d.chart["kind"] == "rank_table"
+    assert client.get(f"{P}/drafts/{d.id}").json()["chart_kinds"] == ["rank_table", "rolling_line"]
     b = client.post(f"{P}/drafts/{d.id}/regenerate", json={"chart_variant": True}).json()
-    assert b["chart"]["kind"] == "heat_grid" and b["chart"]["variant_of"] == "rank_table"
+    assert b["chart"]["kind"] == "rolling_line" and b["chart"]["variant_of"] == "rank_table"  # the leader's own funding history
+    r = client.get(f"{P}/drafts/{d.id}/image.png", params={"fmt": "portrait"})
+    assert r.status_code == 200 and r.content[:4] == b"\x89PNG"
+    b = client.post(f"{P}/drafts/{d.id}/regenerate", json={"chart_variant": True}).json()
+    assert b["chart"]["kind"] == "rank_table" and "variant_of" not in b["chart"]  # "Other chart" cycles back
+    d2 = drafts.create(db, extremes.rarity_move(Memory.from_points({"px:BTC:close": crash_tail(walk(1000), 30, -0.40)}), AS_OF, ("BTC",))[0],
+                       use_writer=False)
+    assert d2 is not None
+    b = client.post(f"{P}/drafts/{d2.id}/regenerate", json={"chart_variant": True}).json()
+    assert b["chart"]["kind"] == "rolling_line"
+    assert client.get(f"{P}/drafts/{d2.id}/image.png", params={"fmt": "x"}).status_code == 200
 
 
 def test_regenerate_with_ai_goes_through_the_router(client: TestClient, draft: GrDraft, db: Session, finding: Finding,

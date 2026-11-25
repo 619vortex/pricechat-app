@@ -134,9 +134,11 @@ def fmt_value(v: float, y_format: str, digits: int | None = None) -> str:
     if y_format == "rank":
         return f"#{v:,.0f}"
     if y_format == "price":
-        return f"${v:,.0f}"
+        return f"${v:,.0f}" if abs(v) >= 100 else f"${v:,.2f}" if abs(v) >= 1 else f"${v:.4g}"
     if y_format == "index":
         return f"{v:.0f}"
+    if y_format == "share":  # an unsigned percentage (share of perps above an average...)
+        return f"{v:.{0 if digits is None else digits}f}%"
     return f"{v:,.{1 if digits is None else digits}f}".replace("-", MINUS)
 
 
@@ -158,6 +160,8 @@ def fmt_tick(v: float, y_format: str, step: float) -> str:
         return f"${v / 1000:,.0f}k" if abs(v) >= 1000 else f"${v:,.{dec}f}"
     if y_format == "rank":
         return f"#{v:,.0f}"
+    if y_format == "share":
+        return f"{v:.{dec}f}%"
     return f"{v:,.{dec}f}".replace("-", MINUS)
 
 
@@ -603,26 +607,37 @@ def _x_axis(c: Canvas, L: Layout, xs: Scale, dates: bool, y: float, *, unit: str
             first_year_label: bool = True) -> None:
     p = c.p
     f = c.font(L.axis, "Medium", note=True)
+    def text_x(x: float, lab: str) -> float:  # an edge label is pulled inside the plot: overlap is judged where it is drawn
+        w = c.tw(lab, f)
+        return min(max(x, xs.a + w / 2 if x - w / 2 < xs.a - 30 else x), xs.b + 30 - w / 2)
+
+    def clash(a: tuple[float, str], b: tuple[float, str]) -> bool:
+        return text_x(*b) - c.tw(b[1], f) / 2 - (text_x(*a) + c.tw(a[1], f) / 2) < 28
+
     if dates:
         cand = _date_ticks(xs.lo, xs.hi)
         # month axis: add the year to the first label
         if cand and cand[0][2] == "month" and first_year_label and " " not in cand[0][1]:
             d = date.fromordinal(int(cand[0][0]))
             cand[0] = (cand[0][0], f"{cand[0][1]} {d.year}", "month")
+            # a first tick squeezed against the left edge would collide with the next one: drop it, the year moves on
+            if len(cand) > 2 and clash((xs(cand[0][0]), cand[0][1]), (xs(cand[1][0]), cand[1][1])) and " " not in cand[1][1]:
+                d = date.fromordinal(int(cand[1][0]))
+                cand = [(cand[1][0], f"{cand[1][1]} {d.year}", cand[1][2])] + cand[2:]
         items = [(xs(v), lab) for v, lab, _ in cand]
     else:
         tv = ticks if ticks is not None else nice_ticks(xs.lo, xs.hi, 6)[0]
         items = [(xs(v), fmt_tick(v, "num", 1) + unit) for v in tv]
+
     # thin out until labels have room
     for k in range(1, 13):
         sel = items[::k]
-        ok = all(b[0] - c.tw(b[1], f) / 2 - (a[0] + c.tw(a[1], f) / 2) >= 28 for a, b in zip(sel, sel[1:]))
+        ok = not any(clash(a, b) for a, b in zip(sel, sel[1:]))
         if ok:
             items = sel
             break
     for x, lab in items:
-        w = c.tw(lab, f)
-        tx = min(max(x, xs.a + w / 2 if x - w / 2 < xs.a - 30 else x), xs.b + 30 - w / 2)
+        tx = text_x(x, lab)
         c.line([(x, y), (x, y + 8)], p.faint, 1.5, caps=False)
         c.text((tx, y + 12 + L.axis), lab, f, p.muted, anchor="ms")
 
@@ -830,6 +845,7 @@ def _draw_line_family(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
             cands = [(x1 - w - 8, yy - h - 8), (x1 - w - 8, yy + 8), (x0 + 12, yy - h - 8), (x0 + 12, yy + 8),
                      ((x0 + x1) / 2 - w / 2, yy - h - 8), ((x0 + x1) / 2 - w / 2, yy + 8)]
             bx = c.place(w, h, cands, (x0, y0 - 4, x1, y1))
+            c.rect_alpha((bx[0] - 6, bx[1] - 2, bx[0] + w + 6, bx[1] + h + 2), p.bg, 205)  # a crossing line never cuts the text
             c.text((bx[0], bx[1] + L.label * 0.86), a.text, lf, col)
     # ---- markers: every dot is an obstacle before any label is placed
     marks = []
@@ -943,14 +959,23 @@ def _draw_histogram(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
     bw = float(spec.options["bin_width"])
     marker = next((a for a in spec.annotations if a.kind == "marker"), None)
     tail = spec.options.get("tail", "left")
-    lo_b = math.floor(min(obs) / bw) * bw
-    hi_b = math.ceil(max(obs) / bw) * bw
+    # a long, thin tail (options.overflow_above / overflow_below) is gathered into one edge bin instead of stretching the axis: every
+    # observation is still counted, and the edge bin says so ("+80% or more")
+    o_hi, o_lo = spec.options.get("overflow_above"), spec.options.get("overflow_below")
+    o_hi = float(o_hi) if o_hi is not None and max(obs) > float(o_hi) else None
+    o_lo = float(o_lo) if o_lo is not None and min(obs) < float(o_lo) else None
+    lo_b = math.floor((o_lo if o_lo is not None else min(obs)) / bw) * bw
+    hi_b = math.ceil((o_hi if o_hi is not None else max(obs)) / bw) * bw
+    if o_hi is not None:
+        hi_b += bw
+    if o_lo is not None:
+        lo_b -= bw
     if hi_b == lo_b:
         hi_b += bw
     nb = int(round((hi_b - lo_b) / bw))
     counts = [0] * nb
     for v in obs:
-        k = min(nb - 1, int((v - lo_b) // bw))
+        k = max(0, min(nb - 1, int((v - lo_b) // bw)))
         counts[k] += 1
     total = len(obs)
     ticks, step = cover_ticks(0, max(counts) / total * 100 * 1.3, 4)
@@ -973,7 +998,15 @@ def _draw_histogram(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
         colour = col_hi if (in_tail or contains) else p.context2 if c.theme == "dark" else p.context
         if n:
             c.rect((xs(a) + 1.5, ys(n / total * 100), xs(b) - 1.5, y1), colour)
-    _x_axis(c, L, xs, False, y1, unit="%", ticks=nice_ticks(lo_b, hi_b, 8)[0])
+    unit = "%" if spec.y_format in ("pct", "share") else ""
+    of = c.font(L.axis, "SemiBold", note=True)
+    for edge, k, word in ((o_hi, nb - 1, "or more"), (o_lo, 0, "or less")):
+        if edge is not None and counts[k]:
+            a, b = lo_b + k * bw, lo_b + (k + 1) * bw
+            st = 1.0 if float(edge).is_integer() else bw
+            lab = (fmt_tick(edge, "pct", st) if unit == "%" else fmt_tick(edge, "num", st)) + " " + word
+            c.text(((xs(a) + xs(b)) / 2, ys(counts[k] / total * 100) - 12), lab, of, p.text2, anchor="rs" if k else "ls")
+    _x_axis(c, L, xs, False, y1, unit="%" if spec.y_format in ("pct", "share") else "", ticks=nice_ticks(lo_b, hi_b, 8)[0])
     # fix the percent tick text: _x_axis printed numbers + "%"; zero line
     zx = xs(0) if lo_b < 0 < hi_b else None
     if zx is not None:
@@ -1167,10 +1200,14 @@ def _draw_heat(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
         if r.highlight:
             c.rect((x - 1, y - 1, x + tw_ + 1, y + th + 1), None, radius=6, outline=p.text, width=3)  # type: ignore[arg-type]
         txt_col = (255, 255, 255) if c.theme == "dark" or t > 0.45 else p.text
-        lab = r.label[:6]
-        while c.tw(lab, sf) > tw_ - 10 and len(lab) > 2:
+        lab = r.label[:8]
+        lf, ls = sf, sym_size
+        while c.tw(lab, lf) > tw_ - 10 and ls > sym_size * 0.74:  # a long symbol gets a smaller face before it is cut
+            ls -= 1
+            lf = c.font(ls, "ExtraBold")
+        while c.tw(lab, lf) > tw_ - 10 and len(lab) > 2:
             lab = lab[:-1]
-        c.text((x + tw_ / 2, y + th * 0.47), lab, sf, txt_col, anchor="ms")
+        c.text((x + tw_ / 2, y + th * 0.47), lab, lf, txt_col, anchor="ms")
         c.text((x + tw_ / 2, y + th * 0.47 + sym_size * 1.12), r.display or fmt_value(r.value, spec.y_format, 0), vf,
                mix(txt_col, col, 0.18), anchor="ms")
     # legend: a diverging ramp

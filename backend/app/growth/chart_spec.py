@@ -60,7 +60,7 @@ KINDS = (
 ALIASES = {"gauge_history": "series_with_marker", "seasonality_heatmap": "seasonality_bars"}
 ROLES = ("highlight", "context", "pos", "neg", "accent", "blue", "auto")
 ANNOTATION_KINDS = ("marker", "point_label", "hline", "vline", "band", "xband")
-Y_FORMATS = ("pct", "pts", "num", "price", "ratio", "corr", "oz", "rank", "index")
+Y_FORMATS = ("pct", "pts", "num", "price", "ratio", "corr", "oz", "rank", "index", "share")  # share: an unsigned percentage, 0-100
 
 # kinds whose series are date series (x = ISO dates, ascending)
 DATE_KINDS = ("rebased_lines", "spread_lines", "rolling_line", "ratio_line", "series_with_marker", "move_card")

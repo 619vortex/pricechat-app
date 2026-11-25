@@ -12,7 +12,8 @@ export type OriginalDraft = {
   id: number; finding_key: string; format: string; detector: string; status: "pending" | "approved" | "rejected" | "regenerating";
   text: string; chars: number; original_text: string; writer: string; score: number; as_of: string | null; headline: string; calculation: string;
   sources: OriginalSource[]; attribution: string[]; window: string; rarity: number | null; novelty: number | null; notes: string[];
-  chart: { kind: string; title?: string; variant_of?: string }; version: number; created_at: string | null; decided_at: string | null;
+  chart: { kind: string; title?: string; variant_of?: string }; chart_kinds?: string[];
+  render_info?: Record<string, { template?: string; version?: string }>; version: number; created_at: string | null; decided_at: string | null;
   decided_by: string; reject_reason: string; writer_pending: boolean; gate_problems: string[];
 };
 export type OriginalsList = {
@@ -34,7 +35,7 @@ function Graphic({ d }: { d: OriginalDraft }) {
   const [broken, setBroken] = useState(false);
   if (broken)
     return <div className="muted small" style={{ padding: 16, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
-      Graphic not available yet ({d.chart.kind}). The chart renderer is installed separately.
+      Graphic not available yet ({d.chart.kind}): it could not be drawn. Reload, or try Other chart.
     </div>;
   return <img src={imageUrl(d.id, "x", d.version)} alt={d.chart.title || d.headline} onError={() => setBroken(true)}
     style={{ width: "100%", maxWidth: 640, borderRadius: 8, display: "block" }} />;
@@ -75,7 +76,7 @@ function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }
     <Card title={<span>{FORMAT_LABEL[d.format] ?? d.format} <span className="muted small">· {d.detector}</span></span>}
       actions={<Badge tone={STATUS_TONE[d.status] ?? "neutral"}>{d.status}</Badge>}>
       <div className="stack">
-        <Graphic d={d} />
+        <Graphic key={d.version} d={d} />
         {editing ? (
           <textarea aria-label="Tweet text" value={text} rows={6} onChange={(e) => setText(e.target.value)} style={{ width: "100%" }} />
         ) : (
@@ -101,7 +102,8 @@ function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }
             <button className="btn primary" disabled={busy} onClick={() => act("approve")}>Approve</button>
             <button className="btn" disabled={busy} onClick={() => { setText(d.text); setEditing(true); }}>Edit</button>
             <button className="btn" disabled={busy} onClick={() => act("regenerate", { chart_variant: false })}>Regenerate</button>
-            <button className="btn" disabled={busy} onClick={() => act("regenerate", { chart_variant: true })}>Other chart</button>
+            <button className="btn" disabled={busy} onClick={() => act("regenerate", { chart_variant: true })}
+              title={d.chart_kinds && d.chart_kinds.length > 1 ? `Chart types: ${d.chart_kinds.join(", ")}` : "This finding has one chart type"}>Other chart</button>
             <button className="btn" disabled={busy} onClick={() => act("reject", { reason: window.prompt("Why reject it? (optional)") ?? "" })}>Reject</button>
           </>}
           {editing && <>

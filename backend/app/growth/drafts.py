@@ -263,9 +263,14 @@ def regenerate(db: Session, draft_id: int, *, chart_variant: bool = False, setti
         raise DraftError(409, f"A {d.status} draft can't be regenerated.")
     f = finding_of(d)
     if chart_variant:
-        alt = ALT_CHART.get(d.chart.get("kind", ""))
+        from app.growth.graphics import variant_kinds
+
+        kinds = variant_kinds(d.chart)  # the detector's own kind first, then its variants: "Other chart" cycles through them
+        cur = d.chart.get("kind", "")
+        alt = kinds[(kinds.index(cur) + 1) % len(kinds)] if cur in kinds and len(kinds) > 1 else None
         if alt:
-            d.chart = {**d.chart, "kind": alt, "variant_of": d.chart.get("variant_of") or d.chart.get("kind")}
+            base = kinds[0]
+            d.chart = {k: v for k, v in d.chart.items() if k != "variant_of"} | {"kind": alt} | ({"variant_of": base} if alt != base else {})
             d.image_cache = {}
     d.version += 1
     d.status, d.decided_at, d.reject_reason = "pending", None, ""
@@ -297,7 +302,15 @@ def view(d: GrDraft) -> dict[str, Any]:
             "chars": len(d.text), "original_text": d.original_text, "writer": d.writer, "score": round(d.score, 2),
             "as_of": d.as_of.isoformat() if d.as_of else None, "headline": f.get("headline", ""), "calculation": d.calculation,
             "sources": d.sources, "attribution": f.get("attribution", []), "numbers": f.get("numbers", {}), "window": f.get("window", ""),
-            "rarity": f.get("rarity"), "novelty": f.get("novelty"), "notes": f.get("notes", []), "chart": d.chart, "version": d.version,
+            "rarity": f.get("rarity"), "novelty": f.get("novelty"), "notes": f.get("notes", []), "version": d.version,
+            "chart": {k: v for k, v in (d.chart or {}).items() if k != "variants"},  # the variants stay server side (Other chart)
+            "chart_kinds": _kinds(d.chart), "render_info": d.image_cache or {},  # render meta per format: template, version (learner)
             "created_at": d.created_at.isoformat() if d.created_at else None, "decided_at": d.decided_at.isoformat() if d.decided_at else None,
             "decided_by": d.decided_by, "reject_reason": d.reject_reason, "writer_pending": d.writer_job_id is not None,
             "gate_problems": gate.problems(d.text, Finding.from_dict(f), as_edited=d.writer == "owner") if f else []}
+
+
+def _kinds(chart: dict[str, Any] | None) -> list[str]:
+    from app.growth.graphics import variant_kinds
+
+    return variant_kinds(chart) if chart and chart.get("kind") else []

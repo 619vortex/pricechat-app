@@ -69,12 +69,25 @@ def drawdown_cycle(mem: Memory, as_of: date, coins: tuple[str, ...] = ("BTC", "E
                          f"= {fmt.pct(c['depth'])} after {c['days']} days" for c in last2)
         calc += (f"; current: record close {fmt.raw(cur['top_v'], 2)} on {cur['top'].isoformat()}, close {fmt.raw(cur['now_v'], 2)} on {as_of.isoformat()} "
                  f"= {fmt.pct(cur['dd'])}, day {cur['days']} ({s.key}, cycles = record close then a fall of 50% or more before a new record)")
-        series = []
-        for c in last2:
-            seg = [((s.dates[i] - c["top"]).days, (s.values[i] / c["top_v"] - 1) * 100) for i in range(c["top_i"], min(c["end_i"], c["low_i"] + 365))]
-            series.append({"name": f"{c['top'].year} top", "points": pts(seg[::2], 2)})
-        segc = [((s.dates[i] - cur["top"]).days, (s.values[i] / cur["top_v"] - 1) * 100) for i in range(cur["top_i"], len(s))]
-        series.append({"name": f"{cur['top'].year} top (now)", "points": pts(segc[::2], 2), "highlight": True})
+        series, anns = [], []
+
+        def thin(idx: list[int], keep: set[int], top: date, top_v: float) -> list[list]:
+            """Every other day (a lighter JSON), always keeping the bottom / today, so the marked points are plotted points."""
+            sel = [i for k, i in enumerate(idx) if k % 2 == 0 or i in keep]
+            return pts([((s.dates[i] - top).days, (s.values[i] / top_v - 1) * 100) for i in sel], 2)
+
+        for k, c in enumerate(last2, 1):
+            series.append({"name": f"{c['top'].year} top", "points": thin(list(range(c["top_i"], min(c["end_i"], c["low_i"] + 365))), {c["low_i"]},
+                                                                          c["top"], c["top_v"]), "role": "context", "label": f"{c['bottom'].year} bottom"})
+            anns.append({"type": "point_label", "x": c["days"], "series": k - 1, "label": "{c%d_depth}\nday {c%d_days}" % (k, k), "role": "context",
+                         "number": f"c{k}_depth"})
+        series.append({"name": "Now", "points": thin(list(range(cur["top_i"], len(s))), {len(s) - 1}, cur["top"], cur["top_v"]), "role": "neg",
+                       "label": ""})
+        anns.append({"type": "marker", "x": cur["days"], "series": len(series) - 1, "label": "{dd} below\nDay {day}, today", "role": "neg",
+                     "number": "dd_signed", "align": "above"})
+        nums["dd_signed"] = n(cur["dd"], fmt.pct(cur["dd"]), "below the record close (signed)")
+        bottoms = " and ".join("day {c%d_days} ({c%d_year})" % (k, k) for k in range(1, len(last2) + 1))
+        horizon = max([cur["days"]] + [c["days"] for c in last2]) + 60
         rarity = min(1.0, 0.55 + cur["days"] / max(c["days"] for c in last2) * 0.3)
         out.append(Finding(
             key=f"cycle:{coin}:{as_of.isoformat()}", format="history", detector="drawdown_cycle", subject=coin,
@@ -82,9 +95,10 @@ def drawdown_cycle(mem: Memory, as_of: date, coins: tuple[str, ...] = ("BTC", "E
                      + ", ".join(f"{c['days']}d ({c['bottom'].year})" for c in last2),
             numbers=nums, words={}, templates=templates, window=f"since {cur['top'].isoformat()}", series=[s.key], sources=[s.source], as_of=as_of,
             calculation=calc, rarity=rarity, comparatives=["record", "last"],
-            chart=chart("drawdown_overlay", f"{a}: drawdown from each record close", f"Day {cur['days']}, {fmt.pct(cur['dd'])}", series,
-                        annotations=[{"type": "marker", "x": cur["days"], "y": round(cur["dd"], 2), "label": f"Now: day {cur['days']}"}],
-                        sources=[s.source], as_of=as_of, x_kind="number", x_label="days since the record close")))
+            chart=chart("drawdown_overlay", f"{a}: drawdown from each record close", "", series, annotations=anns, sources=[s.source], as_of=as_of,
+                        hero="Day {day}", hero_role="neg", headline="of " + a + "'s drawdown. Its last bear markets bottomed on " + bottoms,
+                        dek=a + ", % below each record close, by days since that record · current record: {ath} on {ath_date}", y_format="pct",
+                        options={"end_values": False, "x_max": min(horizon, max(c["days"] for c in last2) + 400)})))
     return out
 
 
@@ -150,10 +164,12 @@ def seasonality(mem: Memory, as_of: date, coins: tuple[str, ...] = ("BTC", "ETH"
             headline=f"{a} {mon} {as_of.year} so far {fmt.pct(mtd)}: {word} {mon} " + (f"since {ref[-1]}" if ref else "in the stored history"),
             numbers=nums, words={}, templates=templates, window=f"{mon} {as_of.year}", series=[s.key], sources=[s.source], as_of=as_of,
             calculation=calc, rarity=min(1.0, 0.45 + 0.08 * gap_years), comparatives=[word, "since"],
-            chart=chart("seasonality_bars", f"{a} in {mon}, by year", f"{as_of.year} so far {fmt.pct(mtd)}",
-                        [{"name": f"{mon} return, %", "points": pts([(y, r) for y, r in years] + [(as_of.year, mtd)], 2)}],
-                        annotations=[{"type": "highlight", "x": as_of.year, "label": f"{as_of.year} so far ({days_left} days left)"}],
-                        sources=[s.source], as_of=as_of, x_kind="year")))
+            chart=chart("seasonality_bars", f"{a} in {mon}, by year", "",
+                        [{"name": f"{mon} return, %", "points": pts([(str(y), r) for y, r in years] + [(str(as_of.year), mtd)], 2)}],
+                        sources=[s.source], as_of=as_of, hero="mtd", hero_role="neg" if mtd < 0 else "pos",
+                        headline=a + " in {year} so far: " + claim.replace("the ", "its ", 1),
+                        dek=a + "'s " + mon + " return by year: last close of " + mon + " vs last close of the month before · {year} so far, {left} days left",
+                        y_format="pct", options={"partial": [str(as_of.year)], "partial_note": "so far", "digits": 0})))
     return out
 
 
@@ -182,8 +198,28 @@ def then_now(mem: Memory, as_of: date) -> list[Finding]:
         templates=templates, window="1y", series=[s.key, "fng"], sources=[s.source, "alternative_me"], as_of=as_of,
         calculation=f"close {fmt.raw(p0, 2)} on {then.isoformat()} -> {fmt.raw(p1, 2)} on {as_of.isoformat()} = {fmt.pct(ch)}; F&G {f0:.0f} -> {f1:.0f} ({s.key}, fng)",
         rarity=min(0.7, 0.3 + abs(ch) / 150 + abs(f1 - f0) / 250), comparatives=[],
-        chart=chart("move_card", "One year apart", f"Bitcoin {fmt.pct(ch)}",
-                    [{"name": "Bitcoin close, USD", "points": pts(list(zip(s.dates[look:], s.values[look:])), 2)}],
-                    annotations=[{"type": "marker", "x": then.isoformat(), "y": round(p0, 2), "label": f"{fmt.money(p0)} · F&G {f0:.0f}"},
-                                 {"type": "marker", "x": as_of.isoformat(), "y": round(p1, 2), "label": f"{fmt.money(p1)} · F&G {f1:.0f}"}],
-                    sources=[s.source, "alternative_me"], as_of=as_of))]
+        chart=_then_now_chart(s, f, look, then, as_of, ch))]
+
+
+def _then_now_chart(s: Series, f: Series, look: int, then: date, as_of: date, ch: float) -> dict:
+    """The year of Bitcoin closes with both ends marked (price and Fear & Greed in the labels); variant: the year of Fear & Greed."""
+    fi = f.index_on_or_before(as_of, 1)
+    fu = f.upto(f.dates[fi])  # type: ignore[index]
+    f_pts = [(d, v) for d, v in zip(fu.dates, fu.values) if d >= then]
+    role = "neg" if ch < 0 else "pos"
+    return chart("series_with_marker", "One year apart", "",
+                 [{"name": "Bitcoin close, USD", "points": pts(list(zip(s.dates[look:], s.values[look:])), 2), "role": "context", "label": "", "width": 2.6}],
+                 annotations=[{"type": "marker", "x": then.isoformat(), "label": "{p0}\n{then} · Fear & Greed {f0}", "role": "context", "number": "p0",
+                               "align": "right"},
+                              {"type": "marker", "x": as_of.isoformat(), "label": "{p1}\nToday · Fear & Greed {f1}", "role": role, "number": "p1"}],
+                 sources=[s.source, "alternative_me"], as_of=as_of, hero="ch", hero_role=role,
+                 headline="Bitcoin in a year: {p0} to {p1}, while Fear & Greed went from {f0} to {f1}",
+                 dek="Bitcoin daily close in USD, {then} to {date} · Fear & Greed Index readings on both days", y_format="price",
+                 options={"end_labels": False},
+                 variants={"rolling_line": {
+                     "series": [{"name": "Fear & Greed", "points": pts(f_pts, 0), "role": "context", "label": "", "width": 2.2}],
+                     "annotations": [{"type": "marker", "x": f_pts[0][0].isoformat(), "label": "{f0}\n{then}", "role": "context", "number": "f0",
+                                      "align": "right"},
+                                     {"type": "marker", "x": f_pts[-1][0].isoformat(), "label": "{f1}\nToday", "role": role, "number": "f1"}],
+                     "dek": "Crypto Fear & Greed Index, daily readings from {then} (0 = extreme fear, 100 = extreme greed)", "y_format": "index",
+                     "options": {"end_labels": False, "y_min": 0, "y_max": 100}}})
