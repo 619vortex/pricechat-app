@@ -6,9 +6,9 @@ import json
 
 from app.intel.schema import SCHEMA_VERSION, ItemAnalysis
 
-PROMPT_VERSION = f"{SCHEMA_VERSION}/p1"
+PROMPT_VERSION = f"{SCHEMA_VERSION}/p1"  # the prompt production code uses (SYSTEM); p2 is benchmarked in Phase 1, see PROMPTS
 
-SYSTEM = """You are the analysis desk of a markets-and-world news wire (audience: crypto traders, market watchers, people following world events).
+SYSTEM_P1 = SYSTEM = """You are the analysis desk of a markets-and-world news wire (audience: crypto traders, market watchers, people following world events).
 You read ONE news item (headline, optional summary, outlets) and return JSON matching the schema. You extract and label; you never publish.
 
 Materiality, for this audience, judged ONLY from what the text states:
@@ -29,6 +29,27 @@ Rules:
 - magnitude must be copied from the text (e.g. "57%", "$41 billion"); empty if the text gives no figure.
 - Keep claims to the 1-4 most important assertions; attributed_to is who the text says said it.
 Return only the JSON object."""
+
+# Phase 1 (2026-11-25, docs/intelligence/2026-11-25-phase1-eval.md): p1 + fixes for the failure modes found on the eval_v2 DEV split only
+# (attribution read as speculation, majors under-tiered, round-ups / reaction pieces and routine fund flows promoted). Same schema.
+SYSTEM_P2 = SYSTEM_P1.replace("""Return only the JSON object.""", """Further rules (they refine the ones above):
+- Attribution is not speculation. "X happened, says <official / government / military / company / regulator>" or "<official> confirms X"
+  reports an event as fact: judge the EVENT. It is speculative only when the wording itself hedges (could, may, reportedly, plans, claims
+  without saying it happened). A denial, a threat, a warning, an accusation or an opinion by someone is a statement: at most notable.
+- A hedge in a trailing clause ("... as ECB warns funding could dry up") does not make the lead event speculative.
+- These are major even without a casualty figure: missiles or drones landing on a NATO member's territory; a strike on a Gulf capital,
+  its landmarks or state assets; NATO-country troops confirmed fighting in a war; a direct exchange of fire between two states' forces;
+  a mega-cap or newly listed $100B+ company moving 25%+; a deal of $10B+; an index or market falling into correction / bear market.
+- consequence.kind: escalation for a strike, attack, incursion or troop deployment; price_move for a market or price move;
+  money_amount only for an amount of money; deal only for a merger, acquisition or contract.
+- One item must be one story. A headline that joins unrelated stories (with ";", "And,", or a list of topics) is a round-up:
+  is_opinion_or_feature=true. So are takeaways, reactions ("world reacts", "X looms over", "puts ... to the test", "what next"),
+  a live page, an interview, a profile, and a market wrap that only describes a mood.
+- Routine flows are notable at most: ETF inflows/outflows, a fund or company buying or selling an asset, a hacker moving funds already
+  stolen, an analyst's rating or target, a follow-up that adds nothing new to a known event.
+Return only the JSON object.""")
+
+PROMPTS = {f"{SCHEMA_VERSION}/p1": SYSTEM_P1, f"{SCHEMA_VERSION}/p2": SYSTEM_P2}
 
 
 def user_message(title: str, summary: str = "", outlets: list[str] | None = None) -> str:

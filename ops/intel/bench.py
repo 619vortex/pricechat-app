@@ -21,7 +21,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.intel.prompt import PROMPT_VERSION, SYSTEM, json_schema, user_message  # noqa: E402
+from app.intel.prompt import PROMPT_VERSION, PROMPTS, json_schema, user_message  # noqa: E402
+
+SYSTEM = PROMPTS[PROMPT_VERSION]  # --prompt selects another version (Phase 1: intel-item-v1/p2)
 from app.intel.schema import ItemAnalysis  # noqa: E402
 
 PRICES = {  # USD per million tokens (input, output); Claude API list prices 2026-11
@@ -159,10 +161,16 @@ def main() -> None:
     p.add_argument("--ids", default="")
     p.add_argument("--budget-usd", type=float, default=0.0, help="stop before a Claude run would exceed this total")
     p.add_argument("--effort", default="low")
+    p.add_argument("--prompt", default=PROMPT_VERSION, choices=sorted(PROMPTS))
+    p.add_argument("--split", default="", help="only items of this split (eval_v2: dev / test)")
     p.add_argument("--keep-alive", default="2m")
     p.add_argument("--ledger", default=str(ROOT / "ops/intel/spend_ledger.jsonl"), help="shared paid-call ledger ($3/day, $15 total)")
     args = p.parse_args()
+    global SYSTEM
+    SYSTEM = PROMPTS[args.prompt]
     items = json.load(open(args.eval, encoding="utf-8"))["items"]
+    if args.split:
+        items = [i for i in items if i.get("split") == args.split]
     if args.ids:
         want = set(args.ids.split(","))
         items = [i for i in items if i["id"] in want]
@@ -199,7 +207,7 @@ def main() -> None:
                 spent += res["usd"]
                 if res.get("in_tok") or res.get("out_tok"):
                     ledger_add(args.ledger, model, res["usd"], res.get("in_tok", 0), res.get("out_tok", 0))
-            rec = {"id": item["id"], "engine": args.engine, "prompt": PROMPT_VERSION, **res}
+            rec = {"id": item["id"], "engine": args.engine, "prompt": args.prompt, **res}
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()
             if n % 25 == 0:
