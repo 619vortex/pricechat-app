@@ -462,53 +462,118 @@ def auto_ok(s: TtSettings, topic: TtTopic, text: str, b: writer.Brief | None) ->
 
 
 def _has_post(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:
+    """Does this topic already have its tweet? When it doesn't, the drafts that give way are retired here (see _post_block)."""
+    blocked, retire = _post_block(db, topic, s, now)
+    if not blocked:
+        _retire(retire)
+    return blocked
+
+
+REPLACED = "Replaced: the topic crossed the automatic line, so a fresh tweet was written and checked"
+STALE = "Went stale before it was sent"
+
+
+def _retire(drafts: list[TtPost]) -> None:
+    for p in drafts:
+        if p.status in ("pending", "held"):
+            p.status, p.note = "expired", REPLACED
+
+
+def _post_block(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> tuple[bool, list[TtPost]]:
+    """(the topic already has its tweet, the unsent drafts that give way to a fresh one). Nothing is changed here: tick retires the drafts
+    only once it actually writes the fresh tweet. 2026-11-25, production 11-23: the Nvidia / Jensen Huang topics (peak 86.4) retired their
+    drafts every scan ("tweet expired (Replaced: ...)") and then wrote nothing, because the same-story check that ran AFTER the retirement
+    found another topic's unsent draft: the topic was left with no tweet at all, scan after scan."""
     since = now - timedelta(hours=s.topic_cooldown_hours)
     earlier = list(db.scalars(select(TtPost).where(TtPost.topic_id == topic.id, TtPost.created_at >= since, TtPost.status != "rejected")))
     if not earlier:
-        return False
+        return False, []
     # production 2026-11-15: the first topic over the line (Iran/Bahrain, 75.8) had only a draft written for approval at 60-something that
     # expired unsent, and that draft blocked it for 24 h. A topic that has since crossed the automatic line gets a fresh tweet, written and
     # checked again (every gate, the sensitive rules, the limits), when all it had were unsent drafts from below the line.
     # 2026-11-16: the same for a draft HELD below the line (a gate said no to an earlier, weaker telling), and for one held only because no
     # reliable outlet had reported it yet, once one has. A draft written or held at the line itself, a sent one, or one the owner decided on
     # still blocks, so a topic gets one fresh attempt at the line, never a new draft every scan.
-    if not automatic(s) or not at_line(s, topic):
-        return True
-    reliable_now = brief_of(topic)[0] is not None
-    desk_clear = coordinate.newsdesk_conflict(db, [topic.title] + [str(x.get("title") or "") for x in (topic.sources or [])[:3] if x.get("reliable")], now,
-                                              topic_id=topic.id) is None
-    if all(_replaceable(p, s, reliable_now, desk_clear) for p in earlier):
-        for p in earlier:
-            if p.status in ("pending", "held"):
-                p.status, p.note = "expired", "Replaced: the topic crossed the automatic line, so a fresh tweet was written and checked"
-        return False
-    return True
+    line = automatic(s) and at_line(s, topic)
+    cache: dict[str, Any] = {}
+
+    def reliable_now() -> bool:
+        if "brief" not in cache:
+            cache["brief"] = brief_of(topic)[0]
+        return cache["brief"] is not None
+
+    def desk_clear() -> bool:
+        if "desk" not in cache:
+            titles = [topic.title] + [str(x.get("title") or "") for x in (topic.sources or [])[:3] if x.get("reliable")]
+            cache["desk"] = coordinate.newsdesk_conflict(db, titles, now, topic_id=topic.id) is None
+        return bool(cache["desk"])
+
+    def auto_now(p: TtPost) -> bool:
+        reliable_now()
+        return auto_ok(s, topic, p.text or "", cache["brief"])[0]
+
+    if all(_replaceable(p, s, reliable_now, desk_clear, at_line=line, auto_now=auto_now) for p in earlier):
+        return False, [p for p in earlier if p.status in ("pending", "held")]
+    return True, []
 
 
 UNSENT = ("pending", "expired", "held")
+OTHER_LANE = ("covered by the News Desk", "same event as", "already told")
 
 
-def _replaceable(p: TtPost, s: TtSettings, reliable_now: bool, desk_clear: bool = False) -> bool:
-    """May this earlier draft give way to a fresh tweet now that its topic is over the automatic line?"""
+def _replaceable(p: TtPost, s: TtSettings, reliable_now: Any, desk_clear: Any = False, *, at_line: bool = True, auto_now: Any = None) -> bool:
+    """May this earlier draft give way to a fresh tweet (written and checked again by every gate)? reliable_now / desk_clear / auto_now may
+    be callables, asked only when a draft needs them. at_line: the topic is over the automatic line, in automatic mode."""
+
+    def ask(v: Any, *a: Any) -> bool:
+        return bool(v(*a) if callable(v) else v)
+
     if p.status not in UNSENT or p.approved_at is not None or p.original_text:
         return False  # sent, sending, approved or edited by the owner: their decision stands
-    if p.status == "held" and (p.hold_reason or "").startswith("No reliable source"):
-        return reliable_now
-    if p.status == "held" and (p.hold_reason or "").startswith(("covered by the News Desk", "same event as", "already told")):
+    if p.status == "expired" and (p.note or "").startswith("Replaced:"):
+        # 2026-11-25: a draft retired for a fresh tweet stands for nothing by itself. When the fresh tweet exists, that one decides; a
+        # retired draft with nothing after it (production 11-23, Nvidia: retired, the fresh tweet never written) never blocks the topic.
+        return True
+    if p.status == "held" and (p.hold_reason or "").startswith(OTHER_LANE):
         # 2026-11-24: a hold for another lane's story is re-checked against what that lane actually sent, every scan: a candidate it
         # rejected, or an event it never delivered, no longer holds Trending (production 11-23: "covered by the News Desk (event 1162,
-        # candidate)" outlived the desk's rejection for hours)
-        return desk_clear
+        # candidate)" outlived the desk's rejection for hours). 2026-11-25: below the automatic line too. Production 11-24 16:56-17:12,
+        # three hours after that fix went live: Microsoft "Code Red" (69.6) still showed "held (covered by the News Desk (event 1209,
+        # candidate))", because a topic under the line was never re-checked (and the owner never got it as a suggestion either).
+        return ask(desk_clear)
+    if not at_line:
+        return False  # below the line, or approval mode: one draft per topic
+    if p.status == "held" and (p.hold_reason or "").startswith("No reliable source"):
+        return ask(reliable_now)
+    if p.status == "expired" and (p.note or "") == STALE:
+        # 2026-11-25: a suggestion nobody approved went stale (PENDING_TTL) while its topic is still over the line (production 11-23,
+        # Anthropic IPO topic 46560: "pending (not newsworthy ...)", then "expired (Went stale before it was sent)", then nothing for the
+        # whole cooldown however the story developed). One fresh attempt per TTL; every gate decides it again. Never a post that was
+        # queued: automatic queueing stamps approved_at, so those stand.
+        return True
+    if p.status == "pending" and auto_now is not None and ask(auto_now, p):
+        # 2026-11-25: a draft left for approval at the line (not newsworthy enough, no measured growth, ...) whose topic now passes the
+        # same automatic rules because the story developed (a new lead, a stated consequence, measured growth): written and checked again.
+        # The fresh one is queued or held, never pending for the same reason, so this cannot repeat every scan.
+        return True
     return (p.score or 0) < s.hot_score and not (p.angle or "").startswith("fast")
 
 
-def _recent_duplicate(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> bool:
-    """Another topic's post on the same story (a cluster that split and re-formed): one story, one tweet, within the cooldown."""
+def _recent_duplicate(db: Session, topic: TtTopic, s: TtSettings, now: datetime) -> TtPost | None:
+    """Another topic's post on the same story (a cluster that split and re-formed): one story, one tweet, within the cooldown.
+    2026-11-25: for a topic over the automatic line, another topic's unsent draft waiting for approval no longer counts. Production 11-23:
+    a lower Nvidia topic's draft for approval stopped every Nvidia / Jensen Huang topic over the line from getting its tweet. Two tellings
+    never both go out: whichever is sent second is held by the repeat check (coordinate.newsdesk_conflict, newsworthy.told) before X."""
     since = now - timedelta(hours=s.topic_cooldown_hours)
-    for p in db.scalars(select(TtPost).where(TtPost.created_at >= since, TtPost.status.notin_(("rejected", "held", "expired")))):
-        if p.topic_id != topic.id and any(coordinate.same_story(topic.title, str(x.get("title") or "")) for x in p.sources or []):
-            return True
-    return False
+    line = automatic(s) and at_line(s, topic)
+    for p in db.scalars(select(TtPost).where(TtPost.created_at >= since, TtPost.status.notin_(("rejected", "held", "expired"))).order_by(TtPost.id)):
+        if p.topic_id == topic.id:
+            continue
+        if line and p.status == "pending" and p.approved_at is None and not p.original_text:
+            continue
+        if any(coordinate.same_story(topic.title, str(x.get("title") or "")) for x in p.sources or []):
+            return p
+    return None
 
 
 # --- publish ---------------------------------------------------------------------------------------------------------------
@@ -1072,6 +1137,8 @@ def scan_log_lines(db: Session, s: TtSettings, read: dict[str, Any], topics: lis
         else:
             why = p.hold_reason if p.status == "held" else p.note
             tw = f"tweet {p.status}" + (f" ({_safe(why, 70)})" if why else "")
+            if p.status == "expired" and pa.get("skip"):  # 2026-11-25: an expired draft hid why no fresh tweet was written
+                tw += f"; no fresh tweet ({_safe(pa['skip'], 70)})"
         growth = ",".join(g.get("evidence") or []) or ("none, capped" if g.get("capped") else "none")
         notes = f" ({_safe('; '.join(g.get('notes') or []), 60)})" if g.get("notes") else ""
         tl = pa.get("timeline") or {}
@@ -1141,11 +1208,11 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
     for t in sorted(topics, key=lambda t: (not _fast(t), -t.score)):
         if made >= MAX_NEW_PER_SCAN or (t.score < s.suggest_score and not _fast(t)):
             break
-        skip = ("not active" if t.status != "active" else "already has a tweet" if _has_post(db, t, s, now)
-                else "same story as another topic's tweet" if _recent_duplicate(db, t, s, now) else "")
+        skip, retire = next_step(db, s, t, now)
         if skip:
             t.parts = {**(t.parts or {}), "skip": skip}  # the scan log says why a hot topic has no tweet
             continue
+        _retire(retire)  # only now that the fresh tweet is written (2026-11-25)
         p = await suggest(db, s, settings, t, now, writer_transport=writer_transport)
         made += 1
         if _fast(t):
@@ -1184,6 +1251,19 @@ async def tick(db: Session, settings: Settings, runtime: Any, agent_id: int, now
     except Exception:  # noqa: BLE001 - the log line never breaks a scan
         logger.exception("trending: scan log failed")
     return out
+
+
+def next_step(db: Session, s: TtSettings, t: TtTopic, now: datetime) -> tuple[str, list[TtPost]]:
+    """("", drafts to retire) when this topic gets a fresh tweet now, else (why not, []). Changes nothing: the caller retires the drafts
+    when it writes the tweet, so a topic that is skipped keeps the draft it had (2026-11-25)."""
+    if t.status != "active":
+        return "not active", []
+    blocked, retire = _post_block(db, t, s, now)
+    if blocked:
+        return "already has a tweet", []
+    if (dup := _recent_duplicate(db, t, s, now)) is not None:
+        return f"same story as another topic's tweet (post {dup.id}, {dup.status})", []
+    return "", retire
 
 
 def _any_approved(db: Session) -> bool:
