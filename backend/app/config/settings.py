@@ -318,6 +318,14 @@ class Settings(BaseSettings):
     # semantic gate would decide next to their current newsworthy decision (table intel_shadow); it never changes a publish, hold or
     # reject. Off: no extra work at all. No model is called by it (the analyser is plugged in separately; none by default).
     intel_shadow_enabled: bool = False
+    # Growth Engine (app/growth; docs/growth/2026-11-25-original-intelligence-growth-engine.md). Both OFF by default: with them off the
+    # jobs aren't even registered. growth_collect_enabled: G0 Market Memory collectors (public Hyperliquid, Coinbase Exchange, alternative.me
+    # only: sources whose licence isn't cleared never run in production, app/growth/sources.py). growth_enabled: G1 detectors + the Admin
+    # Originals approval queue. Nothing here publishes: an approved draft is only marked approved; the owner posts it by hand.
+    growth_enabled: bool = False
+    growth_collect_enabled: bool = False
+    growth_drafts_per_format: int = Field(3, ge=1, le=10)  # drafts kept per format per generation run
+    growth_max_drafts_per_run: int = Field(12, ge=1, le=50)
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

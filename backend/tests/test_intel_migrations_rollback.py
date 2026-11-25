@@ -13,7 +13,7 @@ from app.db.migrate import alembic_config
 from app.db.session import build_engine
 
 PROD = "0120_trending_text_ok"
-INTEL_TABLES = {"intel_workers", "intel_jobs", "ai_usage", "intel_shadow"}
+INTEL_TABLES = {"intel_workers", "intel_jobs", "ai_usage", "intel_shadow", "mm_series", "gr_drafts"}  # 0123/0124: Growth Engine
 
 
 def _run(url: str, fn: str, rev: str) -> None:

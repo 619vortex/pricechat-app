@@ -39,7 +39,9 @@ HEARTBEAT_FRESH = timedelta(seconds=60)
 LEASE = timedelta(seconds=120)
 MAX_CLAIM = 4
 WORKER_NAME = "Owner PC"
-KINDS = ("intel.analyze", "intel.embed")
+KINDS = ("intel.analyze", "intel.embed", "growth.write")  # growth.write: the Growth Engine's Originals writer (app/growth/writer.py)
+CHAT_KINDS = ("intel.analyze", "growth.write")  # answered by the PC's chat model with a JSON schema
+GROWTH_TEXT_MAX = 1000
 PRIORITIES = ("breaking", "slot", "bulk")
 
 
@@ -189,6 +191,9 @@ def offer(job: IntelJob, nonce: str, settings: Any = None) -> dict[str, Any]:
         out.update({"system": prompt.SYSTEM, "user": prompt.user_message(str(p.get("title") or ""), str(p.get("summary") or ""),
                                                                           [str(o) for o in p.get("outlets") or []]),
                     "schema": prompt.json_schema(), "prompt_version": prompt.PROMPT_VERSION})
+    elif job.kind == "growth.write":  # the prompt was built by app.growth.writer when the job was queued (placeholders, no figures)
+        out.update({"system": str(p.get("system") or ""), "user": str(p.get("user") or ""), "schema": p.get("schema") or {},
+                    "prompt_version": str(p.get("prompt_version") or "")})
     else:
         out.update({"text": str(p.get("text") or ""), "purpose": p.get("purpose") or "document", "dim": int(_settings(settings).intel_embed_dim)})
     return out
@@ -233,6 +238,12 @@ def validate_output(kind: str, output: Any, settings: Any = None) -> Any:
             return ItemAnalysis.model_validate(output).model_dump()
         except ValidationError as e:
             raise ChannelError(422, f"analysis fails the schema ({e.error_count()} errors)") from e
+    if kind == "growth.write":  # only the words: app.growth.writer substitutes the figures and runs the figures gate itself
+        if not isinstance(output, dict) or not isinstance(output.get("text"), str) or not output["text"].strip():
+            raise ChannelError(422, "growth.write output must be {\"text\": \"...\"}")
+        if len(output["text"]) > GROWTH_TEXT_MAX:
+            raise ChannelError(422, f"growth.write text longer than {GROWTH_TEXT_MAX} characters")
+        return {"text": output["text"]}
     dim = int(_settings(settings).intel_embed_dim)
     if not isinstance(output, list) or len(output) != dim:
         raise ChannelError(422, f"embedding must be a list of {dim} numbers")

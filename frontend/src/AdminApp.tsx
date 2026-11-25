@@ -39,6 +39,7 @@ const TerminalNewsDesk = lazy(() => import("./pages/x/NewsDesk").then((m) => ({ 
 const TerminalTrending = lazy(() => import("./pages/x/TrendingTopics").then((m) => ({ default: m.TrendingTopics })));
 const WorldMonitorPage = lazy(() => import("./pages/WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
 const IntelShadowPage = lazy(() => import("./pages/IntelShadowPage").then((m) => ({ default: m.IntelShadowPage })));
+const OriginalsPage = lazy(() => import("./pages/x/OriginalsPage").then((m) => ({ default: m.OriginalsPage })));
 const TradingOSPage = lazy(() => import("./pages/TradingOS").then((m) => ({ default: m.TradingOSPage })));
 const pf = () => import("./pages/pokemon/portfolio");
 const PortfolioPage = lazy(() => pf().then((m) => ({ default: m.PortfolioPage })));
@@ -59,6 +60,7 @@ export function AdminApp() {
             <Route path="brain" element={<ContentHub />} />
             <Route path="knowledge" element={<ContentHub />} />
             <Route path="x" element={<XPage />} />
+            <Route path="x/originals" element={<OriginalsPage />} />
             <Route path="world-monitor" element={<WorldMonitorPage />} />
             <Route path="terminal" element={<TerminalPage />} />
             <Route path="terminal/x" element={<XIntelPage />} />

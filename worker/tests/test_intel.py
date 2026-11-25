@@ -64,3 +64,21 @@ def test_run_backs_off_when_railway_is_down(monkeypatch: pytest.MonkeyPatch) -> 
     w = intel.Worker(cfg, server_http=httpx.Client(transport=httpx.MockTransport(down)), ollama_http=_ollama([]), sleep=sleep)
     assert w.run() == 0
     assert calls and all(p.endswith("/heartbeat") for p in calls) and w.backoff > 5  # backed off, never crashed
+
+
+def test_growth_write_uses_the_chat_model_with_the_jobs_schema() -> None:
+    """growth.write (Growth Engine Originals writer): same Ollama chat path as intel.analyze, JSON {"text"} with {vN} placeholders."""
+    seen: list[Any] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": json.dumps({"text": "Bitcoin {v1} in {v2} days."})}})
+
+    cfg = intel.Config(server="https://x.invalid", token=TOKEN, model="qwen3.8:27b")
+    schema = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+    out = intel.do_job({"id": 2, "kind": "growth.write", "system": "s", "user": "u", "schema": schema},
+                       intel.Ollama(cfg, httpx.Client(transport=httpx.MockTransport(handler))), cfg, 10)
+    assert out["output"] == {"text": "Bitcoin {v1} in {v2} days."} and out["model"] == "qwen3.8:27b"
+    assert seen[0]["format"] == schema and seen[0]["think"] is False and seen[0]["messages"][1]["content"] == "u"
+    with pytest.raises(intel.JobError):
+        intel.do_job({"id": 3, "kind": "growth.write", "user": "u"}, intel.Ollama(cfg, httpx.Client(transport=httpx.MockTransport(handler))), cfg, 10)
