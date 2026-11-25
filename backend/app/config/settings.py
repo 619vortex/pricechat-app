@@ -305,6 +305,10 @@ class Settings(BaseSettings):
     newsdesk_chief_model: str = "claude-opus-5-5"
     newsdesk_chief_effort: str = "low"
     newsdesk_chief_daily_usd: float = Field(1.0, ge=0, le=20)
+    # Terminal Intelligence Engine Phase 0 (app/intel/gate): the shared semantic gate in SHADOW. When on, both lanes record what the
+    # semantic gate would decide next to their current newsworthy decision (table intel_shadow); it never changes a publish, hold or
+    # reject. Off: no extra work at all. No model is called by it (the analyser is plugged in separately; none by default).
+    intel_shadow_enabled: bool = False
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the
