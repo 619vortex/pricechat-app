@@ -332,6 +332,14 @@ class Settings(BaseSettings):
     # More background jobs
     job_x_ingest_seconds: int = Field(900, ge=60)
     job_x_own_seconds: int = Field(900, ge=120)  # Read & Earn: Price Chat's own new X posts
+    # X performance history (app/social/x_history): a metrics curve (~1 h, 6 h, 24 h, 72 h, 7 d after publishing) for every Price Chat X
+    # post, plus an hourly own-account follower snapshot. Read-only owned reads ($0.001 a post, ids batched 100 per request); it never
+    # spends into the posting reserve (terminal/xintel.protect_posting) and has its own daily cap. X_PERF_HISTORY_ENABLED=false turns it off
+    # (the old once-a-day newsdesk.metrics / newsdesk.trending_metrics reads then run again).
+    x_perf_history_enabled: bool = True
+    x_perf_history_daily_usd: float = Field(0.5, ge=0, le=5)
+    job_x_history_seconds: int = Field(600, ge=300)
+    job_x_followers_seconds: int = Field(3600, ge=1800)
     job_x_opportunities_seconds: int = Field(1800, ge=300)
     job_cross_signals_seconds: int = Field(900, ge=120)
     job_topic_merge_seconds: int = Field(3600, ge=300)
