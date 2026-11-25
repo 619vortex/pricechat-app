@@ -414,7 +414,7 @@ def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) ->
         values = {c["name"]: (now if "DATE" in str(c["type"]).upper() else 0) for c in cols}
         conn.execute(text(f"INSERT INTO tt_settings (id{''.join(', ' + k for k in values)}) VALUES (1{''.join(', :' + k for k in values)})"), values)
     to("head")
-    assert tables() - before == kiwi | {"nd_validation", "nd_feedback", "nd_storylines"}  # 0117-0118 (News Desk validation, feedback, story memory) follows the Kiwi migrations
+    assert tables() - before == kiwi | {"nd_validation", "nd_feedback", "nd_storylines"} | {"ai_usage", "intel_workers", "intel_jobs", "intel_shadow"}  # 0117-0118 (News Desk validation, feedback, story memory) follows the Kiwi migrations; 0121-0122 the intel engine
     to("0114_trending_topics", down=True)
     assert tables() == before
     with engine.connect() as conn:
