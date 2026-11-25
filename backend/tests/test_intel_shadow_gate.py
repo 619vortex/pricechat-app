@@ -47,6 +47,29 @@ def intel_on(shadow: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.fixture(autouse=True)
+def _empty_queue() -> Any:
+    gate._PENDING.clear()
+    yield
+    gate._PENDING.clear()
+
+
+def test_a_lane_holding_the_write_lock_never_loses_its_shadow_row(db: Session, intel_on: Any) -> None:
+    """Production 2026-11-25: Trending judges inside its own write transaction, and the shadow's separate connection got "database is
+    locked" on every write. observe() now queues in memory; the intel job writes after the lane has committed."""
+    from app.models.trending import TtTopic as T
+
+    t = T(key="lock-1", title="x", category="stocks", status="active", score=1, peak_score=1, parts={}, sources=[], first_seen=SLOT,
+          last_seen=SLOT)
+    db.add(t)
+    db.flush()  # the lane now holds SQLite's write lock (uncommitted write)
+    gate.observe(db, "trending", f"topic:{t.id}", SANOFI, "", ["Reuters"], True)  # must not touch the database
+    db.commit()  # the lane finishes
+    assert gate.flush(db) == 1
+    row = db.query(IntelShadow).one()
+    assert row.lane == "trending" and row.rules_ok is True and db.query(IntelJob).count() == 1
+
+
+@pytest.fixture(autouse=True)
 def _no_writer_model(monkeypatch: pytest.MonkeyPatch) -> None:
     async def none(*_: Any, **__: Any) -> None:
         return None
@@ -109,6 +132,8 @@ async def test_on_rows_for_both_lanes_and_identical_lane_decisions(db: Session, 
     monkeypatch.setattr(s, "intel_shadow_enabled", True)
     on = [events._newsworthy(db, e, "⚡ JUST IN", SLOT) for e in (ev, big)] + [await _suggest(db, t) for t in (topic, quiet)]
     assert on == off  # the shadow never changes what either lane decides
+    assert db.query(IntelShadow).count() == 0  # the lanes only queue their decisions: no write inside their transaction
+    assert gate.flush(db) == 4  # the intel job writes them
     rows = {(r.lane, r.ref): r for r in db.query(IntelShadow).all()}
     assert set(rows) == {("newsdesk", f"event:{ev.id}"), ("newsdesk", f"event:{big.id}"), ("trending", f"topic:{topic.id}"),
                          ("trending", f"topic:{quiet.id}")}
@@ -117,6 +142,7 @@ async def test_on_rows_for_both_lanes_and_identical_lane_decisions(db: Session, 
     assert rows[("newsdesk", f"event:{big.id}")].rules_ok is True
     assert db.query(IntelJob).count() == 0  # intel itself is off: nothing queued
     events._newsworthy(db, ev, "", SLOT)
+    gate.flush(db)
     db.expire_all()
     assert db.get(IntelShadow, nd.id).seen == 2
 
@@ -125,6 +151,7 @@ async def test_with_intel_on_a_bulk_job_is_queued_once_per_candidate(db: Session
     ev = _news(db, "q", SANOFI, 70, ["Reuters", "CNBC"])
     events._newsworthy(db, ev, "", SLOT)
     events._newsworthy(db, ev, "", SLOT)
+    assert gate.flush(db) == 2
     jobs = db.query(IntelJob).all()
     assert len(jobs) == 1 and jobs[0].priority == "bulk" and jobs[0].key == gate.job_key("newsdesk", f"event:{ev.id}")
     assert jobs[0].payload["title"] == SANOFI
@@ -135,6 +162,7 @@ async def test_with_intel_on_a_bulk_job_is_queued_once_per_candidate(db: Session
 async def test_refresh_fills_the_model_verdict_and_reports_the_disagreement(db: Session, intel_on: Any) -> None:
     ev = _news(db, "s", SANOFI, 70, ["Reuters", "CNBC"])
     assert events._newsworthy(db, ev, "", SLOT)[0].startswith("not published")  # the rules: no concrete consequence
+    gate.flush(db)
     job = db.query(IntelJob).one()
     job.status, job.result_by, job.result = "done", "pc", {"output": analysis(), "model": "qwen3.6:27b"}
     db.commit()
@@ -151,6 +179,7 @@ async def test_refresh_fills_the_model_verdict_and_reports_the_disagreement(db: 
 async def test_refresh_without_an_analysis_keeps_the_rules_verdict(db: Session, intel_on: Any) -> None:
     ev = _news(db, "r", SANOFI, 70, ["Reuters"])
     events._newsworthy(db, ev, "", SLOT)
+    gate.flush(db)
     job = db.query(IntelJob).one()
     job.status, job.result_by, job.result = "done", "rules", None
     db.commit()
@@ -161,6 +190,7 @@ async def test_refresh_without_an_analysis_keeps_the_rules_verdict(db: Session, 
 
 def test_admin_endpoint_reports(client: Any, db: Session, shadow: Any) -> None:
     gate.observe(db, "newsdesk", "event:7", SANOFI, "", ["Reuters"], False)
+    gate.flush(db)
     r = client.get("/api/intel/shadow")
     assert r.status_code == 200
     body = r.json()

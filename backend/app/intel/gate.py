@@ -23,6 +23,7 @@ settings.intel_enabled is on as well (priority bulk: never awaited, never blocks
 from __future__ import annotations
 
 import logging
+from collections import deque
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -309,14 +310,14 @@ def job_key(lane: str, ref: str) -> str:
     return f"shadow:{lane}:{ref}:{PROMPT_VERSION}"[:120]
 
 
-def _own_session(db: Session) -> tuple[Session, Any]:
+def _own_session(db: Session, busy_ms: int = SQLITE_SHADOW_BUSY_MS) -> tuple[Session, Any]:
     """A session of its own, on one connection of the lane's engine: the shadow commit never commits (or rolls back) the lane's
     transaction. SQLite: that connection waits at most SQLITE_SHADOW_BUSY_MS for a write lock (a lane holding one is never stalled)."""
     bind = db.get_bind()
     engine = getattr(bind, "engine", bind)
     conn = engine.connect()
     if engine.dialect.name == "sqlite":
-        conn.exec_driver_sql(f"PRAGMA busy_timeout={SQLITE_SHADOW_BUSY_MS}")
+        conn.exec_driver_sql(f"PRAGMA busy_timeout={int(busy_ms)}")
         conn.commit()
     return Session(bind=conn, autoflush=False, expire_on_commit=False), conn
 
@@ -340,21 +341,48 @@ def _apply(row: Any, v: SemanticVerdict, rules_ok: bool, state: str, extra: dict
     row.verdict = {**extra, "state": state, **v.as_dict()}
 
 
+# Lane decisions waiting to be written. The lanes call observe() inside their own write transaction; on SQLite a second connection's
+# write then fails ("database is locked": production 2026-11-25, every Trending observation). So observe() only queues the decision in
+# memory, and flush() writes the queue from the intel job (intel.tick / intel.shadow), outside every lane's transaction. A restart loses at
+# most the last few seconds of shadow rows; the lanes are never touched.
+PENDING_MAX = 2000
+FLUSH_BUSY_MS = 5000  # the intel job may wait for the write lock: no lane is waiting on it
+_PENDING: deque[dict[str, Any]] = deque(maxlen=PENDING_MAX)
+
+
 def observe(db: Session, lane: str, ref: str, title: str, summary: str = "", outlets: Any = (), rules_ok: bool = False, *,
             evidence: str = "", reason: str = "", rules_assessment: Any = None, vetoes: list[str] | tuple[str, ...] = (),
             now: datetime | None = None, settings: Any = None) -> None:
-    """Record one lane decision in the shadow table (and queue its analysis). Returns nothing; never raises; off by default."""
+    """Queue one lane decision for the shadow table. Returns nothing; never raises; never touches the database; off by default."""
     try:
         s = _settings(settings)
         if not s.intel_shadow_enabled:
             return
-        _observe(db, lane, ref, title, summary, outlets, rules_ok, evidence, reason, rules_assessment, vetoes, now or utcnow(), s)
+        _PENDING.append({"lane": lane, "ref": ref, "title": title, "summary": summary, "outlets": list(outlets or ()),
+                         "rules_ok": bool(rules_ok), "evidence": evidence, "reason": reason,
+                         "rules": rules_view(rules_assessment, rules_ok, reason),
+                         "vetoes": [str(v) for v in vetoes or () if v], "now": now or utcnow()})
     except Exception:  # noqa: BLE001 - shadow only: a failure here is logged and the lane carries on untouched
         logger.warning("intel shadow: observe failed for %s %s", lane, ref, exc_info=True)
 
 
+def flush(db: Session, settings: Any = None) -> int:
+    """Write the queued lane decisions (called by refresh(), from the intel job). Returns how many were written."""
+    s = _settings(settings)
+    written = 0
+    while _PENDING:
+        o = _PENDING.popleft()
+        try:
+            _observe(db, o["lane"], o["ref"], o["title"], o["summary"], o["outlets"], o["rules_ok"], o["evidence"], o["reason"],
+                     o["rules"], o["vetoes"], o["now"], s, busy_ms=FLUSH_BUSY_MS)
+            written += 1
+        except Exception:  # noqa: BLE001
+            logger.warning("intel shadow: writing %s %s failed", o.get("lane"), o.get("ref"), exc_info=True)
+    return written
+
+
 def _observe(db: Session, lane: str, ref: str, title: str, summary: str, outlets: Any, rules_ok: bool, evidence: str, reason: str,
-             rules_assessment: Any, vetoes: Any, now: datetime, s: Any) -> None:
+             rules_assessment: Any, vetoes: Any, now: datetime, s: Any, busy_ms: int = SQLITE_SHADOW_BUSY_MS) -> None:
     from app.models.intel_shadow import IntelShadow
 
     names = [str(o) for o in outlets or [] if str(o or "").strip()][:12]
@@ -362,7 +390,7 @@ def _observe(db: Session, lane: str, ref: str, title: str, summary: str, outlets
     inputs = {"title": (title or "")[:300], "summary": (summary or "")[:900], "outlets": names, "evidence": evidence or "",
               "rules": rules, "vetoes": [str(v)[:300] for v in vetoes or () if v]}
     key = job_key(lane, ref)
-    own, conn = _own_session(db)
+    own, conn = _own_session(db, busy_ms)
     try:
         row = own.scalar(select(IntelShadow).where(IntelShadow.lane == lane, IntelShadow.ref == ref))
         if row is None:
@@ -418,8 +446,9 @@ def refresh(db: Session, now: datetime | None = None, settings: Any = None) -> d
     s = _settings(settings)
     if not s.intel_shadow_enabled:
         return {"skipped": "intel shadow disabled"}
+    written = flush(db, s)
     now = now or utcnow()
-    counts = {"model": 0, "rules": 0, "pending": 0, "queued": 0}
+    counts = {"model": 0, "rules": 0, "pending": 0, "queued": 0, "written": written}
     rows = list(db.scalars(select(IntelShadow).where(IntelShadow.last_seen >= now - REFRESH_WINDOW)
                            .order_by(IntelShadow.last_seen.desc()).limit(REFRESH_MAX)))
     for row in rows:
