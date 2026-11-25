@@ -1114,10 +1114,23 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         async def intel_tick(ctx: JobContext) -> dict[str, Any]:
             from app.intel import router as intel_router
 
-            return await intel_router.tick(ctx.db, ctx.now, s)
+            out = await intel_router.tick(ctx.db, ctx.now, s)
+            if s.intel_shadow_enabled:  # the semantic gate's shadow rows whose analysis landed (app/intel/gate): never changes a post
+                from app.intel import gate
+
+                out = {**out, "shadow": gate.refresh(ctx.db, ctx.now, s)}
+            return out
 
         specs.append(JobSpec("intel.tick", "Intelligence: PC/cloud router", "Expire the PC worker's leases and answer what it didn't (Claude under the daily AI cap, else today's rules). Analysis only: never publishes",
                              s.intel_tick_seconds, intel_tick, initial_delay_seconds=30, timeout_seconds=300))
+    elif s.intel_shadow_enabled:  # shadow only: analyses queued while intel was on still land on their rows
+        async def intel_shadow(ctx: JobContext) -> dict[str, Any]:
+            from app.intel import gate
+
+            return gate.refresh(ctx.db, ctx.now, s)
+
+        specs.append(JobSpec("intel.shadow", "Intelligence: semantic gate shadow", "Fills in what the shared semantic gate would have decided for the candidates both lanes judged, from finished analyses. Shadow only: never publishes, holds or rejects",
+                             300, intel_shadow, initial_delay_seconds=60, timeout_seconds=120))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs

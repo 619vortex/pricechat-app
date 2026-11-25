@@ -1279,6 +1279,13 @@ def _newsworthy(db: Session, ev: NdEvent, label: str, now: datetime) -> tuple[st
         return "", label
     # a release goes to both platforms: it is a repeat when the channel already carried the event (X then skips it on its own if X did)
     a = newsworthy.judge(db, title, ev.summary or "", now, age_min=_age(ev, now), skip_event=ev.id, platform="telegram", outlets=len(outlets_of(ev)))
+    try:  # Intelligence shadow (app/intel/gate): records what the semantic gate would decide; off by default, never changes this decision
+        from app.intel import gate
+
+        gate.observe(db, "newsdesk", f"event:{ev.id}", title, ev.summary or "", sorted(outlets_of(ev)), a.ok, evidence=ev.evidence or "",
+                     rules_assessment=a, now=now)
+    except Exception:  # noqa: BLE001
+        logger.debug("intel shadow hook failed", exc_info=True)
     if not a.ok:
         _note_breaking_miss(ev, a.reason, now)
         logger.info("editorial gate: #%s refused (interest %s): %s | %s", ev.id, a.interest, a.reason[:200], title[:100])
