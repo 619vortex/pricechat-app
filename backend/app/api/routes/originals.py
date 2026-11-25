@@ -30,7 +30,7 @@ def list_drafts(db: DbSession, status: str | None = Query(None), format: str | N
     if status:
         if status not in drafts.STATUSES:
             raise HTTPException(422, f"status must be one of {', '.join(drafts.STATUSES)}")
-        q = q.where(GrDraft.status == status)
+        q = q.where(GrDraft.status.in_(("pending", "regenerating")) if status == "pending" else GrDraft.status == status)  # to review: both
     if format:
         q = q.where(GrDraft.format == format)
     rows = list(db.scalars(q.order_by(GrDraft.created_at.desc(), GrDraft.score.desc()).offset(offset).limit(limit)))
