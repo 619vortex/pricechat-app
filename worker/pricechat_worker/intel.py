@@ -11,7 +11,7 @@ Loop
 - heartbeat every INTEL_HEARTBEAT_S (30 s) from a background thread: the installed Ollama model names (/api/tags), version, busy, GPU.
   Railway offers jobs only while that heartbeat is under 60 s old. Ollama down: models=[] and busy=true, and nothing is claimed.
 - while idle and the analysis or embedding model is installed: claim up to INTEL_MAX_CLAIM jobs (1..4) every INTEL_POLL_S (5 s).
-- intel.analyze: Ollama /api/chat with format=<the job's JSON schema>, temperature 0, num_ctx 4096, a short keep_alive (so the News Desk
+- intel.analyze / growth.write: Ollama /api/chat with format=<the job's JSON schema>, temperature 0, num_ctx 4096, a short keep_alive (so the News Desk
   picture models get the GPU back), think off for qwen3*/deepseek and "low" for gpt-oss (as ops/intel/bench.py does).
 - intel.embed: Ollama /api/embed with nomic-embed-text, "search_document: " / "search_query: " prefix by purpose, Matryoshka-truncated to
   the job's dim (layer norm, cut, then L2 normalise, as the nomic v1.5 model card does).
@@ -49,7 +49,7 @@ import httpx
 
 log = logging.getLogger("intel")
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 STOP = False
 
 PREFIX = "/api/intel-worker"
@@ -61,6 +61,7 @@ MAX_CLAIM = 4  # the server's cap (channel.MAX_CLAIM)
 LEASE_MARGIN_S = 8.0  # don't start a job with less lease than this left: hand it straight back
 MAX_ERROR = 480  # FailIn.error max_length is 500
 EMBED_PREFIX = {"document": "search_document: ", "query": "search_query: "}
+CHAT_KINDS = ("intel.analyze", "growth.write")  # growth.write: the Growth Engine's Originals writer, JSON {"text"} with {vN} placeholders
 
 
 class JobError(Exception):
@@ -263,7 +264,7 @@ def do_job(job: dict[str, Any], ollama: Ollama, cfg: Config, timeout: float) -> 
     """The signed result body {output, model, seconds} for one claimed job, or JobError."""
     t0 = time.perf_counter()
     kind = job.get("kind")
-    if kind == "intel.analyze":
+    if kind in CHAT_KINDS:
         if not isinstance(job.get("schema"), dict) or not job.get("user"):
             raise JobError("job is missing its prompt or schema")
         data = ollama.chat(cfg.model, str(job.get("system") or ""), str(job["user"]), job["schema"], timeout)
@@ -339,7 +340,7 @@ class Worker:
             if left < LEASE_MARGIN_S:
                 raise JobError(f"lease nearly over ({left:.0f}s left) before starting")
             installed = self.models
-            want = self.cfg.model if job.get("kind") == "intel.analyze" else self.cfg.embed_model
+            want = self.cfg.model if job.get("kind") in CHAT_KINDS else self.cfg.embed_model
             if not has_model(installed, want):
                 raise JobError(f"model {want} is not installed in Ollama" if installed else "ollama is not reachable")
             result = do_job(job, self.ollama, self.cfg, timeout=max(5.0, left - 5.0))

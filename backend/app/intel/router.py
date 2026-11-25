@@ -7,6 +7,8 @@ Policy
 - breaking: cloud-first (intel_breaking_cloud_first). If the PC is online it gets a shadow copy; its answer is only stored for comparison.
   With cloud-first off, the PC has 20 s to claim it.
 - slot: the PC has 180 s to claim it; bulk: no claim deadline, but the job expires after 6 h.
+- growth.write (Growth Engine Originals writer): queued "bulk" by the daily generation (templates stand meanwhile) and "slot" by an owner's
+  Regenerate; Railway's fallback is Claude (same cap) then rules (the template text stays).
 - A claim holds a 120 s lease. An expired lease goes back to the queue once (if the claim window is still open and the PC is online),
   otherwise Railway answers it.
 
@@ -63,6 +65,8 @@ def _check(kind: str, payload: dict[str, Any], priority: str) -> None:
     field = "title" if kind == "intel.analyze" else "text"
     if not isinstance(payload.get(field), str) or not payload[field].strip():
         raise ValueError(f"{kind} needs a non-empty {field}")
+    if kind == "growth.write" and (not str(payload.get("user") or "").strip() or not isinstance(payload.get("schema"), dict)):
+        raise ValueError("growth.write needs its prompt (user) and schema (app.growth.writer.build)")
 
 
 def enqueue(db: Session, kind: str, payload: dict[str, Any], priority: str = "slot", *, key: str | None = None, now: datetime | None = None,
@@ -134,6 +138,16 @@ async def fallback(db: Session, job: IntelJob, now: datetime | None = None, *, s
         except anthropic_client.CloudUnavailable as e:
             rules_fallback(job)
             reason = f"cloud: {e.reason}" + (f"; {reason}" if reason else "")
+    elif job.kind == "growth.write":  # the Originals writer: Claude under the same cap, else rules (the draft keeps its template text)
+        p = job.payload or {}
+        try:
+            out, model, cost = await anthropic_client.write_json(db, str(p.get("system") or ""), str(p.get("user") or ""), p.get("schema") or {},
+                                                                 purpose="growth.write", settings=s, transport=transport)
+            job.result = {"output": channel.validate_output("growth.write", out, s), "model": model, "cost_usd": round(cost, 6)}
+            job.result_by = "cloud"
+        except (anthropic_client.CloudUnavailable, channel.ChannelError) as e:
+            rules_fallback(job)
+            reason = f"cloud: {getattr(e, 'reason', str(e))}" + (f"; {reason}" if reason else "")
     else:
         rules_fallback(job)  # Phase 0 has no Railway embeddings yet (Phase 1: nomic on CPU)
         reason = "no cloud embeddings" + (f"; {reason}" if reason else "")

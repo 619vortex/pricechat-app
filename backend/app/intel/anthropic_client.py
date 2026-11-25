@@ -88,21 +88,15 @@ def parse(data: dict[str, Any]) -> ItemAnalysis:
         raise CloudUnavailable("invalid answer") from e
 
 
-async def analyze(db: Session, title: str, summary: str = "", outlets: list[str] | None = None, *, model: str | None = None,
-                  settings: Any = None, transport: httpx.AsyncBaseTransport | None = None) -> CloudResult:
-    if settings is None:
-        from app.config.settings import get_settings
-
-        settings = get_settings()
-    model = (model or settings.intel_cloud_model or MODELS[0]).strip()
-    if model not in MODELS:
-        raise CloudUnavailable(f"model {model} not allowed")
+async def _call(db: Session, body: dict[str, Any], purpose: str, settings: Any, transport: httpx.AsyncBaseTransport | None,
+                parse: Any) -> tuple[Any, int, int, float, int]:
+    """The shared paid call: reserve in the ledger, POST, settle with the reported usage, parse. (parsed, tokens in, tokens out, cost, ms)."""
+    model = body["model"]
     key = _key(settings)
     if not key:
         raise CloudUnavailable("no key")
-    body = request_body(model, title, summary, outlets)
-    est = ledger.estimate(model, ledger.tokens_for(json.dumps(body)), MAX_TOKENS)
-    hold = ledger.reserve(db, model, est, PURPOSE, settings)
+    est = ledger.estimate(model, ledger.tokens_for(json.dumps(body)), int(body.get("max_tokens") or MAX_TOKENS))
+    hold = ledger.reserve(db, model, est, purpose, settings)
     if hold is None:
         raise CloudUnavailable("over cap")
     t0 = time.perf_counter()
@@ -128,9 +122,59 @@ async def analyze(db: Session, title: str, summary: str = "", outlets: list[str]
     tin, tout = int(usage.get("input_tokens") or 0), int(usage.get("output_tokens") or 0)
     cread = int(usage.get("cache_read_input_tokens") or 0)
     try:
-        analysis = parse(data)
+        parsed = parse(data)
     except CloudUnavailable:
         ledger.settle(db, hold, tin, tout, cread, ok=False)  # billed anyway
         raise
     row = ledger.settle(db, hold, tin, tout, cread)
-    return CloudResult(analysis, model, tin, tout, row.cost_usd, latency)
+    return parsed, tin, tout, row.cost_usd, latency
+
+
+def _model(model: str | None, settings: Any) -> str:
+    model = (model or settings.intel_cloud_model or MODELS[0]).strip()
+    if model not in MODELS:
+        raise CloudUnavailable(f"model {model} not allowed")
+    return model
+
+
+async def analyze(db: Session, title: str, summary: str = "", outlets: list[str] | None = None, *, model: str | None = None,
+                  settings: Any = None, transport: httpx.AsyncBaseTransport | None = None) -> CloudResult:
+    if settings is None:
+        from app.config.settings import get_settings
+
+        settings = get_settings()
+    model = _model(model, settings)
+    body = request_body(model, title, summary, outlets)
+    analysis, tin, tout, cost, latency = await _call(db, body, PURPOSE, settings, transport, parse)
+    return CloudResult(analysis, model, tin, tout, cost, latency)
+
+
+def parse_json(data: dict[str, Any]) -> dict[str, Any]:
+    """A JSON object answer (stop_reason checked first, as parse() does)."""
+    stop = data.get("stop_reason")
+    if stop in ("refusal", "max_tokens"):
+        raise CloudUnavailable(stop)
+    if stop not in ("end_turn", "stop_sequence"):
+        raise CloudUnavailable(f"stop_reason {stop}")
+    text = "".join(b.get("text", "") for b in data.get("content") or [] if isinstance(b, dict) and b.get("type") == "text").strip()
+    try:
+        out = json.loads(text)
+    except ValueError as e:
+        raise CloudUnavailable("invalid answer") from e
+    if not isinstance(out, dict):
+        raise CloudUnavailable("invalid answer")
+    return out
+
+
+async def write_json(db: Session, system: str, user: str, schema: dict[str, Any], *, purpose: str, max_tokens: int = 1000,
+                     model: str | None = None, settings: Any = None, transport: httpx.AsyncBaseTransport | None = None) -> tuple[dict[str, Any], str, float]:
+    """A short structured writing call (Growth Engine "growth.write"), under the same key, allow-list and daily cap. (object, model, cost)."""
+    if settings is None:
+        from app.config.settings import get_settings
+
+        settings = get_settings()
+    model = _model(model, settings)
+    body = {"model": model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": user}],
+            "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": schema}}}
+    out, _, _, cost, _ = await _call(db, body, purpose, settings, transport, parse_json)
+    return out, model, cost
