@@ -28,6 +28,31 @@ PRICES = {  # USD per million tokens (input, output); Claude API list prices 202
     "claude-haiku-5-5": (0.10, 0.50), "claude-sonnet-5-5": (2.0, 10.0), "claude-opus-5-5": (4.0, 20.0),
 }
 OLLAMA = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+# Owner approval 2026-11-25: at most $15 for model evaluation, at most $3 per UTC day. Every paid call is appended to one ledger shared by
+# all runs; a call is refused BEFORE it is sent when its worst-case cost would cross either limit.
+DAY_CAP_USD, TOTAL_CAP_USD = 3.0, 15.0
+MAX_OUT = 4000
+
+
+def ledger_spent(path: str) -> tuple[float, float]:
+    import datetime as dt
+
+    today, day, total = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d"), 0.0, 0.0
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            r = json.loads(line)
+            total += r["usd"]
+            day += r["usd"] if r["day"] == today else 0.0
+    return day, total
+
+
+def ledger_add(path: str, model: str, usd: float, tin: int, tout: int) -> None:
+    import datetime as dt
+
+    now = dt.datetime.now(dt.timezone.utc)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"day": now.strftime("%Y-%m-%d"), "at": now.isoformat(timespec="seconds"), "model": model, "usd": usd,
+                            "in": tin, "out": tout}) + "\n")
 
 
 def decide(a: ItemAnalysis) -> dict:
@@ -94,7 +119,7 @@ def _anthropic_client():
 
 
 def run_claude(client, model: str, item: dict, effort: str) -> dict:
-    body = {"model": model, "max_tokens": 4000, "system": SYSTEM,
+    body = {"model": model, "max_tokens": MAX_OUT, "system": SYSTEM,
             "output_config": {"effort": effort, "format": {"type": "json_schema", "schema": json_schema()}},
             "messages": [{"role": "user", "content": user_message(item["title"], item.get("summary") or "", item.get("outlets"))}]}
     t0 = time.perf_counter()
@@ -135,6 +160,7 @@ def main() -> None:
     p.add_argument("--budget-usd", type=float, default=0.0, help="stop before a Claude run would exceed this total")
     p.add_argument("--effort", default="low")
     p.add_argument("--keep-alive", default="2m")
+    p.add_argument("--ledger", default=str(ROOT / "ops/intel/spend_ledger.jsonl"), help="shared paid-call ledger ($3/day, $15 total)")
     args = p.parse_args()
     items = json.load(open(args.eval, encoding="utf-8"))["items"]
     if args.ids:
@@ -158,11 +184,21 @@ def main() -> None:
             elif args.engine.startswith("ollama:"):
                 res = run_ollama(args.engine.split(":", 1)[1], item, args.keep_alive)
             else:
-                if args.budget_usd and spent >= args.budget_usd:
-                    print(f"budget reached: ${spent:.4f}")
+                model = args.engine.split(":", 1)[1]
+                pin, pout = PRICES.get(model, (4.0, 20.0))
+                worst = (len(SYSTEM) + len(json.dumps(json_schema())) + len(item["title"]) + len(item.get("summary") or "")) / 3 * pin / 1e6 \
+                    + MAX_OUT * pout / 1e6
+                day, total = ledger_spent(args.ledger)
+                if day + worst > DAY_CAP_USD or total + worst > TOTAL_CAP_USD:
+                    print(f"cap reached: today ${day:.4f} / ${DAY_CAP_USD}, total ${total:.4f} / ${TOTAL_CAP_USD}")
                     break
-                res = run_claude(client, args.engine.split(":", 1)[1], item, args.effort)
+                if args.budget_usd and spent + worst > args.budget_usd:
+                    print(f"run budget reached: ${spent:.4f}")
+                    break
+                res = run_claude(client, model, item, args.effort)
                 spent += res["usd"]
+                if res.get("in_tok") or res.get("out_tok"):
+                    ledger_add(args.ledger, model, res["usd"], res.get("in_tok", 0), res.get("out_tok", 0))
             rec = {"id": item["id"], "engine": args.engine, "prompt": PROMPT_VERSION, **res}
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             f.flush()

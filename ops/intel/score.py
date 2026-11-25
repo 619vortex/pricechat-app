@@ -49,6 +49,17 @@ def score(items: dict, path: str) -> dict:
         tin += r.get("in_tok", 0)
         tout += r.get("out_tok", 0)
         usd += r.get("usd", 0.0)
+    # independent cross-check: the 64 replay-fixture stories carry the human editor's label (publish / covered / went_out = it was news,
+    # stay_out = it was not). These labels predate the Phase 0 tiers and were not written by any model.
+    etp = efp = efn = 0
+    for r in rows:
+        lab = items[r["id"]].get("editor_label")
+        if not lab:
+            continue
+        pos, pred = lab != "stay_out", r["decision"]["newsworthy"]
+        etp += pos and pred
+        efp += (not pos) and pred
+        efn += pos and not pred
     n = len(rows)
     prec = tp / (tp + fp) if tp + fp else 0.0
     rec = tp / (tp + fn) if tp + fn else 0.0
@@ -59,7 +70,8 @@ def score(items: dict, path: str) -> dict:
             "fp_noise": fp_noise, "fp_notable": fp_notable, "missed_major": missed_major, "missed_sig": missed_sig,
             "tier_acc": tier_ok / n if n else 0, "schema_fail": fails, "p50_ms": pct(warm, 50), "p95_ms": pct(warm, 95),
             "mean_ms": statistics.mean(warm) if warm else 0, "in_tok": tin, "out_tok": tout, "usd": usd,
-            "usd_per_item": usd / n if n else 0}
+            "usd_per_item": usd / n if n else 0,
+            "ed_prec": etp / (etp + efp) if etp + efp else 0.0, "ed_rec": etp / (etp + efn) if etp + efn else 0.0, "ed_n": etp + efp + efn}
 
 
 def main() -> None:
@@ -67,12 +79,12 @@ def main() -> None:
     detail = "--detail" in sys.argv
     items = {i["id"]: i for i in json.load(open(args[0], encoding="utf-8"))["items"]}
     print(f"{'engine':34} {'n':>4} {'prec':>5} {'rec':>5} {'F1':>5} {'major':>5} {'FPnoise':>7} {'FPnotbl':>7} {'tier':>5} "
-          f"{'fail':>4} {'p50s':>6} {'p95s':>6} {'$/item':>8} {'$total':>7}")
+          f"{'fail':>4} {'p50s':>6} {'p95s':>6} {'$/item':>8} {'$total':>7} {'edPrec':>6} {'edRec':>5}")
     for path in args[1:]:
         s = score(items, path)
         print(f"{s['engine'][:34]:34} {s['n']:>4} {s['precision']:.2f}  {s['recall']:.2f}  {s['f1']:.2f}  {s['major_recall']:.2f}  "
               f"{len(s['fp_noise']):>7} {len(s['fp_notable']):>7} {s['tier_acc']:.2f}  {s['schema_fail']:>4} {s['p50_ms'] / 1000:6.2f} "
-              f"{s['p95_ms'] / 1000:6.2f} {s['usd_per_item']:8.5f} {s['usd']:7.3f}")
+              f"{s['p95_ms'] / 1000:6.2f} {s['usd_per_item']:8.5f} {s['usd']:7.3f} {s['ed_prec']:6.2f} {s['ed_rec']:5.2f}")
         if detail:
             for k in ("missed_major", "fp_noise", "fp_notable", "missed_sig"):
                 print(f"   {k} ({len(s[k])}):")
