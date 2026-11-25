@@ -23,6 +23,7 @@ settings.intel_enabled is on as well (priority bulk: never awaited, never blocks
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -44,7 +45,7 @@ SQLITE_SHADOW_BUSY_MS = 250  # SQLite only: the shadow write gives up quickly in
 
 # A lane's reason that IS the consequence / newsworthiness test (the part the model replaces). Every other refusal is a hard veto.
 CONSEQUENCE_REASONS = ("why should anyone care?", "stop-scroll", "not newsworthy", "why would our audience care?")
-AUDIENCE_REFUSALS = ("a routine military update", "diplomacy talk")  # newsworthy.audience()'s outright refusals: vetoes
+AUDIENCE_REFUSALS = ("a routine military update", "diplomacy talk")  # newsworthy.audience()'s refusals: overridable by the model (Phase 0)
 
 
 @dataclass
@@ -108,8 +109,16 @@ def _consequence_reason(reason: str) -> bool:
     for prefix in CONSEQUENCE_REASONS:
         if r.startswith(prefix):
             rest = r[len(prefix):].strip()
-            return not (prefix == "why would our audience care?" and rest.startswith(AUDIENCE_REFUSALS))
+            return True
     return False
+
+
+LEAD_SPLIT = re.compile(r"\s(?:as|while|after|amid|but)\s|;|\.\s|\s[-–—|]\s|,\s(?:and|as|while)\s", re.I)
+
+
+def lead_clause(head: str) -> str:
+    """The headline's first clause: what happened, before "as ...", "amid ...", "; ...", " - ..."."""
+    return LEAD_SPLIT.split(head or "", maxsplit=1)[0]
 
 
 def hard_vetoes(title: str, summary: str = "", rules: dict[str, Any] | None = None, vetoes: list[str] | tuple[str, ...] = ()) -> list[str]:
@@ -118,20 +127,18 @@ def hard_vetoes(title: str, summary: str = "", rules: dict[str, Any] | None = No
 
     head = (title or "").strip()
     out: list[str] = []
-    if h := classes.hedge_words(head):
+    if h := classes.hedge_words(lead_clause(head)):
+        # Phase 0 benchmark: on the whole headline this vetoed "Anthropic hits $1.5 trillion valuation in record IPO as ECB warns AI
+        # funding could ..." (a hedge in a trailing clause). Only the lead clause says whether the event itself happened.
         out.append(f"hedged, rumour or forecast wording ({h}): nothing has happened yet")
     weak = newsworthy.structural_weak(head)
     if not weak and (m := newsworthy.REACTION.search(head)):
         weak = f"a reaction or explainer ({m.group(0)})"
     if weak:
         out.append(f"not one story: {weak}")
-    try:
-        probe = newsworthy.Assessment(True, "strong", "", "", 0, {}, None)
-        why_not = newsworthy.audience(head, summary or "", probe)[2]
-        if why_not.startswith(AUDIENCE_REFUSALS):
-            out.append(why_not)
-    except Exception:  # noqa: BLE001 - a veto probe never breaks the verdict
-        logger.debug("intel gate: audience probe failed for %r", head[:80], exc_info=True)
+    # newsworthy.audience()'s refusals ("a routine military update", "diplomacy talk") are a judgement of the consequence, which is the
+    # part the model replaces; as vetoes they refused "Iran says three tankers hit mines in Hormuz" and "Poland issues air raid alerts as
+    # Russia attacks Ukraine" in the Phase 0 benchmark. They are no longer vetoes (_consequence_reason treats them as overridable).
     r = rules or {}
     if not r.get("ok") and r.get("reason") and not _consequence_reason(str(r["reason"])) and not any(v in str(r["reason"]) for v in out):
         out.append(str(r["reason"]))  # a repeat, a cap, the liquidation pause, a hold: the lane's own veto
@@ -174,8 +181,10 @@ def verdict(analysis: ItemAnalysis | dict[str, Any] | None, title: str, summary:
     if analysis.is_opinion_or_feature:
         reasons.append("the model reads it as opinion, analysis or a feature")
     if consequence_ok and analysis.consequence.kind != "none" and not analysis.consequence.stated_in_text:
-        consequence_ok = False  # section 4.3: the STATED consequence; the model's own inference never makes a story newsworthy
-        reasons.append("its consequence is the model's inference, not stated in the text")
+        # Recorded, not decisive. Phase 0 benchmark: models mark stated_in_text false when the event IS the consequence ("US strikes
+        # Iranian missile site", "Iran attacks Kuwait"), so as a rule this dropped 2 of 18 major stories. Inferred claims are still
+        # classed INFERENCE (never published) by app.intel.classes.
+        reasons.append("the model says the consequence is its own inference, not stated in the text")
     if consequence_ok and analysis.consequence.kind == "none":
         consequence_ok = False
         reasons.append("no consequence kind stated")

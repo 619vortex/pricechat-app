@@ -193,18 +193,35 @@ def test_a_veto_wins_over_a_model_major() -> None:
     assert v.newsworthy and v.hard_veto == []
 
 
-def test_the_audience_gates_outright_refusal_is_a_veto() -> None:
-    title = "Saudi-led coalition intercepts Houthi missiles targeting Riyadh and south"
-    v = gate.verdict(analysis(materiality="significant", event_type="conflict_military"), title, "", ["Reuters", "AP"], "", newsworthy.assess(title))
-    assert not v.newsworthy and v.hard_veto and v.hard_veto[0].startswith("a routine military update") and len(v.hard_veto) == 1
+def test_the_audience_gates_refusal_is_overridable_not_a_veto() -> None:
+    # Phase 0 benchmark (2026-11-25): as a veto it refused "Iran says three tankers hit mines in Hormuz" ("diplomacy talk"). It is a
+    # consequence judgement, which is what the model replaces.
+    title = "Iran says three tankers hit mines in Hormuz despite U.S. escort"
+    v = gate.verdict(analysis(materiality="major", event_type="energy_supply_shipping"), title, "", ["Reuters", "AP"], "", newsworthy.assess(title))
+    assert v.newsworthy and not v.hard_veto
+
+
+def test_a_hedge_only_in_a_trailing_clause_is_no_veto_but_in_the_lead_it_is() -> None:
+    trailing = "Anthropic hits $1.5 trillion valuation in record IPO as ECB warns AI funding could unravel"
+    assert not gate.verdict(analysis(materiality="major"), trailing, "", ["Reuters"], "", newsworthy.assess(trailing)).hard_veto
+    lead = "Anthropic could hit $1.5 trillion valuation in IPO"
+    v = gate.verdict(analysis(materiality="major"), lead, "", ["Reuters"], "", newsworthy.assess(lead))
+    assert not v.newsworthy and v.hard_veto[0].startswith("hedged")
 
 
 @pytest.mark.parametrize("kw", [{"is_speculative": True}, {"is_opinion_or_feature": True, "event_type": "opinion_analysis_feature"},
                                 {"materiality": "notable"}, {"materiality": "noise"},
-                                {"consequence": {"kind": "deal", "stated_in_text": False, "magnitude": ""}}])
+                                {"consequence": {"kind": "none", "stated_in_text": False, "magnitude": ""}}])
 def test_speculation_opinion_routine_or_inferred_is_not_newsworthy(kw: dict[str, Any]) -> None:
     v = gate.verdict(analysis(**kw), SANOFI, "", ["Reuters", "CNBC"], "", None, rules_ok=False)
     assert not v.newsworthy and not v.consequence_ok
+
+
+def test_an_inferred_consequence_is_recorded_not_decisive() -> None:
+    # Phase 0 benchmark: models mark stated_in_text false when the event IS the consequence ("US strikes Iranian missile site")
+    v = gate.verdict(analysis(consequence={"kind": "deal", "stated_in_text": False, "magnitude": ""}), SANOFI, "", ["Reuters", "CNBC"], "",
+                     None, rules_ok=False)
+    assert v.newsworthy and any("inference" in r for r in v.reasons)
 
 
 def test_no_analysis_is_the_rules_verdict() -> None:
