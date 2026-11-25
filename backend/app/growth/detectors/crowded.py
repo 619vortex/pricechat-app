@@ -46,14 +46,14 @@ def funding_extremes(mem: Memory, as_of: date) -> list[Finding]:
         nums = {"list": n(0, lst, "annualised funding, most extreme"), "date": n(0, fmt.day(as_of), "funding day"),
                 "count": n(len(pick), str(len(pick)), "perps listed"), "total": n(len(rows), fmt.num(len(rows)), "perps with funding history")}
         if neg:
-            templates = ["On Hyperliquid, shorts are paying longs to stay bearish:\n{list}\n(funding, annualised from {date}'s average hourly rate)\n"
+            templates = ["On Hyperliquid, shorts are paying longs to stay bearish:\n{list}\n(funding: the {date} average hourly rate, annualised)\n"
                          "Crowded shorts at extreme funding have a history of sharp squeezes. They don't always come.",
-                         "Most negative funding on Hyperliquid ({date} average, annualised):\n{list}\nShorts are paying to stay short. "
+                         "Most negative funding on Hyperliquid ({date} average hourly rate, annualised):\n{list}\nShorts are paying to stay short. "
                          "That has a history of ending in squeezes, but not every time."]
         else:
-            templates = ["On Hyperliquid, longs are paying up to stay long:\n{list}\n(funding, annualised from {date}'s average hourly rate)\n"
+            templates = ["On Hyperliquid, longs are paying up to stay long:\n{list}\n(funding: the {date} average hourly rate, annualised)\n"
                          "Crowded longs at extreme funding have a history of sharp flushes. They don't always come.",
-                         "Highest funding on Hyperliquid ({date} average, annualised):\n{list}\nLongs are paying to stay long. "
+                         "Highest funding on Hyperliquid ({date} average hourly rate, annualised):\n{list}\nLongs are paying to stay long. "
                          "That has a history of ending in flushes, but not every time."]
         calc = (f"annualised = daily mean of the hourly funding rate × 24 × 365; {as_of.isoformat()}: "
                 + "; ".join(f"{c} {a / ANNUAL:.6%}/h -> {fmt.pct(a)}" for c, a, _, _ in pick)
