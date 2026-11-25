@@ -373,6 +373,13 @@ async def suggest(db: Session, s: TtSettings, settings: Settings, topic: TtTopic
     if conflict:
         held = conflict
     hot, why_not = auto_ok(s, topic, text, b)
+    try:  # Intelligence shadow (app/intel/gate): records what the semantic gate would decide; off by default, never changes this decision
+        from app.intel import gate
+
+        gate.observe(db, "trending", f"topic:{topic.id}", topic.title, b.summary if b is not None else "", b.outlets if b is not None else [],
+                     bool(hot and not held), reason=held or why_not or "", now=now)
+    except Exception:  # noqa: BLE001
+        logger.debug("intel shadow hook failed", exc_info=True)
     status = "held" if held else ("queued" if automatic(s) and hot else "pending")
     if b is not None and b.sensitive and used == "model":
         angle = f"sensitive:{b.sensitive['kind']}"
