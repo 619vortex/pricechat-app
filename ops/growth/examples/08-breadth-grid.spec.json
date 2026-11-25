@@ -1,0 +1,588 @@
+{
+ "kind": "heat_grid",
+ "headline": "top crypto coins are up this week. 66 are down: it isn't just Bitcoin",
+ "hero": "5 of 71",
+ "hero_role": "neg",
+ "kicker": "Breadth",
+ "dek": "7-day change, CoinGecko top 100 by market cap, ordered by size · 29 stablecoins, tokenised cash and gold tokens excluded",
+ "series": [],
+ "rows": [
+  {
+   "label": "BTC",
+   "value": -9.2469,
+   "sublabel": null,
+   "display": "−9%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ETH",
+   "value": -8.3503,
+   "sublabel": null,
+   "display": "−8%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "BNB",
+   "value": -9.2294,
+   "sublabel": null,
+   "display": "−9%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "XRP",
+   "value": -8.4777,
+   "sublabel": null,
+   "display": "−8%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "SOL",
+   "value": -9.3672,
+   "sublabel": null,
+   "display": "−9%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "TRX",
+   "value": -1.9198,
+   "sublabel": null,
+   "display": "−2%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "HYPE",
+   "value": -15.3678,
+   "sublabel": null,
+   "display": "−15%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ZEC",
+   "value": -25.5048,
+   "sublabel": null,
+   "display": "−26%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "XMR",
+   "value": -0.5334,
+   "sublabel": null,
+   "display": "−1%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "DOGE",
+   "value": -10.2369,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "LEO",
+   "value": -2.9778,
+   "sublabel": null,
+   "display": "−3%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "LINK",
+   "value": -5.3237,
+   "sublabel": null,
+   "display": "−5%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "WBT",
+   "value": -10.4269,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ADA",
+   "value": -10.0053,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "XLM",
+   "value": -13.6603,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "BCH",
+   "value": -6.9538,
+   "sublabel": null,
+   "display": "−7%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "NEAR",
+   "value": -16.747,
+   "sublabel": null,
+   "display": "−17%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "LTC",
+   "value": -9.1044,
+   "sublabel": null,
+   "display": "−9%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "CC",
+   "value": -11.4124,
+   "sublabel": null,
+   "display": "−11%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "AVAX",
+   "value": -10.6439,
+   "sublabel": null,
+   "display": "−11%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "UNI",
+   "value": -14.2559,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "GRAM",
+   "value": -9.8744,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "SUI",
+   "value": -13.6241,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "HBAR",
+   "value": -13.7805,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "TAO",
+   "value": -11.6718,
+   "sublabel": null,
+   "display": "−12%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "QNT",
+   "value": -10.2849,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "SHIB",
+   "value": -10.1198,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "CRO",
+   "value": -11.1113,
+   "sublabel": null,
+   "display": "−11%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "RAIN",
+   "value": -44.024,
+   "sublabel": null,
+   "display": "−44%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "M",
+   "value": -14.2014,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "OKB",
+   "value": -10.3401,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "AAVE",
+   "value": -16.9276,
+   "sublabel": null,
+   "display": "−17%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "PEPE",
+   "value": -10.1544,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "BTW",
+   "value": 87.1446,
+   "sublabel": null,
+   "display": "+87%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "WLFI",
+   "value": -11.2991,
+   "sublabel": null,
+   "display": "−11%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ONDO",
+   "value": -12.7391,
+   "sublabel": null,
+   "display": "−13%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "HTX",
+   "value": -3.0041,
+   "sublabel": null,
+   "display": "−3%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ENA",
+   "value": -17.1962,
+   "sublabel": null,
+   "display": "−17%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ASTER",
+   "value": -12.6366,
+   "sublabel": null,
+   "display": "−13%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "VVV",
+   "value": 19.6719,
+   "sublabel": null,
+   "display": "+20%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "JST",
+   "value": 1.5176,
+   "sublabel": null,
+   "display": "+2%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "MNT",
+   "value": -9.8766,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ICP",
+   "value": -12.912,
+   "sublabel": null,
+   "display": "−13%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "DOT",
+   "value": -13.1726,
+   "sublabel": null,
+   "display": "−13%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "MORPHO",
+   "value": -12.322,
+   "sublabel": null,
+   "display": "−12%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "BGB",
+   "value": -5.012,
+   "sublabel": null,
+   "display": "−5%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "SKY",
+   "value": -24.2514,
+   "sublabel": null,
+   "display": "−24%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "PIEVERSE",
+   "value": 6.9622,
+   "sublabel": null,
+   "display": "+7%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "ETC",
+   "value": -6.4563,
+   "sublabel": null,
+   "display": "−6%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "WLD",
+   "value": -14.1674,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "PUMP",
+   "value": -12.1849,
+   "sublabel": null,
+   "display": "−12%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "KCS",
+   "value": -7.2772,
+   "sublabel": null,
+   "display": "−7%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "POL",
+   "value": -9.5063,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "NIGHT",
+   "value": -0.5754,
+   "sublabel": null,
+   "display": "−1%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ARB",
+   "value": -16.7118,
+   "sublabel": null,
+   "display": "−17%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "PEARL",
+   "value": 3.3606,
+   "sublabel": null,
+   "display": "+3%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "KAS",
+   "value": -6.5342,
+   "sublabel": null,
+   "display": "−7%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "JUP",
+   "value": -15.6238,
+   "sublabel": null,
+   "display": "−16%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ALGO",
+   "value": -3.5457,
+   "sublabel": null,
+   "display": "−4%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "RENDER",
+   "value": -13.7877,
+   "sublabel": null,
+   "display": "−14%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "GT",
+   "value": -9.5334,
+   "sublabel": null,
+   "display": "−10%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ATOM",
+   "value": -5.0942,
+   "sublabel": null,
+   "display": "−5%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "PI",
+   "value": -8.9765,
+   "sublabel": null,
+   "display": "−9%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "NEXO",
+   "value": -8.1905,
+   "sublabel": null,
+   "display": "−8%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "INJ",
+   "value": -21.8916,
+   "sublabel": null,
+   "display": "−22%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "LIT",
+   "value": -20.5091,
+   "sublabel": null,
+   "display": "−21%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "BDX",
+   "value": -1.1657,
+   "sublabel": null,
+   "display": "−1%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "XDC",
+   "value": -17.2538,
+   "sublabel": null,
+   "display": "−17%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "CAKE",
+   "value": -7.8065,
+   "sublabel": null,
+   "display": "−8%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "STX",
+   "value": -9.0138,
+   "sublabel": null,
+   "display": "−9%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ETHFI",
+   "value": -6.5528,
+   "sublabel": null,
+   "display": "−7%",
+   "highlight": false,
+   "role": "auto"
+  }
+ ],
+ "annotations": [],
+ "y_format": "pct",
+ "y_label": "",
+ "source": "Source: CoinGecko markets (7-day change) · as of 25 Nov 2026 15:40 UTC",
+ "theme": "dark",
+ "options": {
+  "cap": 20
+ },
+ "version": "pc-intel-1"
+}

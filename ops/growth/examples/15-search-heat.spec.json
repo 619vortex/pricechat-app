@@ -1,0 +1,142 @@
+{
+ "kind": "rank_table",
+ "headline": "coins traders are searching on CoinGecko today rank outside the top 750",
+ "hero": "3 of 15",
+ "hero_role": "highlight",
+ "kicker": "Search heat",
+ "dek": "CoinGecko trending searches (last 24 hours), each coin's market-cap rank, log scale",
+ "series": [],
+ "rows": [
+  {
+   "label": "NPS",
+   "value": 853.0,
+   "sublabel": "Non-Playable Shiba",
+   "display": "#853",
+   "highlight": true,
+   "role": "highlight"
+  },
+  {
+   "label": "PEI",
+   "value": 792.0,
+   "sublabel": "Pepe Intelligence",
+   "display": "#792",
+   "highlight": true,
+   "role": "highlight"
+  },
+  {
+   "label": "VAR",
+   "value": 921.0,
+   "sublabel": "Variational X",
+   "display": "#921",
+   "highlight": true,
+   "role": "highlight"
+  },
+  {
+   "label": "BTC",
+   "value": 1.0,
+   "sublabel": "Bitcoin",
+   "display": "#1",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "PEARL",
+   "value": 78.0,
+   "sublabel": null,
+   "display": "#78",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "ETH",
+   "value": 2.0,
+   "sublabel": "Ethereum",
+   "display": "#2",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "HYPE",
+   "value": 10.0,
+   "sublabel": "Hyperliquid",
+   "display": "#10",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "SOL",
+   "value": 7.0,
+   "sublabel": "Solana",
+   "display": "#7",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "ZEC",
+   "value": 11.0,
+   "sublabel": "Zcash",
+   "display": "#11",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "PENGU",
+   "value": 129.0,
+   "sublabel": "Pudgy Penguins",
+   "display": "#129",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "NEAR",
+   "value": 23.0,
+   "sublabel": "NEAR Protocol",
+   "display": "#23",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "ZRO",
+   "value": 108.0,
+   "sublabel": "LayerZero",
+   "display": "#108",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "SYRUP",
+   "value": 276.0,
+   "sublabel": "Maple Finance",
+   "display": "#276",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "ENA",
+   "value": 58.0,
+   "sublabel": "Ethena",
+   "display": "#58",
+   "highlight": false,
+   "role": "context"
+  },
+  {
+   "label": "TAO",
+   "value": 39.0,
+   "sublabel": "Bittensor",
+   "display": "#39",
+   "highlight": false,
+   "role": "context"
+  }
+ ],
+ "annotations": [],
+ "y_format": "rank",
+ "y_label": "",
+ "source": "Source: CoinGecko trending searches and market-cap ranks · as of 25 Nov 2026 15:40 UTC",
+ "theme": "dark",
+ "options": {
+  "scale": "log",
+  "ref_value": 750,
+  "ref_label": "Rank 750"
+ },
+ "version": "pc-intel-1"
+}
