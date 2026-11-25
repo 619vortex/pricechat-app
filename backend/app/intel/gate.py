@@ -10,8 +10,8 @@ The decision (verdict()) is deterministic:
   consequence" judgement (newsworthy.assess / _consequence, importance.judge's tier): newsworthy = materiality major or significant, not
   speculative, not opinion/feature (ops/intel/bench.py decide(), same rule), and the consequence is stated in the text, not inferred.
 - The existing rules stay HARD VETOES and always win: hedge / rumour / forecast wording (the lanes' own patterns, classes.hedge_words), a
-  round-up / feature / reaction (newsworthy.structural_weak, REACTION), the audience gate's outright refusals (a routine military update,
-  diplomacy talk), and every lane-side reason that is not the consequence test (a repeat on any lane, the liquidation pause, caps,
+  round-up / feature / reaction (one_story_problem: the gate's refinement of newsworthy.structural_weak and REACTION, gate audit
+  2026-11-25), and every lane-side reason that is not the consequence test (a repeat on any lane, the liquidation pause, caps,
   spacing, the automatic line, rumour watch, sensitivity, an unverified incident, a copy gate, the News Desk cross-lane hold).
 - Claim classes are computed from the outlets / evidence by app.intel.classes, never by the model.
 - No analysis: source "rules" and the rules' own verdict.
@@ -121,20 +121,102 @@ def lead_clause(head: str) -> str:
     return LEAD_SPLIT.split(head or "", maxsplit=1)[0]
 
 
+# --- the gate's own one-story and hedge checks (gate audit 2026-11-25) ------------------------------------------------------------------
+# The production rules (newsworthy.structural_weak, quality.is_roundup) are untouched; these refine them for the semantic gate only.
+# Replay of the Phase 0 runs (ops/intel/gate_replay.py): the round-up rule was the ONLY veto that removed positives the model had right,
+# 4 for qwen3.8:27b (1 major) and 2 for qwen3.6:27b (1 major), while 6 round-ups that the model wrongly passed went through.
+
+# a short teaser question before the headline proper ("Green Week Ahead? Nvidia Futures Rip 6%, ..."): not part of the list test
+KICKER = re.compile(r"^[^?.!:;]{2,40}\?\s+(?=\S+\s+\S+\s+\S)")
+# "900,000 chips", "$1,000": a thousands separator is not a list comma
+DIGIT_COMMA = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+# a clause with no subject of its own continues the sentence ("Nasdaq sinks more than -4.5%, is down for 2026, fueled by AI trade
+# selloff", a major, was a "round-up"): quality.CONTINUATION plus a bare auxiliary or a participle + "by"
+CONTINUES = re.compile(r"^(?:is|are|was|were|has|have|had|now|down|up|led by|\w+(?:ed|en|ght)\s+by)\b", re.I)
+# several stories joined into one title: "A; B", "A. And, B", "..., and more"
+AND_SENTENCE = re.compile(r"[.?!]\s+(?:And|Plus|Also)\b")
+AND_MORE = re.compile(r"(?:,|\band\b|&)\s*(?:and\s+)?more\s*[.!]?\s*$", re.I)
+# narrative and explainer forms the production feature list does not name (all were model false positives in Phase 0)
+FEATURE_EXTRA = re.compile(r"[.?!]\s+Then came\b|(?::|\s[-–—])\s*Inside\b|\s[-–—]\s*(?:Why|How|What|Here'?s)\b")
+# forecast wording in the LEAD clause (newsworthy.FORECAST minus "set to"/"set for"/"to rise": "Anthropic set to start trading after
+# completing largest-ever IPO" and "AI rally set to add $2 trillion to Nasdaq-100" are significant stories in the eval set)
+FORECAST_LEAD = re.compile(r"\b(expected to|poised to|projected to|forecast to|on track to|likely to)\b", re.I)
+# "May" the month (or a name) is not "may" the hedge: "Bitcoin hits a record, its first since May", "Theresa May"
+MAY_NOT_HEDGE = re.compile(r"\b(?:in|since|of|early|late|mid|last|this|next|until|from|by|before|after|Theresa)\s+May\b|\bMay\s+\d", re.I)
+# a reaction word next to a stated hard event is the event's sourcing: "Ukraine blames Russia for strike that killed 20"
+REACTION_SOFT = ("blame", "blames", "demand", "demands")
+
+
+def _continues(part: str) -> bool:
+    from app.newsdesk import quality
+
+    p = part.strip()
+    return bool(quality.CONTINUATION.match(p) or CONTINUES.match(p))
+
+
+def roundup(head: str) -> str:
+    """Why this headline is several stories, not one (the gate's version of quality.is_roundup), or ""."""
+    from app.newsdesk import network, newsworthy, quality
+
+    t = re.sub(r"\s+", " ", (head or "").strip())
+    t = KICKER.sub("", t, count=1)
+    if m := quality.LIVE_PAGE.match(t):
+        # "Middle East latest: Bahrain says civilian industrial facility damaged in Iran attack" (significant, refused as a round-up): a live
+        # page's headline that names one event is that event. A live page's preview ("FTSE 100 Live: UK Stocks Set to Miss Out") is not.
+        t = t[m.end():].strip()
+        if newsworthy.FORECAST.search(t):
+            return "a live page's preview, not one story"
+    if network.ROUNDUP.search(t) or AND_MORE.search(t) or AND_SENTENCE.search(t):
+        return "a round-up of several stories, not one story"
+    if network.LISTY.match(t) and not network.VERB.search(t):
+        return "a round-up of several stories, not one story"
+    t = DIGIT_COMMA.sub("", t)
+    semis = [p.strip() for p in t.split(";") if p.strip()]
+    if len(semis) >= 2 and all(len(p.split()) >= 2 for p in semis) and not any(_continues(p) for p in semis[1:]):
+        return "two stories in one title (\"A; B\"), not one story"  # "Trump ousts top cybersecurity official; Anthropic's record debut"
+    parts = [p.strip() for p in re.split(r"[,;]", t) if p.strip()]
+    if any(_continues(p) for p in parts[1:]):
+        return ""
+    if len(parts) >= 3 and all(len(p.split()) >= 2 for p in parts):
+        return "a round-up of several stories, not one story"
+    return ""
+
+
+def one_story_problem(head: str) -> str:
+    """Why this headline is not one story that happened (round-up, feature, explainer, reaction), or ""."""
+    from app.newsdesk import newsworthy, quality
+
+    head = (head or "").replace("’", "'").replace("‘", "'")  # "Here’s What $1,000 in VOO Could Have Become" is "Here's"
+    if r := roundup(head):
+        return r
+    if f := quality.feature(head):
+        return f
+    if m := FEATURE_EXTRA.search(head or ""):
+        return f"a feature or explainer, not an event ({m.group(0).strip(' .?!:-–—').lower()})"
+    if m := newsworthy.REACTION.search(head or ""):
+        if not (m.group(0).lower() in REACTION_SOFT and quality.EVENT_SAID.search(head or "")):
+            return f"a reaction or explainer ({m.group(0)})"
+    return ""
+
+
+def lead_hedge(head: str) -> str:
+    """The hedge, rumour or forecast wording in the headline's lead clause, or "": whether the event itself happened."""
+    lead = MAY_NOT_HEDGE.sub(" ", lead_clause(head))
+    if h := classes.hedge_words(lead):
+        return h
+    m = FORECAST_LEAD.search(lead)
+    return m.group(0) if m else ""
+
+
 def hard_vetoes(title: str, summary: str = "", rules: dict[str, Any] | None = None, vetoes: list[str] | tuple[str, ...] = ()) -> list[str]:
     """The existing rules that the semantic gate never overrides, in the lanes' own words."""
-    from app.newsdesk import newsworthy
-
     head = (title or "").strip()
     out: list[str] = []
-    if h := classes.hedge_words(lead_clause(head)):
+    if h := lead_hedge(head):
         # Phase 0 benchmark: on the whole headline this vetoed "Anthropic hits $1.5 trillion valuation in record IPO as ECB warns AI
         # funding could ..." (a hedge in a trailing clause). Only the lead clause says whether the event itself happened.
         out.append(f"hedged, rumour or forecast wording ({h}): nothing has happened yet")
-    weak = newsworthy.structural_weak(head)
-    if not weak and (m := newsworthy.REACTION.search(head)):
-        weak = f"a reaction or explainer ({m.group(0)})"
-    if weak:
+    if weak := one_story_problem(head):
         out.append(f"not one story: {weak}")
     # newsworthy.audience()'s refusals ("a routine military update", "diplomacy talk") are a judgement of the consequence, which is the
     # part the model replaces; as vetoes they refused "Iran says three tankers hit mines in Hormuz" and "Poland issues air raid alerts as

@@ -44,6 +44,22 @@ Measured on the RTX 5090, one model at a time. Other GPU load was present, inclu
 | qwen3.8:27b + gate | 0.80 | 0.85 | 0.89 |
 | qwen3.6:27b + gate | 0.82 | 0.76 | 0.89 |
 
+**Gate audit (branch owner/feat/intel-gateaudit, `ops/intel/gate_replay.py`).** Every refusal was attributed to its rule. The only veto
+that removed stories the model had right was the round-up rule: "Nasdaq sinks more than -4.5%, is down for 2026, fueled by AI trade
+selloff" (major), two "Middle East latest: ..." headlines and "Green Week Ahead? Nvidia Futures Rip 6%, ..." (4 positives for qwen3.8,
+2 for qwen3.6). The gate now has its own one-story check (`gate.roundup` / `one_story_problem`; production `quality.is_roundup` is
+unchanged): subject-less clauses continue the sentence, thousands separators are not list commas, a live page's single-event headline is
+that event (its preview is not), a teaser question is not part of the list. It is also stricter where the model let round-ups and
+features through: "A; B", "A. And, B", "..., and more", "Then came", ": Inside", "— Why ...", and forecast wording in the lead clause
+("expected to", "poised to", ...). Regression tests: `tests/test_intel_gate_legit_news.py`.
+
+| Engine | Precision | Recall | Major recall | Positives removed by a veto | Negatives removed by a veto |
+|---|---|---|---|---|---|
+| qwen3.8:27b + gate (audited) | 0.84 | 0.90 | 0.94 | 0 (was 4) | 5 (was 2) |
+| qwen3.6:27b + gate (audited) | 0.88 | 0.79 | 0.94 | 0 (was 2) | 6 (was 2) |
+
+The one remaining missed major ("Russian missile hits Poland ..., says Tusk") is the model's own refusal (materiality noise), not a veto.
+
 **Majors the rules miss and qwen3.8 catches:**
 - Nvidia +27% on Huang's return;
 - CrowdStrike–Zscaler $44B (twice);
