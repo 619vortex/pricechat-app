@@ -110,3 +110,5 @@ from app.models.vpn import VpnAccount, VpnBrowser, VpnDevice, VpnPayment, VpnSer
 from app.models.perf_indexes import PERF_INDEXES  # noqa: E402,F401  (hot-query indexes, migration 0090)
 from app.models.committee import CmBacktest, CmLlmJob, CmOutcome, CmPaperTrade, CmRun, CmUsage  # noqa: E402,F401
 from app.models.kalshi import KalshiBot, KalshiLink, KalshiReport  # noqa: E402,F401
+from app.models.intel import AiUsage, IntelJob, IntelWorker  # noqa: E402,F401  (Terminal Intelligence Engine channel, migration 0121)
+from app.models.intel_shadow import IntelShadow  # noqa: E402,F401  (the semantic gate's shadow record, migration 0122)
