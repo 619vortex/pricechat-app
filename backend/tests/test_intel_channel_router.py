@@ -49,8 +49,17 @@ def pc_heartbeat(db: Session, ago: float = 0) -> IntelWorker:
     w = channel.worker_for(db, TOKEN)
     assert w is not None
     w.last_seen_at = utcnow() - timedelta(seconds=ago)
+    w.info = {"models": ["qwen3.8:27b"], "busy": False}
     db.commit()
     return w
+
+
+def test_a_pc_whose_ollama_is_down_is_not_online(db: Session, on: Any) -> None:
+    w = pc_heartbeat(db)
+    assert channel.pc_online(db, utcnow())
+    w.info = {"models": [], "busy": True}  # the worker heartbeats on while Ollama is down
+    db.commit()
+    assert not channel.pc_online(db, utcnow())
 
 
 # --- off by default -------------------------------------------------------------------------------------------------------------

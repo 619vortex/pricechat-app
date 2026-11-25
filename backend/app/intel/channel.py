@@ -135,7 +135,12 @@ def pc_online(db: Session, now: datetime, settings: Any = None) -> bool:
     if not configured:
         return False
     w = db.scalar(select(IntelWorker).where(IntelWorker.token_hash == configured, IntelWorker.enabled.is_(True)))
-    return w is not None and fresh(w, now)
+    if w is None or not fresh(w, now):
+        return False
+    # The worker keeps heartbeating while its Ollama is down (models=[], busy=true). Such a PC is not online for routing, or every job
+    # would wait out its claim window (180 s for a slot) before Railway answered it.
+    info = w.info or {}
+    return bool(info.get("models")) and not info.get("busy")
 
 
 # --- claim -----------------------------------------------------------------------------------------------------------------------

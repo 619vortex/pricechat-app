@@ -381,7 +381,9 @@ def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) ->
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(alembic_config())
-    assert script.get_heads() == ["0120_trending_text_ok"]  # 0120: Trending's owner-chosen text-only tweets (one column, 2026-11-23)
+    assert script.get_heads() == ["0122_intel_shadow_gate"]  # 0121/0122: the intel engine's channel and shadow tables (additive, 2026-11-25)
+    assert script.get_revision("0122_intel_shadow_gate").down_revision == "0121_intel_channel"
+    assert script.get_revision("0121_intel_channel").down_revision == "0120_trending_text_ok"
     assert script.get_revision("0120_trending_text_ok").down_revision == "0119_vpn_review_seats"
     assert script.get_revision("0119_vpn_review_seats").down_revision == "0118_nd_editor"
     assert script.get_revision("0118_nd_editor").down_revision == "0117_nd_validation"
