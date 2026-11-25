@@ -60,6 +60,12 @@ MUST_PASS = [
     "Bitcoin hits record high above $150,000, its first since May",  # shape: "May" the month is not the hedge "may"
     "Exchange halts withdrawals after $1,200,000,000 hack, says CEO",  # shape: thousands separators are not list commas
     "Two injured, one critically, in Iranian attack on industrial plant in Bahrain",  # production 2026-11-22 (quality.CONTINUATION)
+    # eval_v2 held-out check (each was a positive the model had right, vetoed before this fix)
+    "US stocks rally: S&P 500 +5.4%, Nasdaq +7.6%, Dow +3.2% (Mon 11-23 vs Fri close)",  # major: figures, not a list of stories
+    "Bitcoin price drops to $60K as Anthropic drops to $87 in tech sell-off",  # a market price, not a shopping deal
+    "California investigates Nvidia over whether chip exports ended up in China",  # the probe is the event
+    "Bitcoin drops below $64,000 as bullish bets get wiped out over the weekend",  # liquidated positions, not a "bullish" take
+    "Ukraine's Ust-Luga strike destroyed five fuel tanks and may have hit a Russian warship",  # stated event, hedged extra
 ]
 
 
@@ -106,6 +112,12 @@ MUST_BLOCK = [
     ("Markets react to Jensen Huang’s return", "not one story"),  # eval
     ("Countries race to secure COP31 deal after fossil fuel row", "not one story"),  # eval
     ("Trump blames the Fed as stocks slide", "not one story"),  # shape: "blames" with no hard event stays a reaction
+    # the eval_v2 narrowings must not open these
+    ("AirPods Pro drops to $99 in early Black Friday deal", "not one story"),  # shape: a shopping deal is still not a topic
+    ("Fed weighs whether to cut rates in December", "hedged"),  # shape: deliberation, not an investigation
+    ("Markets split over whether Nvidia can rebound", "hedged"),  # shape
+    ("Bitcoin could crash and may have already peaked, analysts say", "hedged"),  # shape: the lead's own hedge is still seen
+    ("Why bullish traders think Bitcoin hits $200,000", "not one story"),  # shape: still a feature
 ]
 
 

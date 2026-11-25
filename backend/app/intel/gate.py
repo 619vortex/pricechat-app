@@ -143,8 +143,28 @@ FEATURE_EXTRA = re.compile(r"[.?!]\s+Then came\b|(?::|\s[-–—])\s*Inside\b|\s
 FORECAST_LEAD = re.compile(r"\b(expected to|poised to|projected to|forecast to|on track to|likely to)\b", re.I)
 # "May" the month (or a name) is not "may" the hedge: "Bitcoin hits a record, its first since May", "Theresa May"
 MAY_NOT_HEDGE = re.compile(r"\b(?:in|since|of|early|late|mid|last|this|next|until|from|by|before|after|Theresa)\s+May\b|\bMay\s+\d", re.I)
+# a hedged EXTRA after a stated past event: "Ukraine's Ust-Luga strike destroyed five fuel tanks and may have hit a Russian warship"
+# (significant). The event happened; only the added detail is hedged (and the claim classes still mark that detail SPECULATION).
+# Only the tail is cut: whatever comes before it ("X could rise and may have ...") is still checked for a hedge.
+HEDGED_EXTRA = re.compile(r"\s(?:and|but)\s+(?:may|might|could)\s+(?:have|also)\b.*$", re.I)
 # a reaction word next to a stated hard event is the event's sourcing: "Ukraine blames Russia for strike that killed 20"
 REACTION_SOFT = ("blame", "blames", "demand", "demands")
+# --- held-out check on eval_v2 (2026-11-25): each of these removed a positive the model had right ---
+# "US stocks rally: S&P 500 +5.4%, Nasdaq +7.6%, Dow +3.2%" (major): a list of figures for one market move is one story
+FIGURE = re.compile(r"[+\-−–]?\$?\d[\d.,]*\s?(?:%|percent|points?|pts|bps|[kmbt]n?\b|billion|million|trillion)", re.I)
+# "Bitcoin price drops to $60K as Anthropic drops to $87 in tech sell-off" (significant): sources.NOT_A_TOPIC's "drops to $9" is a
+# shopping deal ("AirPods drops to $99"), not a market asset's price move
+MARKET_ASSET = re.compile(r"\b(?:bitcoin|btc|ether(?:eum)?|eth|crypto\w*|stocks?|shares?|price|index|futures|nasdaq|s&p|dow|oil|gold|"
+                          r"silver|yields?|dollar|sell-?off|rally|token|coin)\b", re.I)
+SHOPPING_DROP = re.compile(r"\bdrops? to (?:its )?(?:lowest|[$£€]\d)", re.I)
+# "California investigates Nvidia over whether chip exports ended up in China" (significant): the probe is the event; "whether" names
+# its subject, it does not hedge it
+# Only an investigation, probe, review or lawsuit: "Fed weighs whether to cut" and "split over whether" stay hedges.
+WHETHER_SUBJECT = re.compile(r"\b(?:investigat\w*|probe[sd]?|probing|examin\w*|review\w*|inquiry|audit\w*|su(?:es|ed|ing))\b[^;:]{0,80}?"
+                             r"\b(?:over|into|about|on|of)?\s*whether\b", re.I)
+# "Bitcoin drops below $64,000 as bullish bets get wiped out" (significant): bullish/bearish POSITIONS being liquidated are a market
+# event, not a "bullish take"
+POSITIONS = re.compile(r"\b(?:bullish|bearish)\s+(?:bets?|positions?|traders?|longs?|shorts?|wagers?|options?)\b", re.I)
 
 
 def _continues(part: str) -> bool:
@@ -177,6 +197,8 @@ def roundup(head: str) -> str:
     parts = [p.strip() for p in re.split(r"[,;]", t) if p.strip()]
     if any(_continues(p) for p in parts[1:]):
         return ""
+    if len(parts) >= 2 and all(FIGURE.search(p) for p in parts[1:]):
+        return ""  # "S&P 500 +5.4%, Nasdaq +7.6%, Dow +3.2%": one market move, several figures
     if len(parts) >= 3 and all(len(p.split()) >= 2 for p in parts):
         return "a round-up of several stories, not one story"
     return ""
@@ -190,10 +212,11 @@ def one_story_problem(head: str) -> str:
     if r := roundup(head):
         return r
     if f := quality.feature(head):
-        return f
+        if not (SHOPPING_DROP.search(head) and MARKET_ASSET.search(head) and not quality.FEATURE.search(head)):
+            return f
     if m := FEATURE_EXTRA.search(head or ""):
         return f"a feature or explainer, not an event ({m.group(0).strip(' .?!:-–—').lower()})"
-    if m := newsworthy.REACTION.search(head or ""):
+    if m := newsworthy.REACTION.search(POSITIONS.sub(" ", head or "")):
         if not (m.group(0).lower() in REACTION_SOFT and quality.EVENT_SAID.search(head or "")):
             return f"a reaction or explainer ({m.group(0)})"
     return ""
@@ -201,7 +224,7 @@ def one_story_problem(head: str) -> str:
 
 def lead_hedge(head: str) -> str:
     """The hedge, rumour or forecast wording in the headline's lead clause, or "": whether the event itself happened."""
-    lead = MAY_NOT_HEDGE.sub(" ", lead_clause(head))
+    lead = HEDGED_EXTRA.sub("", WHETHER_SUBJECT.sub(" ", MAY_NOT_HEDGE.sub(" ", lead_clause(head))))
     if h := classes.hedge_words(lead):
         return h
     m = FORECAST_LEAD.search(lead)

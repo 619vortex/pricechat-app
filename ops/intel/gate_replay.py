@@ -126,15 +126,21 @@ def replay(path: str, items: dict, out_dir: str | None, detail: bool) -> dict:
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     detail = "--detail" in sys.argv
-    engines = None
+    engines, eval_path, split, glob_pat = None, EVAL, None, "ollama_*.jsonl"
     for a in sys.argv[1:]:
         if a.startswith("--engines="):
             engines = a.split("=", 1)[1].split(",")
+        elif a.startswith("--eval="):
+            eval_path = a.split("=", 1)[1]
+        elif a.startswith("--split="):  # eval_v2: dev (tuning) or test (held out)
+            split = a.split("=", 1)[1]
+        elif a.startswith("--glob="):
+            glob_pat = a.split("=", 1)[1]
     runs, out_dir = args[0], (args[1] if len(args) > 1 else None)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    items = {i["id"]: i for i in json.load(open(EVAL, encoding="utf-8"))["items"]}
-    for f in sorted(glob.glob(os.path.join(runs, "ollama_*.jsonl"))):
+    items = {i["id"]: i for i in json.load(open(eval_path, encoding="utf-8"))["items"] if split is None or i.get("split") == split}
+    for f in sorted(glob.glob(os.path.join(runs, glob_pat))):
         name = os.path.basename(f).removeprefix("ollama_").removesuffix(".jsonl")
         if engines and name not in engines:
             continue
