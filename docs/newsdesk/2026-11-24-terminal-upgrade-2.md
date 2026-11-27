@@ -47,3 +47,30 @@ Re-checked against the raw Binance candles kept in `docs/incidents/2026-11-21-te
   - At 04:05 UTC on 20 Nov, when X 142 went out, silver was $41.55–41.75, about −6.0 to −6.3% against 19 Nov's $44.32 close.
   - It closed the day −7.41%, its biggest one-day fall since 15 May (−9.13%).
   - The draft's "about 5.1%" was the 01:35 figure, so it is corrected.
+
+## Deployment (2026-11-24 19:26 UTC, owner approved)
+
+- Checks before deploying:
+  - CI green on 058e148 (backend, frontend, gitleaks).
+  - Local backend suite: 3,946 passed.
+  - Backup restore test passed (backup taken 10:46 UTC, integrity ok, alembic 0120 = code head).
+  - No migration and no dependency change, so rollback needs no database step.
+- Review fixes made before deploying (5366166):
+  - The branded card prints a measured move's own window over its figure ("IN 1 HOUR"), so a 1-hour move beside the 24-hour chart is never read as the day's.
+  - Every writer's copy is refused if it names a related market in the headline, or links one to the move as a cause or an effect (`moves.cross_problems`).
+- Backend: Railway f4642e55, from release/kiwi-hardening fast-forwarded to 058e148.
+- Frontend: Vercel pricechat-r7yx5xut5.
+- Liquidation posts stay paused: only the owner's Admin resume clears `liq_pause`.
+- Rollback:
+  - Backend: `railway up --service api` from `D:/pc-wt/rollback-1772c9e/backend` (linked). bf26f789 is now REMOVED and can't be redeployed.
+  - Frontend: `vercel promote pricechat-cgz2t89xr-price-chat.vercel.app`.
+
+## Correction G approved (owner, 2026-11-25)
+
+The owner approved G, a reply to silver X post 142 (252 characters). The owner publishes it by hand; Price Chat sends nothing.
+
+```
+Correction: this post measured silver's fall from the close two days earlier ($45.00). Against the previous day's close ($44.32), silver was down about 6% when we posted, not 6.7%. Silver closed the day down 7.4%, its biggest one-day fall since 15 May.
+```
+
+All corrections are now settled: A, B, C, E, F and G approved; D not needed (the original never reached X).
