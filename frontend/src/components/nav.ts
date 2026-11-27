@@ -54,6 +54,7 @@ export const AREAS: NavArea[] = [
     pages: [
       { to: "/community", label: "Community", about: "Members and what they ask for, Telegram, invites, Telegram trading and the Pokémon market.", kind: "hub" },
       { to: "/members", label: "Members", about: "Everyone with a Kiwi Passport: their rank, XP and linked accounts.", kind: "tool" },
+      { to: "/predictions", label: "Predictions", about: "Free daily and weekly Bitcoin calls for Predictor XP: calls, votes, settlement, cancel and resolve.", kind: "tool" },
       { to: "/telegram", label: "Telegram", about: "What people are talking about in your Telegram chats.", match: ["/telegram/"], kind: "tool" },
       { to: "/telegram-trading", label: "Telegram trading", about: "Members trading on Hyperliquid from the Telegram bot: mainnet switch, emergency stop, referral codes.", kind: "tool" },
       { to: "/pokemon", label: "Pokémon Market", about: "Card prices, the marketplace and the vault.", match: ["/pokemon/"], kind: "tool" },

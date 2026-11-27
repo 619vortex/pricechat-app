@@ -14,6 +14,7 @@ const CommunityHub = lazy(() => import("./pages/hubs/CommunityHub").then((m) => 
 const SystemHub = lazy(() => import("./pages/hubs/SystemHub").then((m) => ({ default: m.SystemHub })));
 const PublishingHub = lazy(() => import("./pages/hubs/PublishingHub").then((m) => ({ default: m.PublishingHub })));
 const MembersPage = lazy(() => import("./pages/Members").then((m) => ({ default: m.MembersPage })));
+const PredictionsAdminPage = lazy(() => import("./pages/PredictionsAdmin").then((m) => ({ default: m.PredictionsAdminPage })));
 const MarketHome = lazy(() => import("./pages/pokemon/MarketHome").then((m) => ({ default: m.MarketHome })));
 const lp = () => import("./pages/pokemon/ListPages");
 const GradesPage = lazy(() => lp().then((m) => ({ default: m.GradesPage })));
@@ -73,6 +74,7 @@ export function AdminApp() {
             <Route path="website" element={<PublishingHub />} />
             <Route path="youtube" element={<PublishingHub />} />
             <Route path="members" element={<MembersPage />} />
+            <Route path="predictions" element={<PredictionsAdminPage />} />
             <Route path="community" element={<CommunityHub />} />
             <Route path="trading-bot" element={<CommunityHub />} />
             <Route path="affiliate" element={<Overview />} />
