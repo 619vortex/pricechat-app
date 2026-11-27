@@ -10,7 +10,7 @@ import logging
 from collections.abc import Callable
 from datetime import date
 
-from app.growth.detectors import breadth, crowded, extremes, history, relative
+from app.growth.detectors import anomalies, breadth, crowded, extremes, history, insights, relative
 from app.growth.findings import Finding
 from app.growth.memory import Memory
 
@@ -34,6 +34,15 @@ DETECTORS: dict[str, tuple[str, Detector]] = {
     "ratio_record": ("relative", relative.ratio_record),
     "divergence": ("relative", relative.divergence),
     "beta": ("relative", relative.beta),
+    # G2 (2026-11-27): market anomalies, historical comparisons and original insights
+    "streak": ("extremes", anomalies.streak),
+    "volatility_regime": ("extremes", anomalies.volatility_regime),
+    "volume_spike": ("extremes", anomalies.volume_spike),
+    "weekly_streak": ("extremes", anomalies.weekly_streak),
+    "fear_aftermath": ("history", insights.fear_aftermath),
+    "year_paths": ("history", insights.year_paths),
+    "gold_ratio": ("relative", insights.gold_ratio),
+    "drawdown_table": ("relative", insights.drawdown_table),
 }
 
 

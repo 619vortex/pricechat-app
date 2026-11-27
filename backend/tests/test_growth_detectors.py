@@ -196,14 +196,26 @@ def test_breadth_ma_from_stored_breadth_series() -> None:
 
 def test_funding_extremes_annualised() -> None:
     data = {f"fund:C{k}": [(AS_OF - timedelta(days=i), 0.00001) for i in range(90)] for k in range(12)}
-    data["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.0001) for i in range(90)]  # -0.01%/h -> -87.6% a year
-    data["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.00008) for i in range(90)]
+    data["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.0001) for i in range(90)]  # -0.01%/h -> -87.6% a year
+    data["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.00008) for i in range(90)]
     fs = crowded.funding_extremes(Memory.from_points(data), AS_OF)
     assert len(fs) == 1
     f = fs[0]
     assert f.numbers["list"]["text"] == "ADA −88% · XLM −70%"
     assert "history of" in f.text(0) and "don't always" in f.text(0)
     all_pass(fs)
+
+
+def test_funding_extremes_skip_one_day_spikes_and_implausible_rates() -> None:
+    """11-25 production: BIGTIME's one-day -0.35%/h average annualised to "-3,091%" and topped the queue. A spike (one day) or a rate beyond
+    crowded.MAX_PLAUSIBLE is never listed."""
+    data = {f"fund:C{k}": [(AS_OF - timedelta(days=i), 0.00001) for i in range(90)] for k in range(12)}
+    data["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.0001) for i in range(90)]
+    data["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.00008) for i in range(90)]
+    data["fund:BIG"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.0035) for i in range(90)]  # -3,066% a year: implausible
+    data["fund:ONE"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.0002) for i in range(90)]  # one day only: a spike
+    f = crowded.funding_extremes(Memory.from_points(data), AS_OF)[0]
+    assert f.numbers["list"]["text"] == "ADA −88% · XLM −70%"
 
 
 def test_funding_streak_longest_in_data() -> None:

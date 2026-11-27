@@ -50,6 +50,15 @@ describe("Originals", () => {
     expect(calls.every((c) => !/twitter|x\.com|telegram/i.test(c))).toBe(true);
   });
 
+  it("shows that the draft's data was re-read from its source", async () => {
+    serve([draft({ verification: { ok: true, at: "2026-11-27T10:15:00+00:00", values_checked: 1369, problems: [],
+      series: { "px:BTC:close": { source: "Hyperliquid candleSnapshot" } } } })]);
+    render(<OriginalsPage />);
+    await settle();
+    expect(screen.getByText("Data verified")).toBeTruthy();
+    expect(screen.getByTestId("verification").textContent).toContain("1,369 stored values re-read from Hyperliquid candleSnapshot at 2026-11-27 10:15 UTC; every one matched");
+  });
+
   it("edits through the API and regenerates with or without a new chart", async () => {
     serve([draft({})]);
     render(<OriginalsPage />);

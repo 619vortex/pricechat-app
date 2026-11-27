@@ -49,8 +49,8 @@ def _findings() -> dict[str, Finding]:
               "breadth:n200": [(d, 30.0) for d in days]}
     out["breadth_ma"] = breadth.breadth_ma(Memory.from_points(shaped), AS_OF)
     fund = {f"fund:C{k}": [(AS_OF - timedelta(days=i), 0.00001) for i in range(90)] for k in range(12)}
-    fund["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.0001) for i in range(90)]
-    fund["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.00008) for i in range(90)]
+    fund["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.0001) for i in range(90)]
+    fund["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.00008) for i in range(90)]
     out["funding_extremes"] = crowded.funding_extremes(Memory.from_points(fund), AS_OF)
     streak = [(AS_OF - timedelta(days=i), (-0.00001 if i < 9 else (0.00001 if i % 7 else -0.00001))) for i in range(200)]
     out["funding_streak"] = crowded.funding_streak(Memory.from_points({"fund:BTC": streak}), AS_OF, ("BTC",))
@@ -82,8 +82,12 @@ def _findings() -> dict[str, Finding]:
 FINDINGS = _findings()
 
 
+# G2 detectors whose own test files render every finding in both formats (tests/test_growth_g2_anomalies.py, test_growth_g2_insights.py)
+G2_RENDERED_ELSEWHERE = {"streak", "volatility_regime", "volume_spike", "fear_aftermath", "year_paths", "gold_ratio", "weekly_streak", "drawdown_table"}
+
+
 def test_every_detector_has_a_fixture() -> None:
-    assert set(FINDINGS) == set(DETECTORS)
+    assert set(FINDINGS) | G2_RENDERED_ELSEWHERE == set(DETECTORS)
 
 
 def _variant(f: Finding, kind: str) -> dict:

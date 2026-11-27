@@ -23,6 +23,7 @@ from app.models.market_memory import GrDraft
 log = logging.getLogger(__name__)
 
 STATUSES = ("pending", "approved", "rejected", "regenerating")
+GENERATOR = "g2-1"  # the detector set + verification version: a new one drafts once on the day it is deployed (jobs.growth_originals)
 REPEAT_SKIP = timedelta(days=7)  # the same finding key isn't drafted twice in a week
 SIMILAR_DAYS = timedelta(days=3)  # same detector + subject within 3 days: novelty halved
 STORY_DAYS = timedelta(days=3)  # nd_storylines told about the subject in 3 days: novelty 0.7
@@ -70,23 +71,37 @@ def novelty(db: Session, findings: list[Finding], now: datetime) -> list[Finding
             f.novelty *= 0.5
             f.notes.append("a draft on the same detector and subject in the last 3 days")
         subj = (f.words.get("asset") or f.subject).lower()
-        if told and len(subj) > 2 and any(subj in t for t in told):
+        # Bitcoin and Ether are in nearly every News Desk storyline, so "told recently" says nothing about a data angle on them (11-27: the
+        # record 7-week Bitcoin losing streak lost its slot to smaller coins this way)
+        if told and len(subj) > 2 and f.subject.upper() not in ("BTC", "ETH") and any(subj in t for t in told):
             f.novelty *= 0.7
             f.notes.append("the News Desk told a story about this subject in the last 3 days")
         out.append(f)
     return out
 
 
-def select_top(findings: list[Finding], per_format: int, max_total: int) -> list[Finding]:
-    """Best score first, at most per_format per format and one per (format, subject); then round-robin across formats so every format the
-    detectors found something for is represented before any format gets a second slot."""
+PER_DETECTOR = 2  # G2: at most two drafts of one detector per run (a run of five "X is down N% in 30 days" posts isn't variety)
+
+
+def select_top(findings: list[Finding], per_format: int, max_total: int, per_detector: int = PER_DETECTOR) -> list[Finding]:
+    """Best score first, at most per_format per format, per_detector per detector and one per (format, subject); then round-robin across
+    formats so every format the detectors found something for is represented before any format gets a second slot."""
     by_fmt: dict[str, list[Finding]] = {k: [] for k in FORMATS}
     seen: set[tuple[str, str]] = set()
+    per_det: dict[str, int] = {}
     for f in sorted(findings, key=lambda f: -f.score):
-        if (f.format, f.subject) in seen or len(by_fmt[f.format]) >= per_format or f.score <= 0:
+        if (f.format, f.subject) in seen or len(by_fmt[f.format]) >= per_format or f.score <= 0 or per_det.get(f.detector, 0) >= per_detector:
             continue
+        per_det[f.detector] = per_det.get(f.detector, 0) + 1
         seen.add((f.format, f.subject))
         by_fmt[f.format].append(f)
+    if sum(len(v) for v in by_fmt.values()) < max_total:  # a quiet day: one more per detector rather than fewer drafts
+        for f in sorted(findings, key=lambda f: -f.score):
+            if (f.format, f.subject) in seen or len(by_fmt[f.format]) >= per_format or f.score <= 0 or per_det.get(f.detector, 0) >= per_detector + 1:
+                continue
+            per_det[f.detector] = per_det.get(f.detector, 0) + 1
+            seen.add((f.format, f.subject))
+            by_fmt[f.format].append(f)
     out: list[Finding] = []
     for rank in range(per_format):
         for k in FORMATS:
@@ -120,12 +135,12 @@ def _enqueue_writer(db: Session, d: GrDraft, f: Finding, priority: str, settings
     return job.id if job is not None else None
 
 
-def create(db: Session, f: Finding, *, settings: Any = None, use_writer: bool = True) -> GrDraft | None:
+def create(db: Session, f: Finding, *, settings: Any = None, use_writer: bool = True, verification: dict[str, Any] | None = None) -> GrDraft | None:
     text, variant = writer.template_text(f)
     if text is None:
         log.warning("growth: no template of %s passes the gate: %s", f.key, gate.problems(f.text(0), f))
         return None
-    fd = f.to_dict() | {"template_variant": variant}
+    fd = f.to_dict() | {"template_variant": variant, "generator": GENERATOR, **({"verification": verification} if verification else {})}
     d = GrDraft(finding_key=f.key[:160], format=f.format, detector=f.detector, status="pending", text=text, original_text=text, writer="template",
                 finding=fd, chart=f.chart, sources=_sources(f), calculation=f.calculation, score=f.score, as_of=f.as_of, version=1, image_cache={})
     db.add(d)
@@ -150,8 +165,10 @@ def _sources(f: Finding) -> list[dict[str, Any]]:
 
 
 def generate(db: Session, *, settings: Any = None, now: datetime | None = None, mem: Memory | None = None, as_of: date | None = None,
-             use_writer: bool = True) -> dict[str, Any]:
-    """One generation pass (the daily job and Admin's Generate now)."""
+             use_writer: bool = True, verifier: Any = "auto") -> dict[str, Any]:
+    """One generation pass (the daily job and Admin's Generate now). G2: every picked finding's stored inputs are re-read from their source
+    first (app.growth.verify); one that doesn't match, or can't be re-read, is not drafted and the next best takes its place.
+    verifier: "auto" (growth_verify_sources decides), None (no check), or an object with check(finding) -> {"ok": bool, ...}."""
     s = _settings(settings)
     now = now or utcnow()
     mem = mem or Memory.from_db(db)
@@ -159,14 +176,33 @@ def generate(db: Session, *, settings: Any = None, now: datetime | None = None, 
     publishable = [f for f in found if f.publishable]
     held = len(found) - len(publishable)
     fresh = novelty(db, publishable, now)
-    picked = select_top(fresh, int(s.growth_drafts_per_format), int(s.growth_max_drafts_per_run))
-    made = []
-    for f in picked:
-        d = create(db, f, settings=s, use_writer=use_writer)
+    limit = int(s.growth_max_drafts_per_run)
+    ranked = select_top(fresh, int(s.growth_drafts_per_format), len(fresh))
+    if verifier == "auto":
+        from app.growth.verify import Verifier
+
+        verifier = Verifier(mem, now=now) if bool(getattr(s, "growth_verify_sources", True)) else None
+    made: list[int] = []
+    refused: list[dict[str, Any]] = []
+    for f in ranked:
+        if len(made) >= limit:
+            break
+        check = verifier.check(f) if verifier is not None else None
+        if check is not None and not check.get("ok"):
+            refused.append({"key": f.key, "problems": (check.get("problems") or [])[:3]})
+            log.warning("growth: %s not drafted, its data didn't verify: %s", f.key, "; ".join((check.get("problems") or [])[:3]))
+            continue
+        d = create(db, f, settings=s, use_writer=use_writer, verification=check)
         if d is not None:
             made.append(d.id)
     return {"found": len(found), "held_unlicensed": held, "after_novelty": len(fresh), "drafted": len(made), "draft_ids": made, "errors": errors,
-            "as_of": (as_of or detectors.default_as_of(mem) or now.date()).isoformat()}
+            "not_verified": refused, "generator": GENERATOR, "as_of": (as_of or detectors.default_as_of(mem) or now.date()).isoformat()}
+
+
+def generated_today(db: Session, now: datetime) -> bool:
+    """A draft from the current GENERATOR was made today (UTC): the daily job doesn't run again. A new generator (a deploy) runs once."""
+    day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return any((f or {}).get("generator") == GENERATOR for (f,) in db.execute(select(GrDraft.finding).where(GrDraft.created_at >= day0)))
 
 
 def apply_writer_results(db: Session) -> dict[str, int]:
@@ -307,6 +343,7 @@ def view(d: GrDraft) -> dict[str, Any]:
             "chart_kinds": _kinds(d.chart), "render_info": d.image_cache or {},  # render meta per format: template, version (learner)
             "created_at": d.created_at.isoformat() if d.created_at else None, "decided_at": d.decided_at.isoformat() if d.decided_at else None,
             "decided_by": d.decided_by, "reject_reason": d.reject_reason, "writer_pending": d.writer_job_id is not None,
+            "verification": f.get("verification"), "generator": f.get("generator", "g1"),
             "gate_problems": gate.problems(d.text, Finding.from_dict(f), as_edited=d.writer == "owner") if f else []}
 
 

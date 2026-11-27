@@ -38,6 +38,7 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         return boom(self, request)
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", boom)
+    monkeypatch.setattr(get_settings(), "growth_verify_sources", False)  # the live source check is tested with a stub verifier below
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", aboom)
     return attempts
 
@@ -157,8 +158,8 @@ def test_regenerate_without_ai_uses_the_next_template(client: TestClient, draft:
 
 def test_regenerate_chart_variant(client: TestClient, db: Session) -> None:
     data = {f"fund:C{k}": [(AS_OF - timedelta(days=i), 0.00001) for i in range(90)] for k in range(12)}
-    data["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.0001) for i in range(90)]
-    data["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i else -0.00008) for i in range(90)]
+    data["fund:ADA"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.0001) for i in range(90)]
+    data["fund:XLM"] = [(AS_OF - timedelta(days=i), 0.00001 if i >= 3 else -0.00008) for i in range(90)]
     from app.growth.detectors import crowded
 
     f = crowded.funding_extremes(Memory.from_points(data), AS_OF)[0]
@@ -250,7 +251,7 @@ def test_generate_drafts_dedupes_and_holds_unlicensed(db: Session, mem: Memory, 
     assert out["held_unlicensed"] == 1 and out["drafted"] >= 2 and out["errors"] == []
     keys = {d.finding_key for d in db.query(GrDraft)}
     assert "rarity:ETH:cb" not in keys
-    for _ in range(3):  # later runs only draft what wasn't drafted yet (one subject per format per run), never a key twice in a week
+    for _ in range(8):  # later runs only draft what wasn't drafted yet (one subject per format per run), never a key twice in a week
         again = drafts.generate(db, mem=mem, now=utcnow())
         new = {db.get(GrDraft, i).finding_key for i in again["draft_ids"]}  # type: ignore[union-attr]
         assert not (new & keys)
@@ -269,7 +270,7 @@ def test_select_top_variety() -> None:
             pass
 
         f = F()
-        f.format, f.subject, f.score = fmt_, subject, rarity * 100  # type: ignore[attr-defined]
+        f.format, f.subject, f.score, f.detector = fmt_, subject, rarity * 100, fmt_  # type: ignore[attr-defined]
         return f
 
     fs = [fake("extremes", "BTC", 0.9), fake("extremes", "BTC", 0.8), fake("extremes", "ETH", 0.7), fake("breadth", "U", 0.5),
@@ -298,3 +299,49 @@ def test_growth_code_never_imports_a_publisher() -> None:
         src = f.read_text(encoding="utf-8")
         for b in banned:
             assert b not in src, f"{f.name} references {b}"
+
+
+def test_select_top_caps_one_detector() -> None:
+    class F:
+        def __init__(self, subject: str, score: float) -> None:
+            self.format, self.detector, self.subject, self.score = "extremes", "rarity", subject, score
+
+    fs = [F("BTC", 90), F("XRP", 89), F("ETH", 88), F("SOL", 87)]
+    assert [g.subject for g in drafts.select_top(fs, per_format=5, max_total=2)] == ["BTC", "XRP"]  # type: ignore[arg-type]
+    # a quiet day (fewer findings than slots): one more per detector, never more
+    assert [g.subject for g in drafts.select_top(fs, per_format=5, max_total=15)] == ["BTC", "XRP", "ETH"]  # type: ignore[arg-type]
+
+
+class StubVerifier:
+    """Refuses one finding key (its data 'didn't match the source'), passes the rest."""
+
+    def __init__(self, refuse: str) -> None:
+        self.refuse, self.seen = refuse, []
+
+    def check(self, f: Any) -> dict[str, Any]:
+        self.seen.append(f.key)
+        ok = f.key != self.refuse
+        return {"ok": ok, "values_checked": 10, "series": {}, "problems": [] if ok else ["px:BTC:close 2026-11-20: stored 1 vs Hyperliquid 2"]}
+
+
+def test_generate_drafts_only_verified_findings_and_records_the_check(db: Session, mem: Memory) -> None:
+    from app.growth import detectors
+
+    found, _ = detectors.run_all(mem)
+    refuse = max(found, key=lambda f: f.score).key
+    v = StubVerifier(refuse)
+    out = drafts.generate(db, mem=mem, now=utcnow(), verifier=v)
+    assert out["not_verified"] and out["not_verified"][0]["key"] == refuse and out["generator"] == drafts.GENERATOR
+    made = [db.get(GrDraft, i) for i in out["draft_ids"]]
+    assert made and refuse not in {d.finding_key for d in made}  # type: ignore[union-attr]
+    for d in made:
+        assert d.finding["verification"]["ok"] and d.finding["generator"] == drafts.GENERATOR  # type: ignore[union-attr]
+        assert drafts.view(d)["verification"]["values_checked"] == 10  # type: ignore[arg-type]
+    assert drafts.generated_today(db, utcnow())
+
+
+def test_a_new_generator_drafts_again_the_same_day(db: Session, mem: Memory, monkeypatch: pytest.MonkeyPatch) -> None:
+    drafts.generate(db, mem=mem, now=utcnow(), verifier=None)
+    assert drafts.generated_today(db, utcnow())
+    monkeypatch.setattr(drafts, "GENERATOR", "g9-test")
+    assert not drafts.generated_today(db, utcnow())  # a deploy with a new detector set runs once more today

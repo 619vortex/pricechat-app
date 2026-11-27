@@ -15,6 +15,8 @@ export type OriginalDraft = {
   chart: { kind: string; title?: string; variant_of?: string }; chart_kinds?: string[];
   render_info?: Record<string, { template?: string; version?: string }>; version: number; created_at: string | null; decided_at: string | null;
   decided_by: string; reject_reason: string; writer_pending: boolean; gate_problems: string[];
+  verification?: { ok: boolean; at: string; values_checked: number; problems: string[]; series: Record<string, { source?: string }> } | null;
+  generator?: string;
 };
 export type OriginalsList = {
   drafts: OriginalDraft[]; counts: Record<string, number>; publishing: string;
@@ -88,6 +90,14 @@ function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }
             {d.writer_pending ? " (AI wording on its way)" : ""}</span>
         </div>
         {d.gate_problems.length > 0 && <div className="small" style={{ color: "var(--bad, #b00)" }}>Figures gate: {d.gate_problems.join("; ")}</div>}
+        {d.verification ? (
+          <div className="small" data-testid="verification">
+            <Badge tone={d.verification.ok ? "good" : "bad"}>{d.verification.ok ? "Data verified" : "Not verified"}</Badge>{" "}
+            <span className="muted">{d.verification.values_checked.toLocaleString()} stored values re-read from{" "}
+              {[...new Set(Object.values(d.verification.series).map((x) => x.source).filter(Boolean))].join(", ") || "the source"}
+              {" "}at {d.verification.at.slice(0, 16).replace("T", " ")} UTC{d.verification.ok ? "; every one matched" : `; mismatches: ${d.verification.problems.join("; ")}`}</span>
+          </div>
+        ) : <div className="small muted">Data not re-read from the source (drafted before verification existed)</div>}
         <div className="small"><b>Sources:</b> {d.sources.map((s) => s.label).join(", ")}
           {d.attribution.length ? <span className="muted"> · on the graphic: {d.attribution.join(" · ")}</span> : null}</div>
         <details>

@@ -1115,6 +1115,10 @@ def _draw_rank(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
     log = spec.options.get("scale") == "log"
     if spec.options.get("ref_label"):
         box = (box[0], box[1] + 18, box[2], box[3])
+    max_step = (box[3] - box[1]) / 5  # a short list (2-4 rows) keeps rows of a 5-row table, centred, instead of stretching to fill the frame
+    if n < 5:
+        pad = ((box[3] - box[1]) - max_step * n) / 2
+        box = (box[0], box[1] + pad, box[2], box[3] - pad)
     step = (box[3] - box[1]) / n
     size = min(34, max(20, step * 0.56))
     nf = c.font(size, "SemiBold")

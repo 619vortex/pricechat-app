@@ -34,7 +34,9 @@ DETECTOR_LABEL = {"rarity": "Rarity", "record": "Record close", "sentiment": "Se
                   "seasonality": "Seasonality", "then_now": "Then and now", "breadth_count": "Market breadth", "breadth_ma": "Trend breadth",
                   "funding_extremes": "Crowded trade · funding", "funding_streak": "Crowded trade · funding streak",
                   "oi_buildup": "Crowded trade · leverage", "leaderboard": "Leaderboard", "ratio_record": "Relative value",
-                  "divergence": "Divergence", "beta": "Beta to Bitcoin"}
+                  "divergence": "Divergence", "beta": "Beta to Bitcoin", "streak": "Streak", "volatility_regime": "Volatility regime",
+                  "volume_spike": "Volume anomaly", "fear_aftermath": "After extreme fear", "year_paths": "Year to date, every year",
+                  "gold_ratio": "Priced in gold", "weekly_streak": "Weekly streak", "drawdown_table": "Distance from the highs"}
 ANN_KIND = {"marker": "marker", "point_label": "point_label", "hline": "hline", "vline": "vline", "band": "band", "xband": "xband"}
 
 

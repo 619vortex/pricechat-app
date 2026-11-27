@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from app.growth import fmt
 from app.growth.detectors.common import hl_coins, name, percentile_rank, price
@@ -20,6 +21,24 @@ def _ann(rate: float) -> float:
     return rate * ANNUAL
 
 
+MAX_PLAUSIBLE = 300.0  # annualised %: beyond this a one-day average is a squeeze spike on a thin perp, not a crowded trade
+PERSIST_DAYS = 3  # the reading's sign must hold on each of the last 3 stored days
+
+
+def plausible_funding(s: Any, as_of: date) -> bool:
+    """A funding reading the post may annualise (11-25: BIGTIME's one-day -0.35%/h average annualised to "-3,091%" and topped the queue):
+    within MAX_PLAUSIBLE, and the same sign on each of the PERSIST_DAYS stored days up to as_of with no gap (a crowded trade is a state,
+    not one day's spike)."""
+    v = s.value(as_of)
+    if v is None or abs(_ann(v)) > MAX_PLAUSIBLE:
+        return False
+    days = [as_of - timedelta(days=k) for k in range(PERSIST_DAYS)]
+    vals = [s.value(d) for d in days]
+    if any(x is None for x in vals):
+        return False
+    return all((x < 0) == (v < 0) and x != 0 for x in vals)  # type: ignore[operator]
+
+
 def funding_extremes(mem: Memory, as_of: date) -> list[Finding]:
     rows = []
     for k in mem.keys("fund:"):
@@ -31,6 +50,8 @@ def funding_extremes(mem: Memory, as_of: date) -> list[Finding]:
         if v is None:
             continue
         hist = [x for d, x in zip(s.dates, s.values) if d <= as_of]
+        if not plausible_funding(s, as_of):
+            continue
         rows.append((coin, _ann(v), percentile_rank(hist, v) if len(hist) >= 60 else None, len(hist)))
     if len(rows) < 10:
         return []

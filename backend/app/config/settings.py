@@ -324,8 +324,9 @@ class Settings(BaseSettings):
     # Originals approval queue. Nothing here publishes: an approved draft is only marked approved; the owner posts it by hand.
     growth_enabled: bool = False
     growth_collect_enabled: bool = False
-    growth_drafts_per_format: int = Field(3, ge=1, le=10)  # drafts kept per format per generation run
-    growth_max_drafts_per_run: int = Field(12, ge=1, le=50)
+    growth_drafts_per_format: int = Field(5, ge=1, le=10)  # drafts kept per format per generation run
+    growth_max_drafts_per_run: int = Field(15, ge=1, le=50)
+    growth_verify_sources: bool = True  # G2: a finding's stored inputs are re-read from their source before it is drafted (app/growth/verify.py)
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

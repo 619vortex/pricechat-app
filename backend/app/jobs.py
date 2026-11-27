@@ -1170,14 +1170,11 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
         async def growth_originals(ctx: JobContext) -> dict[str, Any]:
             import asyncio
 
-            from sqlalchemy import select as _select
-
             from app.growth import drafts
-            from app.models.market_memory import GrDraft
 
             out: dict[str, Any] = {"writer": drafts.apply_writer_results(ctx.db)}
-            day0 = ctx.now.replace(hour=0, minute=0, second=0, microsecond=0)
-            if ctx.trigger == "manual" or (ctx.now.hour >= 2 and ctx.db.scalar(_select(GrDraft.id).where(GrDraft.created_at >= day0).limit(1)) is None):
+            # once a day after 02:00 UTC, and once more on the day a new detector set (drafts.GENERATOR) is deployed
+            if ctx.trigger == "manual" or (ctx.now.hour >= 2 and not drafts.generated_today(ctx.db, ctx.now)):
                 out["generated"] = await asyncio.to_thread(drafts.generate, ctx.db, settings=s, now=ctx.now)
             return out
 
