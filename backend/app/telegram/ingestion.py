@@ -586,7 +586,19 @@ class TelegramIngestor:
         from app.tradingos import bot
 
         pending, self._commands = self._commands, []
+        from app.config.settings import get_settings
+        from app.predictions import telegram as predictions
+
+        psettings = get_settings()
         for chat_id, user_id, text, group, msg_id, chat_username, author in pending:
+            try:  # Price Chat Predictions: /predict /rank /stats /leaderboard /remind (inert while PREDICTIONS_MODE is off)
+                if predictions.mode(psettings) != "off" and predictions.is_ours(text):
+                    if await predictions.handle_command(self.db, self.client, psettings, chat_id, user_id, text, group, msg_id, author):
+                        continue
+            except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
+                logger.warning("Predictions command not answered (%s)", type(exc).__name__)
+                continue
             try:
                 await bot.handle_command(self.db, self.client, chat_id, user_id, text, group=group, reply_to=msg_id,
                                          chat_username=chat_username, author=author, throttle=True)  # heavy ones: per-user limit (TG-3)
@@ -606,6 +618,13 @@ class TelegramIngestor:
                     self.db.rollback()
                     logger.warning("Trade check follow-up not handled (%s)", type(exc).__name__)
         for cq in callbacks:
+            if str(cq.get("data") or "").startswith(predictions.PREFIX):  # Price Chat Predictions buttons
+                try:
+                    await predictions.handle_callback(self.db, self.client, psettings, cq)
+                except Exception as exc:  # noqa: BLE001
+                    self.db.rollback()
+                    logger.warning("Predictions button not handled (%s: %s)", type(exc).__name__, str(exc)[:200])
+                continue
             try:
                 if str(cq.get("data") or "").startswith("fc:") and await bot.fc_button_throttled(self.client, cq):
                     continue
