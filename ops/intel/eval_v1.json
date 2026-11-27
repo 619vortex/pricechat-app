@@ -1,0 +1,2802 @@
+{
+ "version": "eval_v1",
+ "built": "2026-11-25",
+ "label_source": "Claude, desk importance tiers; owner to review",
+ "items": [
+  {
+   "id": "F556",
+   "title": "Anthropic IPO Is Creating Luxury Home Buyers, Says Realtor Serhant",
+   "summary": "Real estate broker and reality television star Ryan Serhant talks about the housing market in the US, where some hot markets are and why buyers are willing to pay premium prices. He also says the expected Anthropic initial public offering is triggering sales of luxury homes across the country.",
+   "outlets": [
+    "Bloomberg",
+    "CNBC",
+    "Seeking Alpha"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F557",
+   "title": "The Xi-Trump summit has high stakes for toy stocks",
+   "summary": "President Trump will meet with Xi Jinping in China. Notably absent will be Jensen Huang, the former CEO of Nvidia.",
+   "outlets": [
+    "Seeking Alpha",
+    "CBS News",
+    "Bloomberg"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F558",
+   "title": "Bitcoin Price Holds Near $65,000 as Nvidia Turmoil Drags Nasdaq Down 2.5%",
+   "summary": "Bitcoin Magazine Bitcoin Price Holds Near $65,000 as Nvidia Turmoil Drags Nasdaq Down 2.5% Bitcoin price held near $65,000 on Monday afternoon, shrugging off a 2.5% Nasdaq slide as Nvidia's board ruled out bringing back Jensen Huang and the dollar hit a 19-month high.",
+   "outlets": [
+    "Bitcoin Magazine",
+    "Bloomberg",
+    "CNBC"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F559",
+   "title": "US moves to block China’s remote access to AI chips amid Nvidia scandal",
+   "summary": "The Trump administration introduces export licence requirement for Malaysia, Thailand, Indonesia, Singapore and Brazil. The controversy surrounding Nvidia and its former CEO Jensen Huang has put a spotlight on the intensifying AI race between the US and China.",
+   "outlets": [
+    "Al Jazeera",
+    "DW",
+    "CBS News"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F578",
+   "title": "Major U.S. banks report widespread service outages",
+   "summary": "Customers at JPMorgan Chase U.S. Bank and other major financial institutions reported difficulty accessing their accounts. Chase, Bank of America, Wells Fargo and Capital One faced online banking outages Monday, per Downdetector, as JPMorgan Chase shares fell more than 2.4%.",
+   "outlets": [
+    "CBS News",
+    "Fox Business",
+    "BBC"
+   ],
+   "tier": "M",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F579",
+   "title": "United Airlines says ‘widespread’ system outage resolved",
+   "summary": "Airline acknowledges ‘technology issue that delayed flight departures’ in latest high-profile outage to affect Americans United ⁠Airlines said on ⁠Monday ⁠that it had resolved ⁠a widespread system ⁠outage, just three days after the Federal ⁠Aviation Administration issued a rare nationwide ground stop on all US flights. “We have resolved a technology issue that delayed flight departures.",
+   "outlets": [
+    "The Guardian",
+    "NBC News",
+    "DW"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F590",
+   "title": "Trump Arrives in Asia Ahead of Summit with Xi, Putin",
+   "summary": "US President Donald Trump kicked off a three-day trip to Asia on Tuesday, meeting regional leaders and saying he’s open to a one-on-one meeting with Russian President Vladimir Putin later in the week.",
+   "outlets": [
+    "Bloomberg",
+    "The National",
+    "CNA"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F592",
+   "title": "Middle East latest: Bahrain issues alert as Iran claims strike on US radar base",
+   "summary": "The US president oscillates between strike threats on Iran and insisting the war ‘militarily is effectively over’ A third US aircraft carrier has arrived in the Middle East, US Central Command said in a social media post on Monday, making a dramatic show of military might as Donald Trump keeps his options open for next steps in the Iran war.",
+   "outlets": [
+    "The National",
+    "The Guardian",
+    "Al Jazeera"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F615",
+   "title": "Jensen Huang agrees to face Congress over Nvidia scandal",
+   "summary": "Jensen Huang and Nvidia general counsel Tim Teter will officially testify before Congress in early December, lawmakers announced Tuesday.",
+   "outlets": [
+    "Axios",
+    "CNBC",
+    "Fox Business"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F639",
+   "title": "Trump lands in Asia ahead of talks with Russian and Chinese presidents",
+   "summary": "The US president said he would be open to a one-on-one meeting with Russia's Vladimir Putin \"if it's available\". US President Donald Trump prepares to meet Chinese President Xi Jinping and Russian President Vladimir Putin in China for an unprecedented three-way summit following US midterm losses.",
+   "outlets": [
+    "BBC",
+    "The National",
+    "Bloomberg"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F645",
+   "title": "France confirms its troops are in Ukraine. Russia says they are legitimate targets.",
+   "summary": "French troops are in fact in Ukraine to conduct training and repair equipment, French Armed Forces spokesperson Alice Rufo said. Moscow-installed governor says traffic suspended after second attack on bridge in two days.",
+   "outlets": [
+    "Meduza",
+    "CNA",
+    "Al Jazeera"
+   ],
+   "tier": "M",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F647",
+   "title": "Apple Addresses Outages Affecting Apple Pay, iCloud and Apps",
+   "summary": "The disruption followed days of unrelated problems in the past week that interrupted air travel and work at offices, schools and government. A classified computer network used by the National Security Agency went down due to a technical problem.",
+   "outlets": [
+    "New York Times",
+    "NBC News",
+    "The National"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F648",
+   "title": "Widespread outages hit banks, air travel, the NSA and Apple, disrupting seemingly everything",
+   "summary": "Major outages showcase the risks of interconnected tech in the age of AI. A classified computer network used by the National Security Agency went down due to a technical problem.",
+   "outlets": [
+    "CNBC",
+    "NBC News",
+    "CBS News"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F668",
+   "title": "‘Witness the Wonders’: China touts miracle city for Trump summit",
+   "summary": "New limits on remote AI chips and servers will impact Presidents Donald Trump and Xi Jinping talks at the APEC summit. China worries the scandal could ramp up pressure on the US to further restrict the sale of advanced chips.",
+   "outlets": [
+    "Financial Times",
+    "Bloomberg",
+    "BBC"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F671",
+   "title": "Citi and Circle to Help World Bank Study Stablecoin Payouts",
+   "summary": "The lender will study whether regulated dollar stablecoins could sit next to the correspondent banks it now uses to pay out project money, starting in countries that permit digital assets. The initiative plans to initially focus on an intermediated and interoperable stablecoin-based payment model.",
+   "outlets": [
+    "Unchained",
+    "The Block",
+    "Cointelegraph"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F674",
+   "title": "US Strikes Iranian Missile Site after Bahrain Attacks",
+   "summary": "Bloomberg’s Jon Herskovitz discusses the latest exchange of strikes between the US and Iran after American warplanes hit an Islamic Revolutionary Guard Corps missile launch site in Iran.",
+   "outlets": [
+    "Bloomberg",
+    "Al Jazeera",
+    "The National"
+   ],
+   "tier": "M",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F686",
+   "title": "Nvidia stock up 3% as earnings beat expectations. Neoclouds surge",
+   "summary": "The chip giant's earnings come at a tumultuous time for the company.",
+   "outlets": [
+    "CNBC",
+    "Seeking Alpha"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F687",
+   "title": "FAA signed off on repairs before nationwide ground stop: report",
+   "summary": "Senate Republicans appeared skeptical after Transportation Secretary Sean Duffy made the case for tens of billions of more dollars for the Federal Aviation Administration.",
+   "outlets": [
+    "Seeking Alpha",
+    "CBS News",
+    "Bloomberg"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F688",
+   "title": "Iran attacks Kuwait in widening escalation",
+   "summary": "Kuwait's military says its air defence was repelling drones as Iran and the US hit out at each other across the Gulf. Kuwait intercepts 'hostile' drone attacks as Bahrain warns of 'potential threat', urges citizens to remain calm.",
+   "outlets": [
+    "The National",
+    "Al Jazeera",
+    "CNBC"
+   ],
+   "tier": "M",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F695",
+   "title": "ADNOC Ship Attacked in Hormuz as Maritime Security Risks Rise",
+   "summary": "ADNOC Logistics & Services, a unit of Abu Dhabi’s national oil company ADNOC, confirmed on Wednesday that one of its vessels was attacked while transiting the Strait of Hormuz on the evening of November 17, as attacks on tankers in the area have intensified in recent weeks.",
+   "outlets": [
+    "OilPrice",
+    "The National"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F735",
+   "title": "Binance Says It Won Court Order to Recover Frozen Hack Funds",
+   "summary": "Binance says it is pursuing frozen assets after committing more than $6.34 billion in company funds to cover losses from the hack. The court orders permit service via blockchain and support a constantly updating list of 26,000 wallet addresses identified as holding stolen assets, Binance’s lawyers said.",
+   "outlets": [
+    "Bitcoin Magazine",
+    "The Defiant",
+    "Seeking Alpha"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F747",
+   "title": "Anthropic IPO not worth 'risking lives of loved ones', petitioners say",
+   "summary": "New York City Comptroller Mark Levine called it ‘disappointing” that Anthropic is moving ahead with its initial public offering this week despite calls for the company to pause the listing over AI safety concerns.",
+   "outlets": [
+    "The National",
+    "Bloomberg",
+    "CNA"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F760",
+   "title": "Microsoft had rallied back to record highs. Then came the election and Outlook outage",
+   "summary": "Microsoft shares have dropped nearly 9% since closing at a record high on Nov. 4.",
+   "outlets": [
+    "CNBC",
+    "New York Times"
+   ],
+   "tier": "X",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F762",
+   "title": "Binance gets court order in effort to recover frozen assets after $6.3B hack",
+   "summary": "Bitcoin Magazine Binance Says It Won Court Order to Recover Frozen Hack Funds Binance says it has a court order from Abu Dhabi Global Market to recover crypto frozen after the $6.3 billion hack.",
+   "outlets": [
+    "Seeking Alpha",
+    "Bitcoin Magazine",
+    "Cointelegraph"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F771",
+   "title": "Binance says it won $6.5B worldwide freezing order after hack",
+   "summary": "The court orders permit service via blockchain and support a constantly updating list of 26,000 wallet addresses identified as holding stolen assets, Binance’s lawyers said.",
+   "outlets": [
+    "Cointelegraph",
+    "Bitcoin Magazine"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F780",
+   "title": "U.S., China Can Help End Ukraine War, Trump Tells Xi Before Trilateral With Putin",
+   "summary": "Putin's mood after the meeting was \"simply excellent,\" Kremlin foreign policy aide Yury Ushakov said. President Donald Trump sought to tamp down on concerns that he would make agreements with Vladimir Putin without input from Ukraine ahead of his meeting with the Russian leader.",
+   "outlets": [
+    "Moscow Times",
+    "Bloomberg",
+    "Financial Times"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F781",
+   "title": "Binance receives Abu Dhabi court order to 'freeze' assets after $6.3bn heist",
+   "summary": "Bitcoin Magazine Binance Says It Won Court Order to Recover Frozen Hack Funds Binance says it has a court order from Abu Dhabi Global Market to recover crypto frozen after the $6.3 billion hack.",
+   "outlets": [
+    "The National",
+    "CNA",
+    "Bitcoin Magazine"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F790",
+   "title": "Anthropic Shares Jump 35% in Their Nasdaq Trading Debut",
+   "summary": "ANT traded at $112.20 against its $83 IPO price. The implied value depends on which shares are counted.",
+   "outlets": [
+    "The Defiant",
+    "Bloomberg",
+    "BBC"
+   ],
+   "tier": "M",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F791",
+   "title": "Saudi-led coalition intercepts Houthi missiles targeting Riyadh and south",
+   "summary": "Material damage was reported after ​debris fell following the latest Houthi strikes launched towards Saudi Arabia.",
+   "outlets": [
+    "Al Jazeera",
+    "The National",
+    "CNA"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F798",
+   "title": "Dustin Moskovitz, an Early Anthropic Investor, Feels a Bit Uneasy About the IPO",
+   "summary": "An early investment that Facebook co-founder Dustin Moskovitz made in Anthropic is paying off. But it’s not making him happy.",
+   "outlets": [
+    "New York Times",
+    "Financial Times",
+    "Bloomberg"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F801",
+   "title": "Anthropic’s $1.5 trillion IPO exposes bankrupt FTX’s $40 billion missed fortune",
+   "summary": "Anthropic shares owned by FTX and sold for around $2 billion would now be worth more than $40 billion as the artificial intelligence company finally goes public on Nov. 19.",
+   "outlets": [
+    "CryptoSlate",
+    "Bloomberg",
+    "NPR"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F830",
+   "title": "Anthropic hits $1.5 trillion valuation in record IPO as ECB warns AI funding could dry up",
+   "summary": "Anthropic priced its $81 billion IPO at $83 a share Wednesday. The company behind Claude said it expected trading to begin on Nasdaq on Nov. 19.",
+   "outlets": [
+    "CryptoSlate",
+    "Bloomberg",
+    "Financial Times"
+   ],
+   "tier": "M",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F866",
+   "title": "Anthropic begins public trading at $2tn valuation after largest-ever IPO",
+   "summary": "AI startup and Claude chatbot maker likely to become one of the world’s most valuable publicly traded businesses Anthropic IPO – live updates Anthropic shares soared more than a third when trading got under way on its US market debut on Thursday, valuing the company at more than $2tn in the biggest stock market flotation in history.",
+   "outlets": [
+    "The Guardian",
+    "Financial Times",
+    "Bloomberg"
+   ],
+   "tier": "M",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F966",
+   "title": "Bitcoin falls below $60K for first time since July amid broader market selloff",
+   "summary": "Bitcoin fell nearly 6% as US stocks declined, with the Nasdaq dropping more than 2% and Anthropic shares losing almost 10%.",
+   "outlets": [
+    "Cointelegraph",
+    "CNA",
+    "Bitcoin Magazine"
+   ],
+   "tier": "S",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F969",
+   "title": "Poland issues air raid alerts as Russia attacks Ukraine. Poland’s defense minister says two Russian missiles and a drone fell on Polish soil.",
+   "summary": "Air raid alerts went out in two Polish provinces bordering Ukraine as Russia attacked Ukraine overnight into November 20. Polish Defense Minister Władysław Kosiniak-Kamysz said two Russian missiles and a drone crashed on the Polish soil on Friday as Moscow launched a massive strike on neighboring Ukraine.",
+   "outlets": [
+    "Meduza",
+    "Bloomberg",
+    "BBC"
+   ],
+   "tier": "M",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F993",
+   "title": "Nvidia Plunges as SEC Probe Deepens AI Market Selloff | Closing Bell",
+   "summary": "Comprehensive cross-platform coverage of the U.S. market close on Bloomberg Television, Bloomberg Radio, and YouTube with Romaine Bostick, Carol Massar and Tim Stenovec.",
+   "outlets": [
+    "Bloomberg"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1002",
+   "title": "Nasdaq sinks more than -4.5%, is down for 2026, fueled by AI trade selloff",
+   "summary": "",
+   "outlets": [
+    "Seeking Alpha"
+   ],
+   "tier": "M",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1006",
+   "title": "Bitcoin plunges 6%, dips under $58K",
+   "summary": "Friday's low was less than $200 above Coinbase's June trough. The high-to-low decline from Oct. 21 reached 31.8%.",
+   "outlets": [
+    "Seeking Alpha",
+    "The Defiant"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1010",
+   "title": "Tech stocks lead Wall Street bloodbath as S&P 500 posts massive weekly loss",
+   "summary": "",
+   "outlets": [
+    "Seeking Alpha"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1014",
+   "title": "S&P 500 Sinks 3.7%, Extending Slide to Seven Sessions",
+   "summary": "The index lost 8.6% for the week, while bitcoin also declined sharply over the past week.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1027",
+   "title": "Nvidia Shares Sink to 52-Week Low After Report SEC Is Probing Accounting",
+   "summary": "Nvidia shares fell about 13% to a 52-week low after reports that SEC enforcement staff are examining potential accounting issues, adding to pressure on the chipmaker after Jensen Huang’s resignation.",
+   "outlets": [
+    "Decrypt",
+    "Financial Times",
+    "New York Times"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1053",
+   "title": "Russia and Ukraine’s drone war sends optical fibre prices soaring",
+   "summary": "President Donald Trump defended his relationship with Vladimir Putin, repeatedly insisting that the Russian leader wants to end the war in Ukraine despite Moscow’s latest deadly assault. Air raid alerts went out in two Polish provinces bordering Ukraine as Russia attacked Ukraine overnight into November 20.",
+   "outlets": [
+    "Financial Times",
+    "Bloomberg",
+    "Meduza"
+   ],
+   "tier": "N",
+   "editor_label": "went_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1068",
+   "title": "New Orleans Catholic clergy abuse survivors begin receiving payments from $305m bankruptcy settlement",
+   "summary": "Arrival of payments in contentious legal saga that began in 2020 is ‘a weight off my shoulders’, one survivor said Hundreds of clergy sexual abuse survivors have received more than half of the $305m bankruptcy settlement that the archdiocese of New Orleans reached with them last year, a milestone that marks the beginning of the end of a years-long legal saga.",
+   "outlets": [
+    "The Guardian"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1079",
+   "title": "Tankers hit in Strait of Hormuz as Iran tightens grip on shipping",
+   "summary": "British maritime agency reports two incidents near Oman, while Iran says a tanker caught fire due to naval mine.",
+   "outlets": [
+    "Al Jazeera",
+    "The National"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1092",
+   "title": "Middle East latest: Bahrain says civilian industrial facility damaged in Iran attack",
+   "summary": "Bahrain reports no injuries, as Iran's IRGC says it targeted US military positions at two bases in al-Riffa and Awali. Bahrain has condemned Iran's strikes on US military assets in the Gulf country as Houthis keep Saudi Arabia on edge.",
+   "outlets": [
+    "The National",
+    "Al Jazeera",
+    "CNA"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1093",
+   "title": "Athlete swims Strait of Hormuz to highlight Iran war's wildlife toll",
+   "summary": "British endurance swimmer Lewis Pugh has swum the Strait of Hormuz to highlight environmental threats during ongoing conflict. British maritime agency reports two incidents near Oman, while Iran says a tanker caught fire due to naval mine.",
+   "outlets": [
+    "CBS News",
+    "Al Jazeera"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1098",
+   "title": "Chainflip confirms $12M hack, offers attacker 10% bounty",
+   "summary": "Chainflip offered the attacker a 10% bounty to return 90% of the stolen funds by Nov. 23, promising to treat the return as a white-hat recovery and withdraw law enforcement complaints. Chainflip says the theft included 122.86 BTC, widening the scope beyond earlier Ethereum outflows.",
+   "outlets": [
+    "Cointelegraph",
+    "The Defiant"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1105",
+   "title": "Two injured, one critically, in Iranian attack on industrial plant in Bahrain",
+   "summary": "The incidents were the latest escalation of regional hostilities since the US and Israel attacked Iran in February.",
+   "outlets": [
+    "The National",
+    "CNA"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1118",
+   "title": "Chainflip’s losses climb to $12 million after protocol discloses 122.9 BTC theft, offers hacker bounty",
+   "summary": "Chainflip offered the attacker a 10% bounty to return the remainder of the $12 million in stolen BTC, ETH, and stablecoins by Monday.",
+   "outlets": [
+    "The Block"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1130",
+   "title": "Alice Huang in touch with Chinese spy agency during affair with Nvidia CEO: Report",
+   "summary": "Alice Huang was in touch with an officer from China's Ministry of State Security from the spring of 2025 until the fall of this year, according to the New York Times.",
+   "outlets": [
+    "CNA",
+    "Financial Times",
+    "The National"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1134",
+   "title": "Iran Attacks Bahrain, Houthis Strike Saudi Targets (Video)",
+   "summary": "Yemen's Iran-aligned Houthis claimed an operation against Saudi Arabia's Rabigh oil refinery, as diplomatic efforts to end the war face long odds.",
+   "outlets": [
+    "Bloomberg",
+    "CNBC"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1135",
+   "title": "Zelenskyy says Ukraine behind attacks on Russian ships near Libya",
+   "summary": "Ukrainian President Volodymyr Zelenskyy has claimed responsibility for an attack that sank the Russian ship ‘Merkury’. Nine people are dead in the attack, with rescue efforts ongoing to find those still missing from the residential building.",
+   "outlets": [
+    "Al Jazeera",
+    "BBC",
+    "CNA"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1137",
+   "title": "11 killed in Russian strike on Ukraine’s Dymer in Kyiv region",
+   "summary": "Rescue crews are still clearing rubble in the village of Dymer, in the Kyiv region, after a Russian drone struck a five-story apartment building there overnight on November 22. This is a breaking news story.",
+   "outlets": [
+    "Meduza",
+    "Al Jazeera",
+    "DW"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1139",
+   "title": "Gaza turned into ‘toxic wasteland’ by Israel’s war, says new report",
+   "summary": "Scientific and satellite findings warn of widespread contamination in Gaza, posing grave threats to public health ‘for generations to come’ Israel’s destruction of Gaza has left a devastating environmental legacy with poisoned water, contaminated soil and toxic air threatening the life-support systems that the population depends on for survival, according to a report.",
+   "outlets": [
+    "Al Jazeera",
+    "The Guardian"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1140",
+   "title": "Ukraine Claims Strikes on Russian Ships Near Libya",
+   "summary": "President Volodymyr Zelensky said that Ukrainian naval drones sank a corvette and hit a dry cargo vessel, demonstrating Kyiv’s reach in the seas. Nine people are dead in the attack, with rescue efforts ongoing to find those still missing from the residential building.",
+   "outlets": [
+    "New York Times",
+    "BBC",
+    "CNA"
+   ],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1143",
+   "title": "Zelenskyy praises ‘exemplary’ drone operation that sank Russian warship in a Libyan port",
+   "summary": "The incident comes alongside a suspected Ukrainian drone strike on a Russian cargo ship in the Baltic Sea over the weekend. A seven-year-old boy called David was rescued after spending 14 hours trapped in the rubble of a Russian drone attack.",
+   "outlets": [
+    "CNBC",
+    "Al Jazeera",
+    "The National"
+   ],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1144",
+   "title": "Bitcoin’s plunge below $60,000 triggers $20 million buying spree at Twenty One Capital",
+   "summary": "Two purchases lifted reported holdings to about 43,841 BTC and equaled nearly one-fifth of the company’s Sept. 30 cash and equivalents. Read the full story on CryptoSlate Understand the crypto stories that matter and what to watch next.",
+   "outlets": [
+    "CryptoSlate"
+   ],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1149",
+   "title": "Ukrainian drones strike two Russian oil refineries and pumping station in overnight attacks",
+   "summary": "",
+   "outlets": [],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1152",
+   "title": "Ukraine confirms it used naval drones to strike two Russian ships off Libya",
+   "summary": "",
+   "outlets": [],
+   "tier": "S",
+   "editor_label": "covered",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1145",
+   "title": "Ukraine sinks Russian warship off Libya in latest expansion of the war",
+   "summary": "",
+   "outlets": [],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1162",
+   "title": "Nvidia reinstates Jensen Huang as CEO. Stock skyrockets 27%",
+   "summary": "",
+   "outlets": [],
+   "tier": "M",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "F1173",
+   "title": "CrowdStrike to buy Zscaler in $44 billion deal as AI supercharges cyberattacks",
+   "summary": "",
+   "outlets": [],
+   "tier": "M",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "Ftrend-45827",
+   "title": "AI rally set to add $2 trillion to Nasdaq-100 as Huang returns to Nvidia",
+   "summary": "",
+   "outlets": [],
+   "tier": "S",
+   "editor_label": "publish",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "Ftrend-trump-calls",
+   "title": "Trump calls on Nvidia board to rehire Jensen Huang after scandal",
+   "summary": "",
+   "outlets": [],
+   "tier": "X",
+   "editor_label": "stay_out",
+   "lane": "newsdesk"
+  },
+  {
+   "id": "T45631",
+   "title": "Capita boss exits and shares crash after civil service pensions failures",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 90.8
+  },
+  {
+   "id": "T43369",
+   "title": "Dollar Heads for Fourth Week of Gains Following Anthropic IPO",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 88.8
+  },
+  {
+   "id": "T45880",
+   "title": "Markets react to Jensen Huang’s return",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 85.9
+  },
+  {
+   "id": "T45684",
+   "title": "Cybersecurity stocks have been hot — and now CrowdStrike inks deal to buy Zscaler",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 85.8
+  },
+  {
+   "id": "T45581",
+   "title": "Capita Plunges 57% as CEO Quits Over Botched Pensions Contract",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 85.1
+  },
+  {
+   "id": "T45221",
+   "title": "Delta Air Lines hit with delays amid baggage network system issue",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 84.3
+  },
+  {
+   "id": "T43077",
+   "title": "Husband of American detained in Russia says case was not mentioned during Trump meeting with Putin",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 84.0
+  },
+  {
+   "id": "T45668",
+   "title": "Stock futures rebound as battered AI, chip stocks rally after sell-off",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 83.7
+  },
+  {
+   "id": "T44646",
+   "title": "Nasdaq futures lead rebound as Wall Street looks to recover from AI-driven selloff",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 83.6
+  },
+  {
+   "id": "T44565",
+   "title": "Apple works to restore services after outage caused by internal update",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 82.6
+  },
+  {
+   "id": "T20887",
+   "title": "Oil Prices Fall as Fears of a Global Supply Glut Return",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 82.3
+  },
+  {
+   "id": "T39702",
+   "title": "£100m ‘Ponzi’ scheme goes bust",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 82.3
+  },
+  {
+   "id": "T44312",
+   "title": "VIX Hits Highest Level Since 2025 Tariff Turmoil as Volatility Warning Flash",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 81.7
+  },
+  {
+   "id": "T39871",
+   "title": "Ikea ditches plans for new UK stores, blaming high business taxes",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 81.4
+  },
+  {
+   "id": "T46104",
+   "title": "US files action to recover over $1 billion in cryptocurrency stolen in Binance hack",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 80.7
+  },
+  {
+   "id": "T45813",
+   "title": "Jensen Huang reinstated as Nvidia CEO",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google",
+    "hn",
+    "x_accounts"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 78.8
+  },
+  {
+   "id": "T44602",
+   "title": "Stock markets plunge as Nasdaq erases 2026 gains",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 77.6
+  },
+  {
+   "id": "T46079",
+   "title": "Infantino’s $20bn World Cup sell-off plan was to run for up to 96 years, documents show",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 77.0
+  },
+  {
+   "id": "T5103",
+   "title": "Iran raises stakes with new drone attacks as Trump signals a waiting game",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 75.8
+  },
+  {
+   "id": "T43354",
+   "title": "JPMorgan says third-party vendors targeted in cyberattack",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 75.5
+  },
+  {
+   "id": "T44170",
+   "title": "The S&P 500 Has More Than Tripled in 10 Years, Even After Its Latest Pullback. Here’s What $1,000 in VOO Could Have Become.",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 75.5
+  },
+  {
+   "id": "T20513",
+   "title": "Wizards’ defense collapses in seventh straight loss",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 75.4
+  },
+  {
+   "id": "T22080",
+   "title": "Microsoft reveals hidden bug behind global Outlook and Microsoft 365 outage",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 75.3
+  },
+  {
+   "id": "T45304",
+   "title": "417,775 flights are expected over Thanksgiving week, and the FAA is working to keep Americans flying safely during what’s expected to be the busiest Thanksgiving travel period in 16 years!",
+   "summary": "",
+   "outlets": [
+    "x_accounts"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 75.3
+  },
+  {
+   "id": "T43967",
+   "title": "Deadly Russian strikes hit 3 Kyiv bridges after Putin vows revenge for Crimea attacks",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 74.9
+  },
+  {
+   "id": "T45129",
+   "title": "Rosebank oilfield won’t cut bills, warns energy secretary",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 74.9
+  },
+  {
+   "id": "T45655",
+   "title": "North Sea oil’s new predators will cost Labour billions",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 74.9
+  },
+  {
+   "id": "T43238",
+   "title": "Anthropic Ends Debut Up 17% as Ondo Launches ANTon",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 73.6
+  },
+  {
+   "id": "T44325",
+   "title": "Wrapped Monero token crashes 99.8% amid suspected $13.5M exploit",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 73.1
+  },
+  {
+   "id": "T45824",
+   "title": "Democratic 2028ers capitalize on Nvidia news to push anti-corruption message",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 73.1
+  },
+  {
+   "id": "T44241",
+   "title": "Russia launches massive attack on Ukraine a day after Putin’s meeting with Trump and Xi",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 72.5
+  },
+  {
+   "id": "T45266",
+   "title": "Explosion on Russian ship at Libya port likely caused by drone attack, officials say",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 72.5
+  },
+  {
+   "id": "T46331",
+   "title": "NATO warns Putin could strike before European army responds, points to US as military model",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 71.9
+  },
+  {
+   "id": "T44202",
+   "title": "Pontins owner fined £1m over death of woman at Somerset holiday park",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 71.8
+  },
+  {
+   "id": "T43182",
+   "title": "Trump ousts top cybersecurity official; Anthropic's record debut",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 71.5
+  },
+  {
+   "id": "T43648",
+   "title": "Manus on Markets: Anthropic IPO frenzy masks Wall Street jitters",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 71.4
+  },
+  {
+   "id": "T44297",
+   "title": "Nvidia stock plunges 12%, rides longest weekly losing streak since 2008 financial crisis",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 71.4
+  },
+  {
+   "id": "T45706",
+   "title": "Next issues cyber-attack warning after ‘benign’ data accessed by hackers",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 71.3
+  },
+  {
+   "id": "T45746",
+   "title": "Arm's Haas extends contract to lead chip firm through 2033 amid Nvidia top job chatter",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 71.3
+  },
+  {
+   "id": "T45832",
+   "title": "Trump Praises Nvidia’s Decision to Reinstate Huang as CEO",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 71.3
+  },
+  {
+   "id": "T43643",
+   "title": "Trump’s CISA nominee denies Capitol was attacked on Jan. 6",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 71.0
+  },
+  {
+   "id": "T43269",
+   "title": "Anthropic’s historic stock market debut: key takeaways, and what comes next for the AI industry",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 70.8
+  },
+  {
+   "id": "T42220",
+   "title": "David Lammy urges Andy Burnham to campaign on rejoining EU at next election",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 70.5
+  },
+  {
+   "id": "T45557",
+   "title": "Zelenskyy says Ukraine behind drone attacks on Russian ships near Libya",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 70.2
+  },
+  {
+   "id": "T43199",
+   "title": "Myanmar becomes first state found responsible for genocide by UN court",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 69.9
+  },
+  {
+   "id": "T44102",
+   "title": "Tech stock sell-off deepens in Asia",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 69.8
+  },
+  {
+   "id": "T44033",
+   "title": "Midday Need to Know: Anthropic shares fall, consumer sentiment revised up & more",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 69.7
+  },
+  {
+   "id": "T43242",
+   "title": "Tories select James Cleverly as candidate for London mayor",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 69.5
+  },
+  {
+   "id": "T44983",
+   "title": "S&P 500 correction: Five forces behind the market sell-off",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 69.1
+  },
+  {
+   "id": "T45764",
+   "title": "Strategy Buys $30M in Bitcoin, Moves $1B From USD Reserve to Cash Pot",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 69.1
+  },
+  {
+   "id": "T44635",
+   "title": "Zscaler stock jumps 20% on report that CrowdStrike in talks to buy security vendor",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 68.5
+  },
+  {
+   "id": "T45080",
+   "title": "Guterres laments COP31 outcome, urges climate justice from Barbados",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 68.0
+  },
+  {
+   "id": "T45306",
+   "title": "Russell Brand’s wife vows to abide by prison rules after video controversy",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 67.8
+  },
+  {
+   "id": "T45196",
+   "title": "Libya: Suspected drone attack hits Russian ship in Benghazi",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 67.6
+  },
+  {
+   "id": "T46219",
+   "title": "US escalates sanctions on Iran, targets ‘shadow banking’ networks",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 67.5
+  },
+  {
+   "id": "T45537",
+   "title": "FTSE 100 Live: UK Stocks Set to Miss Out on AI Rebound",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 67.2
+  },
+  {
+   "id": "T45609",
+   "title": "Anthropic, Nvidia shares rise in premarket trading after major tech selloff",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 67.0
+  },
+  {
+   "id": "T45428",
+   "title": "Trump calls on Nvidia board to rehire Jensen Huang after scandal",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 66.8
+  },
+  {
+   "id": "T45497",
+   "title": "Iran missile sites under scrutiny, Cop31 climate talks collapse and GTA 6 prompts warnings in UAE",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 66.8
+  },
+  {
+   "id": "T43955",
+   "title": "4.4-magnitude earthquake rattles Los Angeles area",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 66.4
+  },
+  {
+   "id": "T43811",
+   "title": "No major agreements from Trump summit with Putin, Xi",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 65.9
+  },
+  {
+   "id": "T45988",
+   "title": "Trump reacts to Nvidia reinstating Jensen Huang as questions on national security risks persist",
+   "summary": "",
+   "outlets": [
+    "news",
+    "hn"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 65.9
+  },
+  {
+   "id": "T46112",
+   "title": "EU sanctions package intended to ‘keep pressure’ on Russia and ‘strike harder’ at its ability to fund Ukraine war – as it happened",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 65.8
+  },
+  {
+   "id": "T42857",
+   "title": "Anthropic Stock Indicated to Open 33% Above IPO Price as AI Stocks Rally",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 65.6
+  },
+  {
+   "id": "T44699",
+   "title": "Palisades arson retrial ends with conviction of man accused of sparking deadly wildfire",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 65.5
+  },
+  {
+   "id": "T46452",
+   "title": "Russian attack kills two people in Ukraine’s Zaporizhzhia",
+   "summary": "",
+   "outlets": [
+    "news",
+    "gdelt"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 65.1
+  },
+  {
+   "id": "T46358",
+   "title": "Amazon faces FAA probe after delivery drone strikes Michigan fiber cable, garage",
+   "summary": "",
+   "outlets": [
+    "news",
+    "gdelt"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 64.6
+  },
+  {
+   "id": "T44255",
+   "title": "Anthropic employee claims general proof of the Riemann Hypothesis [pdf]",
+   "summary": "",
+   "outlets": [
+    "hn"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 64.5
+  },
+  {
+   "id": "T46240",
+   "title": "Trump Administration Imposes Sanctions on Megaspeed, Singaporean Firm at Center of Nvidia Scandal",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "posted",
+   "peak": 64.5
+  },
+  {
+   "id": "T46037",
+   "title": "Charlie Cox reveals brutal feedback after being rejected for Bond",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 64.4
+  },
+  {
+   "id": "T45328",
+   "title": "Sam Bankman-Fried’s Anthropic Bet Is A $48 Billion Windfall For 37 Investor Groups",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 63.1
+  },
+  {
+   "id": "T45164",
+   "title": "COP31: Climate deal in doubt as EU, others reject draft declaration",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 63.0
+  },
+  {
+   "id": "T45365",
+   "title": "Israel accused of systematic abuse and obstruction of West Bank medics",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 63.0
+  },
+  {
+   "id": "T46327",
+   "title": "Nvidia shares surge after Huang's return, environmental disaster in Gaza and UAE's new AI assistant",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 62.9
+  },
+  {
+   "id": "T42938",
+   "title": "Anthropic raises more than $100B in IPO. And, Dems nominate Jeffries for House speaker",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 62.8
+  },
+  {
+   "id": "T44558",
+   "title": "Nasdaq slumps more than 5% as fear gripping AI trade spreads across markets",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 62.7
+  },
+  {
+   "id": "T43559",
+   "title": "Anthropic shares soar more than 34% to $2 trillion on Wall Street debut",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 62.6
+  },
+  {
+   "id": "T43897",
+   "title": "Russia Pushes Back Against U.S. Idea of NATO-Style Security Guarantees for Ukraine",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 62.1
+  },
+  {
+   "id": "T43097",
+   "title": "Anthropic set to start trading after completing largest-ever IPO",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 61.8
+  },
+  {
+   "id": "T43744",
+   "title": "Trump administration signed off nearly 900,000 Nvidia, AMD AI chips for China in six months",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 61.4
+  },
+  {
+   "id": "T45906",
+   "title": "Cathie Wood Says TSLA Holders ‘Will Get’ A Premium If SpaceX Buys Tesla — HSBC Puts It At Over 30%",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 61.4
+  },
+  {
+   "id": "T44179",
+   "title": "‘I agree with the president’: incoming senator Abdul El-Sayed seeks to help Trump end military aid to Israel",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 61.0
+  },
+  {
+   "id": "T46282",
+   "title": "Democratic Rep. Jimmy Gomez to resign after Ethics Committee finds he engaged in sexual misconduct",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.4
+  },
+  {
+   "id": "T46151",
+   "title": "Nvidia surge: What investors should do with the stock and the AI trade now",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.1
+  },
+  {
+   "id": "T43256",
+   "title": "Walmart’s Winning Combo: Thrifty Shoppers and Wary AI Investors",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T43670",
+   "title": "Bitcoin Price Slumps Under $62,000, Crashing 25% in One Month",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 60.0
+  },
+  {
+   "id": "T44161",
+   "title": "Russian missile hits Poland as Ukraine's allies hold military exercise, says Tusk",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T44286",
+   "title": "Bitcoin selloff: Crypto is failing the 'digital gold' test again as it sinks with stocks",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T44386",
+   "title": "Bitcoin price today crashes near $59,000: Why Peter Brandt warns of a 75% correction as crypto market slid",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 60.0
+  },
+  {
+   "id": "T44472",
+   "title": "Two men killed after microlight glider crashes into Loch Leven",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 60.0
+  },
+  {
+   "id": "T44507",
+   "title": "Bitcoin plunges 6%, dips under $58K",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 60.0
+  },
+  {
+   "id": "T44977",
+   "title": "OGC Nice predicted XI v PSG: Mohamed Abdelmonem out, Elye Wahi to start",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 60.0
+  },
+  {
+   "id": "T45193",
+   "title": "The U.A.E. Is Shuttling Oil Past Iran in Risky Hormuz Operation",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T45643",
+   "title": "South East Water reports loss after supply issues",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T45751",
+   "title": "Range Rover mounts Tesla in high street crash",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T46096",
+   "title": "Busiest US Airports Hit by Ground Stops Two Days in a Row",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T46401",
+   "title": "Bitcoin Crashes to $17,000 This Weekend: Inside the Bizarre Flash Crash Mystery",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 60.0
+  },
+  {
+   "id": "T44704",
+   "title": "Markets plunge deeper one day after Anthropic's record-breaking IPO",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 59.9
+  },
+  {
+   "id": "T44403",
+   "title": "Invesco QQQ Is 14% Below Its October Record. Here's Where I Think It Will Be in 2030.",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 59.8
+  },
+  {
+   "id": "T45820",
+   "title": "Invesco S&P 500 BuyWrite ETF declares $0.1782 dividend",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 59.8
+  },
+  {
+   "id": "T44048",
+   "title": "Countries race to secure COP31 deal after fossil fuel row",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 59.6
+  },
+  {
+   "id": "T44222",
+   "title": "Anthropic IPO Fails to Calm AI Jitters",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 59.5
+  },
+  {
+   "id": "T45809",
+   "title": "Stock futures rise, erasing some losses after tech rout",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 59.2
+  },
+  {
+   "id": "T44520",
+   "title": "Nasdaq plunges 10% for the week after Friday's bloodbath",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 59.0
+  },
+  {
+   "id": "T45385",
+   "title": "Disney+ and Hulu App Merger Slated to Be Completed in December",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 59.0
+  },
+  {
+   "id": "T43695",
+   "title": "StoneX Group plunges 27% after fiscal Q4 earnings miss",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 58.7
+  },
+  {
+   "id": "T46019",
+   "title": "Strictly star Oti Mabuse welcomes baby boy, saying her family ‘feels complete’",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.7
+  },
+  {
+   "id": "T46083",
+   "title": "Feeling the chill? Our favourite winter essentials on offer for Black Friday, from dehumidifiers to bedding",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 58.7
+  },
+  {
+   "id": "T43764",
+   "title": "Japan's October core CPI rises to 2.2%, misses estimates, and headline inflation hits 11-month high",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 58.6
+  },
+  {
+   "id": "T45444",
+   "title": "The U.S. may enter a recession if the Fed raises rates, hedge-fund manager Bill Ackman says",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.5
+  },
+  {
+   "id": "T44214",
+   "title": "Bitcoin crashes to $59,000 as Anthropic falls 25% from yesterday’s IPO-day high",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 58.4
+  },
+  {
+   "id": "T45432",
+   "title": "Trump’s role in bringing Huang back to Nvidia met with bipartisan criticism",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.4
+  },
+  {
+   "id": "T45743",
+   "title": "Green Week Ahead? Nvidia Futures Rip 6%, Nasdaq and S&P 500 Futures Snap Back 2%",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.3
+  },
+  {
+   "id": "T45823",
+   "title": "Crypto Stocks Rebound As Nvidia’s Earnings Beat Lifts Risk Appetite — Why COIN, CRCL, NXXT Are Moving Today",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.3
+  },
+  {
+   "id": "T46051",
+   "title": "Nigeria's Bola Tinubu: Aso Rock suffers water and power cuts",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.3
+  },
+  {
+   "id": "T44901",
+   "title": "This AirPods Pro 3 deal is the one to grab before Black Friday",
+   "summary": "",
+   "outlets": [
+    "google"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 58.2
+  },
+  {
+   "id": "T45741",
+   "title": "Iran threatens response to any attack amid naval blockade",
+   "summary": "",
+   "outlets": [
+    "news",
+    "google"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.2
+  },
+  {
+   "id": "T44848",
+   "title": "Chainflip Halts Swaps Over Potential Vault Exploit",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "cooling",
+   "peak": 58.1
+  },
+  {
+   "id": "T46486",
+   "title": "Bitcoin’s next crash may come from holders, not leverage, as $10.7 billion gets liquidated",
+   "summary": "",
+   "outlets": [
+    "news"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "trending",
+   "prod_status": "active",
+   "peak": 58.1
+  },
+  {
+   "id": "N1175",
+   "title": "Ukrainian Drones Kill 1, Strike Oil Refinery in Perm Region",
+   "summary": "The Lukoil-operated refinery has been targeted by Ukrainian drones multiple times already this year.",
+   "outlets": [
+    "Moscow Times",
+    "OilPrice"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 32.0
+  },
+  {
+   "id": "N1176",
+   "title": "Capita shares plunge and boss steps down as civil service pensions saga drags on",
+   "summary": "Public sector workers have been hit by delays to pension payments, in a scheme overseen by Capita since last year.",
+   "outlets": [
+    "BBC",
+    "The Guardian"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 24.0
+  },
+  {
+   "id": "N1177",
+   "title": "US moves to recover over $1B in crypto stolen by North Korean hackers in Binance heist",
+   "summary": "Federal prosecutors are moving to recover more than $1 billion in USDC stablecoins stolen during the massive $6 billion North Korean cyberattack on Binance. US prosecutors are seeking control of stolen USDC, while Elliptic says hackers have moved $247 million through Bitcoin mixers.",
+   "outlets": [
+    "Fox Business",
+    "CNA",
+    "Seeking Alpha"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 57.0
+  },
+  {
+   "id": "N1178",
+   "title": "Russia warns Ukraine of ‘dangerous trend’ after Libya and Baltic attacks",
+   "summary": "Russia has reacted with fury to Ukraine's continued campaign targeting its naval and merchant shipping. President Volodymyr Zelensky said that Ukrainian naval drones sank a corvette and hit a dry cargo vessel, demonstrating Kyiv’s reach in the seas.",
+   "outlets": [
+    "Al Jazeera",
+    "New York Times",
+    "BBC"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 51.0
+  },
+  {
+   "id": "N1179",
+   "title": "America’s Biggest Oil Export Port Faces Thousands of Cyberattack Attempts",
+   "summary": "The port that ships most of America's crude oil overseas is now fending off \"hundreds or even thousands\" of attempts to break into its systems every day, Port of Corpus Christi CEO Kent Britton told the Financial Times, as hackers step up a campaign against US ports and the cargo ships that call on them.",
+   "outlets": [
+    "OilPrice"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 23.0
+  },
+  {
+   "id": "N1182",
+   "title": "Bitcoin Rebounds to $61K After Weekend Plunge to Two-Year Low",
+   "summary": "Bitcoin swung by more than $6,000 over the weekend as tech stocks slid and spot ETFs logged their biggest daily outflow since June.",
+   "outlets": [
+    "Decrypt"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 28.0
+  },
+  {
+   "id": "N1184",
+   "title": "NATO to Send AWACS Plane to Poland After Russian Missiles Crash",
+   "summary": "NATO will deploy an airborne warning and control system aircraft to Poland to monitor the country’s eastern region, a deputy defense minister said, after three Russian missiles crashed there last week.",
+   "outlets": [
+    "Bloomberg",
+    "DW",
+    "Meduza"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 53.0
+  },
+  {
+   "id": "N1185",
+   "title": "Ukrainian Naval Drones Sink Russian Warship in Libya",
+   "summary": "Ukrainian naval drones sank a Russian warship in the Libyan port of Benghazi, President Volodymyr Zelenskiy said on Monday, in Kyiv's first admitted strike on Libyan soil and the latest attack along the Mediterranean route that carries Russian oil to Asia.",
+   "outlets": [
+    "OilPrice",
+    "Al Jazeera",
+    "Bloomberg"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 45.0
+  },
+  {
+   "id": "N1186",
+   "title": "Chainflip Founder Weighs Compensation After Vault Hack",
+   "summary": "Simon Harman said liquidity providers faced significant losses. Checks before the Nov. 23 bounty deadline showed neither requested return payment had arrived.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 23.0
+  },
+  {
+   "id": "N1187",
+   "title": "Cyber Bridge Hack Followed LayerZero's Support Exit",
+   "summary": "AstraSec said 5.213 million unbacked CYBER were minted. LayerZero's CEO suspects Cyber's replacement infrastructure was compromised.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 23.0
+  },
+  {
+   "id": "N1190",
+   "title": "Binance hackers push $247 million through transactions designed to cloud the source",
+   "summary": "Elliptic found that nearly all the mixing transactions, known as coinjoins, were coordinated by an entity called Kruw during fixed daily hours, suggesting potential handoffs to China-based money launderers.",
+   "outlets": [
+    "CoinDesk",
+    "Decrypt"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 30.0
+  },
+  {
+   "id": "N1191",
+   "title": "UN warns Black Sea drone attacks threaten food exports as Russia-Ukraine war widens",
+   "summary": "As winter sets in, the Security Council hold a high stakes meeting Monday to discuss how Russian attacks on Ukraine's energy grid are leaving civilians without heat, power and water.",
+   "outlets": [
+    "The National",
+    "UN News",
+    "Al Jazeera"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 72.0
+  },
+  {
+   "id": "N1192",
+   "title": "Bitcoin Price Fades Near $61,000 as Stocks Soar on Huang’s Return",
+   "summary": "Bitcoin Magazine Bitcoin Price Fades Near $61,000 as Stocks Soar on Huang’s Return The bitcoin price gave back its Nvidia-fueled spike above $64,000 on Monday afternoon, slipping near $61,000 while stocks and crypto shares held big gains.",
+   "outlets": [
+    "Bitcoin Magazine"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 28.0
+  },
+  {
+   "id": "N1193",
+   "title": "Stocks soared, but the VIX is still at crisis level, says SA Analyst",
+   "summary": "",
+   "outlets": [
+    "Seeking Alpha"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 18.0
+  },
+  {
+   "id": "N1194",
+   "title": "U.S. adds Megaspeed to trade blacklist after Nvidia scandal",
+   "summary": "The Trump administration restricted Megaspeed from buying advanced semiconductor chips, after the firm's alleged links to China helped kick-start the scandal surrounding Nvidia CEO Jensen Huang. Jensen Huang is reinstated as NVIDIA’s CEO after reports he was targeted in an alleged foreign intelligence operation.",
+   "outlets": [
+    "CBS News",
+    "Al Jazeera",
+    "CNBC"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 76.0
+  },
+  {
+   "id": "N1196",
+   "title": "Russia protests Estonia’s planned land border closure and again accuses it of letting Ukrainian drones use its airspace",
+   "summary": "Russia’s Foreign Ministry summoned Estonia’s acting chargé d’affaires in Moscow, Marek Juhtegi, and lodged a “strong protest” over Estonia’s accusation that Moscow tried to set fire to a defense plant and the Estonian government’s decision to close the border with Russia.",
+   "outlets": [
+    "Meduza",
+    "OilPrice"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 52.0
+  },
+  {
+   "id": "N1197",
+   "title": "Russia threatens ‘hostile’ Estonia with ‘open war’",
+   "summary": "Moscow accuses Tallinn of 'hostile actions' citing border closure and claiming it is allowing Ukraine to launch attacks. Ksenia Agar, a Narva resident, has launched a petition asking Estonia to keep its border with Russia open for family visits.",
+   "outlets": [
+    "Al Jazeera",
+    "Meduza"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 35.0
+  },
+  {
+   "id": "N1199",
+   "title": "Iran says it will use all means to end U.S. naval blockade",
+   "summary": "The Iranian government said Monday it would use \"all available means\" to end the U.S. naval blockade of the country's ports, which a foreign ministry official described as \"an act of military aggression\" against the country. CBS News contributor Elliot Ackerman has more.",
+   "outlets": [
+    "CBS News",
+    "Al Jazeera"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 32.0
+  },
+  {
+   "id": "N1201",
+   "title": "CFTC staff advisory says crypto can count toward reserves, not liquidity rule",
+   "summary": "Staff guidance points to valuation discounts of at least 20% for bitcoin and ether and 2% for qualifying payment stablecoins. These assets cannot meet the operating-resource liquidity minimum.",
+   "outlets": [
+    "CNA",
+    "CFTC",
+    "The Defiant"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 33.0
+  },
+  {
+   "id": "N1207",
+   "title": "Shares in Chinese Cobalt Producers Jump After Congo Bans Exports",
+   "summary": "Shares in Chinese cobalt producers surged after the Democratic Republic of Congo slapped an export ban on the battery metal from the end of the month in a bid to arrest a price decline.",
+   "outlets": [
+    "Bloomberg"
+   ],
+   "tier": "S",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "missed",
+   "peak": 14.0
+  },
+  {
+   "id": "N1208",
+   "title": "Nato chief vows defence against space threat after Russian nuclear satellite reports",
+   "summary": "German media said Russia planned to launch a satellite with a nuclear warhead into space in coming weeks.",
+   "outlets": [
+    "BBC",
+    "Seeking Alpha"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "superseded",
+   "peak": 52.0
+  },
+  {
+   "id": "N1209",
+   "title": "Microsoft Outage Review Finds Gaps in Server Testing",
+   "summary": "All queued enterprise email was delivered, Microsoft says, but some messages to inactive consumer mailboxes expired.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 24.0
+  },
+  {
+   "id": "N1210",
+   "title": "UK Qualifying Crypto Venues Face Own-Platform Market-Making Ban",
+   "summary": "Market making in qualifying cryptoassets on qualifying platforms will be excluded from principal-dealing permission. Separate final FCA rules bar firms from making markets on UK qualifying platforms they operate from Oct. 25, 2027.",
+   "outlets": [
+    "The Defiant",
+    "Bitcoin Magazine"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 18.0
+  },
+  {
+   "id": "N1211",
+   "title": "Iran says three tankers hit mines in Hormuz despite U.S. escort, as Treasury widens sanctions",
+   "summary": "Iran said three oil tankers caught fire after hitting naval mines in the Strait of Hormuz, as the U.S. escalates sanctions aimed at cutting off Tehran's financial lifelines.",
+   "outlets": [
+    "CNBC",
+    "Al Jazeera",
+    "The National"
+   ],
+   "tier": "M",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 35.0
+  },
+  {
+   "id": "N1212",
+   "title": "Ten Under Formal Investigation in Paris Gold-Crypto Probe",
+   "summary": "Investigators say stolen customer records were used to solicit asset transfers and home collections under the guise of safekeeping.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 20.0
+  },
+  {
+   "id": "N1213",
+   "title": "Reuters: Circle, World Liberty Ordered to Keep Tokens Frozen",
+   "summary": "An ADGM order requires 18 firms to preserve Binance hack-linked tokens, Reuters reported. A Dec. 1 hearing will consider whether the restrictions continue.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 24.0
+  },
+  {
+   "id": "N1214",
+   "title": "SpaceX and Tesla entrusts five directors for merger talks, FT reports",
+   "summary": "",
+   "outlets": [
+    "CNA",
+    "Financial Times"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 27.0
+  },
+  {
+   "id": "N1216",
+   "title": "FAA probes Amazon delivery drone crash in Michigan near Detroit",
+   "summary": "An Amazon drone \"struck a fiber cable, a residential garage, and became entangled in power lines during takeoff,\" a preliminary FAA report stated.",
+   "outlets": [
+    "Seeking Alpha",
+    "CNBC"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "released",
+   "peak": 60.0
+  },
+  {
+   "id": "N1218",
+   "title": "DOJ moves to recover $1.17 billion from Binance hack, Strategy buys another 457 BTC, and more",
+   "summary": "",
+   "outlets": [
+    "The Block"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 46.0
+  },
+  {
+   "id": "N1219",
+   "title": "Emerging Market Stocks Rally as Huang’s Return Revives AI Trade",
+   "summary": "Emerging-market stocks rallied the most since July as investors snapped up artificial intelligence shares after Jensen Huang’s return to lead Nvidia Corp.",
+   "outlets": [
+    "Bloomberg",
+    "CNA"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 26.0
+  },
+  {
+   "id": "N1225",
+   "title": "Lookonchain Flags Suspected Hack of Ansem-Linked Wallet",
+   "summary": "The tracker reported 2.15 million USDC moved to Arbitrum. Records link 1.55 million USDC directly to the Ansem-associated wallet through Relay.",
+   "outlets": [
+    "The Defiant"
+   ],
+   "tier": "N",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 50.0
+  },
+  {
+   "id": "N1226",
+   "title": "Lithuanian SIM cards found in Russian drones that attacked Ukraine",
+   "summary": "Lithuanian prepaid SIM cards have been found in Russian drones that attacked Ukraine in 2025, the Lithuanian outlet 15 min reported, citing data from Ukrainian military intelligence. The 15 min article is behind a paywall; it was summarized by Delfi and LRT.",
+   "outlets": [
+    "Meduza",
+    "Al Jazeera"
+   ],
+   "tier": "X",
+   "editor_label": null,
+   "lane": "newsdesk",
+   "prod_status": "candidate",
+   "peak": 58.0
+  }
+ ]
+}

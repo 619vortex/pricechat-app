@@ -34,6 +34,7 @@ export const AREAS: NavArea[] = [
     pages: [
       { to: "/publishing", label: "Publishing", about: "Where things go out: X, signals, YouTube and the public website.", kind: "hub" },
       { to: "/x", label: "X / Twitter", about: "Your X account: what's being said, post ideas and replies waiting for approval.", kind: "tool" },
+      { to: "/x/originals", label: "Originals", about: "Original findings computed from Price Chat's own market data, with their graphic and proof. Approve, edit, regenerate or reject; nothing is posted automatically.", kind: "tool" },
       { to: "/trading-os", label: "Signals", about: "The signal scanner: signals waiting for your OK, open and past signals, and the switches that control them.", kind: "tool" },
       { to: "/youtube", label: "YouTube", about: "Your YouTube channel and new videos.", kind: "panel", panel: "youtube" },
       { to: "/website", label: "Website", about: "What the public website shows.", kind: "panel", panel: "website" },
@@ -71,6 +72,7 @@ export const AREAS: NavArea[] = [
       { to: "/api-keys", label: "API keys", about: "Passwords and keys for the services Price Chat connects to.", kind: "panel", panel: "apikeys" },
       { to: "/activity", label: "Activity log", about: "Everything Price Chat did, newest first.", kind: "panel", panel: "activity" },
       { to: "/kalshi", label: "Kalshi bot", about: "Your Kalshi prediction-market bot on your PC: balance, fee curve and the markets it watches. Read-only.", kind: "panel", panel: "kalshi" },
+      { to: "/intelligence", label: "Intelligence (shadow)", about: "The Terminal Intelligence Engine in shadow: AI decisions next to the lanes', disagreements, possible missed stories, latency, the PC worker and AI spend. Read-only: nothing is published by AI.", kind: "tool" },
       { to: "/vpn", label: "Kiwi VPN", about: "Who can use it, whether it costs anything, servers and devices.", kind: "tool" },
       { to: "/realm", label: "Realm (test)", about: "Play Vortex Realm, the Warrior Kiwi game, to test it. Members play it in Passport → Realm.", kind: "tool" },
     ],

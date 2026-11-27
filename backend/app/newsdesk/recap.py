@@ -273,7 +273,7 @@ async def build_visual(db: Session, now: datetime, slot_at: datetime, slot_local
     if second is None and not coin:
         second = await xyz_change(mover["name"])
         if second is not None:
-            second_name = "Hyperliquid (trade.xyz)"
+            second_name = "Hyperliquid"  # no "trade.xyz": a domain-like name fails the X link check
     if second is None:
         second = mover["pct"]  # the source's own summary figure, from a different call than the series
     head = visual.move_headline(mover["name"], series)

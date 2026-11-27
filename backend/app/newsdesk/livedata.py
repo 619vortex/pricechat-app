@@ -176,8 +176,9 @@ def data_label(m: moves.Move, verified: str) -> str:
     """The source line every market post ends with: "Market data: Yahoo Finance, 20:03 UTC, intraday (US market open)." The time is when
     the printed price was struck (Yahoo's regularMarketTime), and a US stock or index says whether its session is still trading."""
     stamp = f"{_utc(m.as_of):%H:%M} UTC"
-    src = ("Yahoo Finance, matched against Hyperliquid's trade.xyz market" if "trade.xyz" in verified and "apart" in verified
-           else "Yahoo Finance, matched against Hyperliquid" if "Hyperliquid" in verified and "apart" in verified else "Yahoo Finance")
+    # never print the "trade.xyz" market's name: it reads as a web address, so X's link check refused every post that carried it (11-25:
+    # the Nasdaq -4.5% move, event 1322, and silver, 1286, were skipped on X and Telegram's package failed its own-links check)
+    src = "Yahoo Finance, matched against Hyperliquid" if ("trade.xyz" in verified or "Hyperliquid" in verified) and "apart" in verified else "Yahoo Finance"
     when = {"intraday": ", intraday (US market open)", "close": ", at the close"}.get(m.session, "")
     return f"Market data: {src}, {stamp}{when}."
 
