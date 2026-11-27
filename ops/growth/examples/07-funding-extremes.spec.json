@@ -1,0 +1,100 @@
+{
+ "kind": "rank_table",
+ "headline": "On Hyperliquid, shorts are paying longs to stay bearish",
+ "hero": "−83%",
+ "hero_role": "neg",
+ "kicker": "Positioning extreme",
+ "dek": "Most negative funding, annualised from the current hourly rate (it resets every hour) · perps with ≥ $5M open interest",
+ "series": [],
+ "rows": [
+  {
+   "label": "ADA",
+   "value": -83.1545,
+   "sublabel": "OI $23M",
+   "display": "−83%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "XLM",
+   "value": -72.6186,
+   "sublabel": "OI $5M",
+   "display": "−73%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "kPEPE",
+   "value": -71.9422,
+   "sublabel": "OI $14M",
+   "display": "−72%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "DOT",
+   "value": -70.7688,
+   "sublabel": "OI $6M",
+   "display": "−71%",
+   "highlight": true,
+   "role": "auto"
+  },
+  {
+   "label": "WLD",
+   "value": -47.0579,
+   "sublabel": "OI $18M",
+   "display": "−47%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "SUI",
+   "value": -36.7289,
+   "sublabel": "OI $15M",
+   "display": "−37%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "ARB",
+   "value": -24.249,
+   "sublabel": "OI $7M",
+   "display": "−24%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "TRX",
+   "value": -22.8145,
+   "sublabel": "OI $10M",
+   "display": "−23%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "DOGE",
+   "value": -16.2491,
+   "sublabel": "OI $22M",
+   "display": "−16%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "PENDLE",
+   "value": -16.1305,
+   "sublabel": "OI $5M",
+   "display": "−16%",
+   "highlight": false,
+   "role": "auto"
+  }
+ ],
+ "annotations": [],
+ "y_format": "pct",
+ "y_label": "",
+ "source": "Source: Hyperliquid metaAndAssetCtxs (instantaneous funding) · as of 25 Nov 2026 15:40 UTC",
+ "theme": "dark",
+ "options": {
+  "mute_unhighlighted": true
+ },
+ "version": "pc-intel-1"
+}

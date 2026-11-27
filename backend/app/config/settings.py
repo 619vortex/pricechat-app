@@ -239,6 +239,15 @@ class Settings(BaseSettings):
     bm_tick_seconds: int = Field(60, ge=15, le=3600)
     bm_max_video_mb: int = Field(120, ge=5, le=1024)
     bm_worker_bootstrap_sha256: str | None = None  # sha256 of a worker token kept on the worker machine (see queue.worker_for)
+    # --- Terminal Intelligence Engine channel (app/intel; docs/intelligence/2026-11-25-terminal-intelligence-engine.md §4.1) ---
+    # OFF by default: with intel_enabled False nothing is enqueued, the intel.tick job isn't even registered, no paid call is made.
+    intel_enabled: bool = False
+    intel_daily_usd_cap: float = Field(3.0, ge=0)  # the shared AI ledger's hard daily cap (owner approved $3/day); over it: rules
+    intel_worker_token_sha256: str | None = None  # sha256 of the PC's pci_ token (python -m app.intel.tokens); the token stays on the PC
+    intel_cloud_model: str = "claude-haiku-5-5"  # intel.analyze when the PC can't (offline, timeout, breaking cloud-first)
+    intel_breaking_cloud_first: bool = True  # breaking: cloud answers; the PC (if online) gets a shadow copy for comparison
+    intel_embed_dim: int = Field(768, ge=16, le=4096)  # nomic-embed-text v1.5
+    intel_tick_seconds: int = Field(15, ge=5, le=600)
     # --- Price Chat Vault (docs/VAULT.md): the curated storefront of vintage Japanese cards from approved sellers ---
     vault_ebay_sellers: str = "mayumicardshop|Mayumi Card Shop"  # username|display name, comma-separated; synced via the Browse API
     vault_sync_seconds: int = Field(10800, ge=900, le=21600)  # eBay's licence: displayed listings at most 6 h older than eBay's
@@ -305,6 +314,18 @@ class Settings(BaseSettings):
     newsdesk_chief_model: str = "claude-opus-5-5"
     newsdesk_chief_effort: str = "low"
     newsdesk_chief_daily_usd: float = Field(1.0, ge=0, le=20)
+    # Terminal Intelligence Engine Phase 0 (app/intel/gate): the shared semantic gate in SHADOW. When on, both lanes record what the
+    # semantic gate would decide next to their current newsworthy decision (table intel_shadow); it never changes a publish, hold or
+    # reject. Off: no extra work at all. No model is called by it (the analyser is plugged in separately; none by default).
+    intel_shadow_enabled: bool = False
+    # Growth Engine (app/growth; docs/growth/2026-11-25-original-intelligence-growth-engine.md). Both OFF by default: with them off the
+    # jobs aren't even registered. growth_collect_enabled: G0 Market Memory collectors (public Hyperliquid, Coinbase Exchange, alternative.me
+    # only: sources whose licence isn't cleared never run in production, app/growth/sources.py). growth_enabled: G1 detectors + the Admin
+    # Originals approval queue. Nothing here publishes: an approved draft is only marked approved; the owner posts it by hand.
+    growth_enabled: bool = False
+    growth_collect_enabled: bool = False
+    growth_drafts_per_format: int = Field(3, ge=1, le=10)  # drafts kept per format per generation run
+    growth_max_drafts_per_run: int = Field(12, ge=1, le=50)
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the
@@ -319,6 +340,14 @@ class Settings(BaseSettings):
     # More background jobs
     job_x_ingest_seconds: int = Field(900, ge=60)
     job_x_own_seconds: int = Field(900, ge=120)  # Read & Earn: Price Chat's own new X posts
+    # X performance history (app/social/x_history): a metrics curve (~1 h, 6 h, 24 h, 72 h, 7 d after publishing) for every Price Chat X
+    # post, plus an hourly own-account follower snapshot. Read-only owned reads ($0.001 a post, ids batched 100 per request); it never
+    # spends into the posting reserve (terminal/xintel.protect_posting) and has its own daily cap. X_PERF_HISTORY_ENABLED=false turns it off
+    # (the old once-a-day newsdesk.metrics / newsdesk.trending_metrics reads then run again).
+    x_perf_history_enabled: bool = True
+    x_perf_history_daily_usd: float = Field(0.5, ge=0, le=5)
+    job_x_history_seconds: int = Field(600, ge=300)
+    job_x_followers_seconds: int = Field(3600, ge=1800)
     job_x_opportunities_seconds: int = Field(1800, ge=300)
     job_cross_signals_seconds: int = Field(900, ge=120)
     job_topic_merge_seconds: int = Field(3600, ge=300)

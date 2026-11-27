@@ -1,0 +1,54 @@
+{
+ "kind": "seasonality_bars",
+ "headline": "Bitcoin's worst November since 2018, with 5 days left",
+ "hero": "−24.8%",
+ "hero_role": "neg",
+ "kicker": "Seasonality",
+ "dek": "Bitcoin's November return by year: close on 30 Nov vs close on 31 Oct",
+ "series": [
+  {
+   "name": "November",
+   "values": [
+    58.2091,
+    -36.4116,
+    -17.7177,
+    42.4123,
+    -7.0346,
+    -16.2336,
+    8.7833,
+    37.3621,
+    -17.4904,
+    -24.7691
+   ],
+   "x": [
+    "2017",
+    "2018",
+    "2019",
+    "2020",
+    "2021",
+    "2022",
+    "2023",
+    "2024",
+    "2025",
+    "2026"
+   ],
+   "role": "context",
+   "label": null,
+   "width": null
+  }
+ ],
+ "rows": [],
+ "annotations": [],
+ "y_format": "pct",
+ "y_label": "",
+ "source": "Source: Yahoo Finance daily closes · 25 Nov value intraday · as of 25 Nov 2026 15:40 UTC",
+ "theme": "dark",
+ "options": {
+  "partial": [
+   "2026"
+  ],
+  "partial_note": "so far",
+  "digits": 0
+ },
+ "version": "pc-intel-1"
+}
