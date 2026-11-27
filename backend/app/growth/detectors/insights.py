@@ -383,7 +383,7 @@ def cross_asset(mem: Memory, as_of: date) -> list[Finding]:
     rows.sort(key=lambda r: -r["ytd"])
     btc = next(r for r in rows if r["label"] == "Bitcoin")
     best = rows[0]
-    lst = " · ".join(f"{r['label']} {fmt.pct(r['ytd'], dp=0)}" for r in rows)
+    lst = " · ".join(f"{r['label']} {fmt.pct(r['ytd'])}" for r in rows)  # the same decimals as the lead figures (no "+3.9%" then "+4%")
     nums = {"list": n(0, lst, "year to date, best first"), "btc": n(btc["ytd"], fmt.pct(btc["ytd"]), "Bitcoin, year to date"),
             "best": n(best["ytd"], fmt.pct(best["ytd"]), f"{best['label']}, year to date"),
             "year": n(as_of.year, str(as_of.year), "year"), "date": n(0, fmt.day(as_of), "as of"),
