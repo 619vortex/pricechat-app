@@ -89,8 +89,11 @@ def test_drawdown_table_says_the_highs_are_hyperliquid_highs() -> None:
 # --- the queue: older drafts replaced, never two versions ------------------------------------------------------------------------
 
 
-def _row(db: Session, key: str, detector: str, generator: str | None, status: str = "pending", writer_name: str = "pc") -> GrDraft:
-    f = _rarity().to_dict() | ({"generator": generator} if generator else {})
+def _row(db: Session, key: str, detector: str, generator: str | None, status: str = "pending", writer_name: str = "pc",
+         verified: bool = True, subject: str | None = None) -> GrDraft:
+    f = _rarity().to_dict() | ({"generator": generator} if generator else {}) | ({"verification": {"ok": True}} if verified else {})
+    if subject:
+        f["subject"] = subject
     d = GrDraft(finding_key=key, format="extremes", detector=detector, status=status, text="t", original_text="t", writer=writer_name, finding=f,
                 chart={}, sources=[], calculation="", score=50, as_of=AS_OF, version=1, image_cache={})
     db.add(d)
@@ -105,10 +108,14 @@ def test_older_untouched_drafts_are_superseded_or_retired(db: Session) -> None:
     edited = _row(db, "rarity:ETH:30d", "rarity", "g2-1", writer_name="owner")
     approved = _row(db, "drawdown_table:x", "drawdown_table", "g2-1", status="approved")
     keep = _row(db, "seasonality:BTC", "seasonality", "g2-1")
+    older = _row(db, "rarity:BTC:30d:2026-11-24", "rarity", "g1", verified=False)  # same detector + subject, older data
+    unverified = _row(db, "then_now:BTC", "then_now", "g1", verified=False, subject="BTC-then")
     new = _row(db, "rarity:BTC:30d", "rarity", drafts.GENERATOR)
     out = drafts.supersede(db, [new], NOW)
-    assert out == {"superseded": [old.id], "retired": [funding.id, board.id]}
-    for d in (old, funding, board):
+    assert out == {"superseded": [old.id, older.id], "retired": [funding.id, board.id, unverified.id]}
+    db.refresh(unverified)
+    assert "before its data was re-read" in unverified.reject_reason
+    for d in (old, funding, board, older):
         db.refresh(d)
         assert d.status == "rejected" and d.decided_by == "system"
     assert f"#{new.id}" in old.reject_reason and "major coins only" in funding.reject_reason
