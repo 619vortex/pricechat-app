@@ -23,7 +23,13 @@ from app.models.market_memory import GrDraft
 log = logging.getLogger(__name__)
 
 STATUSES = ("pending", "approved", "rejected", "regenerating")
-GENERATOR = "g2-2"  # the detector set + verification version: a new one drafts once on the day it is deployed (jobs.growth_originals)
+GENERATOR = "g3-1"  # the detector set + verification version: a new one drafts once on the day it is deployed (jobs.growth_originals)
+# G3 (2026-11-27): every wording keeps the instrument and the history its figures are measured in (Finding.required_phrases). A pending draft
+# of an older generator that nobody has touched is redrafted under the current rules and the old one is marked superseded (rejected, with
+# the reason), so the queue never holds two versions of one finding.
+SYSTEM = "system"
+# G2 v2 changed who these detectors may name (major coins only) or excluded them: their older pending drafts are retired, not redrafted
+UNIVERSE_CHANGED = frozenset({"leaderboard", "divergence", "breadth_count", "volume_spike"})
 REPEAT_SKIP = timedelta(days=7)  # the same finding key isn't drafted twice in a week
 SIMILAR_DAYS = timedelta(days=3)  # same detector + subject within 3 days: novelty halved
 STORY_DAYS = timedelta(days=3)  # nd_storylines told about the subject in 3 days: novelty 0.7
@@ -51,8 +57,9 @@ def _settings(settings: Any = None) -> Any:
 def novelty(db: Session, findings: list[Finding], now: datetime) -> list[Finding]:
     """Drops findings already drafted this week; lowers novelty for a recent draft on the same detector + subject, or a News Desk storyline
     that told the subject in the last few days (nd_storylines: the "already told" memory)."""
-    recent = list(db.execute(select(GrDraft.finding_key, GrDraft.detector, GrDraft.finding, GrDraft.created_at)
-                             .where(GrDraft.created_at >= now - REPEAT_SKIP)))
+    recent = [r for r in db.execute(select(GrDraft.finding_key, GrDraft.detector, GrDraft.finding, GrDraft.created_at, GrDraft.status,
+                                            GrDraft.writer).where(GrDraft.created_at >= now - REPEAT_SKIP))
+              if not _replaceable(r[4], r[5], r[2])]  # an untouched draft of an older generator doesn't block its own redraft
     keys = {r[0] for r in recent}
     similar = {(r[1], (r[2] or {}).get("subject")) for r in recent if _aware(r[3]) >= now - SIMILAR_DAYS}
     told: list[str] = []
@@ -125,6 +132,39 @@ def _aware(t: datetime) -> datetime:
 # --- drafts ----------------------------------------------------------------------------------------------------------------------
 
 
+def _replaceable(status: str, writer_name: str, finding: dict[str, Any] | None) -> bool:
+    """A draft the current generator may replace: still waiting for review, not edited by the owner, made by an older generator."""
+    return status in ("pending", "regenerating") and writer_name != "owner" and (finding or {}).get("generator", "g1") != GENERATOR
+
+
+def supersede(db: Session, made: list[GrDraft], now: datetime) -> dict[str, list[int]]:
+    """After a run: older-generator drafts nobody has reviewed are marked rejected with the reason (the Rejected tab keeps them, Regenerate
+    brings one back): the ones the run redrafted (same finding key, or the same detector and subject on newer data), the ones drafted before
+    source verification existed, and the ones the current rules no longer draft (excluded detectors, the detectors limited to major coins in
+    G2 v2). Never touches an approved, owner-edited or current-generator draft."""
+    by_key = {d.finding_key: d.id for d in made}
+    by_subject = {(d.detector, (d.finding or {}).get("subject")): d.id for d in made}
+    out: dict[str, list[int]] = {"superseded": [], "retired": []}
+    for d in db.scalars(select(GrDraft).where(GrDraft.status.in_(("pending", "regenerating")))):
+        if not _replaceable(d.status, d.writer, d.finding) or d.id in by_key.values():
+            continue
+        same = by_key.get(d.finding_key) or by_subject.get((d.detector, (d.finding or {}).get("subject")))
+        if same:
+            why, bucket = (f"Superseded by draft #{same}: the same finding (or the same angle on newer data), redrafted under the current rules "
+                           f"({GENERATOR})"), "superseded"
+        elif not (d.finding or {}).get("verification"):
+            why, bucket = "Retired: drafted before its data was re-read from the source (G2 verification); the current batch is verified", "retired"
+        elif d.detector in EXCLUDED or d.detector in UNIVERSE_CHANGED:
+            why, bucket = (f"Retired: the current Originals rules ({GENERATOR}) no longer draft this: major coins only, no annualised funding "
+                           "figures"), "retired"
+        else:
+            continue
+        d.status, d.decided_at, d.decided_by, d.reject_reason, d.writer_job_id = "rejected", now, SYSTEM, why[:500], None
+        out[bucket].append(d.id)
+    db.commit()
+    return out
+
+
 def finding_of(d: GrDraft) -> Finding:
     return Finding.from_dict(d.finding)
 
@@ -189,6 +229,7 @@ def generate(db: Session, *, settings: Any = None, now: datetime | None = None, 
 
         verifier = Verifier(mem, now=now) if bool(getattr(s, "growth_verify_sources", True)) else None
     made: list[int] = []
+    made_rows: list[GrDraft] = []
     refused: list[dict[str, Any]] = []
     for f in ranked:
         if len(made) >= limit:
@@ -201,7 +242,9 @@ def generate(db: Session, *, settings: Any = None, now: datetime | None = None, 
         d = create(db, f, settings=s, use_writer=use_writer, verification=check)
         if d is not None:
             made.append(d.id)
-    return {"found": len(found), "held_unlicensed": held, "after_novelty": len(fresh), "drafted": len(made), "draft_ids": made, "errors": errors,
+            made_rows.append(d)
+    replaced = supersede(db, made_rows, now)
+    return {"found": len(found), "held_unlicensed": held, **replaced, "after_novelty": len(fresh), "drafted": len(made), "draft_ids": made, "errors": errors,
             "not_verified": refused, "generator": GENERATOR, "as_of": (as_of or detectors.default_as_of(mem) or now.date()).isoformat()}
 
 
@@ -349,7 +392,8 @@ def view(d: GrDraft) -> dict[str, Any]:
             "chart_kinds": _kinds(d.chart), "render_info": d.image_cache or {},  # render meta per format: template, version (learner)
             "created_at": d.created_at.isoformat() if d.created_at else None, "decided_at": d.decided_at.isoformat() if d.decided_at else None,
             "decided_by": d.decided_by, "reject_reason": d.reject_reason, "writer_pending": d.writer_job_id is not None,
-            "verification": f.get("verification"), "generator": f.get("generator", "g1"),
+            "verification": f.get("verification"), "generator": f.get("generator", "g1"), "subject": f.get("subject", ""),
+            "posted": f.get("posted"), "coverage": Finding.from_dict(f).required_phrases() if f else [],
             "gate_problems": gate.problems(d.text, Finding.from_dict(f), as_edited=d.writer == "owner") if f else []}
 
 

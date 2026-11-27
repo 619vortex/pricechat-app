@@ -38,6 +38,7 @@ class Finding:
     novelty: float = 1.0
     freshness: float = 1.0
     notes: list[str] = field(default_factory=list)
+    coverage: list[str] = field(default_factory=list)  # extra phrases every wording must keep (e.g. "perpetual"): see required_phrases
 
     def __post_init__(self) -> None:
         assert self.format in FORMATS, self.format
@@ -66,6 +67,21 @@ class Finding:
 
     def text(self, variant: int = 0) -> str:
         return self.fill(self.templates[variant % len(self.templates)])
+
+    def required_phrases(self) -> list[str]:
+        """What every wording must still say about the instrument and the history the figures are measured in (owner, 2026-11-27: "every
+        claim accurately represents its underlying instrument and historical coverage"): the data source and the coverage start when every
+        template names them ("Hyperliquid", "February 2023"), plus the Finding's own `coverage` phrases. A rewording that drops them reads as
+        a claim about all of history or about the spot market, so the figures gate refuses it."""
+        filled = [self.fill(t).lower() for t in self.templates]
+        out: list[str] = []
+        if filled and all("hyperliquid" in t for t in filled):
+            out.append("Hyperliquid")
+        for k, v in self.numbers.items():  # where the stored history starts ("since": "February 2023")
+            t = str(v.get("text") or "")
+            if (k == "since" or "history starts" in str(v.get("label") or "")) and t and filled and all(t.lower() in x for x in filled):
+                out.append(t)
+        return out + [c for c in self.coverage if c not in out]
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

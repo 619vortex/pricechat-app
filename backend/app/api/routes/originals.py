@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.config.settings import get_settings
-from app.growth import drafts, graphics, sources, store
+from app.growth import drafts, editorial, graphics, performance, sources, store
 from app.models.market_memory import GrDraft
 
 router = APIRouter(prefix="/originals", tags=["originals"])
@@ -36,10 +36,60 @@ def list_drafts(db: DbSession, status: str | None = Query(None), format: str | N
     rows = list(db.scalars(q.order_by(GrDraft.created_at.desc(), GrDraft.score.desc()).offset(offset).limit(limit)))
     counts = {s: n for s, n in db.execute(select(GrDraft.status, func.count()).group_by(GrDraft.status))}
     s = get_settings()
-    return {"drafts": [drafts.view(d) for d in rows], "counts": {k: int(counts.get(k, 0)) for k in drafts.STATUSES},
+    metrics = performance.draft_metrics(db, rows)
+    views = [drafts.view(d) | {"performance": metrics.get(d.id)} for d in rows]
+    pending = views if status == "pending" and not format and offset == 0 and len(rows) < limit else [
+        drafts.view(d) for d in db.scalars(select(GrDraft).where(GrDraft.status == "pending"))]
+    top = editorial.shortlist(pending, drafts.GENERATOR, _lift(db))
+    return {"drafts": views, "counts": {k: int(counts.get(k, 0)) for k in drafts.STATUSES}, "top": top,
             "switches": {"growth_enabled": bool(s.growth_enabled), "growth_collect_enabled": bool(s.growth_collect_enabled),
                          "intel_enabled": bool(s.intel_enabled)},
             "publishing": "manual: approving marks a draft approved; nothing is posted automatically"}
+
+
+_LIFT: dict[str, Any] = {"at": 0.0, "lift": {}}
+
+
+def _lift(db: Any) -> dict[str, float]:
+    """Measured engagement lift per Original format (G3), recomputed at most every 10 minutes: the shortlist's shareability once measured."""
+    import time
+
+    if time.monotonic() - _LIFT["at"] > 600:
+        try:
+            _LIFT["lift"] = performance.format_lift(performance.report(db))
+        except Exception:  # noqa: BLE001 - a ranking hint: the priors stand in when it can't be computed
+            db.rollback()
+            _LIFT["lift"] = {}
+        _LIFT["at"] = time.monotonic()
+    return _LIFT["lift"]
+
+
+@router.get("/performance")
+def performance_report(db: DbSession, days: int = Query(30, ge=1, le=90)) -> dict[str, Any]:
+    """G3: every Price Chat X post's measured numbers, Originals against the News Desk and Trending posts, the winning formats. Stored
+    snapshots only: this reads nothing from X and costs nothing."""
+    return performance.report(db, days=days)
+
+
+class PostedIn(BaseModel):
+    url: str = Field(min_length=5, max_length=300)
+
+
+@router.post("/drafts/{draft_id}/posted")
+def mark_posted(draft_id: int, body: PostedIn, db: DbSession) -> dict[str, Any]:
+    """Links an approved draft to the X post the owner made from it (the post's link or id). Read-only: nothing is posted."""
+    try:
+        return drafts.view(performance.link(db, draft_id, body.url))
+    except drafts.DraftError as e:
+        raise _err(e) from None
+
+
+@router.delete("/drafts/{draft_id}/posted")
+def unmark_posted(draft_id: int, db: DbSession) -> dict[str, Any]:
+    try:
+        return drafts.view(performance.unlink(db, draft_id))
+    except drafts.DraftError as e:
+        raise _err(e) from None
 
 
 @router.get("/drafts/{draft_id}")

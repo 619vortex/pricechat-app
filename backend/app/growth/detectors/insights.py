@@ -16,7 +16,7 @@ import statistics
 from datetime import date, timedelta
 
 from app.growth import fmt
-from app.growth.detectors.common import data_label, name, price
+from app.growth.detectors.common import data_label, name, price, us_market_closed
 from app.growth.findings import Finding, chart, n, pts
 from app.growth.memory import Memory, Series
 
@@ -327,10 +327,14 @@ def drawdown_table(mem: Memory, as_of: date, coins: tuple[str, ...] = DD_COINS) 
     lst = " · ".join(f"{name(r['coin']) if r['coin'] in ('BTC', 'ETH') else r['coin']} {fmt.pct(r['dd'], dp=0)}" for r in rows[:6])
     nums["list"] = n(0, lst, "distance below the highest close, shallowest first")
     words = {"deep_coin": deepest["coin"]}
-    templates = ["How far below their highest close in Hyperliquid data ({date}):\n{list}\nBitcoin is {btc} from its {btc_high} close of {btc_high_day}. "
-                 "The median of the {count} coins: {median}.",
-                 "Bitcoin is {btc} from its {btc_high} high close ({btc_high_day}).\nAcross {count} major coins in Hyperliquid data, the median is "
-                 "{median}; the deepest, {deep_coin}, is {deep}."]
+    # Each coin's high is its highest close in Hyperliquid data, which for most altcoins is not their all-time high (LINK, AVAX, LTC peaked in
+    # 2021, before Hyperliquid listed them): every wording says so (coverage "since {since}"), never "all-time high" or "from the top".
+    nums["btc_abs"] = n(btc["dd"], f"{abs(btc['dd']):.1f}%", "Bitcoin below its highest close")
+    nums["median_abs"] = n(med, f"{abs(med):.1f}%", "median distance below the high")
+    templates = ["Bitcoin is {btc_abs} below its highest close in Hyperliquid data, {btc_high} on {btc_high_day}.\n"
+                 "Across {count} major coins, the median is {median} from each coin's own Hyperliquid high (data since {since}).",
+                 "How far below their highest close in Hyperliquid data (since {since}), on {date}:\n{list}\n"
+                 "Bitcoin's high: {btc_high} on {btc_high_day}. The median of the {count} coins: {median}."]
     calc = "; ".join(f"{r['coin']}: close {fmt.raw(r['now'], 4)} on {as_of.isoformat()} vs highest close {fmt.raw(r['high'], 4)} on "
                      f"{r['high_day'].isoformat()} = {fmt.pct(r['dd'])}" for r in rows) + f"; median {fmt.pct(med)} ({len(rows)} coins, {', '.join(r['key'] for r in rows)})"
     table = [{"label": name(r["coin"]) if r["coin"] in ("BTC", "ETH") else r["coin"], "value": round(r["dd"], 2), "display": fmt.pct(r["dd"], dp=0),
@@ -361,18 +365,23 @@ def cross_asset(mem: Memory, as_of: date) -> list[Finding]:
     if as_of.month < 2:
         return []
     jan1 = date(as_of.year, 1, 1)
+    end = as_of  # the perpetuals trade on weekends and holidays, the index and the metals' main session don't: measured to the last open day
+    while us_market_closed(end):
+        end -= timedelta(days=1)
+    if end.year != as_of.year or (as_of - end).days > 4:
+        return []
     rows = []
     for key, label in CROSS:
         s = mem.get(f"px:{key}:close") if key.startswith("XYZ-") else price(mem, key)
         if not s:
             continue
-        s = s.upto(as_of)
-        if s.last != as_of:
+        s = s.upto(end)
+        if s.last != end:
             continue
         i0 = s.index_on_or_before(jan1 - timedelta(days=1))
         if i0 is None or (jan1 - s.dates[i0]).days > 4 or s.values[i0] <= 0:
             continue
-        win = [(d, v) for d, v in zip(s.dates, s.values) if s.dates[i0] <= d <= as_of]
+        win = [(d, v) for d, v in zip(s.dates, s.values) if s.dates[i0] <= d <= end]
         if any((win[k][0] - win[k - 1][0]).days > 5 for k in range(1, len(win))):  # a hole in the stored closes: not measured
             continue
         ytd = (s.values[-1] / s.values[i0] - 1) * 100
@@ -386,31 +395,35 @@ def cross_asset(mem: Memory, as_of: date) -> list[Finding]:
     lst = " · ".join(f"{r['label']} {fmt.pct(r['ytd'])}" for r in rows)  # the same decimals as the lead figures (no "+3.9%" then "+4%")
     nums = {"list": n(0, lst, "year to date, best first"), "btc": n(btc["ytd"], fmt.pct(btc["ytd"]), "Bitcoin, year to date"),
             "best": n(best["ytd"], fmt.pct(best["ytd"]), f"{best['label']}, year to date"),
-            "year": n(as_of.year, str(as_of.year), "year"), "date": n(0, fmt.day(as_of), "as of"),
+            "year": n(as_of.year, str(as_of.year), "year"), "date": n(0, fmt.day(end), "as of (the last US market day)"),
             "gap": n(best["ytd"] - btc["ytd"], fmt.pts(best["ytd"] - btc["ytd"]), f"{best['label']} minus Bitcoin, points")}
     words = {"best_label": best["label"]}
     for r in rows:
         nums["ytd_" + r["label"].lower().replace(" ", "").replace("&", "").replace("-", "")] = n(r["ytd"], fmt.pct(r["ytd"]), f"{r['label']}, year to date")
-    templates = ["{year} so far, from each market's last close of last year:\n{list}\n"
+    # Gold, silver and the indices are Hyperliquid perpetuals that track them, not the index or the spot metal itself: every wording says
+    # "perpetual" (Finding.coverage), and the figures run to the last US market day (`end`), never a holiday's off-hours perp price.
+    templates = ["{year} so far, from each market's last close of last year to {date}:\n{list}\n"
                  "Prices from Hyperliquid, where gold, silver and US stock indices trade as perpetuals that track them.",
-                 "Bitcoin is {btc} in {year} so far. Gold, silver and the big stock indices, same window:\n{list}\n(Hyperliquid prices, through {date})"]
+                 "Bitcoin is {btc} in {year} so far. Gold, silver and the big stock indices, same window:\n{list}\n"
+                 "(Hyperliquid perpetuals tracking each market, through {date})"]
     if best["label"] != "Bitcoin":
-        templates.insert(0, "{best_label} {best} in {year} so far. Bitcoin: {btc}.\nThe full scoreboard: {list}\n"
-                            "(Hyperliquid prices, from each market's last close of last year to {date})")
+        templates.insert(0, "{best_label} {best} in {year} so far. Bitcoin: {btc}.\nThe scoreboard: {list}\n"
+                            "(Hyperliquid perpetuals tracking each market, last close of last year to {date})")
     calc = "; ".join(f"{r['label']}: {r['key']} close {fmt.raw(r['base'], 4)} on {r['base_day'].isoformat()} -> {fmt.raw(r['now'], 4)} on "
-                     f"{as_of.isoformat()} = {fmt.pct(r['ytd'])}" for r in rows)
+                     f"{end.isoformat()} = {fmt.pct(r['ytd'])}" for r in rows) + (
+        f"; measured to {end.isoformat()}, the last US market day on or before {as_of.isoformat()}" if end != as_of else "")
     iso = as_of.isocalendar()
     role = {best["label"]: "highlight", "Bitcoin": "neg" if btc["ytd"] < 0 else "pos"}
     series = [{"name": r["label"], "points": pts(r["pts"], 4 if r["base"] < 100 else 2), "role": role.get(r["label"], "context")} for r in rows]
-    anns = [{"type": "check", "x": as_of.isoformat(), "series": k, "number": "ytd_" + r["label"].lower().replace(" ", "").replace("&", "").replace("-", "")}
+    anns = [{"type": "check", "x": end.isoformat(), "series": k, "number": "ytd_" + r["label"].lower().replace(" ", "").replace("&", "").replace("-", "")}
             for k, r in enumerate(rows)]
     rarity = min(1.0, 0.55 + abs(best["ytd"] - btc["ytd"]) / 120)
     return [Finding(
         key=f"cross_asset:{iso[0]}-W{iso[1]:02d}", format="relative", detector="cross_asset", subject="cross-asset",
         headline=f"{as_of.year} so far: " + lst, numbers=nums, words=words, templates=templates, window="year to date",
-        series=[r["key"] for r in rows], sources=["hyperliquid"], as_of=as_of, calculation=calc, rarity=rarity,
-        comparatives=["best"],
-        chart=chart("rebased_lines", f"{as_of.year} so far", "Markets scoreboard", series, annotations=anns, sources=["hyperliquid"], as_of=as_of,
+        series=[r["key"] for r in rows], sources=["hyperliquid"], as_of=end, calculation=calc, rarity=rarity,  # the graphic's "as of" too
+        comparatives=["best"], coverage=["perpetual"],
+        chart=chart("rebased_lines", f"{as_of.year} so far", "Markets scoreboard", series, annotations=anns, sources=["hyperliquid"], as_of=end,
                     hero="btc", hero_role="neg" if btc["ytd"] < 0 else "pos",
                     headline="Bitcoin in {year} so far. " + ("{best_label}: {best}" if best["label"] != "Bitcoin" else "The best of the markets shown"),
                     dek="Change since each market's last close of last year, %, daily (gold, silver and indices: Hyperliquid perpetuals tracking them)",
@@ -445,11 +458,11 @@ def btc_in_gold(mem: Memory, as_of: date) -> list[Finding]:
             "btc": n(b.value(as_of) or 0, fmt.money(b.value(as_of) or 0), "Bitcoin close"), "gold": n(gm[as_of], fmt.money(gm[as_of]), "gold close, per oz")}
     word = "fewer" if ch < 0 else "more"
     templates = ["One bitcoin buys {oz_now} of gold, down from {oz_start} at the end of last year ({ch}).\n"
-                 "Bitcoin {btc}, gold {gold} an ounce ({date}, Hyperliquid prices)." if ch < 0 else
+                 "Bitcoin {btc}, gold {gold} an ounce ({date}, Hyperliquid's gold perpetual)." if ch < 0 else
                  "One bitcoin buys {oz_now} of gold, up from {oz_start} at the end of last year ({ch}).\n"
-                 "Bitcoin {btc}, gold {gold} an ounce ({date}, Hyperliquid prices).",
+                 "Bitcoin {btc}, gold {gold} an ounce ({date}, Hyperliquid's gold perpetual).",
                  "Bitcoin priced in gold, {year} so far: from {oz_start} to {oz_now} per bitcoin ({ch}).\n"
-                 "A bitcoin buys " + word + " gold than it did on {start}."]
+                 "A bitcoin buys " + word + " gold than it did on {start} (Hyperliquid's bitcoin and gold perpetuals)."]
     calc = (f"ounces = Bitcoin close / gold close (px:BTC:close / px:XYZ-GOLD:close, Hyperliquid's gold perpetual); {base_day.isoformat()}: "
             f"{fmt.raw(b.value(base_day) or 0, 2)} / {fmt.raw(gm[base_day], 2)} = {r0:.2f}; {as_of.isoformat()}: {fmt.raw(b.value(as_of) or 0, 2)} / "
             f"{fmt.raw(gm[as_of], 2)} = {r1:.2f}; change {fmt.pct(ch)}; low {lo[1]:.2f} on {lo[0].isoformat()}")
@@ -458,7 +471,7 @@ def btc_in_gold(mem: Memory, as_of: date) -> list[Finding]:
         key=f"btc_in_gold:{iso[0]}-W{iso[1]:02d}", format="relative", detector="btc_in_gold", subject="BTC-gold",
         headline=f"One bitcoin = {r1:.1f} oz of gold ({fmt.pct(ch)} in {as_of.year})", numbers=nums, words={}, templates=templates,
         window="year to date", series=[b.key, "px:XYZ-GOLD:close"], sources=["hyperliquid"], as_of=as_of, calculation=calc,
-        rarity=min(1.0, 0.5 + abs(ch) / 100), comparatives=[],
+        rarity=min(1.0, 0.5 + abs(ch) / 100), comparatives=[], coverage=["perpetual"],
         chart=chart("ratio_line", "Bitcoin priced in gold", "Bitcoin in gold",
                     [{"name": "ounces of gold per bitcoin", "points": pts(ratio, 2), "role": "neg" if ch < 0 else "pos"}],
                     annotations=[{"type": "marker", "x": as_of.isoformat(), "label": "Now"}], sources=["hyperliquid"], as_of=as_of,

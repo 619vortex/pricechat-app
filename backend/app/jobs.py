@@ -1172,7 +1172,12 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
             from app.growth import drafts
 
+            from app.growth import performance
+
             out: dict[str, Any] = {"writer": drafts.apply_writer_results(ctx.db)}
+            linked = performance.auto_link(ctx.db, ctx.now)  # G3: approved Originals the owner has posted, matched to their X post (no X read)
+            if linked:
+                out["linked"] = linked
             # once a day after 02:00 UTC, and once more on the day a new detector set (drafts.GENERATOR) is deployed
             if ctx.trigger == "manual" or (ctx.now.hour >= 2 and not drafts.generated_today(ctx.db, ctx.now)):
                 out["generated"] = await asyncio.to_thread(drafts.generate, ctx.db, settings=s, now=ctx.now)

@@ -109,3 +109,45 @@ def nice_bin(values: list[float], target: int = 32) -> float:
     raw = span / target
     mag = 10 ** math.floor(math.log10(raw))
     return next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+
+
+def us_market_closed(d: date) -> bool:
+    """True on a weekend or a New York Stock Exchange holiday. Hyperliquid's index and metal perpetuals trade around the clock, so on those
+    days their price is not a price the index (or the metals' main session) printed: a cross-asset comparison ends on the last open day."""
+    if d.weekday() >= 5:
+        return True
+    return d in _nyse_holidays(d.year)
+
+
+def _nth_weekday(year: int, month: int, weekday: int, nth: int) -> date:
+    first = date(year, month, 1)
+    if nth > 0:
+        return first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (nth - 1))
+    nxt = date(year + (month == 12), month % 12 + 1, 1)  # the last one: from the end of the month
+    last = nxt - timedelta(days=1)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _observed(d: date) -> date:
+    return d - timedelta(days=1) if d.weekday() == 5 else d + timedelta(days=1) if d.weekday() == 6 else d
+
+
+def _easter(year: int) -> date:  # anonymous Gregorian algorithm
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7  # noqa: E741
+    m = (a + 11 * h + 19 * l) // 433
+    month = (h + l - 7 * m + 90) // 25
+    return date(year, month, (h + l - 7 * m + 33 * month + 19) % 32)
+
+
+def _nyse_holidays(year: int) -> set[date]:
+    days = {_observed(date(year, 1, 1)), _nth_weekday(year, 1, 0, 3), _nth_weekday(year, 2, 0, 3), _easter(year) - timedelta(days=2),
+            _nth_weekday(year, 5, 0, -1), _observed(date(year, 7, 4)), _nth_weekday(year, 9, 0, 1), _nth_weekday(year, 11, 3, 4),
+            _observed(date(year, 12, 25))}
+    if year >= 2022:
+        days.add(_observed(date(year, 6, 19)))
+    return days

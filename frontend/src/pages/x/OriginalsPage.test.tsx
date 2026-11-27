@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { locate } from "../../components/nav";
-import { OriginalsPage, type OriginalDraft, type OriginalsList } from "./OriginalsPage";
+import { OriginalsPage, type OriginalDraft, type OriginalsList, type TopPick } from "./OriginalsPage";
+import type { PerfReport, PerfSummary } from "./OriginalsPerformance";
 
 /** TEST FIXTURES: made-up findings and figures. */
 const draft = (over: Partial<OriginalDraft>): OriginalDraft => ({
@@ -13,13 +14,26 @@ const draft = (over: Partial<OriginalDraft>): OriginalDraft => ({
   created_at: new Date().toISOString(), decided_at: null, decided_by: "", reject_reason: "", writer_pending: false, gate_problems: [], ...over,
 });
 
+const summary = (over: Partial<PerfSummary>): PerfSummary => ({
+  posts: 0, measured_24h: 0, median_impressions_24h: null, median_engagement_rate_24h: null, engagement_rate_24h: null, reposts: 0, bookmarks: 0,
+  replies: 0, likes: 0, quotes: 0, profile_visits: 0, impressions: 0, followers_est_24h: null, followers_per_1k_impressions: null, ...over,
+});
+const perf = (over: Partial<PerfReport> = {}): PerfReport => ({
+  days: 30, as_of: "2026-11-27T12:00:00+00:00", overall: summary({ posts: 10 }), formats: [], winners: [], pictures: {}, originals: [], top_posts: [],
+  groups: { original: summary({ label: "Originals" }), news: summary({ label: "News Desk", posts: 9, measured_24h: 4, median_impressions_24h: 23, engagement_rate_24h: 0.004 }),
+    trend: summary({ label: "Trending Topics" }), other: summary({ label: "Other posts" }) },
+  followers_now: 57, notes: ["No Original has been posted yet."], originals_vs_news: { enough_data: false },
+  method: { min_posts_for_a_winner: 3, ranking: "lift", followers: "estimate", cost: "no X reads" }, ...over,
+});
+
 let calls: string[] = [];
-function serve(drafts: OriginalDraft[]) {
+function serve(drafts: OriginalDraft[], top: TopPick[] = [], report: PerfReport = perf()) {
   calls = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     calls.push(`${init?.method ?? "GET"} ${input}${init?.body ? " " + String(init.body) : ""}`);
     const body: OriginalsList = { drafts, counts: { pending: drafts.filter((d) => d.status === "pending").length, approved: 0, rejected: 0, regenerating: 0 },
-      publishing: "manual", switches: { growth_enabled: false, growth_collect_enabled: false, intel_enabled: false } };
+      publishing: "manual", switches: { growth_enabled: false, growth_collect_enabled: false, intel_enabled: false }, top };
+    if (String(input).includes("/originals/performance")) return new Response(JSON.stringify(report), { status: 200, headers: { "Content-Type": "application/json" } });
     if (String(input).includes("/generate")) return new Response(JSON.stringify({ drafted: 2, found: 5, errors: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
     return new Response(JSON.stringify(String(input).includes("/drafts/7/") ? drafts[0] : body), { status: 200, headers: { "Content-Type": "application/json" } });
   }));
@@ -95,6 +109,48 @@ describe("Originals", () => {
     await settle();
     expect(calls.some((c) => c.startsWith("POST /api/originals/generate"))).toBe(true);
     expect(screen.getByText(/2 new drafts from 5 findings/)).toBeTruthy();
+  });
+
+  it("puts the editor's top picks first with their scores and the phrases every wording must keep", async () => {
+    serve([draft({ id: 8, detector: "rarity" }), draft({ id: 7, detector: "weekly_streak", coverage: ["Hyperliquid", "February 2023"] })],
+      [{ id: 7, rank: 1, editorial: { total: 20, shareability: 5, originality: 5, visual: 5, relevance: 5, measured: false } }]);
+    render(<OriginalsPage />);
+    await settle();
+    expect(screen.getByTestId("top-picks").textContent).toContain("Top 1 for approval");
+    expect(screen.getByText("Top 1")).toBeTruthy();
+    expect(screen.getByTestId("editorial").textContent).toContain("Editor's score 20/20");
+    expect(screen.getByTestId("coverage").textContent).toContain("Hyperliquid · February 2023");
+    expect(screen.getByText("All other drafts")).toBeTruthy();
+  });
+
+  it("shows performance by lane, read from stored snapshots only", async () => {
+    serve([draft({})]);
+    render(<OriginalsPage />);
+    await settle();
+    expect(screen.getByTestId("performance")).toBeTruthy();
+    expect(screen.getByTestId("group-news").textContent).toContain("23");
+    expect(screen.getByTestId("group-news").textContent).toContain("4.0");  // 0.004 = 4.0 engagements per 1k impressions
+    expect(screen.getByText("57 followers")).toBeTruthy();
+    expect(screen.getByText("No Original has been posted yet.")).toBeTruthy();
+    expect(calls.some((c) => c === "GET /api/originals/performance?days=30")).toBe(true);
+  });
+
+  it("an approved draft links to its X post and then shows its numbers", async () => {
+    serve([draft({ status: "approved" })]);
+    render(<OriginalsPage />);
+    await settle();
+    fireEvent.change(screen.getByLabelText("X post link"), { target: { value: "https://x.com/thepricechat/status/1234567890" } });
+    fireEvent.click(screen.getByText("Link post"));
+    await settle();
+    expect(calls.some((c) => c.startsWith("POST /api/originals/drafts/7/posted") && c.includes("1234567890"))).toBe(true);
+    cleanup();
+    serve([draft({ status: "approved", posted: { x_id: "1234567890", url: "https://x.com/i/status/1234567890", at: "2026-11-27T13:00:00+00:00", how: "matched" },
+      performance: { impressions: 410, likes: 9, replies: 2, reposts: 3, quotes: 0, bookmarks: 4, profile_visits: 5, url_clicks: null, engagement: 18, engagement_rate: 0.0439 } })]);
+    render(<OriginalsPage />);
+    await settle();
+    expect(screen.getByTestId("posted").textContent).toContain("matched automatically by its text");
+    expect(screen.getByTestId("draft-metrics").textContent).toContain("410 impressions");
+    expect(screen.getByTestId("draft-metrics").textContent).toContain("43.9 engagements / 1k impressions");
   });
 
   it("shows gate problems and an empty state", async () => {

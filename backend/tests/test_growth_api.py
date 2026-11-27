@@ -135,7 +135,7 @@ def test_approve_only_marks_it(client: TestClient, draft: GrDraft, db: Session, 
 def test_edit_runs_the_figures_gate(client: TestClient, draft: GrDraft, finding: Finding) -> None:
     bad = client.post(f"{P}/drafts/{draft.id}/edit", json={"text": "Bitcoin −41.0% in 30 days."})
     assert bad.status_code == 422 and "isn't in the finding" in bad.json()["detail"]
-    good_text = "Bitcoin: " + finding.numbers["move"]["text"] + " in " + finding.numbers["days"]["text"] + " days. Rare in Hyperliquid data."
+    good_text = "Bitcoin: " + finding.numbers["move"]["text"] + " in " + finding.numbers["days"]["text"] + " days. Rare in Hyperliquid data since " + finding.numbers["since"]["text"] + "."
     ok = client.post(f"{P}/drafts/{draft.id}/edit", json={"text": good_text})
     assert ok.status_code == 200, ok.text
     b = ok.json()
@@ -295,10 +295,18 @@ def test_growth_code_never_imports_a_publisher() -> None:
     files = list((root / "growth").rglob("*.py")) + [root / "api" / "routes" / "originals.py"]
     banned = ("app.social", "app.x", "app.newsdesk.delivery", "app.newsdesk.telegram", "app.telegram", "tweepy", "create_tweet", "sendMessage",
               "sendPhoto", "app.newsdesk.xpost", "app.trending.publish")
+    # G3 performance reads the stored X metrics curves through app.social.x_history (read-only: it never posts); that one import is allowed,
+    # and x_history itself is held to the same no-sender rule
+    allowed = ("from app.social import x_history",)
     for f in files:
         src = f.read_text(encoding="utf-8")
+        for a in allowed:
+            src = src.replace(a, "")
         for b in banned:
             assert b not in src, f"{f.name} references {b}"
+    hist = (root / "social" / "x_history.py").read_text(encoding="utf-8")
+    for b in ("create_post", "create_tweet", "sendMessage", "sendPhoto", "delete_post", "client.repost(", "client.like(", "upload_image"):
+        assert b not in hist, f"x_history.py references {b}"
 
 
 def test_select_top_caps_one_detector() -> None:

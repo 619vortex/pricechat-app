@@ -34,7 +34,8 @@ def test_weekly_streak_longest_in_the_stored_history() -> None:
     assert len(fs) == 1
     f = fs[0]
     assert f.numbers["weeks"]["text"] == "9" and f.key == "weekly_streak:BTC:down:2026-11-22"
-    assert "9 weeks in a row" in f.text(0) and "No losing run in Hyperliquid data since" in f.text(0)
+    assert "9 weeks in a row" in f.text(0) and "No losing run this long in Hyperliquid data, which begins in" in f.text(0)
+    assert f.required_phrases() == ["Hyperliquid", f.numbers["since"]["text"]]
     assert f.chart["kind"] == "seasonality_bars" and len(f.chart["options"]["highlight"]) == 9
     all_pass(fs)
 

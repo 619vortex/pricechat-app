@@ -1062,13 +1062,21 @@ def _draw_bars(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
             break
     ylw = _y_label_w(c, L, ticks, step, spec.y_format)
     x0, x1 = box[0] + ylw, box[2] - 4
-    y0, y1 = box[1] + 6, box[3] - L.axis - 26
-    ys = Scale(ticks[0], ticks[-1], y1, y0)
-    _y_grid(c, L, ys, ticks, step, spec.y_format, x0, x1)
     n = len(vals)
     slot = (x1 - x0) / n
+    # many bars on a narrow (portrait) canvas: category labels that don't fit their slot go on two lines ("Nov" / "22"), and the value
+    # labels shrink (never below the axis size) until neighbours can't touch
+    probe = _font("sans", int(round((L.axis + 2) * SS)), "Bold")
+    two_line = any(c.tw(x, probe) > slot * 0.92 for x in cats) and all(" " in x for x in cats)
+    y0, y1 = box[1] + 6, box[3] - L.axis - 26 - ((L.axis + 4) if two_line else 0)
+    ys = Scale(ticks[0], ticks[-1], y1, y0)
+    _y_grid(c, L, ys, ticks, step, spec.y_format, x0, x1)
     bw = slot * 0.62
-    vf = c.font(L.label + (2 if c.fmt == "x" else 0), "ExtraBold")
+    vsize = L.label + (2 if c.fmt == "x" else 0)
+    labels = [fmt_value(v, spec.y_format, spec.options.get("digits", 0)) for v in vals]
+    while vsize > L.axis and max(c.tw(x, _font("sans", int(round(vsize * SS)), "ExtraBold")) for x in labels) > slot * 0.96:
+        vsize -= 1
+    vf = c.font(vsize, "ExtraBold")
     cf = c.font(L.axis + 2, "SemiBold", note=True)
     zy = ys(0)
     for k, (cat, v) in enumerate(zip(cats, vals)):
@@ -1099,7 +1107,13 @@ def _draw_bars(c: Canvas, spec: ChartSpec, L: Layout, box: Box) -> None:
             c.text((cx, top - 12), lab, vf, tcol, anchor="ms")
         else:
             c.text((cx, bot + 12 + L.label * 0.8), lab, vf, tcol, anchor="ms")
-        c.text((cx, y1 + 14 + L.axis), cat, c.font(L.axis + 2, "Bold" if is_hl else "Medium", note=True), p.text if is_hl else p.muted, anchor="ms")
+        catf = c.font(L.axis + 2, "Bold" if is_hl else "Medium", note=True)
+        if two_line:
+            first, rest = cat.split(" ", 1)
+            c.text((cx, y1 + 14 + L.axis), first, catf, p.text if is_hl else p.muted, anchor="ms")
+            c.text((cx, y1 + 18 + 2 * L.axis + 2), rest, catf, p.text if is_hl else p.muted, anchor="ms")
+        else:
+            c.text((cx, y1 + 14 + L.axis), cat, catf, p.text if is_hl else p.muted, anchor="ms")
         if cat in partial:
             sf = c.font(L.axis, "SemiBold", note=True)
             note = spec.options.get("partial_note", "so far")

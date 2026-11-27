@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { request } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import { ApiErrorBanner, Badge, Card, Empty, Loading, PageHeader, type Tone } from "../../components/ui";
+import { MetricsRow, OriginalsPerformance, type PerfMeasure } from "./OriginalsPerformance";
 
 /** Admin › Publishing › X › Originals (Growth Engine G1): drafts of ORIGINAL findings computed from Market Memory, each with its graphic,
  *  the tweet text, sources, the calculation, score and format. Approve only MARKS a draft approved: nothing is posted automatically. The
@@ -16,10 +17,14 @@ export type OriginalDraft = {
   render_info?: Record<string, { template?: string; version?: string }>; version: number; created_at: string | null; decided_at: string | null;
   decided_by: string; reject_reason: string; writer_pending: boolean; gate_problems: string[];
   verification?: { ok: boolean; at: string; values_checked: number; problems: string[]; series: Record<string, { source?: string }> } | null;
-  generator?: string;
+  generator?: string; subject?: string; coverage?: string[];
+  posted?: { x_id: string; url: string; at: string | null; how: "matched" | "owner"; similarity?: number } | null;
+  performance?: PerfMeasure | null;
 };
+export type Editorial = { total: number; shareability: number; originality: number; visual: number; relevance: number; measured: boolean };
+export type TopPick = { id: number; rank: number; editorial: Editorial };
 export type OriginalsList = {
-  drafts: OriginalDraft[]; counts: Record<string, number>; publishing: string;
+  drafts: OriginalDraft[]; counts: Record<string, number>; publishing: string; top?: TopPick[];
   switches: { growth_enabled: boolean; growth_collect_enabled: boolean; intel_enabled: boolean };
 };
 
@@ -43,7 +48,44 @@ function Graphic({ d }: { d: OriginalDraft }) {
     style={{ width: "100%", maxWidth: 640, borderRadius: 8, display: "block" }} />;
 }
 
-function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }) {
+function PostedLink({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  async function send(method: "POST" | "DELETE") {
+    setBusy(true);
+    setError(null);
+    try {
+      await request(`/originals/drafts/${d.id}/posted`, { method, body: method === "POST" ? JSON.stringify({ url }) : undefined });
+      onChanged();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (d.posted)
+    return (
+      <div className="stack small" data-testid="posted">
+        <div><Badge tone="good">Posted</Badge> <a href={d.posted.url} target="_blank" rel="noreferrer">View on X</a>
+          <span className="muted"> · {d.posted.how === "matched" ? "matched automatically by its text" : "linked by you"}
+            {d.posted.at ? ` · ${d.posted.at.slice(0, 16).replace("T", " ")} UTC` : ""}</span>{" "}
+          <button className="btn small" disabled={busy} onClick={() => send("DELETE")}>Unlink</button></div>
+        {d.performance ? <MetricsRow m={d.performance} testId="draft-metrics" /> : <div className="muted">Numbers appear after the first snapshot (within about an hour of posting).</div>}
+        <ApiErrorBanner error={error} />
+      </div>
+    );
+  return (
+    <div className="small" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <span className="muted">Posted it? It is matched automatically by its text, or paste the link:</span>
+      <input aria-label="X post link" placeholder="https://x.com/…/status/…" value={url} onChange={(e) => setUrl(e.target.value)} style={{ minWidth: 260 }} />
+      <button className="btn" disabled={busy || url.trim().length < 5} onClick={() => send("POST")}>Link post</button>
+      <ApiErrorBanner error={error} />
+    </div>
+  );
+}
+
+function DraftCard({ d, onChanged, pick }: { d: OriginalDraft; onChanged: () => void; pick?: TopPick }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(d.text);
   const [busy, setBusy] = useState(false);
@@ -75,7 +117,7 @@ function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }
 
   const over = (editing ? text.length : d.chars) > 280;
   return (
-    <Card title={<span>{FORMAT_LABEL[d.format] ?? d.format} <span className="muted small">· {d.detector}</span></span>}
+    <Card title={<span>{pick ? <Badge tone="good">Top {pick.rank}</Badge> : null} {FORMAT_LABEL[d.format] ?? d.format} <span className="muted small">· {d.detector}</span></span>}
       actions={<Badge tone={STATUS_TONE[d.status] ?? "neutral"}>{d.status}</Badge>}>
       <div className="stack">
         <Graphic key={d.version} d={d} />
@@ -89,6 +131,9 @@ function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }
           <span className="muted">Score {d.score.toFixed(0)} · as of {d.as_of ?? "—"} · {d.window} · words by {WRITER[d.writer] ?? d.writer}
             {d.writer_pending ? " (AI wording on its way)" : ""}</span>
         </div>
+        {pick && <div className="small" data-testid="editorial">Editor's score {pick.editorial.total}/20: shareability {pick.editorial.shareability}
+          {pick.editorial.measured ? " (measured)" : ""} · originality {pick.editorial.originality} · visual {pick.editorial.visual} · broad-audience relevance {pick.editorial.relevance}</div>}
+        {d.coverage && d.coverage.length > 0 && <div className="small muted" data-testid="coverage">Every wording must say: {d.coverage.join(" · ")} (the instrument and the history the figures are measured in)</div>}
         {d.gate_problems.length > 0 && <div className="small" style={{ color: "var(--bad, #b00)" }}>Figures gate: {d.gate_problems.join("; ")}</div>}
         {d.verification ? (
           <div className="small" data-testid="verification">
@@ -127,6 +172,7 @@ function DraftCard({ d, onChanged }: { d: OriginalDraft; onChanged: () => void }
             <button className="btn" disabled={busy} onClick={() => { setText(d.text); setEditing(true); }}>Edit</button>
           </>}
           {d.status === "regenerating" && <span className="muted small">Writing a new version…</span>}
+          {d.status === "approved" && <PostedLink d={d} onChanged={onChanged} />}
           {d.status === "rejected" && <button className="btn" disabled={busy} onClick={() => act("regenerate", { chart_variant: false })}>Bring back with new wording</button>}
         </div>
       </div>
@@ -169,6 +215,7 @@ export function OriginalsPage() {
     <div className="stack">
       {header}
       <div className="small muted" role="note">Nothing here is posted automatically. Approved drafts offer Copy text and Download image.</div>
+      <OriginalsPerformance />
       {genMsg && <div className="small">{genMsg}</div>}
       <ApiErrorBanner error={genErr} />
       <div role="tablist" style={{ display: "flex", gap: 8 }}>
@@ -182,8 +229,17 @@ export function OriginalsPage() {
         <>
           {failure ? <ApiErrorBanner error={failure} /> : null}
           {!data.switches.growth_enabled && <div className="small muted">The daily generation job is off (GROWTH_ENABLED); Generate now still works.</div>}
-          {data.drafts.length === 0 ? <Empty>{tab === "pending" ? "No drafts to review. Try Generate now." : "Nothing here yet."}</Empty> :
-            data.drafts.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} />)}
+          {data.drafts.length === 0 ? <Empty>{tab === "pending" ? "No drafts to review. Try Generate now." : "Nothing here yet."}</Empty> : (() => {
+            const picks = new Map((tab === "pending" ? data.top ?? [] : []).map((p) => [p.id, p]));
+            const top = [...picks.values()].map((p) => data.drafts.find((d) => d.id === p.id)).filter((d): d is OriginalDraft => !!d);
+            const rest = data.drafts.filter((d) => !picks.has(d.id));
+            return <>
+              {top.length > 0 && <h3 data-testid="top-picks">Top {top.length} for approval <span className="muted small">ranked by shareability, originality, visual quality and broad-audience relevance; data verified</span></h3>}
+              {top.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} pick={picks.get(d.id)} />)}
+              {top.length > 0 && rest.length > 0 && <h3>All other drafts</h3>}
+              {rest.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} />)}
+            </>;
+          })()}
         </>
       )}
     </div>

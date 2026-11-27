@@ -73,6 +73,10 @@ def problems(text: str, f: Finding, *, as_edited: bool = False) -> list[str]:
         out.append(f"{len(t)} characters (limit {MAX_LEN})")
     if re.search(r"\{[a-z0-9_]+\}", t):
         out.append("an unfilled placeholder is left in the text")
+    low = t.lower()
+    for phrase in f.required_phrases():
+        if phrase.lower() not in low:
+            out.append(f"the text must say \"{phrase}\" (what the figures are measured in)")
     cores, comps, months = allowed(f)
     template_text = " ".join(f.fill(x) for x in f.templates).lower()
     for sign, core, pos in _tokens(t):

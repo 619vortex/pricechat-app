@@ -495,14 +495,14 @@ def weekly_streak(mem: Memory, as_of: date, coins: tuple[str, ...] = MAJORS) -> 
         words = {"asset": a, "data": data_label(s)}
         if last is None:
             templates = ["{asset} has closed " + adj + " {weeks} weeks in a row ({move} from the {start} weekly close to {end}).\n"
-                         "No " + kind + " run in {data} since {since} lasted this long.",
-                         "{weeks} straight " + word + " weeks for {asset}: {move} in all.\nThe longest weekly " + kind + " run in {data} since {since}."]
+                         "No " + kind + " run this long in {data}, which begins in {since}.",
+                         "{weeks} straight " + word + " weeks for {asset}: {move} in all.\nThe longest weekly " + kind + " run in {data}, which goes back to {since}."]
             headline = "{asset} closed " + adj + " {weeks} weeks in a row: the longest " + kind + " run in {data} since {since}"
             comps = ["longest", "none earlier"]
         else:
             nums["last"] = n(0, fmt.month_year(last[1]), f"the last weekly {kind} run this long ended")
             templates = ["{asset} has closed " + adj + " {weeks} weeks in a row ({move} from the {start} weekly close to {end}).\n"
-                         "The last weekly run this long in {data} ended in {last}."]
+                         "The last weekly run this long in {data} (since {since}) ended in {last}."]
             headline = "{asset} closed " + adj + " {weeks} weeks in a row, the first run this long since {last}"
             comps = ["first since", "last time"]
         calc = (f"weekly close = Sunday's daily close in {s.key}; {length} consecutive weekly closes {adj}: "

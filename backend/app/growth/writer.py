@@ -18,7 +18,7 @@ from app.growth import gate
 from app.growth.findings import PLACEHOLDER, Finding
 
 KIND = "growth.write"
-PROMPT_VERSION = "g1"
+PROMPT_VERSION = "g3"
 SCHEMA: dict[str, Any] = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"],
                           "additionalProperties": False}
 
@@ -51,6 +51,10 @@ def build(f: Finding, attempt: int = 0, avoid: str = "") -> dict[str, Any]:
     for k, v in sorted(pm.items(), key=lambda x: int(x[1][1:])):
         num = f.numbers[k]
         lines.append(f"{{{v}}} = {num.get('label', k)} = {num['text']}")
+    by_text = {f.numbers[k]["text"]: v for k, v in pm.items()}
+    must = [f"{{{by_text[m]}}}" if m in by_text else m for m in f.required_phrases()]  # a figure stays a placeholder (no digits typed)
+    if must:  # the instrument and the history the figures are measured in: a wording without them is refused by the gate
+        lines += ["", "Must say, word for word (what the figures are measured in): " + "; ".join(must)]
     lines += ["", "Allowed superlatives / comparisons: " + (", ".join(sorted(set(f.comparatives))) or "none"),
               "Example (same facts, write your own wording; keep the placeholders):", _as_v(f.templates[attempt % len(f.templates)], f, pm)]
     if avoid:
