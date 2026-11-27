@@ -45,7 +45,7 @@ DEFAULT_WATCHLIST: list[dict[str, str]] = [
     *({"handle": h, "group": "markets", "tier": "C"} for h in ("DeItaone", "FirstSquawk", "unusual_whales", "KobeissiLetter")),
     *({"handle": h, "group": "onchain", "tier": "B"} for h in ("zachxbt", "PeckShieldAlert", "CertiKAlert", "CoinDesk", "TheBlock__")),
     *({"handle": h, "group": "onchain", "tier": "C"} for h in ("lookonchain", "whale_alert", "WatcherGuru", "tier10k")),
-    *({"handle": h, "group": "geopolitics", "tier": "A"} for h in ("CENTCOM", "DeptofDefense", "StateDept", "NATO")),
+    *({"handle": h, "group": "geopolitics", "tier": "A"} for h in ("CENTCOM", "DeptofWar", "StateDept", "NATO")),
     *({"handle": h, "group": "geopolitics", "tier": "B"} for h in ("flightradar24",)),
     *({"handle": h, "group": "geopolitics", "tier": "C"} for h in ("sentdefender", "Faytuks", "IntelCrab", "Osinttechnical")),
     *({"handle": h, "group": "outages", "tier": "A"} for h in ("CISAgov", "FAANews", "Cloudflare", "githubstatus")),
@@ -57,7 +57,7 @@ DEFAULT_WATCHLIST: list[dict[str, str]] = [
 # redundant reads"): official accounts that post rarely and matter when they do (incidents, military, regulators), named investigators,
 # and one fast breaking account. Off: the wires (Reuters, AP, AFP, BBC, Bloomberg, WSJ, FT: the News Desk's feeds already carry them, so
 # reading them on X pays twice for the same story) and the high-volume aggregators and alert bots (hundreds of posts a day each).
-PILOT = {"centcom", "deptofdefense", "statedept", "nato", "cisagov", "faanews", "cloudflare", "githubstatus", "federalreserve", "secgov",
+PILOT = {"centcom", "deptofwar", "statedept", "nato", "cisagov", "faanews", "cloudflare", "githubstatus", "federalreserve", "secgov",
          "zachxbt", "peckshieldalert", "certikalert", "bellingcat", "bnonews", "flightradar24"}
 PILOT_APPROVED = "2026-11-18"  # the owner's approval; activation happens once, and only if the account's remaining X budget supports it
 HANDLE = re.compile(r"^@?([A-Za-z0-9_]{1,15})$")
@@ -71,6 +71,11 @@ WRITE_RESERVE_MONTH_MIN = 4.0
 POST_USD, USER_USD = 0.005, 0.010
 
 
+# Accounts that changed their X handle: a stored watchlist is read with the new one (the old one no longer exists, so lookups found nothing).
+# 2025-09: the Pentagon's account became "Department of War" (owner asked 2026-11-27; the pilot's own lookup confirms or marks it missing).
+RENAMED = {"deptofdefense": "DeptofWar"}
+
+
 def clean_watchlist(rows: Any) -> list[dict[str, str]]:
     """Valid, unique entries only: a handle, a known group and tier, an optional note."""
     out: list[dict[str, str]] = []
@@ -80,7 +85,7 @@ def clean_watchlist(rows: Any) -> list[dict[str, str]]:
             r = {"handle": r, "group": "breaking", "tier": "C"}
         if not isinstance(r, dict):
             continue
-        m = HANDLE.match(str(r.get("handle") or "").strip())
+        m = HANDLE.match(RENAMED.get(str(r.get("handle") or "").strip().lstrip("@").lower(), str(r.get("handle") or "").strip()))
         if not m or m.group(1).lower() in seen:
             continue
         group = str(r.get("group") or "breaking")

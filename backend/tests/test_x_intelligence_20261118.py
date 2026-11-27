@@ -403,12 +403,18 @@ async def test_one_renamed_account_does_not_stop_the_reads(db: Session, xweb: XW
     web = RenamedWeb(NOW)
     turn_on(db)
     await tick(db, web)  # every watched account is known after this
-    turn_on(db, accounts=[*WATCH, {"handle": "DeptofDefense", "group": "geopolitics", "tier": "A"}])
+    turn_on(db, accounts=[*WATCH, {"handle": "GoneAccount", "group": "geopolitics", "tier": "A"}])
     web.x_posts = [post(20, "zachxbt", HACK, 5)]
     await tick(db, web, NOW + timedelta(minutes=6))
-    assert web.lookups[-1] == ["DeptofDefense"]
+    assert web.lookups[-1] == ["GoneAccount"]
     st = engine.settings_row(db).state["x_intel"]
-    assert "deptofdefense" in st["missing"]
+    assert "goneaccount" in st["missing"]
     assert db.scalars(select(TtSignal).where(TtSignal.external_id == "xpost:20")).first() is not None  # the others were still read
     await tick(db, web, NOW + timedelta(minutes=12))
-    assert web.lookups[-1] == ["DeptofDefense"] and len([x for x in web.lookups if x == ["DeptofDefense"]]) == 1  # not asked again for a week
+    assert web.lookups[-1] == ["GoneAccount"] and len([x for x in web.lookups if x == ["GoneAccount"]]) == 1  # not asked again for a week
+
+
+def test_a_renamed_handle_is_read_with_its_new_name() -> None:
+    rows = xintel.clean_watchlist([{"handle": "@DeptofDefense", "group": "geopolitics", "tier": "A"}, {"handle": "DeptofWar", "group": "geopolitics", "tier": "A"}])
+    assert [r["handle"] for r in rows] == ["DeptofWar"]  # mapped, and not listed twice
+    assert "deptofwar" in xintel.PILOT
