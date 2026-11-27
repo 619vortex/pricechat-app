@@ -1,0 +1,122 @@
+{
+ "kind": "rank_table",
+ "headline": "Oil leads 2026. The old economy is beating crypto and tech",
+ "hero": "+44.5%",
+ "hero_role": "pos",
+ "kicker": "2026 leaderboard",
+ "dek": "Year-to-date return, last close of 2025 to now · futures for oil, gold and silver",
+ "series": [],
+ "rows": [
+  {
+   "label": "Oil (WTI)",
+   "value": 44.4619,
+   "sublabel": null,
+   "display": "+44.5%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Energy stocks",
+   "value": 35.406,
+   "sublabel": null,
+   "display": "+35.4%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Staples",
+   "value": 18.6663,
+   "sublabel": null,
+   "display": "+18.7%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Healthcare",
+   "value": 18.0491,
+   "sublabel": null,
+   "display": "+18.0%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "S&P 500",
+   "value": 2.4851,
+   "sublabel": null,
+   "display": "+2.5%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Nasdaq",
+   "value": -1.8489,
+   "sublabel": null,
+   "display": "−1.8%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Gold",
+   "value": -20.0111,
+   "sublabel": null,
+   "display": "−20.0%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Bitcoin",
+   "value": -33.4297,
+   "sublabel": null,
+   "display": "−33.4%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Ether",
+   "value": -44.638,
+   "sublabel": null,
+   "display": "−44.6%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Silver",
+   "value": -44.6631,
+   "sublabel": null,
+   "display": "−44.7%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Solana",
+   "value": -45.9852,
+   "sublabel": null,
+   "display": "−46.0%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Strategy",
+   "value": -52.9977,
+   "sublabel": null,
+   "display": "−53.0%",
+   "highlight": false,
+   "role": "auto"
+  },
+  {
+   "label": "Coinbase",
+   "value": -57.1615,
+   "sublabel": null,
+   "display": "−57.2%",
+   "highlight": false,
+   "role": "auto"
+  }
+ ],
+ "annotations": [],
+ "y_format": "pct",
+ "y_label": "",
+ "source": "Source: Yahoo Finance daily closes · 25 Nov value intraday · as of 25 Nov 2026 15:40 UTC",
+ "theme": "dark",
+ "options": {},
+ "version": "pc-intel-1"
+}

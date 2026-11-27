@@ -158,11 +158,15 @@ class XClient:
         params = {"ids": ",".join(ids[:100]), "tweet.fields": "created_at,public_metrics", "expansions": "author_id", "user.fields": "username,name"}
         return await self._get("/2/tweets", params, est_cost=PRICE_POST_READ * len(ids[:100]), endpoint="tweets/lookup", count_posts=True)
 
-    async def own_post_metrics(self, ids: list[str]) -> dict[str, Any]:
-        """Public + private metrics for our own recent posts (user context; X provides private metrics for ~30 days)."""
+    async def own_post_metrics(self, ids: list[str], media: bool = False) -> dict[str, Any]:
+        """Public + private metrics for our own recent posts (user context; X provides private metrics for ~30 days).
+        media: also which photos / video the post carried (attachments expansion; X bills the posts returned, not their fields)."""
         if not self.has_user_context:
             raise XNotConfiguredError("Account (user-context) keys are needed for private metrics.")
-        params = {"ids": ",".join(ids[:100]), "tweet.fields": f"public_metrics,{PRIVATE_FIELDS},created_at"}
+        params = {"ids": ",".join(ids[:100]), "tweet.fields": f"public_metrics,{PRIVATE_FIELDS},created_at" + (",attachments" if media else "")}
+        if media:
+            params["expansions"] = "attachments.media_keys"
+            params["media.fields"] = "type,url,preview_image_url,width,height"
         return await self._get("/2/tweets", params, est_cost=PRICE_OWNED_READ * len(ids[:100]), endpoint="tweets/lookup",
                                count_posts=True, user=True, owned=True)
 

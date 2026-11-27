@@ -239,6 +239,7 @@ PUBLIC_PREFIXES = ("/api/members/",
                    "/api/committee/",  # Kiwi AI Investment Committee: public research JSON; starting a run checks member / owner itself  # Vortex trade checks: the owner's home AI, its own bearer token (never the admin cookie)
                    "/api/website/seo/",  # sitemaps and link previews: only what public pages already show
                    "/api/webhooks/",
+                   "/api/intel-worker/",  # the owner PC's intel channel: its own pci_ token + HMAC-signed results (app/intel/channel)
                    "/api/newsdesk-worker/",  # the GPU PC's News Desk pictures: the AI worker's own bearer token (app/api/routes/newsdesk_worker)
                    "/api/kalshi/bot/",  # the Kalshi bot's read-only reports: its own bearer token (app.kalshi.service)  # TikTok etc.: each webhook verifies its sender's signature over the raw body
                    "/api/r/")  # tracked referral links: count a click, 302 on (stores no IP / user agent / member)

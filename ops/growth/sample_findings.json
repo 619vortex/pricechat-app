@@ -1,0 +1,5976 @@
+{
+ "generated_at": "2026-11-25T17:35:46+00:00",
+ "as_of": "2026-11-24",
+ "note": "Real public data (Hyperliquid info API, alternative.me Fear & Greed), computed locally; drafts for review, not posts. Template wording (no model). Only licence-cleared sources are used.",
+ "detector_errors": [],
+ "findings_total": 14,
+ "publishable_total": 14,
+ "by_detector": {
+  "rarity": 5,
+  "record": 0,
+  "sentiment": 1,
+  "drawdown_cycle": 0,
+  "seasonality": 2,
+  "then_now": 1,
+  "breadth_count": 1,
+  "breadth_ma": 0,
+  "funding_extremes": 1,
+  "funding_streak": 0,
+  "oi_buildup": 0,
+  "leaderboard": 3,
+  "ratio_record": 0,
+  "divergence": 0,
+  "beta": 0
+ },
+ "top": [
+  {
+   "score": 94.39,
+   "format": "extremes",
+   "detector": "rarity",
+   "headline": "Bitcoin −25.4% in 30 day(s): most extreme 1.1% of Hyperliquid data since 2023-03-28",
+   "text": "Bitcoin −25.4% in 30 days.\nIn Hyperliquid data since March 2023, only 1.1% of all 30-day stretches were this bad (15 of 1,338). The last one ended in February 2026.",
+   "chars": 164,
+   "template_variant": 0,
+   "all_variants": [
+    "Bitcoin −25.4% in 30 days.\nIn Hyperliquid data since March 2023, only 1.1% of all 30-day stretches were this bad (15 of 1,338). The last one ended in February 2026.",
+    "Bitcoin is down 25.4% over the past 30 days.\nOnly 15 of 1,338 30-day windows in Hyperliquid data since March 2023 were this bad. The last one ended in February 2026."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "rarity:BTC:30d:2026-11-24",
+    "format": "extremes",
+    "detector": "rarity",
+    "subject": "BTC",
+    "headline": "Bitcoin −25.4% in 30 day(s): most extreme 1.1% of Hyperliquid data since 2023-03-28",
+    "numbers": {
+     "move": {
+      "value": -25.357018025665358,
+      "text": "−25.4%",
+      "label": "30-day return"
+     },
+     "share": {
+      "value": 1.1210762331838564,
+      "text": "1.1%",
+      "label": "share of windows"
+     },
+     "count": {
+      "value": 15.0,
+      "text": "15",
+      "label": "windows as extreme"
+     },
+     "total": {
+      "value": 1338.0,
+      "text": "1,338",
+      "label": "windows in history"
+     },
+     "since": {
+      "value": 0.0,
+      "text": "March 2023",
+      "label": "stored history starts"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "as of"
+     },
+     "last": {
+      "value": 0.0,
+      "text": "February 2026",
+      "label": "previous window as extreme ended"
+     },
+     "move_abs": {
+      "value": -25.357018025665358,
+      "text": "25.4%",
+      "label": "30-day move, size (the value keeps its sign: the gate checks the direction)"
+     }
+    },
+    "words": {
+     "asset": "Bitcoin",
+     "adj": "bad",
+     "dirword": "down",
+     "data": "Hyperliquid data"
+    },
+    "templates": [
+     "{asset} {move} in {days} days.\nIn {data} since {since}, only {share} of all {days}-day stretches were this bad ({count} of {total}). The last one ended in {last}.",
+     "{asset} is {dirword} {move_abs} over the past {days} days.\nOnly {count} of {total} {days}-day windows in {data} since {since} were this bad. The last one ended in {last}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:BTC:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "30d return = 59,795.00 / 80,108.00 − 1 = −25.4%; 15 of 1,338 30-day windows since 2023-03-28 were ≤ −25.4% (1.1%); most recent earlier window: ended 2026-02-27 (−26.3%). Source series px:BTC:close.",
+    "rarity": 0.9439461883408071,
+    "chart": {
+     "kind": "histogram_marker",
+     "title": "Every 30-day Bitcoin move since 2023",
+     "kicker": "Bitcoin −25.4% in 30d",
+     "series": [
+      {
+       "name": "30-day returns, %",
+       "points": [
+        [
+         -31.7996,
+         1.0
+        ],
+        [
+         -29.4998,
+         3.0
+        ],
+        [
+         -27.1999,
+         10.0
+        ],
+        [
+         -24.9001,
+         16.0
+        ],
+        [
+         -22.6003,
+         12.0
+        ],
+        [
+         -20.3004,
+         21.0
+        ],
+        [
+         -18.0006,
+         22.0
+        ],
+        [
+         -15.7007,
+         24.0
+        ],
+        [
+         -13.4009,
+         38.0
+        ],
+        [
+         -11.101,
+         57.0
+        ],
+        [
+         -8.8012,
+         62.0
+        ],
+        [
+         -6.5014,
+         76.0
+        ],
+        [
+         -4.2015,
+         93.0
+        ],
+        [
+         -1.9017,
+         114.0
+        ],
+        [
+         0.3982,
+         109.0
+        ],
+        [
+         2.698,
+         98.0
+        ],
+        [
+         4.9979,
+         93.0
+        ],
+        [
+         7.2977,
+         76.0
+        ],
+        [
+         9.5975,
+         79.0
+        ],
+        [
+         11.8974,
+         65.0
+        ],
+        [
+         14.1972,
+         48.0
+        ],
+        [
+         16.4971,
+         28.0
+        ],
+        [
+         18.7969,
+         20.0
+        ],
+        [
+         21.0968,
+         29.0
+        ],
+        [
+         23.3966,
+         26.0
+        ],
+        [
+         25.6964,
+         30.0
+        ],
+        [
+         27.9963,
+         16.0
+        ],
+        [
+         30.2961,
+         13.0
+        ],
+        [
+         32.596,
+         9.0
+        ],
+        [
+         34.8958,
+         11.0
+        ],
+        [
+         37.1957,
+         7.0
+        ],
+        [
+         39.4955,
+         10.0
+        ],
+        [
+         41.7953,
+         1.0
+        ],
+        [
+         44.0952,
+         5.0
+        ],
+        [
+         46.395,
+         7.0
+        ],
+        [
+         48.6949,
+         2.0
+        ],
+        [
+         50.9947,
+         3.0
+        ],
+        [
+         53.2946,
+         1.0
+        ],
+        [
+         55.5944,
+         2.0
+        ],
+        [
+         57.8942,
+         1.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "marker",
+       "x": -25.36,
+       "label": "Now −25.4%"
+      },
+      {
+       "type": "note",
+       "text": "1.1% of windows this bad"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "number",
+     "x_label": "30-day return, %"
+    },
+    "comparatives": [
+     "only",
+     "last time",
+     "most",
+     "first"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 94.39,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 69.0,
+   "format": "history",
+   "detector": "seasonality",
+   "headline": "Bitcoin November 2026 so far −22.9%: worst November in the stored history",
+   "text": "Bitcoin in November:\n2023 +9% · 2024 +37% · 2025 −18%\n2026 so far: −23%, the worst November in Hyperliquid data since 2023, with 6 days left.",
+   "chars": 141,
+   "template_variant": 0,
+   "all_variants": [
+    "Bitcoin in November:\n2023 +9% · 2024 +37% · 2025 −18%\n2026 so far: −23%, the worst November in Hyperliquid data since 2023, with 6 days left.",
+    "2026 so far: Bitcoin −23% in November, the worst November in Hyperliquid data since 2023 (6 days to go).\nPast years: 2023 +9% · 2024 +37% · 2025 −18%"
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "season:BTC:2026-11:worst:2026-11-24",
+    "format": "history",
+    "detector": "seasonality",
+    "subject": "BTC",
+    "headline": "Bitcoin November 2026 so far −22.9%: worst November in the stored history",
+    "numbers": {
+     "list": {
+      "value": 0.0,
+      "text": "2023 +9% · 2024 +37% · 2025 −18%",
+      "label": "full-month returns by year"
+     },
+     "mtd": {
+      "value": -22.87998968207906,
+      "text": "−23%",
+      "label": "month to date"
+     },
+     "year": {
+      "value": 2026.0,
+      "text": "2026",
+      "label": "this year"
+     },
+     "left": {
+      "value": 6.0,
+      "text": "6",
+      "label": "days left in the month"
+     },
+     "start": {
+      "value": 2023.0,
+      "text": "2023",
+      "label": "first stored year"
+     }
+    },
+    "words": {},
+    "templates": [
+     "Bitcoin in November:\n{list}\n{year} so far: {mtd}, the worst November in Hyperliquid data since {start}, with {left} days left.",
+     "{year} so far: Bitcoin {mtd} in November, the worst November in Hyperliquid data since {start} ({left} days to go).\nPast years: {list}"
+    ],
+    "window": "November 2026",
+    "series": [
+     "px:BTC:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "MTD = close 59,795.00 on 2026-11-24 / close 77,535.00 on 2026-10-31 − 1 = −22.9%; each year's November = last close of November / last close of the month before − 1 (3 years from 2023); no stored November since 2023 was lower (px:BTC:close)",
+    "rarity": 0.69,
+    "chart": {
+     "kind": "seasonality_bars",
+     "title": "Bitcoin in November, by year",
+     "kicker": "2026 so far −22.9%",
+     "series": [
+      {
+       "name": "November return, %",
+       "points": [
+        [
+         2023,
+         8.77
+        ],
+        [
+         2024,
+         37.12
+        ],
+        [
+         2025,
+         -17.58
+        ],
+        [
+         2026,
+         -22.88
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "highlight",
+       "x": 2026,
+       "label": "2026 so far (6 days left)"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "year"
+    },
+    "comparatives": [
+     "worst",
+     "since"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 69.0,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 88.14,
+   "format": "breadth",
+   "detector": "breadth_count",
+   "headline": "2 of 101 Hyperliquid perps up over 30d (2%): weaker than 97% of days since 2023",
+   "text": "Crypto breadth: 2 of 101 Hyperliquid perps are up over the past 30 days. 99 are down.\nOnly 3.0% of days since July 2023 had breadth this weak.",
+   "chars": 142,
+   "template_variant": 0,
+   "all_variants": [
+    "Crypto breadth: 2 of 101 Hyperliquid perps are up over the past 30 days. 99 are down.\nOnly 3.0% of days since July 2023 had breadth this weak.",
+    "2 of 101 Hyperliquid perps are up over the past 30 days. 99 are down.\nIt isn't one coin, it's almost everything. Breadth this weak showed up on just 3.0% of days since July 2023."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "breadth:30d:2026-11-24",
+    "format": "breadth",
+    "detector": "breadth_count",
+    "subject": "HL-universe",
+    "headline": "2 of 101 Hyperliquid perps up over 30d (2%): weaker than 97% of days since 2023",
+    "numbers": {
+     "up": {
+      "value": 2.0,
+      "text": "2",
+      "label": "perps up"
+     },
+     "down": {
+      "value": 99.0,
+      "text": "99",
+      "label": "perps down"
+     },
+     "total": {
+      "value": 101.0,
+      "text": "101",
+      "label": "perps counted"
+     },
+     "tail": {
+      "value": 2.9654036243822075,
+      "text": "3.0%",
+      "label": "share of days with breadth this weak"
+     },
+     "since": {
+      "value": 0.0,
+      "text": "July 2023",
+      "label": "breadth history starts"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "as of"
+     }
+    },
+    "words": {},
+    "templates": [
+     "Crypto breadth: {up} of {total} Hyperliquid perps are up over the past {days} days. {down} are down.\nOnly {tail} of days since {since} had breadth this weak.",
+     "{up} of {total} Hyperliquid perps are up over the past {days} days. {down} are down.\nIt isn't one coin, it's almost everything. Breadth this weak showed up on just {tail} of days since {since}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:*:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "2 of 101 perps with a close on both 2026-10-25 and 2026-11-24 closed higher (2.0%); 3.0% of 1,214 days since 2023-07-30 had a share ≤ 2.0% (same universe: every stored Hyperliquid perp, px:*:close)",
+    "rarity": 0.8813838550247117,
+    "chart": {
+     "kind": "heat_grid",
+     "title": "Hyperliquid perps, 30-day change",
+     "kicker": "2 up · 99 down",
+     "series": [
+      {
+       "name": "30-day change, %",
+       "points": [
+        [
+         "PONS",
+         -64.66
+        ],
+        [
+         "SYRUP",
+         -59.75
+        ],
+        [
+         "CASHCAT",
+         -59.71
+        ],
+        [
+         "USELESS",
+         -58.49
+        ],
+        [
+         "ACE",
+         -56.93
+        ],
+        [
+         "MON",
+         -56.1
+        ],
+        [
+         "ENA",
+         -52.52
+        ],
+        [
+         "GRASS",
+         -49.25
+        ],
+        [
+         "TRUMP",
+         -49.23
+        ],
+        [
+         "CRV",
+         -49.14
+        ],
+        [
+         "APT",
+         -48.05
+        ],
+        [
+         "WLD",
+         -47.63
+        ],
+        [
+         "JTO",
+         -45.39
+        ],
+        [
+         "PENGU",
+         -43.68
+        ],
+        [
+         "2Z",
+         -43.24
+        ],
+        [
+         "VIRTUAL",
+         -43.23
+        ],
+        [
+         "MELANIA",
+         -42.96
+        ],
+        [
+         "INIT",
+         -42.56
+        ],
+        [
+         "PUMP",
+         -42.26
+        ],
+        [
+         "FIL",
+         -42.19
+        ],
+        [
+         "S",
+         -41.85
+        ],
+        [
+         "POPCAT",
+         -41.39
+        ],
+        [
+         "AERO",
+         -41.2
+        ],
+        [
+         "ZRO",
+         -40.54
+        ],
+        [
+         "SKY",
+         -40.29
+        ],
+        [
+         "BIGTIME",
+         -40.21
+        ],
+        [
+         "XPL",
+         -40.12
+        ],
+        [
+         "TIA",
+         -39.39
+        ],
+        [
+         "FET",
+         -39.16
+        ],
+        [
+         "ZEC",
+         -39.11
+        ],
+        [
+         "CHIP",
+         -38.9
+        ],
+        [
+         "OP",
+         -38.28
+        ],
+        [
+         "SEI",
+         -37.77
+        ],
+        [
+         "LDO",
+         -37.48
+        ],
+        [
+         "NEAR",
+         -37.11
+        ],
+        [
+         "BABY",
+         -37.04
+        ],
+        [
+         "DOT",
+         -36.53
+        ],
+        [
+         "FARTCOIN",
+         -36.43
+        ],
+        [
+         "PENDLE",
+         -36.42
+        ],
+        [
+         "MOODENG",
+         -36.34
+        ],
+        [
+         "LAYER",
+         -36.24
+        ],
+        [
+         "HBAR",
+         -34.99
+        ],
+        [
+         "STBL",
+         -34.63
+        ],
+        [
+         "ARB",
+         -34.58
+        ],
+        [
+         "STRK",
+         -34.54
+        ],
+        [
+         "AR",
+         -32.64
+        ],
+        [
+         "WIF",
+         -32.3
+        ],
+        [
+         "W",
+         -32.3
+        ],
+        [
+         "UNI",
+         -31.87
+        ],
+        [
+         "ONDO",
+         -31.79
+        ],
+        [
+         "ASTER",
+         -31.45
+        ],
+        [
+         "SOL",
+         -31.26
+        ],
+        [
+         "AAVE",
+         -31.05
+        ],
+        [
+         "MNT",
+         -30.49
+        ],
+        [
+         "MET",
+         -30.35
+        ],
+        [
+         "kBONK",
+         -30.04
+        ],
+        [
+         "PURR",
+         -29.71
+        ],
+        [
+         "SUI",
+         -29.55
+        ],
+        [
+         "BCH",
+         -29.18
+        ],
+        [
+         "ADA",
+         -29.16
+        ],
+        [
+         "GOAT",
+         -28.78
+        ],
+        [
+         "XRP",
+         -28.64
+        ],
+        [
+         "TAO",
+         -28.42
+        ],
+        [
+         "DOGE",
+         -28.11
+        ],
+        [
+         "LTC",
+         -27.96
+        ],
+        [
+         "ETH",
+         -27.89
+        ],
+        [
+         "ANIME",
+         -27.72
+        ],
+        [
+         "kSHIB",
+         -27.05
+        ],
+        [
+         "AVAX",
+         -26.38
+        ],
+        [
+         "GALA",
+         -26.3
+        ],
+        [
+         "XLM",
+         -26.08
+        ],
+        [
+         "CC",
+         -25.89
+        ],
+        [
+         "BNB",
+         -25.73
+        ],
+        [
+         "INJ",
+         -25.62
+        ],
+        [
+         "RENDER",
+         -25.57
+        ],
+        [
+         "GRAM",
+         -25.46
+        ],
+        [
+         "BTC",
+         -25.36
+        ],
+        [
+         "ETHFI",
+         -24.95
+        ],
+        [
+         "ALGO",
+         -24.87
+        ],
+        [
+         "LIT",
+         -24.78
+        ],
+        [
+         "SPX",
+         -24.62
+        ],
+        [
+         "WLFI",
+         -24.26
+        ],
+        [
+         "ATOM",
+         -24.21
+        ],
+        [
+         "MORPHO",
+         -24.02
+        ],
+        [
+         "ICP",
+         -23.92
+        ],
+        [
+         "LINK",
+         -22.74
+        ],
+        [
+         "JUP",
+         -21.77
+        ],
+        [
+         "HYPE",
+         -21.46
+        ],
+        [
+         "kPEPE",
+         -19.33
+        ],
+        [
+         "RUNE",
+         -18.58
+        ],
+        [
+         "POL",
+         -15.0
+        ],
+        [
+         "STX",
+         -14.47
+        ],
+        [
+         "XMR",
+         -14.09
+        ],
+        [
+         "PAXG",
+         -11.61
+        ],
+        [
+         "STABLE",
+         -10.42
+        ],
+        [
+         "MEGA",
+         -7.27
+        ],
+        [
+         "TRX",
+         -6.72
+        ],
+        [
+         "VVV",
+         -2.1
+        ],
+        [
+         "kLUNC",
+         -0.35
+        ],
+        [
+         "USUAL",
+         12.51
+        ],
+        [
+         "BLUR",
+         14.63
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "note",
+       "text": "2 of 101 up"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "label"
+    },
+    "comparatives": [
+     "only",
+     "just",
+     "almost",
+     "nearly"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 88.14,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 92.37,
+   "format": "crowded",
+   "detector": "funding_extremes",
+   "headline": "Shorts paying longs: BIGTIME −73% · TRUMP −67% · JUP −42% · SKY −38%",
+   "text": "On Hyperliquid, shorts are paying longs to stay bearish:\nBIGTIME −73% · TRUMP −67% · JUP −42% · SKY −38%\n(funding: the Nov 24, 2026 average hourly rate, annualised)\nCrowded shorts at extreme funding have a history of sharp squeezes. They don't always come.",
+   "chars": 256,
+   "template_variant": 0,
+   "all_variants": [
+    "On Hyperliquid, shorts are paying longs to stay bearish:\nBIGTIME −73% · TRUMP −67% · JUP −42% · SKY −38%\n(funding: the Nov 24, 2026 average hourly rate, annualised)\nCrowded shorts at extreme funding have a history of sharp squeezes. They don't always come.",
+    "Most negative funding on Hyperliquid (Nov 24, 2026 average hourly rate, annualised):\nBIGTIME −73% · TRUMP −67% · JUP −42% · SKY −38%\nShorts are paying to stay short. That has a history of ending in squeezes, but not every time."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "funding:neg:2026-11-24",
+    "format": "crowded",
+    "detector": "funding_extremes",
+    "subject": "HL-funding-neg",
+    "headline": "Shorts paying longs: BIGTIME −73% · TRUMP −67% · JUP −42% · SKY −38%",
+    "numbers": {
+     "list": {
+      "value": 0.0,
+      "text": "BIGTIME −73% · TRUMP −67% · JUP −42% · SKY −38%",
+      "label": "annualised funding, most extreme"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "funding day"
+     },
+     "count": {
+      "value": 4.0,
+      "text": "4",
+      "label": "perps listed"
+     },
+     "total": {
+      "value": 30.0,
+      "text": "30",
+      "label": "perps with funding history"
+     }
+    },
+    "words": {},
+    "templates": [
+     "On Hyperliquid, shorts are paying longs to stay bearish:\n{list}\n(funding: the {date} average hourly rate, annualised)\nCrowded shorts at extreme funding have a history of sharp squeezes. They don't always come.",
+     "Most negative funding on Hyperliquid ({date} average hourly rate, annualised):\n{list}\nShorts are paying to stay short. That has a history of ending in squeezes, but not every time."
+    ],
+    "window": "1d",
+    "series": [
+     "fund:BIGTIME",
+     "fund:TRUMP",
+     "fund:JUP",
+     "fund:SKY"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "annualised = daily mean of the hourly funding rate × 24 × 365; 2026-11-24: BIGTIME -0.008281%/h -> −72.5%; TRUMP -0.007664%/h -> −67.1%; JUP -0.004749%/h -> −41.6%; SKY -0.004333%/h -> −38.0% (of 30 perps with funding stored); BIGTIME's reading is in the most extreme 1.1% of its 365 stored days",
+    "rarity": 0.9237246134356164,
+    "chart": {
+     "kind": "rank_table",
+     "title": "Hyperliquid funding, annualised",
+     "kicker": "2026-11-24 average hourly rate × 8,760",
+     "series": [
+      {
+       "name": "annualised funding, %",
+       "points": [
+        [
+         "BIGTIME",
+         -72.5
+        ],
+        [
+         "TRUMP",
+         -67.1
+        ],
+        [
+         "JUP",
+         -41.6
+        ],
+        [
+         "SKY",
+         -38.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "label"
+    },
+    "comparatives": [
+     "most",
+     "highest",
+     "extreme"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 92.37,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 85.0,
+   "format": "relative",
+   "detector": "leaderboard",
+   "headline": "2026 so far: best VVV +1,404%, worst TRUMP −82.5%",
+   "text": "2026 so far, the 50 most traded Hyperliquid perps:\nBest: VVV +1,404% · HYPE +135% · NEAR +91% · ZEC +44% · INJ +40%\nWorst: TRUMP −83% · MEGA −81% · APT −78% · XPL −73% · WLFI −72%\nBitcoin: −32%. Higher over the period: 9 of 50.",
+   "chars": 227,
+   "template_variant": 0,
+   "all_variants": [
+    "2026 so far, the 50 most traded Hyperliquid perps:\nBest: VVV +1,404% · HYPE +135% · NEAR +91% · ZEC +44% · INJ +40%\nWorst: TRUMP −83% · MEGA −81% · APT −78% · XPL −73% · WLFI −72%\nBitcoin: −32%. Higher over the period: 9 of 50.",
+    "2026 so far on Hyperliquid (50 most traded perps):\n▲ VVV +1,404% · HYPE +135% · NEAR +91% · ZEC +44% · INJ +40%\n▼ TRUMP −83% · MEGA −81% · APT −78% · XPL −73% · WLFI −72%\nBitcoin: −32%. Higher over the period: 9 of 50."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "leaders:328d:2026-11-24",
+    "format": "relative",
+    "detector": "leaderboard",
+    "subject": "leaders-328",
+    "headline": "2026 so far: best VVV +1,404%, worst TRUMP −82.5%",
+    "numbers": {
+     "best": {
+      "value": 0.0,
+      "text": "VVV +1,404% · HYPE +135% · NEAR +91% · ZEC +44% · INJ +40%",
+      "label": "best performers"
+     },
+     "worst": {
+      "value": 0.0,
+      "text": "TRUMP −83% · MEGA −81% · APT −78% · XPL −73% · WLFI −72%",
+      "label": "worst performers"
+     },
+     "total": {
+      "value": 50.0,
+      "text": "50",
+      "label": "perps ranked"
+     },
+     "up": {
+      "value": 9.0,
+      "text": "9",
+      "label": "perps up"
+     },
+     "days": {
+      "value": 328.0,
+      "text": "328",
+      "label": "window, days"
+     },
+     "year": {
+      "value": 2026.0,
+      "text": "2026",
+      "label": "year"
+     },
+     "btc": {
+      "value": -31.765793317509583,
+      "text": "−32%",
+      "label": "Bitcoin, same window"
+     }
+    },
+    "words": {},
+    "templates": [
+     "{year} so far, the {total} most traded Hyperliquid perps:\nBest: {best}\nWorst: {worst}\nBitcoin: {btc}. Higher over the period: {up} of {total}.",
+     "{year} so far on Hyperliquid ({total} most traded perps):\n▲ {best}\n▼ {worst}\nBitcoin: {btc}. Higher over the period: {up} of {total}."
+    ],
+    "window": "328d",
+    "series": [
+     "px:VVV:close",
+     "px:HYPE:close",
+     "px:NEAR:close",
+     "px:ZEC:close",
+     "px:INJ:close",
+     "px:GRASS:close",
+     "px:PUMP:close",
+     "px:JUP:close",
+     "px:TRX:close",
+     "px:AERO:close",
+     "px:INIT:close",
+     "px:LIT:close",
+     "px:RUNE:close",
+     "px:kPEPE:close",
+     "px:ZRO:close",
+     "px:UNI:close",
+     "px:TAO:close",
+     "px:PAXG:close",
+     "px:ONDO:close",
+     "px:LINK:close",
+     "px:TIA:close",
+     "px:ASTER:close",
+     "px:BTC:close",
+     "px:ETHFI:close",
+     "px:AAVE:close",
+     "px:BNB:close",
+     "px:XLM:close",
+     "px:ARB:close",
+     "px:ETH:close",
+     "px:SOL:close",
+     "px:AVAX:close",
+     "px:LTC:close",
+     "px:XRP:close",
+     "px:ENA:close",
+     "px:WLD:close",
+     "px:CRV:close",
+     "px:HBAR:close",
+     "px:DOGE:close",
+     "px:SUI:close",
+     "px:ADA:close",
+     "px:MON:close",
+     "px:STRK:close",
+     "px:DOT:close",
+     "px:BCH:close",
+     "px:FARTCOIN:close",
+     "px:WLFI:close",
+     "px:XPL:close",
+     "px:APT:close",
+     "px:MEGA:close",
+     "px:TRUMP:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "return = close 2026-11-24 / close 2025-12-31 − 1 for the 50 perps with the highest 30-day average USD volume and a close on both days; VVV +1404.00%; HYPE +135.24%; NEAR +90.73%; ZEC +44.43%; INJ +39.70%; TRUMP -82.53%; MEGA -81.27%; APT -78.04%; XPL -72.69%; WLFI -72.02%",
+    "rarity": 0.85,
+    "chart": {
+     "kind": "rank_table",
+     "title": "2026 so far: best and worst",
+     "kicker": "50 most traded Hyperliquid perps",
+     "series": [
+      {
+       "name": "best",
+       "points": [
+        [
+         "VVV",
+         1404.0
+        ],
+        [
+         "HYPE",
+         135.24
+        ],
+        [
+         "NEAR",
+         90.73
+        ],
+        [
+         "ZEC",
+         44.43
+        ],
+        [
+         "INJ",
+         39.7
+        ]
+       ]
+      },
+      {
+       "name": "worst",
+       "points": [
+        [
+         "TRUMP",
+         -82.53
+        ],
+        [
+         "MEGA",
+         -81.27
+        ],
+        [
+         "APT",
+         -78.04
+        ],
+        [
+         "XPL",
+         -72.69
+        ],
+        [
+         "WLFI",
+         -72.02
+        ]
+       ]
+      }
+     ],
+     "annotations": [],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "label"
+    },
+    "comparatives": [
+     "best",
+     "worst",
+     "most"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 85.0,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 89.81,
+   "format": "extremes",
+   "detector": "rarity",
+   "headline": "XRP −28.6% in 30 day(s): most extreme 2.0% of Hyperliquid data since 2023-07-17",
+   "text": "XRP −28.6% in 30 days.\nIn Hyperliquid data since July 2023, only 2.0% of all 30-day stretches were this bad (25 of 1,227). The last one ended in February 2026.",
+   "chars": 159,
+   "template_variant": 0,
+   "all_variants": [
+    "XRP −28.6% in 30 days.\nIn Hyperliquid data since July 2023, only 2.0% of all 30-day stretches were this bad (25 of 1,227). The last one ended in February 2026.",
+    "XRP is down 28.6% over the past 30 days.\nOnly 25 of 1,227 30-day windows in Hyperliquid data since July 2023 were this bad. The last one ended in February 2026."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "rarity:XRP:30d:2026-11-24",
+    "format": "extremes",
+    "detector": "rarity",
+    "subject": "XRP",
+    "headline": "XRP −28.6% in 30 day(s): most extreme 2.0% of Hyperliquid data since 2023-07-17",
+    "numbers": {
+     "move": {
+      "value": -28.642080086413092,
+      "text": "−28.6%",
+      "label": "30-day return"
+     },
+     "share": {
+      "value": 2.037489812550937,
+      "text": "2.0%",
+      "label": "share of windows"
+     },
+     "count": {
+      "value": 25.0,
+      "text": "25",
+      "label": "windows as extreme"
+     },
+     "total": {
+      "value": 1227.0,
+      "text": "1,227",
+      "label": "windows in history"
+     },
+     "since": {
+      "value": 0.0,
+      "text": "July 2023",
+      "label": "stored history starts"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "as of"
+     },
+     "last": {
+      "value": 0.0,
+      "text": "February 2026",
+      "label": "previous window as extreme ended"
+     },
+     "move_abs": {
+      "value": -28.642080086413092,
+      "text": "28.6%",
+      "label": "30-day move, size (the value keeps its sign: the gate checks the direction)"
+     }
+    },
+    "words": {
+     "asset": "XRP",
+     "adj": "bad",
+     "dirword": "down",
+     "data": "Hyperliquid data"
+    },
+    "templates": [
+     "{asset} {move} in {days} days.\nIn {data} since {since}, only {share} of all {days}-day stretches were this bad ({count} of {total}). The last one ended in {last}.",
+     "{asset} is {dirword} {move_abs} over the past {days} days.\nOnly {count} of {total} {days}-day windows in {data} since {since} were this bad. The last one ended in {last}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:XRP:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "30d return = 0.92 / 1.30 − 1 = −28.6%; 25 of 1,227 30-day windows since 2023-07-17 were ≤ −28.6% (2.0%); most recent earlier window: ended 2026-02-27 (−29.1%). Source series px:XRP:close.",
+    "rarity": 0.8981255093724532,
+    "chart": {
+     "kind": "histogram_marker",
+     "title": "Every 30-day XRP move since 2023",
+     "kicker": "XRP −28.6% in 30d",
+     "series": [
+      {
+       "name": "30-day returns, %",
+       "points": [
+        [
+         -41.3038,
+         4.0
+        ],
+        [
+         -29.2729,
+         70.0
+        ],
+        [
+         -17.242,
+         233.0
+        ],
+        [
+         -5.2111,
+         413.0
+        ],
+        [
+         6.8199,
+         265.0
+        ],
+        [
+         18.8508,
+         63.0
+        ],
+        [
+         30.8817,
+         75.0
+        ],
+        [
+         42.9126,
+         44.0
+        ],
+        [
+         54.9436,
+         15.0
+        ],
+        [
+         66.9745,
+         8.0
+        ],
+        [
+         79.0054,
+         2.0
+        ],
+        [
+         91.0364,
+         1.0
+        ],
+        [
+         103.0673,
+         7.0
+        ],
+        [
+         115.0982,
+         0.0
+        ],
+        [
+         127.1291,
+         1.0
+        ],
+        [
+         139.1601,
+         2.0
+        ],
+        [
+         151.191,
+         0.0
+        ],
+        [
+         163.2219,
+         0.0
+        ],
+        [
+         175.2528,
+         5.0
+        ],
+        [
+         187.2838,
+         3.0
+        ],
+        [
+         199.3147,
+         0.0
+        ],
+        [
+         211.3456,
+         1.0
+        ],
+        [
+         223.3765,
+         0.0
+        ],
+        [
+         235.4075,
+         1.0
+        ],
+        [
+         247.4384,
+         2.0
+        ],
+        [
+         259.4693,
+         0.0
+        ],
+        [
+         271.5002,
+         0.0
+        ],
+        [
+         283.5312,
+         2.0
+        ],
+        [
+         295.5621,
+         1.0
+        ],
+        [
+         307.593,
+         1.0
+        ],
+        [
+         319.624,
+         0.0
+        ],
+        [
+         331.6549,
+         1.0
+        ],
+        [
+         343.6858,
+         2.0
+        ],
+        [
+         355.7167,
+         0.0
+        ],
+        [
+         367.7477,
+         3.0
+        ],
+        [
+         379.7786,
+         0.0
+        ],
+        [
+         391.8095,
+         0.0
+        ],
+        [
+         403.8404,
+         1.0
+        ],
+        [
+         415.8714,
+         0.0
+        ],
+        [
+         427.9023,
+         1.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "marker",
+       "x": -28.64,
+       "label": "Now −28.6%"
+      },
+      {
+       "type": "note",
+       "text": "2.0% of windows this bad"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "number",
+     "x_label": "30-day return, %"
+    },
+    "comparatives": [
+     "only",
+     "last time",
+     "most",
+     "first"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 89.81,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 69.0,
+   "format": "history",
+   "detector": "seasonality",
+   "headline": "Ether November 2026 so far −25.5%: worst November in the stored history",
+   "text": "Ether in November:\n2023 +13% · 2024 +47% · 2025 −22%\n2026 so far: −26%, the worst November in Hyperliquid data since 2023, with 6 days left.",
+   "chars": 140,
+   "template_variant": 0,
+   "all_variants": [
+    "Ether in November:\n2023 +13% · 2024 +47% · 2025 −22%\n2026 so far: −26%, the worst November in Hyperliquid data since 2023, with 6 days left.",
+    "2026 so far: Ether −26% in November, the worst November in Hyperliquid data since 2023 (6 days to go).\nPast years: 2023 +13% · 2024 +47% · 2025 −22%"
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "season:ETH:2026-11:worst:2026-11-24",
+    "format": "history",
+    "detector": "seasonality",
+    "subject": "ETH",
+    "headline": "Ether November 2026 so far −25.5%: worst November in the stored history",
+    "numbers": {
+     "list": {
+      "value": 0.0,
+      "text": "2023 +13% · 2024 +47% · 2025 −22%",
+      "label": "full-month returns by year"
+     },
+     "mtd": {
+      "value": -25.523328011353563,
+      "text": "−26%",
+      "label": "month to date"
+     },
+     "year": {
+      "value": 2026.0,
+      "text": "2026",
+      "label": "this year"
+     },
+     "left": {
+      "value": 6.0,
+      "text": "6",
+      "label": "days left in the month"
+     },
+     "start": {
+      "value": 2023.0,
+      "text": "2023",
+      "label": "first stored year"
+     }
+    },
+    "words": {},
+    "templates": [
+     "Ether in November:\n{list}\n{year} so far: {mtd}, the worst November in Hyperliquid data since {start}, with {left} days left.",
+     "{year} so far: Ether {mtd} in November, the worst November in Hyperliquid data since {start} ({left} days to go).\nPast years: {list}"
+    ],
+    "window": "November 2026",
+    "series": [
+     "px:ETH:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "MTD = close 1,679.30 on 2026-11-24 / close 2,254.80 on 2026-10-31 − 1 = −25.5%; each year's November = last close of November / last close of the month before − 1 (3 years from 2023); no stored November since 2023 was lower (px:ETH:close)",
+    "rarity": 0.69,
+    "chart": {
+     "kind": "seasonality_bars",
+     "title": "Ether in November, by year",
+     "kicker": "2026 so far −25.5%",
+     "series": [
+      {
+       "name": "November return, %",
+       "points": [
+        [
+         2023,
+         13.0
+        ],
+        [
+         2024,
+         47.15
+        ],
+        [
+         2025,
+         -22.25
+        ],
+        [
+         2026,
+         -25.52
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "highlight",
+       "x": 2026,
+       "label": "2026 so far (6 days left)"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "year"
+    },
+    "comparatives": [
+     "worst",
+     "since"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 69.0,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 55.86,
+   "format": "relative",
+   "detector": "leaderboard",
+   "headline": "Past 30 days: best VVV −2.1%, worst PONS −64.7%",
+   "text": "Past 30 days, the 50 most traded Hyperliquid perps:\nBest: VVV −2% · TRX −7% · PAXG −12% · XMR −14% · kPEPE −19%\nWorst: PONS −65% · CASHCAT −60% · USELESS −58% · MON −56% · ENA −53%\nBitcoin: −25%. Higher over the period: 0 of 50.",
+   "chars": 228,
+   "template_variant": 0,
+   "all_variants": [
+    "Past 30 days, the 50 most traded Hyperliquid perps:\nBest: VVV −2% · TRX −7% · PAXG −12% · XMR −14% · kPEPE −19%\nWorst: PONS −65% · CASHCAT −60% · USELESS −58% · MON −56% · ENA −53%\nBitcoin: −25%. Higher over the period: 0 of 50.",
+    "Past 30 days on Hyperliquid (50 most traded perps):\n▲ VVV −2% · TRX −7% · PAXG −12% · XMR −14% · kPEPE −19%\n▼ PONS −65% · CASHCAT −60% · USELESS −58% · MON −56% · ENA −53%\nBitcoin: −25%. Higher over the period: 0 of 50."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "leaders:30d:2026-11-24",
+    "format": "relative",
+    "detector": "leaderboard",
+    "subject": "leaders-30",
+    "headline": "Past 30 days: best VVV −2.1%, worst PONS −64.7%",
+    "numbers": {
+     "best": {
+      "value": 0.0,
+      "text": "VVV −2% · TRX −7% · PAXG −12% · XMR −14% · kPEPE −19%",
+      "label": "best performers"
+     },
+     "worst": {
+      "value": 0.0,
+      "text": "PONS −65% · CASHCAT −60% · USELESS −58% · MON −56% · ENA −53%",
+      "label": "worst performers"
+     },
+     "total": {
+      "value": 50.0,
+      "text": "50",
+      "label": "perps ranked"
+     },
+     "up": {
+      "value": 0.0,
+      "text": "0",
+      "label": "perps up"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "year": {
+      "value": 2026.0,
+      "text": "2026",
+      "label": "year"
+     },
+     "btc": {
+      "value": -25.357018025665358,
+      "text": "−25%",
+      "label": "Bitcoin, same window"
+     }
+    },
+    "words": {},
+    "templates": [
+     "Past {days} days, the {total} most traded Hyperliquid perps:\nBest: {best}\nWorst: {worst}\nBitcoin: {btc}. Higher over the period: {up} of {total}.",
+     "Past {days} days on Hyperliquid ({total} most traded perps):\n▲ {best}\n▼ {worst}\nBitcoin: {btc}. Higher over the period: {up} of {total}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:VVV:close",
+     "px:TRX:close",
+     "px:PAXG:close",
+     "px:XMR:close",
+     "px:kPEPE:close",
+     "px:HYPE:close",
+     "px:JUP:close",
+     "px:LINK:close",
+     "px:WLFI:close",
+     "px:LIT:close",
+     "px:ETHFI:close",
+     "px:BTC:close",
+     "px:GRAM:close",
+     "px:INJ:close",
+     "px:BNB:close",
+     "px:AVAX:close",
+     "px:ETH:close",
+     "px:LTC:close",
+     "px:DOGE:close",
+     "px:TAO:close",
+     "px:XRP:close",
+     "px:ADA:close",
+     "px:BCH:close",
+     "px:SUI:close",
+     "px:AAVE:close",
+     "px:SOL:close",
+     "px:ASTER:close",
+     "px:ONDO:close",
+     "px:UNI:close",
+     "px:STRK:close",
+     "px:ARB:close",
+     "px:FARTCOIN:close",
+     "px:DOT:close",
+     "px:NEAR:close",
+     "px:CHIP:close",
+     "px:ZEC:close",
+     "px:XPL:close",
+     "px:ZRO:close",
+     "px:AERO:close",
+     "px:PUMP:close",
+     "px:INIT:close",
+     "px:WLD:close",
+     "px:CRV:close",
+     "px:TRUMP:close",
+     "px:GRASS:close",
+     "px:ENA:close",
+     "px:MON:close",
+     "px:USELESS:close",
+     "px:CASHCAT:close",
+     "px:PONS:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "return = close 2026-11-24 / close 2026-10-25 − 1 for the 50 perps with the highest 30-day average USD volume and a close on both days; VVV -2.10%; TRX -6.72%; PAXG -11.61%; XMR -14.09%; kPEPE -19.33%; PONS -64.66%; CASHCAT -59.71%; USELESS -58.49%; MON -56.10%; ENA -52.52%",
+    "rarity": 0.5586249115062674,
+    "chart": {
+     "kind": "rank_table",
+     "title": "Past 30 days: best and worst",
+     "kicker": "50 most traded Hyperliquid perps",
+     "series": [
+      {
+       "name": "best",
+       "points": [
+        [
+         "VVV",
+         -2.1
+        ],
+        [
+         "TRX",
+         -6.72
+        ],
+        [
+         "PAXG",
+         -11.61
+        ],
+        [
+         "XMR",
+         -14.09
+        ],
+        [
+         "kPEPE",
+         -19.33
+        ]
+       ]
+      },
+      {
+       "name": "worst",
+       "points": [
+        [
+         "PONS",
+         -64.66
+        ],
+        [
+         "CASHCAT",
+         -59.71
+        ],
+        [
+         "USELESS",
+         -58.49
+        ],
+        [
+         "MON",
+         -56.1
+        ],
+        [
+         "ENA",
+         -52.52
+        ]
+       ]
+      }
+     ],
+     "annotations": [],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "label"
+    },
+    "comparatives": [
+     "best",
+     "worst",
+     "most"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 55.86,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 85.82,
+   "format": "extremes",
+   "detector": "sentiment",
+   "headline": "Fear & Greed 11: this low on 3.5% of days since 2018",
+   "text": "Crypto Fear & Greed: 11 out of 100.\nSince 2018, the index has been this low on just 3.5% of days (114 of 3,215).\nIt has been in extreme fear for 12 days in a row.",
+   "chars": 162,
+   "template_variant": 0,
+   "all_variants": [
+    "Crypto Fear & Greed: 11 out of 100.\nSince 2018, the index has been this low on just 3.5% of days (114 of 3,215).\nIt has been in extreme fear for 12 days in a row.",
+    "Fear & Greed is at 11. Only 114 of 3,215 daily readings since 2018 were this low (3.5%)."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "fng:low:2026-11-24",
+    "format": "extremes",
+    "detector": "sentiment",
+    "subject": "FNG",
+    "headline": "Fear & Greed 11: this low on 3.5% of days since 2018",
+    "numbers": {
+     "value": {
+      "value": 11.0,
+      "text": "11",
+      "label": "Fear & Greed"
+     },
+     "share": {
+      "value": 3.5458786936236395,
+      "text": "3.5%",
+      "label": "share of days"
+     },
+     "count": {
+      "value": 114.0,
+      "text": "114",
+      "label": "days this low"
+     },
+     "total": {
+      "value": 3215.0,
+      "text": "3,215",
+      "label": "days stored"
+     },
+     "since": {
+      "value": 2018.0,
+      "text": "2018",
+      "label": "index history starts"
+     },
+     "max": {
+      "value": 100.0,
+      "text": "100",
+      "label": "scale maximum"
+     },
+     "streak": {
+      "value": 12.0,
+      "text": "12",
+      "label": "days in a row in extreme territory"
+     }
+    },
+    "words": {},
+    "templates": [
+     "Crypto Fear & Greed: {value} out of {max}.\nSince {since}, the index has been this low on just {share} of days ({count} of {total}).\nIt has been in extreme fear for {streak} days in a row.",
+     "Fear & Greed is at {value}. Only {count} of {total} daily readings since {since} were this low ({share})."
+    ],
+    "window": "daily",
+    "series": [
+     "fng"
+    ],
+    "sources": [
+     "alternative_me"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "F&G 11 on 2026-11-24; 114 of 3,215 daily readings since 2018-02-01 were ≤ 11 (3.55%); 12 consecutive days ≤ 25",
+    "rarity": 0.8581648522550545,
+    "chart": {
+     "kind": "series_with_marker",
+     "title": "Crypto Fear & Greed",
+     "kicker": "11 today",
+     "series": [
+      {
+       "name": "Fear & Greed",
+       "points": [
+        [
+         "2024-11-25",
+         82.0
+        ],
+        [
+         "2024-11-26",
+         79.0
+        ],
+        [
+         "2024-11-27",
+         75.0
+        ],
+        [
+         "2024-11-28",
+         77.0
+        ],
+        [
+         "2024-11-29",
+         78.0
+        ],
+        [
+         "2024-11-30",
+         84.0
+        ],
+        [
+         "2024-12-01",
+         81.0
+        ],
+        [
+         "2024-12-02",
+         80.0
+        ],
+        [
+         "2024-12-03",
+         76.0
+        ],
+        [
+         "2024-12-04",
+         78.0
+        ],
+        [
+         "2024-12-05",
+         84.0
+        ],
+        [
+         "2024-12-06",
+         72.0
+        ],
+        [
+         "2024-12-07",
+         75.0
+        ],
+        [
+         "2024-12-08",
+         79.0
+        ],
+        [
+         "2024-12-09",
+         78.0
+        ],
+        [
+         "2024-12-10",
+         78.0
+        ],
+        [
+         "2024-12-11",
+         74.0
+        ],
+        [
+         "2024-12-12",
+         83.0
+        ],
+        [
+         "2024-12-13",
+         76.0
+        ],
+        [
+         "2024-12-14",
+         83.0
+        ],
+        [
+         "2024-12-15",
+         80.0
+        ],
+        [
+         "2024-12-16",
+         83.0
+        ],
+        [
+         "2024-12-17",
+         87.0
+        ],
+        [
+         "2024-12-18",
+         81.0
+        ],
+        [
+         "2024-12-19",
+         75.0
+        ],
+        [
+         "2024-12-20",
+         74.0
+        ],
+        [
+         "2024-12-21",
+         73.0
+        ],
+        [
+         "2024-12-22",
+         73.0
+        ],
+        [
+         "2024-12-23",
+         70.0
+        ],
+        [
+         "2024-12-24",
+         73.0
+        ],
+        [
+         "2024-12-25",
+         73.0
+        ],
+        [
+         "2024-12-26",
+         79.0
+        ],
+        [
+         "2024-12-27",
+         74.0
+        ],
+        [
+         "2024-12-28",
+         72.0
+        ],
+        [
+         "2024-12-29",
+         73.0
+        ],
+        [
+         "2024-12-30",
+         65.0
+        ],
+        [
+         "2024-12-31",
+         64.0
+        ],
+        [
+         "2025-01-01",
+         66.0
+        ],
+        [
+         "2025-01-02",
+         70.0
+        ],
+        [
+         "2025-01-03",
+         74.0
+        ],
+        [
+         "2025-01-04",
+         73.0
+        ],
+        [
+         "2025-01-05",
+         72.0
+        ],
+        [
+         "2025-01-06",
+         76.0
+        ],
+        [
+         "2025-01-07",
+         78.0
+        ],
+        [
+         "2025-01-08",
+         70.0
+        ],
+        [
+         "2025-01-09",
+         69.0
+        ],
+        [
+         "2025-01-10",
+         50.0
+        ],
+        [
+         "2025-01-11",
+         69.0
+        ],
+        [
+         "2025-01-12",
+         62.0
+        ],
+        [
+         "2025-01-13",
+         61.0
+        ],
+        [
+         "2025-01-14",
+         63.0
+        ],
+        [
+         "2025-01-15",
+         70.0
+        ],
+        [
+         "2025-01-16",
+         75.0
+        ],
+        [
+         "2025-01-17",
+         75.0
+        ],
+        [
+         "2025-01-18",
+         77.0
+        ],
+        [
+         "2025-01-19",
+         77.0
+        ],
+        [
+         "2025-01-20",
+         76.0
+        ],
+        [
+         "2025-01-21",
+         76.0
+        ],
+        [
+         "2025-01-22",
+         84.0
+        ],
+        [
+         "2025-01-23",
+         75.0
+        ],
+        [
+         "2025-01-24",
+         75.0
+        ],
+        [
+         "2025-01-25",
+         75.0
+        ],
+        [
+         "2025-01-26",
+         73.0
+        ],
+        [
+         "2025-01-27",
+         71.0
+        ],
+        [
+         "2025-01-28",
+         72.0
+        ],
+        [
+         "2025-01-29",
+         72.0
+        ],
+        [
+         "2025-01-30",
+         70.0
+        ],
+        [
+         "2025-01-31",
+         76.0
+        ],
+        [
+         "2025-02-01",
+         68.0
+        ],
+        [
+         "2025-02-02",
+         60.0
+        ],
+        [
+         "2025-02-03",
+         44.0
+        ],
+        [
+         "2025-02-04",
+         72.0
+        ],
+        [
+         "2025-02-05",
+         54.0
+        ],
+        [
+         "2025-02-06",
+         49.0
+        ],
+        [
+         "2025-02-07",
+         44.0
+        ],
+        [
+         "2025-02-08",
+         44.0
+        ],
+        [
+         "2025-02-09",
+         46.0
+        ],
+        [
+         "2025-02-10",
+         43.0
+        ],
+        [
+         "2025-02-11",
+         47.0
+        ],
+        [
+         "2025-02-12",
+         46.0
+        ],
+        [
+         "2025-02-13",
+         50.0
+        ],
+        [
+         "2025-02-14",
+         48.0
+        ],
+        [
+         "2025-02-15",
+         50.0
+        ],
+        [
+         "2025-02-16",
+         54.0
+        ],
+        [
+         "2025-02-17",
+         51.0
+        ],
+        [
+         "2025-02-18",
+         47.0
+        ],
+        [
+         "2025-02-19",
+         44.0
+        ],
+        [
+         "2025-02-20",
+         49.0
+        ],
+        [
+         "2025-02-21",
+         55.0
+        ],
+        [
+         "2025-02-22",
+         49.0
+        ],
+        [
+         "2025-02-23",
+         50.0
+        ],
+        [
+         "2025-02-24",
+         49.0
+        ],
+        [
+         "2025-02-25",
+         25.0
+        ],
+        [
+         "2025-02-26",
+         21.0
+        ],
+        [
+         "2025-02-27",
+         10.0
+        ],
+        [
+         "2025-02-28",
+         16.0
+        ],
+        [
+         "2025-03-01",
+         20.0
+        ],
+        [
+         "2025-03-02",
+         26.0
+        ],
+        [
+         "2025-03-03",
+         33.0
+        ],
+        [
+         "2025-03-04",
+         15.0
+        ],
+        [
+         "2025-03-05",
+         20.0
+        ],
+        [
+         "2025-03-06",
+         25.0
+        ],
+        [
+         "2025-03-07",
+         34.0
+        ],
+        [
+         "2025-03-08",
+         28.0
+        ],
+        [
+         "2025-03-09",
+         27.0
+        ],
+        [
+         "2025-03-10",
+         20.0
+        ],
+        [
+         "2025-03-11",
+         24.0
+        ],
+        [
+         "2025-03-12",
+         34.0
+        ],
+        [
+         "2025-03-13",
+         45.0
+        ],
+        [
+         "2025-03-14",
+         27.0
+        ],
+        [
+         "2025-03-15",
+         46.0
+        ],
+        [
+         "2025-03-16",
+         30.0
+        ],
+        [
+         "2025-03-17",
+         32.0
+        ],
+        [
+         "2025-03-18",
+         34.0
+        ],
+        [
+         "2025-03-19",
+         32.0
+        ],
+        [
+         "2025-03-20",
+         49.0
+        ],
+        [
+         "2025-03-21",
+         31.0
+        ],
+        [
+         "2025-03-22",
+         32.0
+        ],
+        [
+         "2025-03-23",
+         30.0
+        ],
+        [
+         "2025-03-24",
+         45.0
+        ],
+        [
+         "2025-03-25",
+         46.0
+        ],
+        [
+         "2025-03-26",
+         47.0
+        ],
+        [
+         "2025-03-27",
+         40.0
+        ],
+        [
+         "2025-03-28",
+         44.0
+        ],
+        [
+         "2025-03-29",
+         26.0
+        ],
+        [
+         "2025-03-30",
+         32.0
+        ],
+        [
+         "2025-03-31",
+         34.0
+        ],
+        [
+         "2025-04-01",
+         34.0
+        ],
+        [
+         "2025-04-02",
+         44.0
+        ],
+        [
+         "2025-04-03",
+         25.0
+        ],
+        [
+         "2025-04-04",
+         28.0
+        ],
+        [
+         "2025-04-05",
+         30.0
+        ],
+        [
+         "2025-04-06",
+         34.0
+        ],
+        [
+         "2025-04-07",
+         23.0
+        ],
+        [
+         "2025-04-08",
+         24.0
+        ],
+        [
+         "2025-04-09",
+         18.0
+        ],
+        [
+         "2025-04-10",
+         39.0
+        ],
+        [
+         "2025-04-11",
+         25.0
+        ],
+        [
+         "2025-04-12",
+         43.0
+        ],
+        [
+         "2025-04-13",
+         45.0
+        ],
+        [
+         "2025-04-14",
+         31.0
+        ],
+        [
+         "2025-04-15",
+         38.0
+        ],
+        [
+         "2025-04-16",
+         29.0
+        ],
+        [
+         "2025-04-17",
+         30.0
+        ],
+        [
+         "2025-04-18",
+         33.0
+        ],
+        [
+         "2025-04-19",
+         32.0
+        ],
+        [
+         "2025-04-20",
+         37.0
+        ],
+        [
+         "2025-04-21",
+         39.0
+        ],
+        [
+         "2025-04-22",
+         47.0
+        ],
+        [
+         "2025-04-23",
+         72.0
+        ],
+        [
+         "2025-04-24",
+         63.0
+        ],
+        [
+         "2025-04-25",
+         60.0
+        ],
+        [
+         "2025-04-26",
+         65.0
+        ],
+        [
+         "2025-04-27",
+         61.0
+        ],
+        [
+         "2025-04-28",
+         54.0
+        ],
+        [
+         "2025-04-29",
+         60.0
+        ],
+        [
+         "2025-04-30",
+         56.0
+        ],
+        [
+         "2025-05-01",
+         53.0
+        ],
+        [
+         "2025-05-02",
+         67.0
+        ],
+        [
+         "2025-05-03",
+         65.0
+        ],
+        [
+         "2025-05-04",
+         64.0
+        ],
+        [
+         "2025-05-05",
+         52.0
+        ],
+        [
+         "2025-05-06",
+         59.0
+        ],
+        [
+         "2025-05-07",
+         67.0
+        ],
+        [
+         "2025-05-08",
+         65.0
+        ],
+        [
+         "2025-05-09",
+         73.0
+        ],
+        [
+         "2025-05-10",
+         70.0
+        ],
+        [
+         "2025-05-11",
+         70.0
+        ],
+        [
+         "2025-05-12",
+         70.0
+        ],
+        [
+         "2025-05-13",
+         70.0
+        ],
+        [
+         "2025-05-14",
+         73.0
+        ],
+        [
+         "2025-05-15",
+         70.0
+        ],
+        [
+         "2025-05-16",
+         71.0
+        ],
+        [
+         "2025-05-17",
+         74.0
+        ],
+        [
+         "2025-05-18",
+         74.0
+        ],
+        [
+         "2025-05-19",
+         74.0
+        ],
+        [
+         "2025-05-20",
+         71.0
+        ],
+        [
+         "2025-05-21",
+         70.0
+        ],
+        [
+         "2025-05-22",
+         72.0
+        ],
+        [
+         "2025-05-23",
+         78.0
+        ],
+        [
+         "2025-05-24",
+         66.0
+        ],
+        [
+         "2025-05-25",
+         74.0
+        ],
+        [
+         "2025-05-26",
+         73.0
+        ],
+        [
+         "2025-05-27",
+         74.0
+        ],
+        [
+         "2025-05-28",
+         71.0
+        ],
+        [
+         "2025-05-29",
+         74.0
+        ],
+        [
+         "2025-05-30",
+         60.0
+        ],
+        [
+         "2025-05-31",
+         50.0
+        ],
+        [
+         "2025-06-01",
+         56.0
+        ],
+        [
+         "2025-06-02",
+         64.0
+        ],
+        [
+         "2025-06-03",
+         64.0
+        ],
+        [
+         "2025-06-04",
+         62.0
+        ],
+        [
+         "2025-06-05",
+         57.0
+        ],
+        [
+         "2025-06-06",
+         45.0
+        ],
+        [
+         "2025-06-07",
+         52.0
+        ],
+        [
+         "2025-06-08",
+         62.0
+        ],
+        [
+         "2025-06-09",
+         62.0
+        ],
+        [
+         "2025-06-10",
+         71.0
+        ],
+        [
+         "2025-06-11",
+         72.0
+        ],
+        [
+         "2025-06-12",
+         71.0
+        ],
+        [
+         "2025-06-13",
+         61.0
+        ],
+        [
+         "2025-06-14",
+         63.0
+        ],
+        [
+         "2025-06-15",
+         60.0
+        ],
+        [
+         "2025-06-16",
+         61.0
+        ],
+        [
+         "2025-06-17",
+         68.0
+        ],
+        [
+         "2025-06-18",
+         52.0
+        ],
+        [
+         "2025-06-19",
+         57.0
+        ],
+        [
+         "2025-06-20",
+         54.0
+        ],
+        [
+         "2025-06-21",
+         49.0
+        ],
+        [
+         "2025-06-22",
+         42.0
+        ],
+        [
+         "2025-06-23",
+         47.0
+        ],
+        [
+         "2025-06-24",
+         65.0
+        ],
+        [
+         "2025-06-25",
+         66.0
+        ],
+        [
+         "2025-06-26",
+         74.0
+        ],
+        [
+         "2025-06-27",
+         65.0
+        ],
+        [
+         "2025-06-28",
+         65.0
+        ],
+        [
+         "2025-06-29",
+         68.0
+        ],
+        [
+         "2025-06-30",
+         66.0
+        ],
+        [
+         "2025-07-01",
+         64.0
+        ],
+        [
+         "2025-07-02",
+         63.0
+        ],
+        [
+         "2025-07-03",
+         73.0
+        ],
+        [
+         "2025-07-04",
+         73.0
+        ],
+        [
+         "2025-07-05",
+         67.0
+        ],
+        [
+         "2025-07-06",
+         66.0
+        ],
+        [
+         "2025-07-07",
+         73.0
+        ],
+        [
+         "2025-07-08",
+         65.0
+        ],
+        [
+         "2025-07-09",
+         66.0
+        ],
+        [
+         "2025-07-10",
+         71.0
+        ],
+        [
+         "2025-07-11",
+         71.0
+        ],
+        [
+         "2025-07-12",
+         79.0
+        ],
+        [
+         "2025-07-13",
+         74.0
+        ],
+        [
+         "2025-07-14",
+         74.0
+        ],
+        [
+         "2025-07-15",
+         73.0
+        ],
+        [
+         "2025-07-16",
+         70.0
+        ],
+        [
+         "2025-07-17",
+         74.0
+        ],
+        [
+         "2025-07-18",
+         73.0
+        ],
+        [
+         "2025-07-19",
+         74.0
+        ],
+        [
+         "2025-07-20",
+         72.0
+        ],
+        [
+         "2025-07-21",
+         71.0
+        ],
+        [
+         "2025-07-22",
+         72.0
+        ],
+        [
+         "2025-07-23",
+         74.0
+        ],
+        [
+         "2025-07-24",
+         71.0
+        ],
+        [
+         "2025-07-25",
+         70.0
+        ],
+        [
+         "2025-07-26",
+         72.0
+        ],
+        [
+         "2025-07-27",
+         73.0
+        ],
+        [
+         "2025-07-28",
+         75.0
+        ],
+        [
+         "2025-07-29",
+         73.0
+        ],
+        [
+         "2025-07-30",
+         74.0
+        ],
+        [
+         "2025-07-31",
+         72.0
+        ],
+        [
+         "2025-08-01",
+         65.0
+        ],
+        [
+         "2025-08-02",
+         55.0
+        ],
+        [
+         "2025-08-03",
+         53.0
+        ],
+        [
+         "2025-08-04",
+         64.0
+        ],
+        [
+         "2025-08-05",
+         60.0
+        ],
+        [
+         "2025-08-06",
+         54.0
+        ],
+        [
+         "2025-08-07",
+         62.0
+        ],
+        [
+         "2025-08-08",
+         74.0
+        ],
+        [
+         "2025-08-09",
+         67.0
+        ],
+        [
+         "2025-08-10",
+         69.0
+        ],
+        [
+         "2025-08-11",
+         70.0
+        ],
+        [
+         "2025-08-12",
+         68.0
+        ],
+        [
+         "2025-08-13",
+         73.0
+        ],
+        [
+         "2025-08-14",
+         75.0
+        ],
+        [
+         "2025-08-15",
+         60.0
+        ],
+        [
+         "2025-08-16",
+         56.0
+        ],
+        [
+         "2025-08-17",
+         64.0
+        ],
+        [
+         "2025-08-18",
+         60.0
+        ],
+        [
+         "2025-08-19",
+         56.0
+        ],
+        [
+         "2025-08-20",
+         44.0
+        ],
+        [
+         "2025-08-21",
+         50.0
+        ],
+        [
+         "2025-08-22",
+         50.0
+        ],
+        [
+         "2025-08-23",
+         60.0
+        ],
+        [
+         "2025-08-24",
+         53.0
+        ],
+        [
+         "2025-08-25",
+         47.0
+        ],
+        [
+         "2025-08-26",
+         48.0
+        ],
+        [
+         "2025-08-27",
+         51.0
+        ],
+        [
+         "2025-08-28",
+         48.0
+        ],
+        [
+         "2025-08-29",
+         50.0
+        ],
+        [
+         "2025-08-30",
+         39.0
+        ],
+        [
+         "2025-08-31",
+         48.0
+        ],
+        [
+         "2025-09-01",
+         46.0
+        ],
+        [
+         "2025-09-02",
+         49.0
+        ],
+        [
+         "2025-09-03",
+         55.0
+        ],
+        [
+         "2025-09-04",
+         51.0
+        ],
+        [
+         "2025-09-05",
+         48.0
+        ],
+        [
+         "2025-09-06",
+         48.0
+        ],
+        [
+         "2025-09-07",
+         44.0
+        ],
+        [
+         "2025-09-08",
+         51.0
+        ],
+        [
+         "2025-09-09",
+         48.0
+        ],
+        [
+         "2025-09-10",
+         49.0
+        ],
+        [
+         "2025-09-11",
+         54.0
+        ],
+        [
+         "2025-09-12",
+         57.0
+        ],
+        [
+         "2025-09-13",
+         52.0
+        ],
+        [
+         "2025-09-14",
+         55.0
+        ],
+        [
+         "2025-09-15",
+         53.0
+        ],
+        [
+         "2025-09-16",
+         52.0
+        ],
+        [
+         "2025-09-17",
+         53.0
+        ],
+        [
+         "2025-09-18",
+         52.0
+        ],
+        [
+         "2025-09-19",
+         53.0
+        ],
+        [
+         "2025-09-20",
+         48.0
+        ],
+        [
+         "2025-09-21",
+         49.0
+        ],
+        [
+         "2025-09-22",
+         45.0
+        ],
+        [
+         "2025-09-23",
+         43.0
+        ],
+        [
+         "2025-09-24",
+         44.0
+        ],
+        [
+         "2025-09-25",
+         44.0
+        ],
+        [
+         "2025-09-26",
+         28.0
+        ],
+        [
+         "2025-09-27",
+         33.0
+        ],
+        [
+         "2025-09-28",
+         37.0
+        ],
+        [
+         "2025-09-29",
+         50.0
+        ],
+        [
+         "2025-09-30",
+         50.0
+        ],
+        [
+         "2025-10-01",
+         49.0
+        ],
+        [
+         "2025-10-02",
+         64.0
+        ],
+        [
+         "2025-10-03",
+         63.0
+        ],
+        [
+         "2025-10-04",
+         71.0
+        ],
+        [
+         "2025-10-05",
+         74.0
+        ],
+        [
+         "2025-10-06",
+         71.0
+        ],
+        [
+         "2025-10-07",
+         70.0
+        ],
+        [
+         "2025-10-08",
+         60.0
+        ],
+        [
+         "2025-10-09",
+         70.0
+        ],
+        [
+         "2025-10-10",
+         64.0
+        ],
+        [
+         "2025-10-11",
+         27.0
+        ],
+        [
+         "2025-10-12",
+         24.0
+        ],
+        [
+         "2025-10-13",
+         38.0
+        ],
+        [
+         "2025-10-14",
+         38.0
+        ],
+        [
+         "2025-10-15",
+         34.0
+        ],
+        [
+         "2025-10-16",
+         28.0
+        ],
+        [
+         "2025-10-17",
+         22.0
+        ],
+        [
+         "2025-10-18",
+         23.0
+        ],
+        [
+         "2025-10-19",
+         29.0
+        ],
+        [
+         "2025-10-20",
+         29.0
+        ],
+        [
+         "2025-10-21",
+         34.0
+        ],
+        [
+         "2025-10-22",
+         25.0
+        ],
+        [
+         "2025-10-23",
+         27.0
+        ],
+        [
+         "2025-10-24",
+         30.0
+        ],
+        [
+         "2025-10-25",
+         37.0
+        ],
+        [
+         "2025-10-26",
+         40.0
+        ],
+        [
+         "2025-10-27",
+         51.0
+        ],
+        [
+         "2025-10-28",
+         50.0
+        ],
+        [
+         "2025-10-29",
+         51.0
+        ],
+        [
+         "2025-10-30",
+         34.0
+        ],
+        [
+         "2025-10-31",
+         29.0
+        ],
+        [
+         "2025-11-01",
+         33.0
+        ],
+        [
+         "2025-11-02",
+         37.0
+        ],
+        [
+         "2025-11-03",
+         42.0
+        ],
+        [
+         "2025-11-04",
+         21.0
+        ],
+        [
+         "2025-11-05",
+         23.0
+        ],
+        [
+         "2025-11-06",
+         27.0
+        ],
+        [
+         "2025-11-07",
+         24.0
+        ],
+        [
+         "2025-11-08",
+         20.0
+        ],
+        [
+         "2025-11-09",
+         22.0
+        ],
+        [
+         "2025-11-10",
+         29.0
+        ],
+        [
+         "2025-11-11",
+         26.0
+        ],
+        [
+         "2025-11-12",
+         24.0
+        ],
+        [
+         "2025-11-13",
+         15.0
+        ],
+        [
+         "2025-11-14",
+         16.0
+        ],
+        [
+         "2025-11-15",
+         10.0
+        ],
+        [
+         "2025-11-16",
+         10.0
+        ],
+        [
+         "2025-11-17",
+         14.0
+        ],
+        [
+         "2025-11-18",
+         11.0
+        ],
+        [
+         "2025-11-19",
+         15.0
+        ],
+        [
+         "2025-11-20",
+         11.0
+        ],
+        [
+         "2025-11-21",
+         14.0
+        ],
+        [
+         "2025-11-22",
+         11.0
+        ],
+        [
+         "2025-11-23",
+         13.0
+        ],
+        [
+         "2025-11-24",
+         19.0
+        ],
+        [
+         "2025-11-25",
+         20.0
+        ],
+        [
+         "2025-11-26",
+         15.0
+        ],
+        [
+         "2025-11-27",
+         22.0
+        ],
+        [
+         "2025-11-28",
+         25.0
+        ],
+        [
+         "2025-11-29",
+         28.0
+        ],
+        [
+         "2025-11-30",
+         28.0
+        ],
+        [
+         "2025-12-01",
+         24.0
+        ],
+        [
+         "2025-12-02",
+         23.0
+        ],
+        [
+         "2025-12-03",
+         28.0
+        ],
+        [
+         "2025-12-04",
+         26.0
+        ],
+        [
+         "2025-12-05",
+         28.0
+        ],
+        [
+         "2025-12-06",
+         23.0
+        ],
+        [
+         "2025-12-07",
+         20.0
+        ],
+        [
+         "2025-12-08",
+         20.0
+        ],
+        [
+         "2025-12-09",
+         22.0
+        ],
+        [
+         "2025-12-10",
+         26.0
+        ],
+        [
+         "2025-12-11",
+         29.0
+        ],
+        [
+         "2025-12-12",
+         29.0
+        ],
+        [
+         "2025-12-13",
+         23.0
+        ],
+        [
+         "2025-12-14",
+         21.0
+        ],
+        [
+         "2025-12-15",
+         16.0
+        ],
+        [
+         "2025-12-16",
+         11.0
+        ],
+        [
+         "2025-12-17",
+         16.0
+        ],
+        [
+         "2025-12-18",
+         17.0
+        ],
+        [
+         "2025-12-19",
+         16.0
+        ],
+        [
+         "2025-12-20",
+         20.0
+        ],
+        [
+         "2025-12-21",
+         20.0
+        ],
+        [
+         "2025-12-22",
+         25.0
+        ],
+        [
+         "2025-12-23",
+         24.0
+        ],
+        [
+         "2025-12-24",
+         24.0
+        ],
+        [
+         "2025-12-25",
+         23.0
+        ],
+        [
+         "2025-12-26",
+         20.0
+        ],
+        [
+         "2025-12-27",
+         23.0
+        ],
+        [
+         "2025-12-28",
+         24.0
+        ],
+        [
+         "2025-12-29",
+         24.0
+        ],
+        [
+         "2025-12-30",
+         23.0
+        ],
+        [
+         "2025-12-31",
+         21.0
+        ],
+        [
+         "2026-01-01",
+         20.0
+        ],
+        [
+         "2026-01-02",
+         28.0
+        ],
+        [
+         "2026-01-03",
+         29.0
+        ],
+        [
+         "2026-01-04",
+         25.0
+        ],
+        [
+         "2026-01-05",
+         26.0
+        ],
+        [
+         "2026-01-06",
+         44.0
+        ],
+        [
+         "2026-01-07",
+         42.0
+        ],
+        [
+         "2026-01-08",
+         28.0
+        ],
+        [
+         "2026-01-09",
+         27.0
+        ],
+        [
+         "2026-01-10",
+         25.0
+        ],
+        [
+         "2026-01-11",
+         29.0
+        ],
+        [
+         "2026-01-12",
+         27.0
+        ],
+        [
+         "2026-01-13",
+         26.0
+        ],
+        [
+         "2026-01-14",
+         48.0
+        ],
+        [
+         "2026-01-15",
+         61.0
+        ],
+        [
+         "2026-01-16",
+         49.0
+        ],
+        [
+         "2026-01-17",
+         50.0
+        ],
+        [
+         "2026-01-18",
+         49.0
+        ],
+        [
+         "2026-01-19",
+         44.0
+        ],
+        [
+         "2026-01-20",
+         32.0
+        ],
+        [
+         "2026-01-21",
+         24.0
+        ],
+        [
+         "2026-01-22",
+         20.0
+        ],
+        [
+         "2026-01-23",
+         24.0
+        ],
+        [
+         "2026-01-24",
+         25.0
+        ],
+        [
+         "2026-01-25",
+         25.0
+        ],
+        [
+         "2026-01-26",
+         20.0
+        ],
+        [
+         "2026-01-27",
+         29.0
+        ],
+        [
+         "2026-01-28",
+         29.0
+        ],
+        [
+         "2026-01-29",
+         26.0
+        ],
+        [
+         "2026-01-30",
+         16.0
+        ],
+        [
+         "2026-01-31",
+         20.0
+        ],
+        [
+         "2026-02-01",
+         14.0
+        ],
+        [
+         "2026-02-02",
+         14.0
+        ],
+        [
+         "2026-02-03",
+         17.0
+        ],
+        [
+         "2026-02-04",
+         14.0
+        ],
+        [
+         "2026-02-05",
+         12.0
+        ],
+        [
+         "2026-02-06",
+         9.0
+        ],
+        [
+         "2026-02-07",
+         6.0
+        ],
+        [
+         "2026-02-08",
+         7.0
+        ],
+        [
+         "2026-02-09",
+         14.0
+        ],
+        [
+         "2026-02-10",
+         9.0
+        ],
+        [
+         "2026-02-11",
+         11.0
+        ],
+        [
+         "2026-02-12",
+         5.0
+        ],
+        [
+         "2026-02-13",
+         9.0
+        ],
+        [
+         "2026-02-14",
+         9.0
+        ],
+        [
+         "2026-02-15",
+         8.0
+        ],
+        [
+         "2026-02-16",
+         12.0
+        ],
+        [
+         "2026-02-17",
+         10.0
+        ],
+        [
+         "2026-02-18",
+         8.0
+        ],
+        [
+         "2026-02-19",
+         9.0
+        ],
+        [
+         "2026-02-20",
+         7.0
+        ],
+        [
+         "2026-02-21",
+         8.0
+        ],
+        [
+         "2026-02-22",
+         9.0
+        ],
+        [
+         "2026-02-23",
+         5.0
+        ],
+        [
+         "2026-02-24",
+         8.0
+        ],
+        [
+         "2026-02-25",
+         11.0
+        ],
+        [
+         "2026-02-26",
+         11.0
+        ],
+        [
+         "2026-02-27",
+         13.0
+        ],
+        [
+         "2026-02-28",
+         11.0
+        ],
+        [
+         "2026-03-01",
+         14.0
+        ],
+        [
+         "2026-03-02",
+         10.0
+        ],
+        [
+         "2026-03-03",
+         14.0
+        ],
+        [
+         "2026-03-04",
+         10.0
+        ],
+        [
+         "2026-03-05",
+         22.0
+        ],
+        [
+         "2026-03-06",
+         18.0
+        ],
+        [
+         "2026-03-07",
+         12.0
+        ],
+        [
+         "2026-03-08",
+         12.0
+        ],
+        [
+         "2026-03-09",
+         8.0
+        ],
+        [
+         "2026-03-10",
+         13.0
+        ],
+        [
+         "2026-03-11",
+         15.0
+        ],
+        [
+         "2026-03-12",
+         18.0
+        ],
+        [
+         "2026-03-13",
+         15.0
+        ],
+        [
+         "2026-03-14",
+         16.0
+        ],
+        [
+         "2026-03-15",
+         15.0
+        ],
+        [
+         "2026-03-16",
+         23.0
+        ],
+        [
+         "2026-03-17",
+         28.0
+        ],
+        [
+         "2026-03-18",
+         26.0
+        ],
+        [
+         "2026-03-19",
+         23.0
+        ],
+        [
+         "2026-03-20",
+         11.0
+        ],
+        [
+         "2026-03-21",
+         12.0
+        ],
+        [
+         "2026-03-22",
+         10.0
+        ],
+        [
+         "2026-03-23",
+         8.0
+        ],
+        [
+         "2026-03-24",
+         11.0
+        ],
+        [
+         "2026-03-25",
+         14.0
+        ],
+        [
+         "2026-03-26",
+         10.0
+        ],
+        [
+         "2026-03-27",
+         13.0
+        ],
+        [
+         "2026-03-28",
+         12.0
+        ],
+        [
+         "2026-03-29",
+         9.0
+        ],
+        [
+         "2026-03-30",
+         8.0
+        ],
+        [
+         "2026-03-31",
+         11.0
+        ],
+        [
+         "2026-04-01",
+         8.0
+        ],
+        [
+         "2026-04-02",
+         12.0
+        ],
+        [
+         "2026-04-03",
+         9.0
+        ],
+        [
+         "2026-04-04",
+         11.0
+        ],
+        [
+         "2026-04-05",
+         12.0
+        ],
+        [
+         "2026-04-06",
+         13.0
+        ],
+        [
+         "2026-04-07",
+         11.0
+        ],
+        [
+         "2026-04-08",
+         17.0
+        ],
+        [
+         "2026-04-09",
+         14.0
+        ],
+        [
+         "2026-04-10",
+         16.0
+        ],
+        [
+         "2026-04-11",
+         15.0
+        ],
+        [
+         "2026-04-12",
+         16.0
+        ],
+        [
+         "2026-04-13",
+         12.0
+        ],
+        [
+         "2026-04-14",
+         21.0
+        ],
+        [
+         "2026-04-15",
+         23.0
+        ],
+        [
+         "2026-04-16",
+         23.0
+        ],
+        [
+         "2026-04-17",
+         21.0
+        ],
+        [
+         "2026-04-18",
+         26.0
+        ],
+        [
+         "2026-04-19",
+         27.0
+        ],
+        [
+         "2026-04-20",
+         29.0
+        ],
+        [
+         "2026-04-21",
+         33.0
+        ],
+        [
+         "2026-04-22",
+         32.0
+        ],
+        [
+         "2026-04-23",
+         46.0
+        ],
+        [
+         "2026-04-24",
+         39.0
+        ],
+        [
+         "2026-04-25",
+         31.0
+        ],
+        [
+         "2026-04-26",
+         33.0
+        ],
+        [
+         "2026-04-27",
+         47.0
+        ],
+        [
+         "2026-04-28",
+         33.0
+        ],
+        [
+         "2026-04-29",
+         26.0
+        ],
+        [
+         "2026-04-30",
+         29.0
+        ],
+        [
+         "2026-05-01",
+         26.0
+        ],
+        [
+         "2026-05-02",
+         39.0
+        ],
+        [
+         "2026-05-03",
+         47.0
+        ],
+        [
+         "2026-05-04",
+         40.0
+        ],
+        [
+         "2026-05-05",
+         50.0
+        ],
+        [
+         "2026-05-06",
+         46.0
+        ],
+        [
+         "2026-05-07",
+         47.0
+        ],
+        [
+         "2026-05-08",
+         38.0
+        ],
+        [
+         "2026-05-09",
+         38.0
+        ],
+        [
+         "2026-05-10",
+         47.0
+        ],
+        [
+         "2026-05-11",
+         48.0
+        ],
+        [
+         "2026-05-12",
+         49.0
+        ],
+        [
+         "2026-05-13",
+         42.0
+        ],
+        [
+         "2026-05-14",
+         34.0
+        ],
+        [
+         "2026-05-15",
+         43.0
+        ],
+        [
+         "2026-05-16",
+         31.0
+        ],
+        [
+         "2026-05-17",
+         27.0
+        ],
+        [
+         "2026-05-18",
+         28.0
+        ],
+        [
+         "2026-05-19",
+         25.0
+        ],
+        [
+         "2026-05-20",
+         27.0
+        ],
+        [
+         "2026-05-21",
+         29.0
+        ],
+        [
+         "2026-05-22",
+         28.0
+        ],
+        [
+         "2026-05-23",
+         28.0
+        ],
+        [
+         "2026-05-24",
+         25.0
+        ],
+        [
+         "2026-05-25",
+         30.0
+        ],
+        [
+         "2026-05-26",
+         34.0
+        ],
+        [
+         "2026-05-27",
+         25.0
+        ],
+        [
+         "2026-05-28",
+         22.0
+        ],
+        [
+         "2026-05-29",
+         23.0
+        ],
+        [
+         "2026-05-30",
+         23.0
+        ],
+        [
+         "2026-05-31",
+         28.0
+        ],
+        [
+         "2026-06-01",
+         29.0
+        ],
+        [
+         "2026-06-02",
+         23.0
+        ],
+        [
+         "2026-06-03",
+         11.0
+        ],
+        [
+         "2026-06-04",
+         12.0
+        ],
+        [
+         "2026-06-05",
+         12.0
+        ],
+        [
+         "2026-06-06",
+         12.0
+        ],
+        [
+         "2026-06-07",
+         12.0
+        ],
+        [
+         "2026-06-08",
+         8.0
+        ],
+        [
+         "2026-06-09",
+         10.0
+        ],
+        [
+         "2026-06-10",
+         9.0
+        ],
+        [
+         "2026-06-11",
+         12.0
+        ],
+        [
+         "2026-06-12",
+         12.0
+        ],
+        [
+         "2026-06-13",
+         13.0
+        ],
+        [
+         "2026-06-14",
+         18.0
+        ],
+        [
+         "2026-06-15",
+         20.0
+        ],
+        [
+         "2026-06-16",
+         23.0
+        ],
+        [
+         "2026-06-17",
+         22.0
+        ],
+        [
+         "2026-06-18",
+         15.0
+        ],
+        [
+         "2026-06-19",
+         14.0
+        ],
+        [
+         "2026-06-20",
+         23.0
+        ],
+        [
+         "2026-06-21",
+         23.0
+        ],
+        [
+         "2026-06-22",
+         20.0
+        ],
+        [
+         "2026-06-23",
+         23.0
+        ],
+        [
+         "2026-06-24",
+         17.0
+        ],
+        [
+         "2026-06-25",
+         12.0
+        ],
+        [
+         "2026-06-26",
+         13.0
+        ],
+        [
+         "2026-06-27",
+         15.0
+        ],
+        [
+         "2026-06-28",
+         18.0
+        ],
+        [
+         "2026-06-29",
+         12.0
+        ],
+        [
+         "2026-06-30",
+         15.0
+        ],
+        [
+         "2026-07-01",
+         11.0
+        ],
+        [
+         "2026-07-02",
+         19.0
+        ],
+        [
+         "2026-07-03",
+         21.0
+        ],
+        [
+         "2026-07-04",
+         22.0
+        ],
+        [
+         "2026-07-05",
+         23.0
+        ],
+        [
+         "2026-07-06",
+         24.0
+        ],
+        [
+         "2026-07-07",
+         27.0
+        ],
+        [
+         "2026-07-08",
+         20.0
+        ],
+        [
+         "2026-07-09",
+         22.0
+        ],
+        [
+         "2026-07-10",
+         23.0
+        ],
+        [
+         "2026-07-11",
+         26.0
+        ],
+        [
+         "2026-07-12",
+         26.0
+        ],
+        [
+         "2026-07-13",
+         28.0
+        ],
+        [
+         "2026-07-14",
+         22.0
+        ],
+        [
+         "2026-07-15",
+         25.0
+        ],
+        [
+         "2026-07-16",
+         25.0
+        ],
+        [
+         "2026-07-17",
+         27.0
+        ],
+        [
+         "2026-07-18",
+         25.0
+        ],
+        [
+         "2026-07-19",
+         28.0
+        ],
+        [
+         "2026-07-20",
+         29.0
+        ],
+        [
+         "2026-07-21",
+         25.0
+        ],
+        [
+         "2026-07-22",
+         33.0
+        ],
+        [
+         "2026-07-23",
+         31.0
+        ],
+        [
+         "2026-07-24",
+         28.0
+        ],
+        [
+         "2026-07-25",
+         27.0
+        ],
+        [
+         "2026-07-26",
+         26.0
+        ],
+        [
+         "2026-07-27",
+         30.0
+        ],
+        [
+         "2026-07-28",
+         29.0
+        ],
+        [
+         "2026-07-29",
+         29.0
+        ],
+        [
+         "2026-07-30",
+         28.0
+        ],
+        [
+         "2026-07-31",
+         25.0
+        ],
+        [
+         "2026-08-01",
+         27.0
+        ],
+        [
+         "2026-08-02",
+         27.0
+        ],
+        [
+         "2026-08-03",
+         28.0
+        ],
+        [
+         "2026-08-04",
+         25.0
+        ],
+        [
+         "2026-08-05",
+         27.0
+        ],
+        [
+         "2026-08-06",
+         25.0
+        ],
+        [
+         "2026-08-07",
+         29.0
+        ],
+        [
+         "2026-08-08",
+         30.0
+        ],
+        [
+         "2026-08-09",
+         31.0
+        ],
+        [
+         "2026-08-10",
+         30.0
+        ],
+        [
+         "2026-08-11",
+         29.0
+        ],
+        [
+         "2026-08-12",
+         27.0
+        ],
+        [
+         "2026-08-13",
+         29.0
+        ],
+        [
+         "2026-08-14",
+         29.0
+        ],
+        [
+         "2026-08-15",
+         34.0
+        ],
+        [
+         "2026-08-16",
+         34.0
+        ],
+        [
+         "2026-08-17",
+         31.0
+        ],
+        [
+         "2026-08-18",
+         41.0
+        ],
+        [
+         "2026-08-19",
+         46.0
+        ],
+        [
+         "2026-08-20",
+         62.0
+        ],
+        [
+         "2026-08-21",
+         72.0
+        ],
+        [
+         "2026-08-22",
+         71.0
+        ],
+        [
+         "2026-08-23",
+         66.0
+        ],
+        [
+         "2026-08-24",
+         73.0
+        ],
+        [
+         "2026-08-25",
+         74.0
+        ],
+        [
+         "2026-08-26",
+         65.0
+        ],
+        [
+         "2026-08-27",
+         71.0
+        ],
+        [
+         "2026-08-28",
+         73.0
+        ],
+        [
+         "2026-08-29",
+         68.0
+        ],
+        [
+         "2026-08-30",
+         69.0
+        ],
+        [
+         "2026-08-31",
+         62.0
+        ],
+        [
+         "2026-09-01",
+         69.0
+        ],
+        [
+         "2026-09-02",
+         63.0
+        ],
+        [
+         "2026-09-03",
+         65.0
+        ],
+        [
+         "2026-09-04",
+         74.0
+        ],
+        [
+         "2026-09-05",
+         73.0
+        ],
+        [
+         "2026-09-06",
+         73.0
+        ],
+        [
+         "2026-09-07",
+         71.0
+        ],
+        [
+         "2026-09-08",
+         69.0
+        ],
+        [
+         "2026-09-09",
+         66.0
+        ],
+        [
+         "2026-09-10",
+         69.0
+        ],
+        [
+         "2026-09-11",
+         56.0
+        ],
+        [
+         "2026-09-12",
+         63.0
+        ],
+        [
+         "2026-09-13",
+         61.0
+        ],
+        [
+         "2026-09-14",
+         57.0
+        ],
+        [
+         "2026-09-15",
+         69.0
+        ],
+        [
+         "2026-09-16",
+         51.0
+        ],
+        [
+         "2026-09-17",
+         50.0
+        ],
+        [
+         "2026-09-18",
+         56.0
+        ],
+        [
+         "2026-09-19",
+         71.0
+        ],
+        [
+         "2026-09-20",
+         71.0
+        ],
+        [
+         "2026-09-21",
+         70.0
+        ],
+        [
+         "2026-09-22",
+         78.0
+        ],
+        [
+         "2026-09-23",
+         71.0
+        ],
+        [
+         "2026-09-24",
+         71.0
+        ],
+        [
+         "2026-09-25",
+         71.0
+        ],
+        [
+         "2026-09-26",
+         74.0
+        ],
+        [
+         "2026-09-27",
+         70.0
+        ],
+        [
+         "2026-09-28",
+         74.0
+        ],
+        [
+         "2026-09-29",
+         73.0
+        ],
+        [
+         "2026-09-30",
+         71.0
+        ],
+        [
+         "2026-10-01",
+         74.0
+        ],
+        [
+         "2026-10-02",
+         72.0
+        ],
+        [
+         "2026-10-03",
+         67.0
+        ],
+        [
+         "2026-10-04",
+         65.0
+        ],
+        [
+         "2026-10-05",
+         70.0
+        ],
+        [
+         "2026-10-06",
+         73.0
+        ],
+        [
+         "2026-10-07",
+         71.0
+        ],
+        [
+         "2026-10-08",
+         64.0
+        ],
+        [
+         "2026-10-09",
+         59.0
+        ],
+        [
+         "2026-10-10",
+         64.0
+        ],
+        [
+         "2026-10-11",
+         61.0
+        ],
+        [
+         "2026-10-12",
+         69.0
+        ],
+        [
+         "2026-10-13",
+         57.0
+        ],
+        [
+         "2026-10-14",
+         62.0
+        ],
+        [
+         "2026-10-15",
+         53.0
+        ],
+        [
+         "2026-10-16",
+         63.0
+        ],
+        [
+         "2026-10-17",
+         55.0
+        ],
+        [
+         "2026-10-18",
+         53.0
+        ],
+        [
+         "2026-10-19",
+         59.0
+        ],
+        [
+         "2026-10-20",
+         55.0
+        ],
+        [
+         "2026-10-21",
+         63.0
+        ],
+        [
+         "2026-10-22",
+         68.0
+        ],
+        [
+         "2026-10-23",
+         50.0
+        ],
+        [
+         "2026-10-24",
+         51.0
+        ],
+        [
+         "2026-10-25",
+         54.0
+        ],
+        [
+         "2026-10-26",
+         50.0
+        ],
+        [
+         "2026-10-27",
+         48.0
+        ],
+        [
+         "2026-10-28",
+         51.0
+        ],
+        [
+         "2026-10-29",
+         51.0
+        ],
+        [
+         "2026-10-30",
+         30.0
+        ],
+        [
+         "2026-10-31",
+         30.0
+        ],
+        [
+         "2026-11-01",
+         34.0
+        ],
+        [
+         "2026-11-02",
+         37.0
+        ],
+        [
+         "2026-11-03",
+         26.0
+        ],
+        [
+         "2026-11-04",
+         34.0
+        ],
+        [
+         "2026-11-05",
+         50.0
+        ],
+        [
+         "2026-11-06",
+         28.0
+        ],
+        [
+         "2026-11-07",
+         25.0
+        ],
+        [
+         "2026-11-08",
+         28.0
+        ],
+        [
+         "2026-11-09",
+         29.0
+        ],
+        [
+         "2026-11-10",
+         32.0
+        ],
+        [
+         "2026-11-11",
+         29.0
+        ],
+        [
+         "2026-11-12",
+         28.0
+        ],
+        [
+         "2026-11-13",
+         20.0
+        ],
+        [
+         "2026-11-14",
+         13.0
+        ],
+        [
+         "2026-11-15",
+         10.0
+        ],
+        [
+         "2026-11-16",
+         10.0
+        ],
+        [
+         "2026-11-17",
+         12.0
+        ],
+        [
+         "2026-11-18",
+         11.0
+        ],
+        [
+         "2026-11-19",
+         10.0
+        ],
+        [
+         "2026-11-20",
+         12.0
+        ],
+        [
+         "2026-11-21",
+         12.0
+        ],
+        [
+         "2026-11-22",
+         11.0
+        ],
+        [
+         "2026-11-23",
+         11.0
+        ],
+        [
+         "2026-11-24",
+         11.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "marker",
+       "x": "2026-11-24",
+       "y": 11.0,
+       "label": "11"
+      },
+      {
+       "type": "band",
+       "y0": 0,
+       "y1": 25,
+       "label": "extreme fear"
+      }
+     ],
+     "source": "Fear & Greed Index: alternative.me",
+     "as_of": "2026-11-24"
+    },
+    "comparatives": [
+     "only",
+     "just"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 85.82,
+    "attribution": [
+     "Fear & Greed Index: alternative.me"
+    ],
+    "source_labels": [
+     "alternative.me"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 45.51,
+   "format": "relative",
+   "detector": "leaderboard",
+   "headline": "Past 7 days: best VVV +16.8%, worst MON −38.8%",
+   "text": "Past 7 days, the 50 most traded Hyperliquid perps:\nBest: VVV +17% · XMR 0% · TRX 0% · ETHFI −4% · XPL −5%\nWorst: MON −39% · USELESS −29% · PONS −29% · ZRO −26% · ZEC −24%\nBitcoin: −8%. Higher over the period: 2 of 50.",
+   "chars": 217,
+   "template_variant": 0,
+   "all_variants": [
+    "Past 7 days, the 50 most traded Hyperliquid perps:\nBest: VVV +17% · XMR 0% · TRX 0% · ETHFI −4% · XPL −5%\nWorst: MON −39% · USELESS −29% · PONS −29% · ZRO −26% · ZEC −24%\nBitcoin: −8%. Higher over the period: 2 of 50.",
+    "Past 7 days on Hyperliquid (50 most traded perps):\n▲ VVV +17% · XMR 0% · TRX 0% · ETHFI −4% · XPL −5%\n▼ MON −39% · USELESS −29% · PONS −29% · ZRO −26% · ZEC −24%\nBitcoin: −8%. Higher over the period: 2 of 50."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "leaders:7d:2026-11-24",
+    "format": "relative",
+    "detector": "leaderboard",
+    "subject": "leaders-7",
+    "headline": "Past 7 days: best VVV +16.8%, worst MON −38.8%",
+    "numbers": {
+     "best": {
+      "value": 0.0,
+      "text": "VVV +17% · XMR 0% · TRX 0% · ETHFI −4% · XPL −5%",
+      "label": "best performers"
+     },
+     "worst": {
+      "value": 0.0,
+      "text": "MON −39% · USELESS −29% · PONS −29% · ZRO −26% · ZEC −24%",
+      "label": "worst performers"
+     },
+     "total": {
+      "value": 50.0,
+      "text": "50",
+      "label": "perps ranked"
+     },
+     "up": {
+      "value": 2.0,
+      "text": "2",
+      "label": "perps up"
+     },
+     "days": {
+      "value": 7.0,
+      "text": "7",
+      "label": "window, days"
+     },
+     "year": {
+      "value": 2026.0,
+      "text": "2026",
+      "label": "year"
+     },
+     "btc": {
+      "value": -7.897168910384766,
+      "text": "−8%",
+      "label": "Bitcoin, same window"
+     }
+    },
+    "words": {},
+    "templates": [
+     "Past {days} days, the {total} most traded Hyperliquid perps:\nBest: {best}\nWorst: {worst}\nBitcoin: {btc}. Higher over the period: {up} of {total}.",
+     "Past {days} days on Hyperliquid ({total} most traded perps):\n▲ {best}\n▼ {worst}\nBitcoin: {btc}. Higher over the period: {up} of {total}."
+    ],
+    "window": "7d",
+    "series": [
+     "px:VVV:close",
+     "px:XMR:close",
+     "px:TRX:close",
+     "px:ETHFI:close",
+     "px:XPL:close",
+     "px:LINK:close",
+     "px:XRP:close",
+     "px:ADA:close",
+     "px:BCH:close",
+     "px:SOL:close",
+     "px:CHIP:close",
+     "px:PAXG:close",
+     "px:BTC:close",
+     "px:ETH:close",
+     "px:DOGE:close",
+     "px:BNB:close",
+     "px:TAO:close",
+     "px:kPEPE:close",
+     "px:LTC:close",
+     "px:AVAX:close",
+     "px:ONDO:close",
+     "px:STRK:close",
+     "px:UNI:close",
+     "px:AERO:close",
+     "px:WLFI:close",
+     "px:SUI:close",
+     "px:DOT:close",
+     "px:GRASS:close",
+     "px:WLD:close",
+     "px:INIT:close",
+     "px:PUMP:close",
+     "px:GRAM:close",
+     "px:TRUMP:close",
+     "px:HYPE:close",
+     "px:FARTCOIN:close",
+     "px:NEAR:close",
+     "px:JUP:close",
+     "px:CRV:close",
+     "px:AAVE:close",
+     "px:ENA:close",
+     "px:ARB:close",
+     "px:LIT:close",
+     "px:ASTER:close",
+     "px:CASHCAT:close",
+     "px:INJ:close",
+     "px:ZEC:close",
+     "px:ZRO:close",
+     "px:PONS:close",
+     "px:USELESS:close",
+     "px:MON:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "return = close 2026-11-24 / close 2026-11-17 − 1 for the 50 perps with the highest 30-day average USD volume and a close on both days; VVV +16.84%; XMR +0.32%; TRX +0.00%; ETHFI -3.51%; XPL -5.02%; MON -38.78%; USELESS -28.72%; PONS -28.55%; ZRO -26.44%; ZEC -23.68%",
+    "rarity": 0.4551226457834444,
+    "chart": {
+     "kind": "rank_table",
+     "title": "Past 7 days: best and worst",
+     "kicker": "50 most traded Hyperliquid perps",
+     "series": [
+      {
+       "name": "best",
+       "points": [
+        [
+         "VVV",
+         16.84
+        ],
+        [
+         "XMR",
+         0.32
+        ],
+        [
+         "TRX",
+         0.0
+        ],
+        [
+         "ETHFI",
+         -3.51
+        ],
+        [
+         "XPL",
+         -5.02
+        ]
+       ]
+      },
+      {
+       "name": "worst",
+       "points": [
+        [
+         "MON",
+         -38.78
+        ],
+        [
+         "USELESS",
+         -28.72
+        ],
+        [
+         "PONS",
+         -28.55
+        ],
+        [
+         "ZRO",
+         -26.44
+        ],
+        [
+         "ZEC",
+         -23.68
+        ]
+       ]
+      }
+     ],
+     "annotations": [],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "label"
+    },
+    "comparatives": [
+     "best",
+     "worst",
+     "most"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 45.51,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 82.06,
+   "format": "extremes",
+   "detector": "rarity",
+   "headline": "Ether −27.9% in 30 day(s): most extreme 3.6% of Hyperliquid data since 2023-03-28",
+   "text": "Ether −27.9% in 30 days.\nIn Hyperliquid data since March 2023, only 3.6% of all 30-day stretches were this bad (48 of 1,338). The last one ended in June 2026.",
+   "chars": 158,
+   "template_variant": 0,
+   "all_variants": [
+    "Ether −27.9% in 30 days.\nIn Hyperliquid data since March 2023, only 3.6% of all 30-day stretches were this bad (48 of 1,338). The last one ended in June 2026.",
+    "Ether is down 27.9% over the past 30 days.\nOnly 48 of 1,338 30-day windows in Hyperliquid data since March 2023 were this bad. The last one ended in June 2026."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "rarity:ETH:30d:2026-11-24",
+    "format": "extremes",
+    "detector": "rarity",
+    "subject": "ETH",
+    "headline": "Ether −27.9% in 30 day(s): most extreme 3.6% of Hyperliquid data since 2023-03-28",
+    "numbers": {
+     "move": {
+      "value": -27.88990037787703,
+      "text": "−27.9%",
+      "label": "30-day return"
+     },
+     "share": {
+      "value": 3.587443946188341,
+      "text": "3.6%",
+      "label": "share of windows"
+     },
+     "count": {
+      "value": 48.0,
+      "text": "48",
+      "label": "windows as extreme"
+     },
+     "total": {
+      "value": 1338.0,
+      "text": "1,338",
+      "label": "windows in history"
+     },
+     "since": {
+      "value": 0.0,
+      "text": "March 2023",
+      "label": "stored history starts"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "as of"
+     },
+     "last": {
+      "value": 0.0,
+      "text": "June 2026",
+      "label": "previous window as extreme ended"
+     },
+     "move_abs": {
+      "value": -27.88990037787703,
+      "text": "27.9%",
+      "label": "30-day move, size (the value keeps its sign: the gate checks the direction)"
+     }
+    },
+    "words": {
+     "asset": "Ether",
+     "adj": "bad",
+     "dirword": "down",
+     "data": "Hyperliquid data"
+    },
+    "templates": [
+     "{asset} {move} in {days} days.\nIn {data} since {since}, only {share} of all {days}-day stretches were this bad ({count} of {total}). The last one ended in {last}.",
+     "{asset} is {dirword} {move_abs} over the past {days} days.\nOnly {count} of {total} {days}-day windows in {data} since {since} were this bad. The last one ended in {last}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:ETH:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "30d return = 1,679.30 / 2,328.80 − 1 = −27.9%; 48 of 1,338 30-day windows since 2023-03-28 were ≤ −27.9% (3.6%); most recent earlier window: ended 2026-06-10 (−30.7%). Source series px:ETH:close.",
+    "rarity": 0.820627802690583,
+    "chart": {
+     "kind": "histogram_marker",
+     "title": "Every 30-day Ether move since 2023",
+     "kicker": "Ether −27.9% in 30d",
+     "series": [
+      {
+       "name": "30-day returns, %",
+       "points": [
+        [
+         -43.1689,
+         1.0
+        ],
+        [
+         -40.305,
+         5.0
+        ],
+        [
+         -37.4411,
+         4.0
+        ],
+        [
+         -34.5772,
+         10.0
+        ],
+        [
+         -31.7133,
+         12.0
+        ],
+        [
+         -28.8494,
+         23.0
+        ],
+        [
+         -25.9855,
+         34.0
+        ],
+        [
+         -23.1216,
+         41.0
+        ],
+        [
+         -20.2577,
+         41.0
+        ],
+        [
+         -17.3938,
+         52.0
+        ],
+        [
+         -14.5299,
+         45.0
+        ],
+        [
+         -11.666,
+         86.0
+        ],
+        [
+         -8.8021,
+         68.0
+        ],
+        [
+         -5.9382,
+         82.0
+        ],
+        [
+         -3.0743,
+         106.0
+        ],
+        [
+         -0.2104,
+         114.0
+        ],
+        [
+         2.6536,
+         83.0
+        ],
+        [
+         5.5175,
+         70.0
+        ],
+        [
+         8.3814,
+         75.0
+        ],
+        [
+         11.2453,
+         59.0
+        ],
+        [
+         14.1092,
+         55.0
+        ],
+        [
+         16.9731,
+         42.0
+        ],
+        [
+         19.837,
+         37.0
+        ],
+        [
+         22.7009,
+         17.0
+        ],
+        [
+         25.5648,
+         21.0
+        ],
+        [
+         28.4287,
+         25.0
+        ],
+        [
+         31.2926,
+         26.0
+        ],
+        [
+         34.1565,
+         15.0
+        ],
+        [
+         37.0204,
+         10.0
+        ],
+        [
+         39.8843,
+         9.0
+        ],
+        [
+         42.7482,
+         11.0
+        ],
+        [
+         45.6121,
+         8.0
+        ],
+        [
+         48.476,
+         9.0
+        ],
+        [
+         51.3399,
+         9.0
+        ],
+        [
+         54.2038,
+         6.0
+        ],
+        [
+         57.0677,
+         9.0
+        ],
+        [
+         59.9316,
+         10.0
+        ],
+        [
+         62.7955,
+         4.0
+        ],
+        [
+         65.6594,
+         1.0
+        ],
+        [
+         68.5234,
+         3.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "marker",
+       "x": -27.89,
+       "label": "Now −27.9%"
+      },
+      {
+       "type": "note",
+       "text": "3.6% of windows this bad"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "number",
+     "x_label": "30-day return, %"
+    },
+    "comparatives": [
+     "only",
+     "last time",
+     "most",
+     "first"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 82.06,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 77.85,
+   "format": "extremes",
+   "detector": "rarity",
+   "headline": "Solana −31.3% in 30 day(s): most extreme 4.4% of Hyperliquid data since 2023-04-03",
+   "text": "Solana −31.3% in 30 days.\nIn Hyperliquid data since April 2023, only 4.4% of all 30-day stretches were this bad (59 of 1,332). The last one ended in June 2026.",
+   "chars": 159,
+   "template_variant": 0,
+   "all_variants": [
+    "Solana −31.3% in 30 days.\nIn Hyperliquid data since April 2023, only 4.4% of all 30-day stretches were this bad (59 of 1,332). The last one ended in June 2026.",
+    "Solana is down 31.3% over the past 30 days.\nOnly 59 of 1,332 30-day windows in Hyperliquid data since April 2023 were this bad. The last one ended in June 2026."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "rarity:SOL:30d:2026-11-24",
+    "format": "extremes",
+    "detector": "rarity",
+    "subject": "SOL",
+    "headline": "Solana −31.3% in 30 day(s): most extreme 4.4% of Hyperliquid data since 2023-04-03",
+    "numbers": {
+     "move": {
+      "value": -31.25925194907727,
+      "text": "−31.3%",
+      "label": "30-day return"
+     },
+     "share": {
+      "value": 4.42942942942943,
+      "text": "4.4%",
+      "label": "share of windows"
+     },
+     "count": {
+      "value": 59.0,
+      "text": "59",
+      "label": "windows as extreme"
+     },
+     "total": {
+      "value": 1332.0,
+      "text": "1,332",
+      "label": "windows in history"
+     },
+     "since": {
+      "value": 0.0,
+      "text": "April 2023",
+      "label": "stored history starts"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "as of"
+     },
+     "last": {
+      "value": 0.0,
+      "text": "June 2026",
+      "label": "previous window as extreme ended"
+     },
+     "move_abs": {
+      "value": -31.25925194907727,
+      "text": "31.3%",
+      "label": "30-day move, size (the value keeps its sign: the gate checks the direction)"
+     }
+    },
+    "words": {
+     "asset": "Solana",
+     "adj": "bad",
+     "dirword": "down",
+     "data": "Hyperliquid data"
+    },
+    "templates": [
+     "{asset} {move} in {days} days.\nIn {data} since {since}, only {share} of all {days}-day stretches were this bad ({count} of {total}). The last one ended in {last}.",
+     "{asset} is {dirword} {move_abs} over the past {days} days.\nOnly {count} of {total} {days}-day windows in {data} since {since} were this bad. The last one ended in {last}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:SOL:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "30d return = 69.66 / 101.33 − 1 = −31.3%; 59 of 1,332 30-day windows since 2023-04-03 were ≤ −31.3% (4.4%); most recent earlier window: ended 2026-06-10 (−35.1%). Source series px:SOL:close.",
+    "rarity": 0.7785285285285285,
+    "chart": {
+     "kind": "histogram_marker",
+     "title": "Every 30-day Solana move since 2023",
+     "kicker": "Solana −31.3% in 30d",
+     "series": [
+      {
+       "name": "30-day returns, %",
+       "points": [
+        [
+         -43.364,
+         8.0
+        ],
+        [
+         -37.8511,
+         20.0
+        ],
+        [
+         -32.3382,
+         47.0
+        ],
+        [
+         -26.8253,
+         68.0
+        ],
+        [
+         -21.3123,
+         79.0
+        ],
+        [
+         -15.7994,
+         117.0
+        ],
+        [
+         -10.2865,
+         128.0
+        ],
+        [
+         -4.7736,
+         111.0
+        ],
+        [
+         0.7393,
+         106.0
+        ],
+        [
+         6.2523,
+         117.0
+        ],
+        [
+         11.7652,
+         103.0
+        ],
+        [
+         17.2781,
+         110.0
+        ],
+        [
+         22.791,
+         60.0
+        ],
+        [
+         28.3039,
+         44.0
+        ],
+        [
+         33.8168,
+         48.0
+        ],
+        [
+         39.3298,
+         34.0
+        ],
+        [
+         44.8427,
+         27.0
+        ],
+        [
+         50.3556,
+         13.0
+        ],
+        [
+         55.8685,
+         17.0
+        ],
+        [
+         61.3814,
+         11.0
+        ],
+        [
+         66.8944,
+         6.0
+        ],
+        [
+         72.4073,
+         17.0
+        ],
+        [
+         77.9202,
+         11.0
+        ],
+        [
+         83.4331,
+         10.0
+        ],
+        [
+         88.946,
+         3.0
+        ],
+        [
+         94.4589,
+         4.0
+        ],
+        [
+         99.9719,
+         1.0
+        ],
+        [
+         105.4848,
+         2.0
+        ],
+        [
+         110.9977,
+         0.0
+        ],
+        [
+         116.5106,
+         0.0
+        ],
+        [
+         122.0235,
+         0.0
+        ],
+        [
+         127.5365,
+         1.0
+        ],
+        [
+         133.0494,
+         2.0
+        ],
+        [
+         138.5623,
+         0.0
+        ],
+        [
+         144.0752,
+         1.0
+        ],
+        [
+         149.5881,
+         1.0
+        ],
+        [
+         155.101,
+         1.0
+        ],
+        [
+         160.614,
+         2.0
+        ],
+        [
+         166.1269,
+         1.0
+        ],
+        [
+         171.6398,
+         1.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "marker",
+       "x": -31.26,
+       "label": "Now −31.3%"
+      },
+      {
+       "type": "note",
+       "text": "4.4% of windows this bad"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "number",
+     "x_label": "30-day return, %"
+    },
+    "comparatives": [
+     "only",
+     "last time",
+     "most",
+     "first"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 77.85,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  },
+  {
+   "score": 69.66,
+   "format": "extremes",
+   "detector": "rarity",
+   "headline": "Dogecoin −28.1% in 30 day(s): most extreme 6.1% of Hyperliquid data since 2023-05-03",
+   "text": "Dogecoin −28.1% in 30 days.\nIn Hyperliquid data since May 2023, only 6.1% of all 30-day stretches were this bad (79 of 1,302). The last one ended in July 2026.",
+   "chars": 159,
+   "template_variant": 0,
+   "all_variants": [
+    "Dogecoin −28.1% in 30 days.\nIn Hyperliquid data since May 2023, only 6.1% of all 30-day stretches were this bad (79 of 1,302). The last one ended in July 2026.",
+    "Dogecoin is down 28.1% over the past 30 days.\nOnly 79 of 1,302 30-day windows in Hyperliquid data since May 2023 were this bad. The last one ended in July 2026."
+   ],
+   "gate_problems": [],
+   "finding": {
+    "key": "rarity:DOGE:30d:2026-11-24",
+    "format": "extremes",
+    "detector": "rarity",
+    "subject": "DOGE",
+    "headline": "Dogecoin −28.1% in 30 day(s): most extreme 6.1% of Hyperliquid data since 2023-05-03",
+    "numbers": {
+     "move": {
+      "value": -28.11411036563166,
+      "text": "−28.1%",
+      "label": "30-day return"
+     },
+     "share": {
+      "value": 6.067588325652841,
+      "text": "6.1%",
+      "label": "share of windows"
+     },
+     "count": {
+      "value": 79.0,
+      "text": "79",
+      "label": "windows as extreme"
+     },
+     "total": {
+      "value": 1302.0,
+      "text": "1,302",
+      "label": "windows in history"
+     },
+     "since": {
+      "value": 0.0,
+      "text": "May 2023",
+      "label": "stored history starts"
+     },
+     "days": {
+      "value": 30.0,
+      "text": "30",
+      "label": "window, days"
+     },
+     "date": {
+      "value": 0.0,
+      "text": "Nov 24, 2026",
+      "label": "as of"
+     },
+     "last": {
+      "value": 0.0,
+      "text": "July 2026",
+      "label": "previous window as extreme ended"
+     },
+     "move_abs": {
+      "value": -28.11411036563166,
+      "text": "28.1%",
+      "label": "30-day move, size (the value keeps its sign: the gate checks the direction)"
+     }
+    },
+    "words": {
+     "asset": "Dogecoin",
+     "adj": "bad",
+     "dirword": "down",
+     "data": "Hyperliquid data"
+    },
+    "templates": [
+     "{asset} {move} in {days} days.\nIn {data} since {since}, only {share} of all {days}-day stretches were this bad ({count} of {total}). The last one ended in {last}.",
+     "{asset} is {dirword} {move_abs} over the past {days} days.\nOnly {count} of {total} {days}-day windows in {data} since {since} were this bad. The last one ended in {last}."
+    ],
+    "window": "30d",
+    "series": [
+     "px:DOGE:close"
+    ],
+    "sources": [
+     "hyperliquid"
+    ],
+    "as_of": "2026-11-24",
+    "calculation": "30d return = 0.06 / 0.08 − 1 = −28.1%; 79 of 1,302 30-day windows since 2023-05-03 were ≤ −28.1% (6.1%); most recent earlier window: ended 2026-07-01 (−28.6%). Source series px:DOGE:close.",
+    "rarity": 0.6966205837173579,
+    "chart": {
+     "kind": "histogram_marker",
+     "title": "Every 30-day Dogecoin move since 2023",
+     "kicker": "Dogecoin −28.1% in 30d",
+     "series": [
+      {
+       "name": "30-day returns, %",
+       "points": [
+        [
+         -37.7717,
+         29.0
+        ],
+        [
+         -30.6889,
+         70.0
+        ],
+        [
+         -23.606,
+         139.0
+        ],
+        [
+         -16.5231,
+         190.0
+        ],
+        [
+         -9.4403,
+         150.0
+        ],
+        [
+         -2.3574,
+         183.0
+        ],
+        [
+         4.7254,
+         142.0
+        ],
+        [
+         11.8083,
+         129.0
+        ],
+        [
+         18.8911,
+         86.0
+        ],
+        [
+         25.974,
+         52.0
+        ],
+        [
+         33.0569,
+         28.0
+        ],
+        [
+         40.1397,
+         16.0
+        ],
+        [
+         47.2226,
+         15.0
+        ],
+        [
+         54.3054,
+         5.0
+        ],
+        [
+         61.3883,
+         2.0
+        ],
+        [
+         68.4712,
+         5.0
+        ],
+        [
+         75.554,
+         2.0
+        ],
+        [
+         82.6369,
+         8.0
+        ],
+        [
+         89.7197,
+         4.0
+        ],
+        [
+         96.8026,
+         2.0
+        ],
+        [
+         103.8855,
+         7.0
+        ],
+        [
+         110.9683,
+         4.0
+        ],
+        [
+         118.0512,
+         2.0
+        ],
+        [
+         125.134,
+         4.0
+        ],
+        [
+         132.2169,
+         3.0
+        ],
+        [
+         139.2997,
+         0.0
+        ],
+        [
+         146.3826,
+         1.0
+        ],
+        [
+         153.4655,
+         3.0
+        ],
+        [
+         160.5483,
+         3.0
+        ],
+        [
+         167.6312,
+         4.0
+        ],
+        [
+         174.714,
+         4.0
+        ],
+        [
+         181.7969,
+         1.0
+        ],
+        [
+         188.8798,
+         1.0
+        ],
+        [
+         195.9626,
+         1.0
+        ],
+        [
+         203.0455,
+         2.0
+        ],
+        [
+         210.1283,
+         1.0
+        ],
+        [
+         217.2112,
+         1.0
+        ],
+        [
+         224.2941,
+         1.0
+        ],
+        [
+         231.3769,
+         0.0
+        ],
+        [
+         238.4598,
+         2.0
+        ]
+       ]
+      }
+     ],
+     "annotations": [
+      {
+       "type": "marker",
+       "x": -28.11,
+       "label": "Now −28.1%"
+      },
+      {
+       "type": "note",
+       "text": "6.1% of windows this bad"
+      }
+     ],
+     "source": "Data: Hyperliquid",
+     "as_of": "2026-11-24",
+     "x_kind": "number",
+     "x_label": "30-day return, %"
+    },
+    "comparatives": [
+     "only",
+     "last time",
+     "most",
+     "first"
+    ],
+    "novelty": 1.0,
+    "freshness": 1.0,
+    "notes": [],
+    "score": 69.66,
+    "attribution": [
+     "Data: Hyperliquid"
+    ],
+    "source_labels": [
+     "Hyperliquid"
+    ],
+    "publishable": true
+   }
+  }
+ ]
+}

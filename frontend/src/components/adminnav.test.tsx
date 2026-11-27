@@ -53,7 +53,7 @@ function expectedSection(path: string): string {
   if (["/publishing", "/x", "/youtube", "/website", "/trading-os"].some(starts)) return "publishing";
   if (["/terminal", "/world-monitor"].some(starts)) return "terminal";
   if (["/community", "/members", "/rank-rewards", "/workers", "/trading-bot", "/telegram", "/invite-bot", "/telegram-trading", "/pokemon"].some(starts)) return "community";
-  if (["/system", "/settings", "/api-keys", "/activity", "/vpn", "/kalshi", "/realm"].some(starts)) return "system";
+  if (["/system", "/settings", "/api-keys", "/activity", "/vpn", "/kalshi", "/realm", "/intelligence"].some(starts)) return "system";
   throw new Error(`no section expected for ${path}`);
 }
 
