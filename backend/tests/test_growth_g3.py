@@ -214,6 +214,7 @@ def test_report_compares_originals_with_news_and_estimates_followers(db: Session
 
 def test_auto_link_needs_a_close_text_match_and_never_takes_a_desk_post(db: Session) -> None:
     d = _row(db, "k", "rarity", drafts.GENERATOR, status="approved")
+    d.created_at = NOW - timedelta(hours=6)  # the made-up posts below are timed against NOW, not the real clock
     d.text = "Fear & Greed is at 11. In Hyperliquid data since February 2023, it dropped this low in 6 earlier episodes."
     db.commit()
     _own(db, "7001", "Something else entirely about ETF flows today.", NOW - timedelta(hours=3), 10, 0)
