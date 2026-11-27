@@ -381,3 +381,34 @@ def test_posts_from_before_the_pilot_never_count_as_discoveries() -> None:
     xintel.pilot_ledger(xi, [T()], NOW)
     m = xintel.pilot_metrics(xi, NOW, set())
     assert m["stories"] == 0 and m["x_led"] == 0 and m["useful_discoveries"] == 0
+
+
+class RenamedWeb(XWeb):
+    """X's answer when none of the looked-up accounts exists: 200 with errors only (no "data"), which the client raises as not found."""
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.x.com" and request.url.path == "/2/users/by":
+            names = dict(request.url.params)["usernames"].split(",")
+            self.lookups.append(names)
+            data = [{"id": USERS[n], "username": n} for n in names if n in USERS]
+            errors = [{"value": n, "detail": f"Could not find user with usernames: [{n}].", "title": "Not Found Error",
+                       "type": "https://api.twitter.com/2/problems/resource-not-found"} for n in names if n not in USERS]
+            return httpx.Response(200, json={**({"data": data} if data else {}), **({"errors": errors} if errors else {})})
+        return super().handler(request)
+
+
+async def test_one_renamed_account_does_not_stop_the_reads(db: Session, xweb: XWeb) -> None:
+    """2026-11-26/27 production: @DeptofDefense no longer exists; looking it up alone raised not-found and every hourly read stopped there
+    (0 posts read for days). It is now marked missing (asked again in a week) and the other accounts are read."""
+    web = RenamedWeb(NOW)
+    turn_on(db)
+    await tick(db, web)  # every watched account is known after this
+    turn_on(db, accounts=[*WATCH, {"handle": "DeptofDefense", "group": "geopolitics", "tier": "A"}])
+    web.x_posts = [post(20, "zachxbt", HACK, 5)]
+    await tick(db, web, NOW + timedelta(minutes=6))
+    assert web.lookups[-1] == ["DeptofDefense"]
+    st = engine.settings_row(db).state["x_intel"]
+    assert "deptofdefense" in st["missing"]
+    assert db.scalars(select(TtSignal).where(TtSignal.external_id == "xpost:20")).first() is not None  # the others were still read
+    await tick(db, web, NOW + timedelta(minutes=12))
+    assert web.lookups[-1] == ["DeptofDefense"] and len([x for x in web.lookups if x == ["DeptofDefense"]]) == 1  # not asked again for a week

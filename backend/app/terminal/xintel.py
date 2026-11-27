@@ -309,7 +309,7 @@ __all__ = ["DEFAULTS", "DEFAULT_WATCHLIST", "GROUPS", "TIERS", "clean_watchlist"
 async def read(db: Any, s: Any, settings: Any, runtime: Any, opts: dict[str, Any], now: datetime) -> tuple[list[dict[str, Any]], str | None, dict[str, Any]]:
     """One pass over the watchlist: one recent-search request per batch of accounts, only posts newer than the last one we hold
     (since_id), so each post is paid for once. Stops before the Terminal's own daily cap and behind the account-wide X budget guard."""
-    from app.connectors.x.errors import XBudgetExceededError, XError, XForbiddenError, XNotConfiguredError, XRateLimitError
+    from app.connectors.x.errors import XBudgetExceededError, XError, XForbiddenError, XNotConfiguredError, XNotFoundError, XRateLimitError
     from app.security import credentials
     from app.social.x_service import make_x_client
 
@@ -340,7 +340,10 @@ async def read(db: Any, s: Any, settings: Any, runtime: Any, opts: dict[str, Any
         unknown = [a["handle"] for a in accounts if a["handle"].lower() not in known
                    and (missing.get(a["handle"].lower()) or "") < (now - timedelta(days=7)).isoformat()]
         if unknown and not budget_why and spent_today({"x_intel": xi}, now) + len(unknown) * USER_USD <= cap + 1e-9:
-            body = await client.users_by_usernames(unknown)
+            try:
+                body = await client.users_by_usernames(unknown)
+            except XNotFoundError:  # none of them exists (renamed / suspended): X answers 200 with errors only. Before 2026-11-27 this
+                body = {}  # aborted every read: one renamed account (@DeptofDefense) stopped the pilot from reading anything for days
             requests += 1
             found = [u for u in body.get("data") or [] if u.get("id") and u.get("username")]
             cost += round(len(found) * USER_USD, 4)
