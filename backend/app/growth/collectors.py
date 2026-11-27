@@ -36,6 +36,10 @@ CB_API = "https://api.exchange.coinbase.com"
 FNG_API = "https://api.alternative.me/fng/"
 UA = "PriceChat-MarketMemory/1.0"
 DAY_MS = 86_400_000
+# Hyperliquid's XYZ (HIP-3) perpetuals that track traditional markets, stored as px:<key>:close. Keys never contain ":" or a domain-like
+# name (the X link check reads "trade.xyz" as a web address). History: GOLD since 2025-12-22, XYZ100 since 2025-10-13, SP500 since 2026-03-18.
+XYZ_MARKETS = {"xyz:GOLD": "XYZ-GOLD", "xyz:SILVER": "XYZ-SILVER", "xyz:XYZ100": "XYZ-NDX", "xyz:SP500": "XYZ-SPX"}
+XYZ_COIN = {v: k for k, v in XYZ_MARKETS.items()}
 HL_MIN_VOLUME_USD = 250_000.0  # "meaningful volume": 24h notional at least $250k (about 100 perps in a quiet market)
 HL_WEIGHT_PER_MIN = 900  # Hyperliquid allows 1200 per IP per minute; we stay well under it
 COINBASE_PAIRS = ("BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD", "ADA-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "BCH-USD",
@@ -326,7 +330,7 @@ def pts_gap_ok(pts: list[tuple[date, float]], i: int, n: int) -> bool:
 
 def collect(db: Session, *, full: bool = False, http: Http | None = None, settings: Any = None, now: datetime | None = None,
             funding_coins: int = 40, funding_days: int = 180, max_coins: int | None = None, progress: Callable[[str], None] | None = None,
-            steps: tuple[str, ...] = ("hyperliquid", "funding", "fng", "oi", "liquidations", "breadth")) -> dict[str, Any]:
+            steps: tuple[str, ...] = ("hyperliquid", "macro", "funding", "fng", "oi", "liquidations", "breadth")) -> dict[str, Any]:
     """One collection pass. Incremental by default: each series restarts a few days before its newest stored day (or from its full history
     when it has none, so the first daily run is its own backfill). full=True re-reads full history for every series."""
     http = http or Http()
@@ -369,6 +373,14 @@ def collect(db: Session, *, full: bool = False, http: Http | None = None, settin
                 report["errors"].append(f"candles {coin}: {e}")
             if i % 20 == 0:
                 say(f"hyperliquid candles {i + 1}/{len(universe)}")
+    if "macro" in steps and allowed("hyperliquid", "macro"):
+        for coin, key in XYZ_MARKETS.items():  # gold, silver, the Nasdaq-100 and the S&P 500 perpetuals (Hyperliquid's XYZ markets)
+            try:
+                st = start_for(f"px:{key}:close", end - timedelta(days=4990))
+                rows = hl_daily_candles(http, coin, st, end)
+                add("macro", store.upsert(db, f"px:{key}:close", [(d, c) for d, c, _ in rows], "hyperliquid"))
+            except CollectError as e:
+                report["errors"].append(f"candles {coin}: {e}")
     if "funding" in steps:
         for i, (coin, _) in enumerate(universe[:funding_coins]):
             try:

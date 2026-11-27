@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from app.growth import fmt
-from app.growth.detectors.common import avg_volume, hl_coins, percentile_rank
+from app.growth.detectors.common import DISPLAY, WELL_KNOWN, avg_volume, hl_coins, percentile_rank
 from app.growth.findings import Finding, chart, n, pts
 from app.growth.memory import Memory
 
@@ -43,28 +43,22 @@ def share_up_history(closes: dict[str, dict[date, float]], days: int, upto: date
 def _breadth_chart(mem: Memory, coin_rets: list[tuple[str, float]], days: int, weak: bool, as_of: date) -> dict:
     """One tile per perp, most traded first: at most 60 tiles, so every symbol stays legible on a phone, and the few that went the other
     way (the "2" in "2 of 101 up") are always among them. Variant: the 7 best and 7 worst as a ranked table."""
-    show_max = 60
+    # 11-27 (owner: "avoid obscure low-volume tokens"): the tiles name only the coins a broad audience knows (common.WELL_KNOWN); the count
+    # in the headline is still every perp, and the dek says both
     by_vol = sorted(coin_rets, key=lambda cr: -avg_volume(mem, cr[0], as_of))
-    minority = [cr for cr in by_vol if (cr[1] > 0) == weak]
-    shown = by_vol
-    if len(by_vol) > show_max:
-        keep = {c for c, _ in minority} if len(minority) <= 12 else set()
-        rest = [cr for cr in by_vol if cr[0] not in keep][: show_max - len(keep)]
-        pick = keep | {c for c, _ in rest}
-        shown = [cr for cr in by_vol if cr[0] in pick]
+    known = set(WELL_KNOWN)
+    shown = [cr for cr in by_vol if cr[0] in known] or by_vol[:30]
     period = "on {date}" if days == 1 else "over the past {days} days"
-    dek = ("1-day" if days == 1 else "{days}-day") + " change of every Hyperliquid perp with a close on both days, most traded first"
-    if len(shown) < len(by_vol):
-        dek = (("1-day" if days == 1 else "{days}-day") + f" change, {len(shown)} of {{total}} Hyperliquid perps: the most traded"
-               + (", and every one that " + ("rose" if weak else "fell") if len(minority) <= 12 and minority else "") + ". Most traded first")
+    dek = (("1-day" if days == 1 else "{days}-day") + f" change of {len(shown)} major coins, most traded first. "
+           "The count above covers all {total} Hyperliquid perps with a close on both days")
     return chart("heat_grid", f"Hyperliquid perps, {days}-day change", "", [{"name": f"{days}-day change, %", "points": pts(coin_rets, 2)}],
-                 rows=[{"label": c, "value": round(v, 2)} for c, v in shown], sources=["hyperliquid"], as_of=as_of,
+                 rows=[{"label": DISPLAY.get(c, c), "value": round(v, 2)} for c, v in shown], sources=["hyperliquid"], as_of=as_of,
                  hero="{up} of {total}", hero_role="neg" if weak else "pos",
                  headline="Hyperliquid perps " + ("closed" if days == 1 else "are") + " up " + period + ". Breadth this " + ("weak" if weak else "strong")
                           + " on only {tail} of days since {since}",
                  dek=dek, y_format="pct", options={"cap": {1: 10, 7: 25, 30: 40}[days]},
-                 variants={"rank_table": {"rows": [{"label": c, "value": round(v, 2)} for c, v in sorted(coin_rets, key=lambda cr: -cr[1])],
-                                          "dek": "The 7 best and the 7 worst of {total} Hyperliquid perps, "
+                 variants={"rank_table": {"rows": [{"label": DISPLAY.get(c, c), "value": round(v, 2)} for c, v in sorted(shown, key=lambda cr: -cr[1])],
+                                          "dek": f"The best and the worst of {len(shown)} major coins on Hyperliquid, "
                                                  + ("1-day" if days == 1 else "{days}-day") + " change"}})
 
 

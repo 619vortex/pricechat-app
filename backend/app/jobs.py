@@ -1179,7 +1179,7 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
             return out
 
         specs.append(JobSpec("growth.originals", "Growth Engine: Originals drafts", "Hourly: once a day (after 02:00 UTC) runs the detectors over Market Memory and queues the best findings as drafts in Admin › X › Originals, with their numbers, calculation and chart; applies the writer's wording when it passes the figures gate. Approval only marks a draft approved: never publishes",
-                             3600, growth_originals, initial_delay_seconds=900, timeout_seconds=900))
+                             3600, growth_originals, initial_delay_seconds=1500, timeout_seconds=900))  # after growth.collect (600 s) has stored today
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs

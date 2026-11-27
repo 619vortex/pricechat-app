@@ -7,30 +7,31 @@ import math
 from datetime import date, timedelta
 
 from app.growth import fmt
-from app.growth.detectors.common import data_label, most_traded, name, percentile_rank, price, ret
+from app.growth.detectors.common import DISPLAY, data_label, name, percentile_rank, price, ret, well_known
 from app.growth.findings import Finding, chart, n, pts
 from app.growth.memory import Memory, Series
 
 LEADERS = 50
+RAW = {v: k for k, v in DISPLAY.items()}  # display name -> stored ticker (PEPE -> kPEPE)
 SHOW = 5
 
 
 def leaderboard(mem: Memory, as_of: date) -> list[Finding]:
     out = []
-    windows = [(7, "Past {days} days"), (30, "Past {days} days")]
+    windows = [(30, "Past {days} days")]  # 11-27: the 7-day board was noise for a broad audience
     ytd = (as_of - date(as_of.year, 1, 1)).days
     if as_of.month >= 2:
         windows.append((ytd + 1, "{year} so far"))  # from the last close of the previous year
     btc = price(mem, "BTC")
     for days, label in windows:
-        coins = most_traded(mem, as_of, LEADERS, min_days=days + 1)
+        coins = well_known(mem, as_of, min_days=days + 1)
         rows = []
         for c in coins:
             s = mem.get(f"px:{c}:close")
             r = ret(s, as_of, days) if s else None
             if r:
-                rows.append((c, r[0]))
-        if len(rows) < 20:
+                rows.append((DISPLAY.get(c, c), r[0]))
+        if len(rows) < 15:
             continue
         by_volume = list(rows)
         rows.sort(key=lambda x: -x[1])
@@ -46,16 +47,16 @@ def leaderboard(mem: Memory, as_of: date) -> list[Finding]:
         if br:
             nums["btc"] = n(br[0], fmt.pct(br[0], dp=0), "Bitcoin, same window")
             extra = "\nBitcoin: {btc}. Higher over the period: {up} of {total}."
-        templates = [label + ", the {total} most traded Hyperliquid perps:\nBest: {best}\nWorst: {worst}" + extra,
-                     label + " on Hyperliquid ({total} most traded perps):\n▲ {best}\n▼ {worst}" + extra]
+        templates = [label + ", {total} major coins on Hyperliquid:\nBest: {best}\nWorst: {worst}" + extra,
+                     label + " on Hyperliquid ({total} major coins):\n▲ {best}\n▼ {worst}" + extra]
         spread = max(abs(best[0][1]), abs(worst[0][1]))
         start = as_of - timedelta(days=days)
         out.append(Finding(
             key=f"leaders:{days}d:{as_of.isoformat()}", format="relative", detector="leaderboard", subject=f"leaders-{days}",
             headline=f"{label_txt}: best {best[0][0]} {fmt.pct(best[0][1])}, worst {worst[0][0]} {fmt.pct(worst[0][1])}", numbers=nums, words={},
-            templates=templates, window=f"{days}d", series=[f"px:{c}:close" for c, _ in rows], sources=["hyperliquid"], as_of=as_of,
-            calculation=f"return = close {as_of.isoformat()} / close {start.isoformat()} − 1 for the {len(rows)} perps with the highest 30-day average "
-                        f"USD volume and a close on both days; " + "; ".join(f"{c} {r:+.2f}%" for c, r in best + worst),
+            templates=templates, window=f"{days}d", series=[f"px:{RAW.get(c, c)}:close" for c, _ in rows], sources=["hyperliquid"], as_of=as_of,
+            calculation=f"return = close {as_of.isoformat()} / close {start.isoformat()} − 1 for the {len(rows)} major coins (common.WELL_KNOWN) "
+                        f"with a close on both days; " + "; ".join(f"{c} {r:+.2f}%" for c, r in best + worst),
             rarity=min(0.85, 0.3 + spread / 250), comparatives=["best", "worst", "most"],
             chart=_leader_chart(best, worst, by_volume, days, label, bool(br), as_of)))
         out[-1].numbers |= {"best1": n(best[0][1], fmt.pct(best[0][1], dp=0), f"{best[0][0]}, best"),
@@ -72,11 +73,11 @@ def _leader_chart(best: list, worst: list, by_volume: list, days: int, label: st
             + [{"label": c, "value": round(r, 2), "display": fmt.pct(r, dp=0), "highlight": i == len(worst) - 1} for i, (c, r) in enumerate(worst[::-1])])
     return chart("rank_table", "Best and worst", "", [{"name": "best", "points": pts(best, 2)}, {"name": "worst", "points": pts(worst, 2)}],
                  rows=rows, sources=["hyperliquid"], as_of=as_of, hero="best1", hero_role="auto",
-                 headline="{best_coin}, the best of the {total} most traded Hyperliquid perps " + when + ". The worst: {worst_coin} at {worst1}",
+                 headline="{best_coin}, the best of {total} major coins on Hyperliquid " + when + ". The worst: {worst_coin} at {worst1}",
                  dek="Return from the close on {start} to the close on {date} · the 5 best and the 5 worst" + (" · Bitcoin: {btc}" if has_btc else ""),
                  y_format="pct", options={},
                  variants={"heat_grid": {"rows": [{"label": c, "value": round(r, 2), "display": fmt.pct(r, dp=0)} for c, r in by_volume],
-                                         "dek": "Return from the close on {start} to the close on {date}, the {total} most traded Hyperliquid perps, "
+                                         "dek": "Return from the close on {start} to the close on {date}, {total} major coins on Hyperliquid, "
                                                 "most traded first" + (" · Bitcoin: {btc}" if has_btc else ""),
                                          "options": {"cap": 15 if days <= 7 else 40}}})
 
@@ -152,7 +153,8 @@ def divergence(mem: Memory, as_of: date, days: int = 30) -> list[Finding]:
     if not br:
         return []
     cands = []
-    for c in most_traded(mem, as_of, 20, min_days=days + 1):
+    universe = well_known(mem, as_of, min_days=days + 1)
+    for c in universe:
         if c == "BTC":
             continue
         s = mem.get(f"px:{c}:close")
@@ -167,10 +169,10 @@ def divergence(mem: Memory, as_of: date, days: int = 30) -> list[Finding]:
     s = mem.get(f"px:{coin}:close")
     assert s is not None
     nm = name(coin)
-    nums = {"n": n(20, "20", "universe size"), "btc": n(br[0], fmt.pct(br[0]), f"Bitcoin, {days}d"), "coin": n(r[0], fmt.pct(r[0]), f"{coin}, {days}d"),
+    nums = {"n": n(len(universe), str(len(universe)), "universe size"), "btc": n(br[0], fmt.pct(br[0]), f"Bitcoin, {days}d"), "coin": n(r[0], fmt.pct(r[0]), f"{coin}, {days}d"),
             "gap": n(gap, fmt.pts(gap), "gap, percentage points"), "days": n(days, str(days), "window, days")}
-    templates = ["Past {days} days:\nBitcoin {btc}\n" + nm + " {coin}\nA {gap}-point gap, the widest among the {n} most traded Hyperliquid perps.",
-                 nm + " {coin} in {days} days while Bitcoin went {btc}. That {gap}-point split is the widest among the {n} most traded Hyperliquid perps."]
+    templates = ["Past {days} days:\nBitcoin {btc}\n" + nm + " {coin}\nA {gap}-point gap, the widest among {n} major coins on Hyperliquid.",
+                 nm + " {coin} in {days} days while Bitcoin went {btc}. That {gap}-point split is the widest among {n} major coins on Hyperliquid."]
     start = as_of - timedelta(days=days)
 
     def window(x: Series) -> list[tuple[date, float]]:
@@ -181,7 +183,7 @@ def divergence(mem: Memory, as_of: date, days: int = 30) -> list[Finding]:
         headline=f"{nm} {fmt.pct(r[0])} vs Bitcoin {fmt.pct(br[0])} in {days}d ({gap:.1f} pts)", numbers=nums, words={}, templates=templates,
         window=f"{days}d", series=[s.key, btc.key], sources=sorted({"hyperliquid", btc.source}), as_of=as_of,
         calculation=f"{coin}: {fmt.raw(r[2], 4)} / {fmt.raw(r[1], 4)} − 1 = {fmt.pct(r[0])}; BTC: {fmt.raw(br[2], 2)} / {fmt.raw(br[1], 2)} − 1 = "
-                    f"{fmt.pct(br[0])} ({start.isoformat()} to {as_of.isoformat()}); widest opposite-sign gap among the 20 most traded perps",
+                    f"{fmt.pct(br[0])} ({start.isoformat()} to {as_of.isoformat()}); widest opposite-sign gap among the major coins (common.WELL_KNOWN)",
         rarity=min(0.9, 0.3 + gap / 120), comparatives=["widest", "most"],
         chart=_divergence_chart(window(btc), window(s), nm, r[0] > br[0], sorted({"hyperliquid", btc.source}), as_of))]
 
@@ -198,7 +200,7 @@ def _divergence_chart(b: list[tuple[date, float]], c: list[tuple[date, float]], 
                  [{"name": "Bitcoin", "points": pts(b, 2), "role": "context"}, {"name": nm, "points": pts(c, dp), "role": "highlight"}],
                  annotations=[{"type": "check", "x": end, "series": 0, "number": "btc"}, {"type": "check", "x": end, "series": 1, "number": "coin"}],
                  sources=sources, as_of=as_of, hero="{gap} pts", hero_role="highlight",
-                 headline="between " + nm + " ({coin}) and Bitcoin ({btc}) in {days} days: the widest split among the {n} most traded Hyperliquid perps",
+                 headline="between " + nm + " ({coin}) and Bitcoin ({btc}) in {days} days: the widest split among {n} major coins on Hyperliquid",
                  dek="Change since the close {days} days ago, %, daily closes", y_format="pct", options={"shade_between": [0, 1], "shade_role": "highlight"},
                  variants={"spread_lines": {
                      "series": [{"name": (nm + " minus Bitcoin") if coin_ahead else ("Bitcoin minus " + nm), "points": pts(gap, 2), "role": "highlight",

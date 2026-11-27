@@ -43,6 +43,8 @@ DETECTORS: dict[str, tuple[str, Detector]] = {
     "year_paths": ("history", insights.year_paths),
     "gold_ratio": ("relative", insights.gold_ratio),
     "drawdown_table": ("relative", insights.drawdown_table),
+    "cross_asset": ("relative", insights.cross_asset),
+    "btc_in_gold": ("relative", insights.btc_in_gold),
 }
 
 

@@ -157,14 +157,22 @@ def test_seasonality_needs_three_prior_years_and_an_extreme_month() -> None:
     all_pass(fs)
 
 
+# fixture coins are real well-known tickers (rankings name only common.WELL_KNOWN since 11-27); prices are made up
+UNI_NAMES = [c for c in __import__("app.growth.detectors.common", fromlist=["WELL_KNOWN"]).WELL_KNOWN if c != "BTC"]
+
+
+def coin_name(k: int) -> str:
+    return UNI_NAMES[k] if k < len(UNI_NAMES) else f"C{k}"
+
+
 def _universe(n: int, days: int, crash: float | None = None) -> dict[str, list[tuple[date, float]]]:
     data = {}
     for k in range(n):
         pts = walk(days, seed=k + 2, drift=0.0003 * ((k % 5) - 2))
         if crash is not None:
             pts = crash_tail(pts, 30, crash - 0.002 * k)
-        data[f"px:C{k}:close"] = pts
-        data[f"px:C{k}:vol"] = [(d, 1e6 * (k + 1)) for d, _ in pts]
+        data[f"px:{coin_name(k)}:close"] = pts
+        data[f"px:{coin_name(k)}:vol"] = [(d, 1e6 * (k + 1)) for d, _ in pts]
     return data
 
 
@@ -229,10 +237,10 @@ def test_leaderboard_ranks_most_traded() -> None:
     data = _universe(25, 400)
     data["px:BTC:close"] = walk(400, seed=99)
     data["px:BTC:vol"] = [(d, 1e9) for d, _ in data["px:BTC:close"]]
-    data["px:C3:close"] = crash_tail(data["px:C3:close"], 7, 0.8)
-    fs = [f for f in relative.leaderboard(Memory.from_points(data), AS_OF) if f.window == "7d"]
+    data["px:BNB:close"] = crash_tail(data["px:BNB:close"], 7, 0.8)
+    fs = [f for f in relative.leaderboard(Memory.from_points(data), AS_OF) if f.window == "30d"]
     assert len(fs) == 1
-    assert fs[0].numbers["best"]["text"].startswith("C3 +80%")
+    assert fs[0].numbers["best"]["text"].startswith("BNB +") and "major coins" in fs[0].text(0)
     assert fs[0].chart["kind"] == "rank_table"
     all_pass(fs)
 
@@ -252,7 +260,7 @@ def test_divergence_and_beta_run_clean() -> None:
     btc = crash_tail(walk(600, seed=50), 30, -0.25)
     data["px:BTC:close"] = btc
     data["px:BTC:vol"] = [(d, 1e9) for d, _ in btc]
-    data["px:C1:close"] = crash_tail(data["px:C1:close"], 30, 0.3)
+    data["px:SOL:close"] = crash_tail(data["px:SOL:close"], 30, 0.3)
     fs = relative.divergence(Memory.from_points(data), AS_OF)
     assert len(fs) == 1 and fs[0].numbers["coin"]["value"] > 0 > fs[0].numbers["btc"]["value"] and fs[0].numbers["gap"]["value"] >= 25
     all_pass(fs)

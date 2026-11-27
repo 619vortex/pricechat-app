@@ -23,7 +23,7 @@ from app.models.market_memory import GrDraft
 log = logging.getLogger(__name__)
 
 STATUSES = ("pending", "approved", "rejected", "regenerating")
-GENERATOR = "g2-1"  # the detector set + verification version: a new one drafts once on the day it is deployed (jobs.growth_originals)
+GENERATOR = "g2-2"  # the detector set + verification version: a new one drafts once on the day it is deployed (jobs.growth_originals)
 REPEAT_SKIP = timedelta(days=7)  # the same finding key isn't drafted twice in a week
 SIMILAR_DAYS = timedelta(days=3)  # same detector + subject within 3 days: novelty halved
 STORY_DAYS = timedelta(days=3)  # nd_storylines told about the subject in 3 days: novelty 0.7
@@ -80,6 +80,10 @@ def novelty(db: Session, findings: list[Finding], now: datetime) -> list[Finding
     return out
 
 
+# Not drafted as Originals (owner, 2026-11-27: "avoid misleading annualized statistics"): funding is an hourly rate whose annualised
+# figure reads as a yearly return to a general audience; open-interest build-ups are trader jargon. The detectors still run (Terminal).
+EXCLUDED = frozenset({"funding_extremes", "funding_streak", "oi_buildup"})
+
 PER_DETECTOR = 2  # G2: at most two drafts of one detector per run (a run of five "X is down N% in 30 days" posts isn't variety)
 
 
@@ -96,11 +100,13 @@ def select_top(findings: list[Finding], per_format: int, max_total: int, per_det
         seen.add((f.format, f.subject))
         by_fmt[f.format].append(f)
     if sum(len(v) for v in by_fmt.values()) < max_total:  # a quiet day: one more per detector rather than fewer drafts
+        seen_det = {(f.detector, f.subject) for v in by_fmt.values() for f in v}
         for f in sorted(findings, key=lambda f: -f.score):
-            if (f.format, f.subject) in seen or len(by_fmt[f.format]) >= per_format or f.score <= 0 or per_det.get(f.detector, 0) >= per_detector + 1:
-                continue
+            if ((f.detector, f.subject) in seen_det or len(by_fmt[f.format]) >= per_format or f.score <= 0
+                    or per_det.get(f.detector, 0) >= per_detector + 1 or f in by_fmt[f.format]):
+                continue  # a quiet day: a second angle on the same subject from another detector may fill a slot
             per_det[f.detector] = per_det.get(f.detector, 0) + 1
-            seen.add((f.format, f.subject))
+            seen_det.add((f.detector, f.subject))
             by_fmt[f.format].append(f)
     out: list[Finding] = []
     for rank in range(per_format):
@@ -173,7 +179,7 @@ def generate(db: Session, *, settings: Any = None, now: datetime | None = None, 
     now = now or utcnow()
     mem = mem or Memory.from_db(db)
     found, errors = detectors.run_all(mem, as_of)
-    publishable = [f for f in found if f.publishable]
+    publishable = [f for f in found if f.publishable and f.detector not in EXCLUDED]
     held = len(found) - len(publishable)
     fresh = novelty(db, publishable, now)
     limit = int(s.growth_max_drafts_per_run)

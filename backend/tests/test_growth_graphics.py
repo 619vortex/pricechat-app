@@ -60,8 +60,8 @@ def _findings() -> dict[str, Finding]:
     lead = _universe(25, 400)
     lead["px:BTC:close"] = walk(400, seed=99)
     lead["px:BTC:vol"] = [(d, 1e9) for d, _ in lead["px:BTC:close"]]
-    lead["px:C3:close"] = crash_tail(lead["px:C3:close"], 7, 0.8)
-    out["leaderboard"] = [f for f in relative.leaderboard(Memory.from_points(lead), AS_OF) if f.window == "7d"]
+    lead["px:BNB:close"] = crash_tail(lead["px:BNB:close"], 7, 0.8)
+    out["leaderboard"] = [f for f in relative.leaderboard(Memory.from_points(lead), AS_OF) if f.window == "30d"]
     btc = walk(800, seed=5)
     eth = [(d, v * 0.05 * (1 - 0.0004 * i)) for i, (d, v) in enumerate(btc)]
     eth[-1] = (eth[-1][0], eth[-1][1] * 0.9)
@@ -70,7 +70,7 @@ def _findings() -> dict[str, Finding]:
     data = _universe(25, 600)
     b2 = crash_tail(walk(600, seed=50), 30, -0.25)
     data["px:BTC:close"], data["px:BTC:vol"] = b2, [(d, 1e9) for d, _ in b2]
-    data["px:C1:close"] = crash_tail(data["px:C1:close"], 30, 0.3)
+    data["px:SOL:close"] = crash_tail(data["px:SOL:close"], 30, 0.3)
     out["divergence"] = relative.divergence(Memory.from_points(data), AS_OF)
     e2 = [(d, v * (1 + 0.5 * math.sin(i / 3) * 0.01) ** (1 if i < 500 else 3)) for i, (d, v) in enumerate(b2)]
     out["beta"] = relative.beta(Memory.from_points({"px:BTC:close": b2, "px:ETH:close": e2}), AS_OF, ("ETH",))
@@ -83,7 +83,7 @@ FINDINGS = _findings()
 
 
 # G2 detectors whose own test files render every finding in both formats (tests/test_growth_g2_anomalies.py, test_growth_g2_insights.py)
-G2_RENDERED_ELSEWHERE = {"streak", "volatility_regime", "volume_spike", "fear_aftermath", "year_paths", "gold_ratio", "weekly_streak", "drawdown_table"}
+G2_RENDERED_ELSEWHERE = {"streak", "volatility_regime", "volume_spike", "fear_aftermath", "year_paths", "gold_ratio", "weekly_streak", "drawdown_table", "cross_asset", "btc_in_gold"}
 
 
 def test_every_detector_has_a_fixture() -> None:

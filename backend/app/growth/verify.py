@@ -67,6 +67,7 @@ class Verifier:
 
     def _px(self, key: str, as_of: date, many: bool, out: dict[str, Any]) -> list[str]:
         _, coin, field = key.split(":", 2)
+        coin = collectors.XYZ_COIN.get(coin, coin)  # px:XYZ-GOLD:close is read from Hyperliquid as xyz:GOLD
         s = self.mem.get(key)
         if s is None:
             return [f"{key}: not stored"]

@@ -13,7 +13,7 @@ import re
 from datetime import date, timedelta
 
 from app.growth import fmt
-from app.growth.detectors.common import MAJORS, data_label, most_traded, name, percentile_rank, price
+from app.growth.detectors.common import MAJORS, data_label, name, percentile_rank, price, well_known
 from app.growth.findings import Finding, chart, n, pts
 from app.growth.memory import Memory, Series
 
@@ -290,7 +290,7 @@ def _ratios(vs: Series) -> list[tuple[date, float]]:
 
 
 def volume_spike(mem: Memory, as_of: date) -> list[Finding]:
-    universe = [c for c in most_traded(mem, as_of, VOL_UNIVERSE, min_days=VOL_MIN_DAYS) if _TICKER_OK.match(c)]
+    universe = [c for c in well_known(mem, as_of, min_days=VOL_MIN_DAYS) if _TICKER_OK.match(c)]  # 11-27: major coins only
     spikes: list[dict] = []
     for coin in universe:
         vs = mem.get(f"px:{coin}:vol")

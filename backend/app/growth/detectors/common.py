@@ -35,7 +35,28 @@ def data_label(s: Series) -> str:
 
 
 def hl_coins(mem: Memory) -> list[str]:
-    return [k[3:-6] for k in mem.keys("px:") if k.endswith(":close") and k[3:-6].upper() not in STABLE_OR_WRAPPED]
+    """Crypto perps only: the XYZ markets (gold, indices) are never part of a crypto universe (breadth, rankings)."""
+    return [k[3:-6] for k in mem.keys("px:") if k.endswith(":close") and k[3:-6].upper() not in STABLE_OR_WRAPPED and not k[3:].startswith("XYZ-")]
+
+
+# Assets a broad financial audience knows (owner, 2026-11-27: "avoid obscure low-volume tokens"). Rankings and comparisons name only these.
+WELL_KNOWN = ("BTC", "ETH", "SOL", "XRP", "BNB", "DOGE", "ADA", "TRX", "AVAX", "LINK", "DOT", "LTC", "BCH", "XLM", "SUI", "HYPE", "NEAR",
+              "UNI", "AAVE", "ATOM", "HBAR", "XMR", "FIL", "ARB", "OP", "APT", "TAO", "ONDO", "kPEPE", "kSHIB", "TON", "ETC")
+DISPLAY = {"kPEPE": "PEPE", "kSHIB": "SHIB"}
+
+
+def well_known(mem: Memory, as_of: date, min_days: int = 0) -> list[str]:
+    """WELL_KNOWN coins with a close on as_of (and min_days of history), most traded first."""
+    stored = set(hl_coins(mem))
+    out = []
+    for c in WELL_KNOWN:
+        s = mem.get(f"px:{c}:close")
+        if c not in stored or not s or s.index_on_or_before(as_of) is None or s.dates[s.index_on_or_before(as_of)] != as_of:  # type: ignore[index]
+            continue
+        if min_days and (as_of - s.first).days < min_days:
+            continue
+        out.append((avg_volume(mem, c, as_of), c))
+    return [c for _, c in sorted(out, reverse=True)]
 
 
 def avg_volume(mem: Memory, coin: str, as_of: date, days: int = 30) -> float:

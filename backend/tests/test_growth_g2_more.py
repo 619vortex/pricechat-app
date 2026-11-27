@@ -67,3 +67,39 @@ def test_drawdown_table_needs_a_market_wide_drawdown() -> None:
     calm = {f"px:{c}:close": walk(800, seed=k, end=AS_OF) for k, c in enumerate(("BTC", "ETH", "SOL", "XRP", "DOGE", "LINK", "AVAX"))}
     assert insights.drawdown_table(Memory.from_points(calm), AS_OF) == []
     assert insights.drawdown_table(Memory.from_points({"px:BTC:close": _crash(0, -0.6)}), AS_OF) == []  # one coin isn't a table
+
+
+def _year(start: float, end: float, first: date = date(2025, 12, 20)) -> list[tuple[date, float]]:
+    days = (AS_OF - first).days
+    return [(first + timedelta(days=i), start + (end - start) * i / days) for i in range(days + 1)]
+
+
+def test_cross_asset_scoreboard_names_markets_from_last_years_close() -> None:
+    data = {"px:BTC:close": _year(90000, 60000), "px:ETH:close": _year(3000, 1700), "px:XYZ-GOLD:close": _year(3000, 3600),
+            "px:XYZ-NDX:close": _year(25000, 26000)}
+    fs = insights.cross_asset(Memory.from_points(data), AS_OF)
+    assert len(fs) == 1
+    f = fs[0]
+    assert f.text(0).startswith("Gold +") and "Bitcoin: −" in f.text(0)
+    assert set(f.series) == {"px:BTC:close", "px:ETH:close", "px:XYZ-GOLD:close", "px:XYZ-NDX:close"}
+    assert "trade.xyz" not in " ".join(f.text(i) for i in range(len(f.templates)))  # read as a link on X
+    all_pass(fs)
+
+
+def test_cross_asset_leaves_out_a_market_without_last_years_close() -> None:
+    data = {"px:BTC:close": _year(90000, 60000), "px:ETH:close": _year(3000, 1700), "px:XYZ-GOLD:close": _year(3000, 3600),
+            "px:XYZ-SPX:close": _year(6000, 6500, first=date(2026, 3, 18))}
+    assert insights.cross_asset(Memory.from_points(data), AS_OF) == []  # only 3 markets measure the whole year: no scoreboard
+
+
+def test_btc_in_gold_counts_ounces() -> None:
+    data = {"px:BTC:close": _year(90000, 60000), "px:XYZ-GOLD:close": _year(3000, 3600)}
+    f = insights.btc_in_gold(Memory.from_points(data), AS_OF)[0]
+    assert f.numbers["oz_now"]["text"] == "16.7 oz" and f.numbers["ch"]["value"] < -15
+    all_pass([f])
+
+
+def test_funding_is_never_an_original() -> None:
+    from app.growth import drafts
+
+    assert {"funding_extremes", "funding_streak"} <= drafts.EXCLUDED
