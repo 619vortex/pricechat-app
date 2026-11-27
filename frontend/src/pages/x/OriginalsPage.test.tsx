@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { locate } from "../../components/nav";
-import { OriginalsPage, type OriginalDraft, type OriginalsList, type TopPick } from "./OriginalsPage";
+import { OriginalsPage, type OriginalDraft, type OriginalsList, type SlatePick, type TopPick } from "./OriginalsPage";
 import type { PerfReport, PerfSummary } from "./OriginalsPerformance";
 
 /** TEST FIXTURES: made-up findings and figures. */
@@ -27,12 +27,13 @@ const perf = (over: Partial<PerfReport> = {}): PerfReport => ({
 });
 
 let calls: string[] = [];
-function serve(drafts: OriginalDraft[], top: TopPick[] = [], report: PerfReport = perf()) {
+function serve(drafts: OriginalDraft[], top: TopPick[] = [], report: PerfReport = perf(), slate: SlatePick[] = []) {
   calls = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     calls.push(`${init?.method ?? "GET"} ${input}${init?.body ? " " + String(init.body) : ""}`);
     const body: OriginalsList = { drafts, counts: { pending: drafts.filter((d) => d.status === "pending").length, approved: 0, rejected: 0, regenerating: 0 },
-      publishing: "manual", switches: { growth_enabled: false, growth_collect_enabled: false, intel_enabled: false }, top };
+      publishing: "manual", switches: { growth_enabled: false, growth_collect_enabled: false, intel_enabled: false }, top, slate,
+      experiment: { start: "2026-11-28", end: "2026-12-04", day: report.experiment?.day ?? null, state: report.experiment?.state ?? "not started" } };
     if (String(input).includes("/originals/performance")) return new Response(JSON.stringify(report), { status: 200, headers: { "Content-Type": "application/json" } });
     if (String(input).includes("/generate")) return new Response(JSON.stringify({ drafted: 2, found: 5, errors: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
     return new Response(JSON.stringify(String(input).includes("/drafts/7/") ? drafts[0] : body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -121,6 +122,24 @@ describe("Originals", () => {
     expect(screen.getByTestId("editorial").textContent).toContain("Editor's score 20/20");
     expect(screen.getByTestId("coverage").textContent).toContain("Hyperliquid · February 2023");
     expect(screen.getByText("All other drafts")).toBeTruthy();
+  });
+
+  it("shows the 7-day experiment's progress and today's slate", async () => {
+    const fam = (family: string, posts: number) => ({ ...summary({ posts, measured_24h: posts }), family, impressions_lift: null, engagement_lift: null, score: null, enough: posts >= 3 });
+    serve([draft({ id: 7, detector: "weekly_streak" })],
+      [{ id: 7, rank: 1, editorial: { total: 20, shareability: 5, originality: 5, visual: 5, relevance: 5, measured: false } }],
+      perf({ experiment: { start: "2026-11-28", end: "2026-12-04", days: 7, day: 2, state: "running", per_day: [2, 3], slots_utc: ["13:30", "17:00", "21:00"],
+        posted_per_day: { "2026-11-28": 2, "2026-11-29": 0 }, originals: summary({ posts: 2 }), news: summary({ posts: 5 }),
+        families: [fam("Records & streaks", 1), fam("Cross-market", 1)], winners: [], measured_originals: 2, g4_ready: false,
+        g4_needs: { measured_originals: 15, families_with_min_n: 2 } } }),
+      [{ id: 7, family: "Records & streaks", slot: "13:30", editorial: { total: 20, shareability: 5, originality: 5, visual: 5, relevance: 5, measured: false } }]);
+    render(<OriginalsPage />);
+    await settle();
+    expect(screen.getByTestId("experiment").textContent).toContain("day 2 of 7");
+    expect(screen.getByText("11-28: 2")).toBeTruthy();
+    expect(screen.getByTestId("experiment").textContent).toContain("needs 15 measured Originals");
+    expect(screen.getByText("Experiment · 13:30 UTC · Records & streaks")).toBeTruthy();
+    expect(screen.getByTestId("slate").textContent).toContain("day 2");
   });
 
   it("shows performance by lane, read from stored snapshots only", async () => {

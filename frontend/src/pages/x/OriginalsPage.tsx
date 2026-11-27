@@ -23,8 +23,10 @@ export type OriginalDraft = {
 };
 export type Editorial = { total: number; shareability: number; originality: number; visual: number; relevance: number; measured: boolean };
 export type TopPick = { id: number; rank: number; editorial: Editorial };
+export type SlatePick = { id: number; family: string; slot: string; editorial: Editorial };
 export type OriginalsList = {
-  drafts: OriginalDraft[]; counts: Record<string, number>; publishing: string; top?: TopPick[];
+  drafts: OriginalDraft[]; counts: Record<string, number>; publishing: string; top?: TopPick[]; slate?: SlatePick[];
+  experiment?: { start: string; end: string; day: number | null; state: string };
   switches: { growth_enabled: boolean; growth_collect_enabled: boolean; intel_enabled: boolean };
 };
 
@@ -85,7 +87,7 @@ function PostedLink({ d, onChanged }: { d: OriginalDraft; onChanged: () => void 
   );
 }
 
-function DraftCard({ d, onChanged, pick }: { d: OriginalDraft; onChanged: () => void; pick?: TopPick }) {
+function DraftCard({ d, onChanged, pick, slot }: { d: OriginalDraft; onChanged: () => void; pick?: TopPick; slot?: SlatePick }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(d.text);
   const [busy, setBusy] = useState(false);
@@ -117,7 +119,7 @@ function DraftCard({ d, onChanged, pick }: { d: OriginalDraft; onChanged: () => 
 
   const over = (editing ? text.length : d.chars) > 280;
   return (
-    <Card title={<span>{pick ? <Badge tone="good">Top {pick.rank}</Badge> : null} {FORMAT_LABEL[d.format] ?? d.format} <span className="muted small">· {d.detector}</span></span>}
+    <Card title={<span>{pick ? <Badge tone="good">Top {pick.rank}</Badge> : null} {slot ? <Badge tone="info">Experiment · {slot.slot} UTC · {slot.family}</Badge> : null} {FORMAT_LABEL[d.format] ?? d.format} <span className="muted small">· {d.detector}</span></span>}
       actions={<Badge tone={STATUS_TONE[d.status] ?? "neutral"}>{d.status}</Badge>}>
       <div className="stack">
         <Graphic key={d.version} d={d} />
@@ -231,13 +233,15 @@ export function OriginalsPage() {
           {!data.switches.growth_enabled && <div className="small muted">The daily generation job is off (GROWTH_ENABLED); Generate now still works.</div>}
           {data.drafts.length === 0 ? <Empty>{tab === "pending" ? "No drafts to review. Try Generate now." : "Nothing here yet."}</Empty> : (() => {
             const picks = new Map((tab === "pending" ? data.top ?? [] : []).map((p) => [p.id, p]));
+            const slots = new Map((tab === "pending" ? data.slate ?? [] : []).map((p) => [p.id, p]));
             const top = [...picks.values()].map((p) => data.drafts.find((d) => d.id === p.id)).filter((d): d is OriginalDraft => !!d);
             const rest = data.drafts.filter((d) => !picks.has(d.id));
             return <>
               {top.length > 0 && <h3 data-testid="top-picks">Top {top.length} for approval <span className="muted small">ranked by shareability, originality, visual quality and broad-audience relevance; data verified</span></h3>}
-              {top.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} pick={picks.get(d.id)} />)}
+              {top.length > 0 && slots.size > 0 && <div className="small muted" data-testid="slate">Today's experiment slate{data.experiment?.day ? ` (day ${data.experiment.day})` : ` (starts ${data.experiment?.start ?? ""})`}: one post per format family, the least-tested families first. Approve and post at the suggested times; skipping is fine.</div>}
+              {top.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} pick={picks.get(d.id)} slot={slots.get(d.id)} />)}
               {top.length > 0 && rest.length > 0 && <h3>All other drafts</h3>}
-              {rest.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} />)}
+              {rest.map((d) => <DraftCard key={`${d.id}-${d.version}-${d.status}`} d={d} onChanged={reload} slot={slots.get(d.id)} />)}
             </>;
           })()}
         </>

@@ -26,7 +26,40 @@ export type PerfReport = {
   pictures: Record<string, PerfSummary>; originals: PerfPost[]; top_posts: PerfPost[]; followers_now: number | null; notes: string[];
   originals_vs_news: Record<string, { originals: number | null; news: number | null; ratio: number | null } | boolean>;
   method: Record<string, string | number | number[]>;
+  experiment?: Experiment;
 };
+export type ExperimentFamily = PerfSummary & { family: string; impressions_lift: number | null; engagement_lift: number | null; score: number | null; enough: boolean };
+export type Experiment = {
+  start: string; end: string; days: number; day: number | null; state: string; per_day: number[]; slots_utc: string[];
+  posted_per_day: Record<string, number>; originals: PerfSummary; news: PerfSummary; families: ExperimentFamily[]; winners: string[];
+  measured_originals: number; g4_ready: boolean; g4_needs: { measured_originals: number; families_with_min_n: number };
+};
+
+function ExperimentPanel({ e }: { e: Experiment }) {
+  const [lo, hi] = e.per_day;
+  return (
+    <div className="stack" data-testid="experiment" style={{ borderTop: "1px solid var(--border, #ddd)", paddingTop: 10 }}>
+      <div><b>7-day growth experiment</b> <span className="muted small">{e.start} to {e.end} · {e.state}{e.day ? ` · day ${e.day} of ${e.days}` : ""} ·
+        {` ${lo}-${hi}`} approved Originals a day at {e.slots_utc.join(", ")} UTC · News Desk is the control</span></div>
+      <div className="small" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {Object.entries(e.posted_per_day).map(([d, n]) => (
+          <Badge key={d} tone={n >= lo ? "good" : n > 0 ? "warn" : "neutral"}>{d.slice(5)}: {n}</Badge>
+        ))}
+      </div>
+      <div className="small">Originals: {e.originals.posts} posted, {e.originals.measured_24h} measured, median {num(e.originals.median_impressions_24h)} impressions,
+        {" "}{per1k(e.originals.engagement_rate_24h)} engagements / 1k · News Desk in the same days: {e.news.posts} posts, median {num(e.news.median_impressions_24h)},
+        {" "}{per1k(e.news.engagement_rate_24h)} / 1k</div>
+      <div className="table-wrap"><table className="table small">
+        <thead><tr><th>Family</th><th>Posted</th><th>Measured</th><th>Median impr. 24 h</th><th>Eng. / 1k</th><th>Impr. lift</th><th>Eng. lift</th></tr></thead>
+        <tbody>{e.families.map((f) => (
+          <tr key={f.family}><td>{f.family}{e.winners.includes(f.family) ? " ★" : ""}</td><td>{f.posts}</td><td>{f.measured_24h}{f.enough ? "" : " (needs 3)"}</td>
+            <td>{num(f.median_impressions_24h)}</td><td>{per1k(f.engagement_rate_24h)}</td><td>{lift(f.impressions_lift)}</td><td>{lift(f.engagement_lift)}</td></tr>
+        ))}</tbody>
+      </table></div>
+      <div className="small muted">Learner (G4): {e.g4_ready ? "enough data to start" : `not yet: needs ${e.g4_needs.measured_originals} measured Originals and ${e.g4_needs.families_with_min_n} families with 3 each (now ${e.measured_originals})`}.</div>
+    </div>
+  );
+}
 
 const num = (v: number | null | undefined, dp = 0) => (v === null || v === undefined ? "—" : v.toLocaleString(undefined, { maximumFractionDigits: dp }));
 /** engagements per 1,000 impressions: easier to read than a 0.4% rate on a small account */
@@ -106,6 +139,7 @@ export function OriginalsPerformance() {
           <p className="small muted">With a picture: {per1k(data.pictures["with picture"]?.engagement_rate_24h)} engagements / 1k, median {num(data.pictures["with picture"]?.median_impressions_24h)} impressions ·
             no picture: {per1k(data.pictures["no picture"]?.engagement_rate_24h)} / 1k, median {num(data.pictures["no picture"]?.median_impressions_24h)}.</p>
         </details>
+        {data.experiment && <ExperimentPanel e={data.experiment} />}
         <div className="small muted">How: {String(data.method.ranking)}. Followers: {String(data.method.followers)}. Cost: {String(data.method.cost)}.</div>
       </div>
     </Card>

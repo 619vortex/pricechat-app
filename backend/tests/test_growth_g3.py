@@ -250,3 +250,36 @@ def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", boom)
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", boom)
+
+
+# --- the 7-day experiment ------------------------------------------------------------------------------------------------------------
+
+
+def test_experiment_window_and_slate_rotate_families() -> None:
+    from app.growth import experiment
+
+    assert experiment.window(datetime(2026, 11, 27, 12, tzinfo=timezone.utc))["state"] == "not started"
+    w = experiment.window(datetime(2026, 11, 30, 12, tzinfo=timezone.utc))
+    assert w["state"] == "running" and w["day"] == 3 and w["end"] == "2026-12-04"
+    views = [_view(2, "weekly_streak", "BTC"), _view(3, "cross_asset", "cross-asset"), _view(4, "fear_aftermath", "FNG-BTC"),
+             _view(6, "btc_in_gold", "BTC-gold"), _view(7, "drawdown_table", "drawdown-majors")]
+    s = experiment.slate(views, drafts.GENERATOR, {})
+    assert [p["id"] for p in s] == [2, 3, 4] and [p["slot"] for p in s] == list(experiment.DAILY_SLOTS)
+    assert len({p["family"] for p in s}) == 3  # one per family (the gold card shares Cross-market with the scoreboard)
+    s2 = experiment.slate(views, drafts.GENERATOR, {"Records & streaks": 3, "Cross-market": 3})
+    assert [p["id"] for p in s2] == [4, 7, 2]  # the least-tested families first
+
+
+def test_experiment_summary_counts_days_families_and_g4_readiness(db: Session) -> None:
+    d = _row(db, "weekly_streak:BTC", "weekly_streak", drafts.GENERATOR, status="approved")
+    t0 = datetime(2026, 11, 28, 13, 30, tzinfo=timezone.utc)
+    d.text, d.created_at = "Bitcoin closed lower 7 weeks in a row, the longest in Hyperliquid data, which begins in February 2023.", t0 - timedelta(hours=3)
+    db.commit()
+    _own(db, "9101", d.text, t0, imp=500, eng=10)
+    _news(db, "9102", t0 + timedelta(hours=1), imp=100, eng=1)
+    r = performance.report(db, days=30, now=datetime(2026, 11, 30, 12, tzinfo=timezone.utc))
+    e = r["experiment"]
+    assert e["posted_per_day"]["2026-11-28"] == 1 and e["day"] == 3
+    fam = next(f for f in e["families"] if f["family"] == "Records & streaks")
+    assert fam["posts"] == 1 and fam["measured_24h"] == 1 and not fam["enough"]
+    assert e["news"]["posts"] == 1 and e["g4_ready"] is False and e["winners"] == []

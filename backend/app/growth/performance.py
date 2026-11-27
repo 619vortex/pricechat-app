@@ -244,7 +244,8 @@ def report(db: Session, days: int = 30, now: datetime | None = None) -> dict[str
         group = "original" if draft is not None else {"newsdesk": "news", "trending": "trend"}.get(str(lane), "other")
         pt = _at_24h(c.get("points") or [])
         posts.append({"x_id": c["x_id"], "url": c["url"], "published_at": c["published_at"], "text": (c.get("text") or "")[:280], "group": group,
-                      "format": _fmt_of(group, c["features"] | {"text": c.get("text") or ""}, draft), "draft_id": draft.id if draft is not None else None,
+                      "format": _fmt_of(group, c["features"] | {"text": c.get("text") or ""}, draft),
+                      "family": _family(draft.detector) if draft is not None else None, "draft_id": draft.id if draft is not None else None,
                       "has_image": c["features"].get("has_image"), "at_24h": _measure(pt) if pt else None, "latest": _measure(_latest(c)),
                       "followers_est": None, "followers_window": None})
     # follower attribution: the change over each post's first 24 h, split by 24 h impressions among the posts published in that window
@@ -280,11 +281,35 @@ def report(db: Session, days: int = 30, now: datetime | None = None) -> dict[str
             "top_posts": sorted([p for p in posts if p["at_24h"] and p["at_24h"].get("engagement_rate") is not None],
                                 key=lambda p: -p["at_24h"]["engagement_rate"])[:10],
             "followers_now": snaps[-1][1] if snaps else None,
+            "experiment": _experiment({"all_posts": posts}, now),
             "notes": _notes(originals, posts),
             "method": {"window_hours": WINDOW_H, "measured_between_hours": list(NEAR_24H), "min_posts_for_a_winner": MIN_N, "ranking": "the geometric mean of the impressions lift (median at 24 h vs all posts) and the engagement lift (pooled rate at 24 h vs all posts)",
                        "engagement": " + ".join(ENGAGEMENT), "followers": "estimate: the account's follower change in the 24 h after a post, split "
                        "by 24 h impressions among the posts published in that window (X does not say which post brought a follower)",
                        "cost": "no X reads: the snapshots newsdesk.x_history already takes inside its own daily cap"}}
+
+
+def _family(detector: str) -> str:
+    from app.growth.experiment import family
+
+    return family(detector)
+
+
+def _experiment(rep: dict[str, Any], now: datetime) -> dict[str, Any]:
+    from app.growth import experiment
+
+    return experiment.summary(rep, now)
+
+
+def posted_by_family(db: Session, start: datetime, end: datetime) -> dict[str, int]:
+    """Originals posted between start and end, per experiment family (for the daily slate). No X reads."""
+    out: dict[str, int] = {}
+    for d in _linked(db):
+        at = (posted_of(d) or {}).get("at")
+        if at and start <= datetime.fromisoformat(at) < end:
+            f = _family(d.detector)
+            out[f] = out.get(f, 0) + 1
+    return out
 
 
 def _lift(s: dict[str, Any], overall: dict[str, Any]) -> dict[str, Any]:

@@ -4,6 +4,7 @@ Approve only MARKS a draft approved. Nothing in this module (or app.growth) post
 the image and posts by hand.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -12,7 +13,8 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.config.settings import get_settings
-from app.growth import drafts, editorial, graphics, performance, sources, store
+from app.db.base import utcnow
+from app.growth import drafts, editorial, experiment, graphics, performance, sources, store
 from app.models.market_memory import GrDraft
 
 router = APIRouter(prefix="/originals", tags=["originals"])
@@ -40,8 +42,12 @@ def list_drafts(db: DbSession, status: str | None = Query(None), format: str | N
     views = [drafts.view(d) | {"performance": metrics.get(d.id)} for d in rows]
     pending = views if status == "pending" and not format and offset == 0 and len(rows) < limit else [
         drafts.view(d) for d in db.scalars(select(GrDraft).where(GrDraft.status == "pending"))]
-    top = editorial.shortlist(pending, drafts.GENERATOR, _lift(db))
-    return {"drafts": views, "counts": {k: int(counts.get(k, 0)) for k in drafts.STATUSES}, "top": top,
+    lift = _lift(db)
+    top = editorial.shortlist(pending, drafts.GENERATOR, lift)
+    ex_start = datetime.combine(experiment.START, datetime.min.time(), tzinfo=timezone.utc)
+    slate = experiment.slate(pending, drafts.GENERATOR, performance.posted_by_family(db, ex_start, ex_start + timedelta(days=experiment.DAYS)), lift)
+    return {"drafts": views, "counts": {k: int(counts.get(k, 0)) for k in drafts.STATUSES}, "top": top, "slate": slate,
+            "experiment": experiment.window(utcnow()),
             "switches": {"growth_enabled": bool(s.growth_enabled), "growth_collect_enabled": bool(s.growth_collect_enabled),
                          "intel_enabled": bool(s.intel_enabled)},
             "publishing": "manual: approving marks a draft approved; nothing is posted automatically"}
