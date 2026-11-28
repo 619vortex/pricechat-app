@@ -268,15 +268,22 @@ def _cq(data: str, uid: int = 555, **frm: Any) -> dict[str, Any]:
 def test_tick_posts_one_quiet_post_hides_the_split_and_reveals_it_at_the_lock(db: Session, live: Any) -> None:
     bot = FakeBot()
     reader = _reader({DAY - timedelta(days=1): 60000.0, DAY: 61000.0})
+    tg._launched.clear()
     out = asyncio.run(engine.tick(db, live, bot, NOW, reader))
     assert out["opened"] == ["daily:BTC:2026-11-30", "weekly:BTC:2026-11-30"] and out["posted"] == 2
+    # the launch: one announcement, just before the very first group call, then never again
+    assert [k for k, _ in bot.sent] == ["message", "photo", "photo"] and "Predictions is live" in bot.sent[0][1]["text"]
+    assert bot.sent[0][1]["chat"] == "@testgroup"
     asyncio.run(engine.tick(db, live, bot, NOW + timedelta(minutes=1), reader))
-    assert len(bot.sent) == 2  # idempotent: no second post
+    tg._launched.clear()  # a restart: the database still knows the group has had its first call
+    asyncio.run(engine.tick(db, live, bot, NOW + timedelta(minutes=2), reader))
+    assert len(bot.sent) == 3  # idempotent: no second post, no second announcement
+    bot.sent.clear()
     q = db.scalar(select(PredQuestion).where(PredQuestion.kind == "daily"))
     asyncio.run(tg.handle_callback(db, bot, live, _cq(f"pd:v:{q.id}:up"), NOW + timedelta(minutes=2)))
     text, alert = bot.answers[-1]
     assert text.startswith("Your call is Higher") and "pending until you link a Passport" in text and not alert
-    assert len(bot.sent) == 2  # a vote adds no message to the group
+    assert bot.sent == []  # a vote adds no message to the group
     cap = tg.caption(db, q, NOW)
     assert "1 call so far" in cap and "%" not in cap  # the split stays hidden while open
     asyncio.run(engine.tick(db, live, bot, service._aware(q.locks_at), reader))

@@ -190,10 +190,31 @@ def info_buttons() -> list[list[dict[str, str]]]:
 # --- posting ----------------------------------------------------------------------------------------------------------------------
 
 
+LAUNCH_TEXT = ("🎯 <b>Price Chat Predictions is live</b>\n\n"
+               "One free Bitcoin call a day: will BTC close higher or lower than yesterday?\n\n"
+               "• Today's first call is the post right below\n"
+               "• Tap <b>Higher</b> or <b>Lower</b> under it. You can change your call until 20:00 UTC\n"
+               "• It settles on the Hyperliquid BTC daily close (00:00 UTC)\n"
+               "• No sign-up needed. Link a Kiwi Passport to keep your Predictor XP, or play on pricechat.live/predictions\n\n"
+               "<i>Free game for XP only. No money involved. Not financial advice.</i>")
+_launched: set[str] = set()
+
+
+def _first_group_post(db: Session, chat: str) -> bool:
+    return chat not in _launched and db.scalar(select(PredQuestion.id).where(
+        PredQuestion.tg_chat == chat, PredQuestion.tg_message_id.is_not(None)).limit(1)) is None
+
+
 async def announce(db: Session, client: Any, settings: Any, q: PredQuestion, now: datetime) -> bool:
     chat = group_chat(settings)
     if not chat or q.tg_message_id:
         return False
+    if mode(settings) == "live" and _first_group_post(db, str(chat)):  # the launch: one announcement, just before the very first group call
+        _launched.add(str(chat))
+        try:
+            await client.send_message(chat, LAUNCH_TEXT, html=True)
+        except Exception as exc:  # noqa: BLE001 - the call itself still goes out
+            log.warning("predictions: launch announcement not sent (%s)", type(exc).__name__)
     sent = await client.send_photo(chat, card_png(q), caption(db, q, now), buttons=vote_buttons(q), html=True)
     q.tg_chat, q.tg_message_id, q.tg_shown, q.tg_edited_at = str(chat), int(sent.get("message_id") or 0) or None, 0, now
     db.commit()
