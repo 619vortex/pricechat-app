@@ -381,7 +381,8 @@ def test_kiwi_migrations_follow_productions_trending_revision(tmp_path: Path) ->
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(alembic_config())
-    assert script.get_heads() == ["0125_predictions"]  # 0125: Price Chat Predictions (additive, 2026-11-27)
+    assert script.get_heads() == ["0126_passport2"]  # 0126: Kiwi Passport 2.0 (additive, 2026-11-28)
+    assert script.get_revision("0126_passport2").down_revision == "0125_predictions"
     assert script.get_revision("0125_predictions").down_revision == "0124_growth_originals"
     assert script.get_revision("0124_growth_originals").down_revision == "0123_market_memory"
     assert script.get_revision("0123_market_memory").down_revision == "0122_intel_shadow_gate"
