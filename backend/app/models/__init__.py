@@ -113,3 +113,4 @@ from app.models.kalshi import KalshiBot, KalshiLink, KalshiReport  # noqa: E402,
 from app.models.intel import AiUsage, IntelJob, IntelWorker  # noqa: E402,F401  (Terminal Intelligence Engine channel, migration 0121)
 from app.models.intel_shadow import IntelShadow  # noqa: E402,F401  (the semantic gate's shadow record, migration 0122)
 from app.models.market_memory import GrDraft, MmSeries  # noqa: E402,F401  (Growth Engine: Market Memory 0123, Originals queue 0124)
+from app.models.predictions import PredQuestion, PredTgUser, PredVote  # noqa: E402,F401  (Price Chat Predictions, migration 0125: inert in this rollback build)
