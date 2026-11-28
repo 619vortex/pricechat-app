@@ -131,12 +131,13 @@ def call_card(q: dict[str, Any], w: int = 1280, h: int = 720) -> bytes:
     x, py = pad, y + 74
     for i, lab in enumerate(q["options"]):
         f = _inter(26, "Bold")
-        pw = c.tw(lab, f) + 56
+        shown = ("▲ " if q["kind"] == "daily" and i == 0 else "▼ " if q["kind"] == "daily" else "") + lab
+        pw = c.tw(shown, f) + 56  # measured with its arrow, so the label sits inside its pill
         if x + pw > w - pad:
             x, py = pad, py + 70
         col = GREEN if (q["kind"] == "daily" and i == 0) else (RED if q["kind"] == "daily" else SOFT)
         c.rect((x, py, x + pw, py + 54), RAISE, r=27, outline=LINE, width=2)
-        c.text((x + 28, py + 13), ("▲ " if q["kind"] == "daily" and i == 0 else "▼ " if q["kind"] == "daily" else "") + lab, f, col)
+        c.text((x + 28, py + 13), shown, f, col)
         x += pw + 14
     c.rect((w - pad - 300, 60, w - pad, 108), RAISE, r=24, outline=LINE, width=2)
     c.text((w - pad - 150, 84), f"Locks {q['lock_label']}", _inter(20, "Bold"), GOLD, anchor="mm")
