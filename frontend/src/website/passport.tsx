@@ -21,6 +21,7 @@ import { PassportPlay } from "./play";
 import { WatchEarn } from "./watch";
 import { XFeedSection } from "./xfeed";
 import { VipStatus } from "./crew";
+import { PredictionsTab, usePredictions } from "./predictions";
 import { VpnStatus } from "./vpn";
 import { desktopSignInToResume } from "./vpnDesktop";
 import { vpnReturnToResume } from "./vpnConfig";
@@ -61,10 +62,11 @@ export function ProfilePage() {
 function Passport() {
   useCanonicalOrigin();
   const [p, setP] = useState<Passport | null>(null);
+  const [predictions, reloadPredictions] = usePredictions();  // false: not available to this member (feature flag / preview list)
   const [tab, setTab] = useState(() => (typeof location !== "undefined" ? location.hash.replace("#", "") : "") || "passport");
   const selectTab = (k: string) => { setTab(k); try { history.replaceState(null, "", k === "passport" ? location.pathname : `#${k}`); } catch { /* sandboxed */ } };
   useEffect(() => {  // a link to /passport#realm from this very page switches the tab too
-    const onHash = () => { const h = location.hash.replace("#", ""); if (h === "realm" || h === "passport") setTab(h); };
+    const onHash = () => { const h = location.hash.replace("#", ""); if (h === "realm" || h === "passport" || h === "predictions") setTab(h); };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -168,7 +170,8 @@ function Passport() {
 
   const { member, rank } = p;
   const roles = p.roles ?? [];
-  const tabs = [["passport", "🥝 Passport"], ["realm", "⚔️ Realm"], ...(roles.includes("WORKER") ? [["worker", "👷 Worker"]] : []),
+  const tabs = [["passport", "🥝 Passport"], ...(predictions ? [["predictions", "🎯 Predictions"]] : []), ["realm", "⚔️ Realm"],
+    ...(roles.includes("WORKER") ? [["worker", "👷 Worker"]] : []),
     ...(roles.includes("MANAGER") ? [["manager", "🧭 Manager"]] : [])] as [string, string][];
   const shownTab = tabs.some(([k]) => k === tab) ? tab : "passport";
   return (
@@ -186,7 +189,7 @@ function Passport() {
           {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={shownTab === k} onClick={() => selectTab(k)}>{l}</button>)}
         </nav>
       )}
-      {shownTab === "realm" ? <RealmTab /> : shownTab === "worker" ? <WorkerTab /> : shownTab === "manager" ? <ManagerTab /> : (
+      {shownTab === "predictions" && predictions ? <PredictionsTab data={predictions} reload={reloadPredictions} /> : shownTab === "realm" ? <RealmTab /> : shownTab === "worker" ? <WorkerTab /> : shownTab === "manager" ? <ManagerTab /> : (
       <div className="pp-flow">
         {roles.length > 0 && <div className="pub-roles">{roles.includes("WORKER") && <WorkerBadge />}{roles.includes("MANAGER") && <ManagerBadge />}</div>}
         {/* 0. Your name: picked right here on day one, then changed from the pencil next to it in the card below */}

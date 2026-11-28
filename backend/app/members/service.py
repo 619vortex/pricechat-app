@@ -103,6 +103,10 @@ def link_identity(db: Session, member: Member, platform: str, platform_user_id: 
         from app.members.combot import on_telegram_linked
 
         on_telegram_linked(db, member)
+        if uid.lstrip("-").isdigit():  # Price Chat Predictions: the Telegram account's calls (and pending XP) become the member's
+            from app.predictions.service import on_telegram_linked as predictions_linked
+
+            predictions_linked(db, member, int(uid))
     return ident
 
 

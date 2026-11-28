@@ -94,6 +94,7 @@ export interface HomeData {
   links: Record<Network, string | null>;
   growth?: Partial<Record<Network, Growth | null>>; // real counts per linked network (null = not measured yet)
   site_url: string | null;
+  predictions?: boolean; // Price Chat Predictions is live: the Predictions link shows
   trading_bot?: boolean; // the VIP Trading Bot funnel is open to the public: the TRADING BOT tab shows
 }
 

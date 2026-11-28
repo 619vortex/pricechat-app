@@ -79,6 +79,13 @@ describe("homepage", () => {
     expect(container.querySelector<HTMLAnchorElement>(".site-join-x")!.href).toBe("https://x.com/pricechat");
   });
 
+  it("links Predictions in the header only once it is live", async () => {
+    serve({ "/api/website/home": baseHome({ predictions: true }) });
+    const { container } = await renderSite(<Website />);
+    const nav = within(container.querySelector(".site-nav")!);
+    expect(nav.getByRole("link", { name: "Predictions" }).getAttribute("href")).toBe("/predictions");
+  });
+
   it("shows franchise sections, trending topics and category links once real data exists", async () => {
     serve({
       "/api/website/home": baseHome({

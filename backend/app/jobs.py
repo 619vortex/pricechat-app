@@ -1185,6 +1185,21 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
 
         specs.append(JobSpec("growth.originals", "Growth Engine: Originals drafts", "Hourly: once a day (after 02:00 UTC) runs the detectors over Market Memory and queues the best findings as drafts in Admin › X › Originals, with their numbers, calculation and chart; applies the writer's wording when it passes the figures gate. Approval only marks a draft approved: never publishes",
                              3600, growth_originals, initial_delay_seconds=1500, timeout_seconds=900))  # after growth.collect (600 s) has stored today
+    if s.predictions_mode != "off":  # Price Chat Predictions (app/predictions): not even registered while the feature flag is off
+        async def predictions_tick(ctx: JobContext) -> dict[str, Any]:
+            from app.predictions import engine
+
+            client = make_client(s, runtime.telegram.transport) if s.telegram_configured else None
+            try:
+                return await engine.tick(ctx.db, s, client, ctx.now)
+            finally:
+                if client is not None:
+                    await client.aclose()
+
+        specs.append(JobSpec("predictions.tick", "Price Chat Predictions", "Every minute: opens the daily (13:30 UTC) and weekly (Monday) "
+                             "Bitcoin calls and posts them, keeps the vote count current, locks them, settles them from two matching reads of the "
+                             "Hyperliquid daily close and writes Predictor XP (never rank or money XP). PREDICTIONS_MODE preview posts to the test chat only",
+                             60, predictions_tick, initial_delay_seconds=90, timeout_seconds=240))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs

@@ -327,6 +327,14 @@ class Settings(BaseSettings):
     growth_drafts_per_format: int = Field(5, ge=1, le=10)  # drafts kept per format per generation run
     growth_max_drafts_per_run: int = Field(15, ge=1, le=50)
     growth_verify_sources: bool = True  # G2: a finding's stored inputs are re-read from their source before it is drafted (app/growth/verify.py)
+    # Price Chat Predictions (app/predictions): free daily / weekly market calls for XP (never money). The feature flag:
+    # off: nothing runs and every member route answers 404. preview: the full experience, but the group posts go to
+    # predictions_preview_chat (a private test chat) and the Passport tab shows only to predictions_preview_members; live: @cryptopricechat.
+    predictions_mode: str = Field("off", pattern="^(off|preview|live)$")
+    predictions_group: str = "@cryptopricechat"
+    predictions_preview_chat: str = ""  # chat id of the private test group or the owner's own chat with the bot
+    predictions_preview_members: str = ""  # comma-separated Passport usernames who see the tab in preview
+    predictions_site_url: str = "https://pricechat.live"
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

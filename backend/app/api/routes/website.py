@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import DbSession, Runtime
 from app.api.schemas import StrictInput
+from app.config.settings import get_settings
 from app.connectors.state import get_connector_state
 from app.analytics.community import growth as community_growth
 from app.db.base import utcnow
@@ -139,6 +140,7 @@ def _home(db: Session) -> dict[str, Any]:
         "growth": community_growth(db, links),  # real counts and history per linked network; None = not measured yet
         "site_url": row.site_url,
         "trading_bot": _trading_bot_open(db),  # the TRADING BOT tab shows only once the owner opens the funnel
+        "predictions": get_settings().predictions_mode == "live",  # the Predictions link shows only once the owner turns it live
     }
 
 
