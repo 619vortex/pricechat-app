@@ -81,6 +81,8 @@ class WorldMonitorIn(StrictInput):
     feeds: dict[str, dict[str, Any]] = Field(default_factory=dict)
     signals: list[dict[str, Any]] = Field(default_factory=list, max_length=400)
     summary: dict[str, Any] = Field(default_factory=dict)
+    feeds_ok: int | None = Field(None, ge=0, le=1000)  # bridge 1.1.0+; older bridges leave them out (counted from `feeds`)
+    feeds_failed: int | None = Field(None, ge=0, le=1000)
 
 
 @router.post("/world-monitor")

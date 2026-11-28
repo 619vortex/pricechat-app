@@ -29,8 +29,9 @@ from typing import Any, Callable
 
 import httpx
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PORT = 46124  # the desktop window's own copy uses 46123
+AUTH_PROBE = "local-env-update"  # behind the sidecar's token check; GET is refused with 405 (POST only), so probing changes nothing
 INTERVAL_S = 300
 STOP = False
 log = logging.getLogger("worldmonitor")
@@ -80,6 +81,98 @@ def app_version(install: Path) -> str:
     return ""
 
 
+# ---------------------------------------------------------------- who holds our port (Windows; tests mock these)
+
+def listening_pid(port: int) -> int | None:
+    """The pid listening on 127.0.0.1:<port> (TCP), from `netstat -ano` (locale-proof: a listening row's foreign address is *:0)."""
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=15,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_listening_pid(out, port)
+
+
+def parse_listening_pid(netstat: str, port: int) -> int | None:
+    for line in netstat.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[2] in ("0.0.0.0:0", "[::]:0") \
+                and parts[1] in (f"127.0.0.1:{port}", f"0.0.0.0:{port}") and parts[-1].isdigit():
+            return int(parts[-1])
+    return None
+
+
+def wm_sidecar_dir() -> Path | None:
+    """%LOCALAPPDATA%\\World Monitor\\sidecar: the only place a process we may stop can run from."""
+    base = os.environ.get("LOCALAPPDATA")
+    return Path(base) / "World Monitor" / "sidecar" if base else None
+
+
+def is_wm_sidecar(path: str | None) -> bool:
+    """True only for World Monitor's own sidecar node.exe under %LOCALAPPDATA%\\World Monitor\\sidecar\\."""
+    root = wm_sidecar_dir()
+    if not path or root is None:
+        return False
+    exe, root_s = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(root))
+    try:
+        inside = os.path.commonpath([exe, root_s]) == root_s
+    except ValueError:  # different drives
+        return False
+    return inside and os.path.basename(exe) == "node.exe"
+
+
+_QUERY, _TERMINATE, _SYNC = 0x1000, 0x0001, 0x00100000  # PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, SYNCHRONIZE
+
+
+def _image(handle: Any) -> str | None:
+    import ctypes
+    from ctypes import wintypes
+
+    buf, size = ctypes.create_unicode_buffer(32768), wintypes.DWORD(32768)
+    if not ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+        return None
+    return buf.value
+
+
+def process_path(pid: int) -> str | None:
+    """The executable of `pid`, or None (no such process / not Windows / no access)."""
+    try:
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+    except (ImportError, AttributeError):
+        return None
+    h = k32.OpenProcess(_QUERY, False, pid)
+    if not h:
+        return None
+    try:
+        return _image(h)
+    finally:
+        k32.CloseHandle(h)
+
+
+def terminate_wm_sidecar(pid: int) -> bool:
+    """Stops `pid` only if, checked again on the SAME handle (so a reused pid can't be hit), it is World Monitor's sidecar node.exe."""
+    try:
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+    except (ImportError, AttributeError):
+        return False
+    h = k32.OpenProcess(_QUERY | _TERMINATE | _SYNC, False, pid)
+    if not h:
+        return False
+    try:
+        if not is_wm_sidecar(_image(h)):
+            return False
+        if not k32.TerminateProcess(h, 1):
+            return False
+        k32.WaitForSingleObject(h, 10_000)
+        return True
+    finally:
+        k32.CloseHandle(h)
+
+
 class Sidecar:
     """Our own headless copy of the app's local data server, restarted if it dies."""
 
@@ -88,6 +181,7 @@ class Sidecar:
         self.token = secrets.token_hex(24)
         self.proc: subprocess.Popen[bytes] | None = None
         self.base = f"http://127.0.0.1:{port}"
+        self.note = ""  # why the sidecar isn't usable, sent with the snapshot
 
     def env(self) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if not k.startswith("PRICECHAT_")}  # never hand our server token to the app
@@ -98,27 +192,74 @@ class Sidecar:
                    LOCAL_API_MODE="desktop", LOCAL_API_CLOUD_FALLBACK="false")
         return env
 
-    def alive(self) -> bool:
+    def probe(self) -> str:
+        """Who answers on our port: "ours" (accepts OUR token), "foreign" (a server that rejects our token: an orphaned sidecar from an
+        earlier bridge run, 2026-11-22), or "down" (nothing usable). /api/local-status needs no token, so it alone can't tell an orphan
+        from our own copy; GET /api/local-env-update sits behind the sidecar's token check and only accepts POST, so with the right
+        token it answers 405 and changes nothing, with a wrong one 401."""
         try:
-            return httpx.get(f"{self.base}/api/local-status", timeout=3).json().get("success") is True
-        except (httpx.HTTPError, ValueError):
+            if httpx.get(f"{self.base}/api/local-status", timeout=3).json().get("success") is not True:
+                return "down"
+            r = httpx.get(f"{self.base}/api/{AUTH_PROBE}", headers={"Authorization": f"Bearer {self.token}"}, timeout=3)
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return "down"
+        return "foreign" if r.status_code in (401, 403) else "ours" if r.status_code < 500 else "down"
+
+    def alive(self) -> bool:
+        return self.probe() == "ours"
+
+    def free_port(self) -> bool:
+        """The port is answered by a server that rejects our token. Stop it ONLY if its executable is World Monitor's own sidecar
+        node.exe under %LOCALAPPDATA%\\World Monitor\\sidecar\\; never touch any other process. True when the port is free again."""
+        pid = listening_pid(self.port)
+        if pid is None:
+            self.note = f"port {self.port} answers but no listening process was found"
+            log.warning("%s", self.note)
             return False
+        path = process_path(pid)
+        if not is_wm_sidecar(path):
+            self.note = f"port {self.port} is held by another program (pid {pid}), not World Monitor's sidecar, left alone: {path or 'unknown'}"
+            log.error("%s; stop it or set a different port", self.note)
+            return False
+        log.warning("port %s is held by an orphaned World Monitor sidecar (pid %s, %s) that rejects our token: stopping it", self.port, pid, path)
+        if not terminate_wm_sidecar(pid):
+            self.note = f"couldn't stop the orphaned World Monitor sidecar (pid {pid}) on port {self.port}"
+            log.error("%s", self.note)
+            return False
+        for _ in range(10):
+            if listening_pid(self.port) is None:
+                return True
+            time.sleep(0.5)
+        self.note = f"port {self.port} still busy after stopping pid {pid}"
+        log.error("%s", self.note)
+        return False
 
     def ensure(self) -> bool:
         if self.proc is not None and self.proc.poll() is None and self.alive():
+            self.note = ""
             return True
         self.stop()
+        if self.probe() == "foreign" and not self.free_port():
+            return False
         node = self.install / "sidecar" / "node" / "node.exe"
         script = self.install / "sidecar" / "local-api-server.mjs"
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         self.proc = subprocess.Popen([str(node), str(script)], env=self.env(), cwd=str(self.install / "sidecar"),
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
         for _ in range(30):
-            if self.alive():
+            state = self.probe()
+            if state == "ours":
                 log.info("sidecar up on %s (pid %s)", self.base, self.proc.pid)
+                self.note = ""
                 return True
+            if state == "foreign":  # someone else won the port: never report their 401s as our feeds
+                self.note = f"another server answers on port {self.port} and rejects our token"
+                log.warning("%s", self.note)
+                self.stop()
+                return False
             time.sleep(1)
-        log.warning("sidecar didn't answer on %s", self.base)
+        self.note = f"sidecar didn't answer on {self.base}"
+        log.warning("%s", self.note)
         return False
 
     def get(self, route: str, timeout: float = 40) -> httpx.Response:
@@ -300,12 +441,37 @@ def collect(get: Callable[[str], httpx.Response]) -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001 - one bad feed never stops the snapshot
             feeds[name] = {"ok": False, "count": 0, "note": f"{type(e).__name__}: {str(e)[:120]}", "ms": int((time.monotonic() - t0) * 1000)}
     signals.sort(key=lambda s: (SEV_RANK.get(s.get("severity"), 9), -_ts(s.get("at"))))
-    return {"feeds": feeds, "signals": signals[:200], "summary": summary}
+    return {"feeds": feeds, "signals": signals[:200], "summary": summary, **feed_counts(feeds)}
+
+
+def feed_counts(feeds: dict[str, Any]) -> dict[str, int]:
+    """feeds_ok: feeds that answered; feeds_failed: feeds that errored (HTTP error, 401, timeout, bad data). A feed that only needs an
+    API key is neither: it is configured, not broken. All failing (or zero signals) for 30 min alerts the owner (backend)."""
+    ok = sum(1 for f in feeds.values() if f.get("ok"))
+    failed = sum(1 for f in feeds.values() if not f.get("ok") and not _keyless(f.get("note")))
+    return {"feeds_ok": ok, "feeds_failed": failed}
+
+
+def _keyless(note: Any) -> bool:
+    n = str(note or "").lower()
+    return any(w in n for w in ("not configured", "api key", "needs a key", "missing key", "no key"))
+
+
+def down_snapshot(reason: str) -> dict[str, Any]:
+    """The sidecar isn't usable: every feed failed, with the reason, so the server shows and alerts on it instead of going quiet."""
+    feeds = {name: {"ok": False, "count": 0, "note": f"sidecar: {reason}"[:160], "ms": 0} for name, _, _ in FEEDS}
+    return {"feeds": feeds, "signals": [], "summary": {}, "feeds_ok": 0, "feeds_failed": len(feeds)}
+
+
+NEW_FIELDS = ("feeds_ok", "feeds_failed")
 
 
 def push(server: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
-    r = httpx.post(server.rstrip("/") + "/api/newsdesk-worker/world-monitor", json=payload, timeout=30,
-                   headers={"Authorization": f"Bearer {token}", "User-Agent": f"pricechat-worldmonitor/{VERSION}"})
+    url = server.rstrip("/") + "/api/newsdesk-worker/world-monitor"
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": f"pricechat-worldmonitor/{VERSION}"}
+    r = httpx.post(url, json=payload, timeout=30, headers=headers)
+    if r.status_code == 422 and any(k in payload for k in NEW_FIELDS):  # a server from before 1.1.0 rejects unknown fields
+        r = httpx.post(url, json={k: v for k, v in payload.items() if k not in NEW_FIELDS}, timeout=30, headers=headers)
     r.raise_for_status()
     return r.json()
 
@@ -350,18 +516,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         while not STOP:
             started = time.monotonic()
-            if side.ensure():
-                snap = collect(side.get)
-                payload = {"app_version": version, "bridge_version": VERSION, "collected_at": datetime.now(timezone.utc).isoformat(), **snap}
-                if a.dry_run:
-                    import json
+            snap = collect(side.get) if side.ensure() else down_snapshot(side.note or "not running")
+            if snap["feeds_ok"] == 0:
+                log.warning("no feed answered (%s failed)%s", snap["feeds_failed"], f": {side.note}" if side.note else "")
+            payload = {"app_version": version, "bridge_version": VERSION, "collected_at": datetime.now(timezone.utc).isoformat(), **snap}
+            if a.dry_run:
+                import json
 
-                    print(json.dumps({**payload, "signals": payload["signals"][:15]}, indent=1, default=str)[:6000])
-                else:
-                    try:
-                        log.info("pushed: %s", push(a.server, a.token, payload))
-                    except httpx.HTTPError as e:
-                        log.warning("push failed: %s", e)
+                print(json.dumps({**payload, "signals": payload["signals"][:15]}, indent=1, default=str)[:6000])
+            else:
+                try:
+                    log.info("pushed: %s", push(a.server, a.token, payload))
+                except httpx.HTTPError as e:
+                    log.warning("push failed: %s", e)
             if a.once or a.dry_run:
                 break
             while not STOP and time.monotonic() - started < a.interval:
