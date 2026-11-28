@@ -38,6 +38,12 @@ class Member(IdMixin, TimestampMixin, Base):
     rank_score: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)  # what the rank ladder uses
     last_active_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True)
     public_profile: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # /u/<username>
+    # Kiwi Passport 2.0 (app/passport, migration 0126): what the public page shows, all chosen by the member
+    bio: Mapped[str | None] = mapped_column(String(80))
+    title_badge: Mapped[str | None] = mapped_column(String(32))  # key of an earned badge whose title shows under the name
+    profile_sections: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # {"predictions": bool, ...}; None = the defaults
+    profile_ref_link: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)  # invite link on /u
+    profile_invited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())  # the one-time "make it public" invitation was answered
     # Pack Giveaway pulls shown in the Pokémon Portfolio (opt-in): a separate virtual section, never real holdings
     giveaway_in_portfolio: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     # Play Market: extra copies pulled from a pack are sold instantly for Play USDT (opt-in)
@@ -190,6 +196,10 @@ class Badge(IdMixin, TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(String(16), default="manual", nullable=False)  # auto | manual | partner
     criteria: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    family: Mapped[str | None] = mapped_column(String(16))  # Passport 2.0 collection: founders, community, predictor, ...
+    tier: Mapped[str | None] = mapped_column(String(8))  # bronze | silver | gold | mythic
+    title: Mapped[str | None] = mapped_column(String(48))  # the title a holder may show under their name
+    sort: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
 
 
 class MemberBadge(IdMixin, TimestampMixin, Base):
@@ -200,7 +210,16 @@ class MemberBadge(IdMixin, TimestampMixin, Base):
     badge_id: Mapped[int] = mapped_column(ForeignKey("badges.id", ondelete="CASCADE"), nullable=False)
     awarded_by: Mapped[str] = mapped_column(String(64), default="system", nullable=False)
     reason: Mapped[str] = mapped_column(String(256), default="", nullable=False)
+    serial: Mapped[int | None] = mapped_column(Integer)  # numbered badges (Founding Kiwi No. 014); unique per badge
+    featured_slot: Mapped[int | None] = mapped_column(Integer)  # 1-3: featured on the public Passport; unique per member
 
+
+
+# Passport 2.0: one holder per number of a numbered badge, one badge per featured slot
+Index("ux_member_badges_serial", MemberBadge.badge_id, MemberBadge.serial, unique=True,
+      sqlite_where=MemberBadge.serial.is_not(None), postgresql_where=MemberBadge.serial.is_not(None))
+Index("ux_member_badges_featured", MemberBadge.member_id, MemberBadge.featured_slot, unique=True,
+      sqlite_where=MemberBadge.featured_slot.is_not(None), postgresql_where=MemberBadge.featured_slot.is_not(None))
 
 class Entitlement(IdMixin, TimestampMixin, Base):
     """Something a rank (or, later, a purchase) unlocks. Defined now; nothing is gated or created automatically yet."""

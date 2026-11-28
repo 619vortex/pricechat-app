@@ -175,9 +175,15 @@ def public_profile(db: Session, username: str) -> dict[str, Any] | None:
     m = db.scalar(select(Member).where(Member.username_key == username.lower()))
     if m is None or not m.public_profile or m.status != "active":
         return None
-    return {"username": m.username, "joined_at": m.created_at.isoformat(), "rank": rank_out(ledger.rank_for(db, m.rank_score)),
-            "badges": [{"key": b["key"], "name": b["name"], "description": b["description"]} for b in badges_of(db, m)],
-            "roles": _roles(db, m.id)}
+    out = {"username": m.username, "joined_at": m.created_at.isoformat(), "rank": rank_out(ledger.rank_for(db, m.rank_score)),
+           "badges": [{"key": b["key"], "name": b["name"], "description": b["description"]} for b in badges_of(db, m)],
+           "roles": _roles(db, m.id)}
+    from app.passport import service as passport
+
+    if passport.visible(m):  # Kiwi Passport 2.0 (PASSPORT2_MODE): what the member chose to show, in the new layout
+        passport.ensure_catalog(db)
+        out.update(passport.public_v2(db, m))
+    return out
 
 
 def _roles(db: Session, member_id: int) -> list[str]:

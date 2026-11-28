@@ -120,7 +120,12 @@ def _profile(db: Any, username: str) -> Found | None:
     p = insights.public_profile(db, username)  # None unless the member made the profile public
     if p is None:
         return None
-    return {**heads.profile_head(p), "path": f"/u/{heads.encode_component(p['username'])}"}
+    out = {**heads.profile_head(p), "path": f"/u/{heads.encode_component(p['username'])}"}
+    if p.get("v") == 2:  # Kiwi Passport 2.0: the member's own share card
+        out["image"] = p["card"]
+        if p.get("title"):
+            out["description"] = f"{p['title']} · {out['description']}"
+    return out
 
 
 @router.get("/website/seo/og/{path:path}")
@@ -151,7 +156,7 @@ def link_preview(path: str, request: Request, db: DbSession, runtime: Runtime) -
     if image.startswith("/") and not image.startswith("//"):  # a card scan is a site path ("/cards/u/…"): previews need an absolute address
         image = base + image
     url = base + (found.get("path") or (f"/{path}" if path else "/"))
-    big = image.endswith("/og.jpg")  # the wide site picture; a card scan is portrait, so a small preview shows all of it
+    big = image.endswith("/og.jpg") or image.endswith("/card.png")  # a Passport 2.0 card is wide too  # the wide site picture; a card scan is portrait, so a small preview shows all of it
     t, d, u, i = escape(found["title"]), escape(found["description"]), escape(url), escape(image)
     robots = '<meta name="robots" content="noindex">' if noindex else ""
     ld = "" if noindex else heads.json_ld_script(found.get("json_ld") or [], base)
