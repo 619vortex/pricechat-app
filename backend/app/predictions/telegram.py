@@ -50,6 +50,28 @@ def group_chat(settings: Any) -> str | None:
     return None
 
 
+def preview_members(settings: Any) -> set[str]:
+    return {u.strip().lower().lstrip("@") for u in str(getattr(settings, "predictions_preview_members", "") or "").split(",") if u.strip()}
+
+
+def preview_allows(db: Session, settings: Any, chat_id: Any, user_id: int) -> bool:
+    """Who the bot answers while PREDICTIONS_MODE is preview: anyone in the private test chat; elsewhere (a private chat with the bot)
+    only a Passport on PREDICTIONS_PREVIEW_MEMBERS or a Telegram account that already played in the test chat. Everyone else,
+    and @cryptopricechat itself, sees nothing of Predictions until the owner turns it live. Always True when live."""
+    m = mode(settings)
+    if m == "live":
+        return True
+    if m != "preview":
+        return False
+    test_chat = str(getattr(settings, "predictions_preview_chat", "") or "").strip()
+    if test_chat and str(chat_id) == test_chat:
+        return True
+    member = service.member_for_tg(db, user_id) if user_id else None
+    if member is not None and (member.username or "").lower() in preview_members(settings):
+        return True
+    return bool(user_id) and db.scalar(select(PredTgUser.id).where(PredTgUser.tg_user_id == user_id)) is not None
+
+
 def e(s: Any) -> str:
     return html.escape(str(s), quote=False)
 
@@ -266,6 +288,10 @@ async def handle_callback(db: Session, client: Any, settings: Any, cq: dict[str,
     if not uid or frm.get("is_bot"):
         await client.answer_callback(cq["id"], "Bots can't take part.")
         return True
+    chat_id = ((cq.get("message") or {}).get("chat") or {}).get("id")
+    if not preview_allows(db, settings, chat_id, uid):
+        await client.answer_callback(cq["id"], "Predictions aren't open yet.")
+        return True
     if tapped_too_fast(uid):
         await client.answer_callback(cq["id"], "One moment: too many taps in a row.")
         return True
@@ -351,8 +377,8 @@ async def handle_command(db: Session, client: Any, settings: Any, chat_id: int, 
     if not is_ours(text):
         return False
     now = now or utcnow()
-    if mode(settings) == "off":
-        return False
+    if mode(settings) == "off" or not preview_allows(db, settings, chat_id, user_id):
+        return False  # not ours yet: the message goes on to the usual bot as if Predictions didn't exist
     word = text.strip().split()[0].split("@")[0].lower()
     tu = touch_user(db, {"id": user_id, "first_name": author or ""}, private=not group)
     db.commit()

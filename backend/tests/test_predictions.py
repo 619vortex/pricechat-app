@@ -334,6 +334,34 @@ def test_off_means_off(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     assert db.scalar(select(func.count()).select_from(PredQuestion)) == 0
 
 
+def test_preview_answers_only_the_test_chat_and_preview_people(db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    s = get_settings()
+    monkeypatch.setattr(s, "predictions_mode", "preview")
+    monkeypatch.setattr(s, "predictions_preview_chat", "-1009")
+    monkeypatch.setattr(s, "predictions_preview_members", "Owner")
+    bot = FakeBot()
+    q = _daily(db)
+
+    def cq(uid: int, chat: int) -> dict[str, Any]:
+        return {"id": "cb", "data": f"pd:v:{q.id}:up", "from": {"id": uid, "first_name": "T"}, "message": {"chat": {"id": chat, "type": "supergroup"}}}
+
+    # the public group and strangers: nothing (commands fall through to the usual bot, buttons say not open)
+    assert not asyncio.run(tg.handle_command(db, bot, s, -100777, 700, "/predict", True, 1, "Pub", NOW))
+    assert not asyncio.run(tg.handle_command(db, bot, s, 700, 700, "/stats", False, None, "Pub", NOW))
+    asyncio.run(tg.handle_callback(db, bot, s, cq(700, -100777), NOW))
+    assert bot.answers[-1][0] == "Predictions aren't open yet."
+    assert db.scalar(select(func.count()).select_from(PredVote)) == 0 and db.scalar(select(func.count()).select_from(PredTgUser)) == 0
+    # the test chat: anyone there plays, and may then use the bot privately
+    asyncio.run(tg.handle_callback(db, bot, s, cq(701, -1009), NOW))
+    assert bot.answers[-1][0].startswith("Your call is Higher")
+    assert asyncio.run(tg.handle_command(db, bot, s, 701, 701, "/stats", False, None, "Tess", NOW))
+    # a linked Passport on the preview list, in a private chat
+    m, _ = _member(db, "owner")
+    members.link_identity(db, m, "telegram", "702", "owner_tg", "Own")
+    db.commit()
+    assert asyncio.run(tg.handle_command(db, bot, s, 702, 702, "/stats", False, None, "Own", NOW))
+
+
 # --- the Passport API ------------------------------------------------------------------------------------------------------------------
 
 
