@@ -22,6 +22,7 @@ import { WatchEarn } from "./watch";
 import { XFeedSection } from "./xfeed";
 import { VipStatus } from "./crew";
 import { PredictionsTab, usePredictions } from "./predictions";
+import { PassportCard, PassportInvite, ProfileTab, usePassport2, type PublicV2 } from "./identity";
 import { VpnStatus } from "./vpn";
 import { desktopSignInToResume } from "./vpnDesktop";
 import { vpnReturnToResume } from "./vpnConfig";
@@ -63,10 +64,11 @@ function Passport() {
   useCanonicalOrigin();
   const [p, setP] = useState<Passport | null>(null);
   const [predictions, reloadPredictions] = usePredictions();  // false: not available to this member (feature flag / preview list)
+  const [identity, reloadIdentity] = usePassport2();  // Kiwi Passport 2.0 (PASSPORT2_MODE): false while it isn't on for this member
   const [tab, setTab] = useState(() => (typeof location !== "undefined" ? location.hash.replace("#", "") : "") || "passport");
   const selectTab = (k: string) => { setTab(k); try { history.replaceState(null, "", k === "passport" ? location.pathname : `#${k}`); } catch { /* sandboxed */ } };
   useEffect(() => {  // a link to /passport#realm from this very page switches the tab too
-    const onHash = () => { const h = location.hash.replace("#", ""); if (h === "realm" || h === "passport" || h === "predictions") setTab(h); };
+    const onHash = () => { const h = location.hash.replace("#", ""); if (h === "realm" || h === "passport" || h === "predictions" || h === "profile") setTab(h); };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -170,7 +172,7 @@ function Passport() {
 
   const { member, rank } = p;
   const roles = p.roles ?? [];
-  const tabs = [["passport", "🥝 Passport"], ...(predictions ? [["predictions", "🎯 Predictions"]] : []), ["realm", "⚔️ Realm"],
+  const tabs = [["passport", "🥝 Passport"], ...(identity ? [["profile", "🪪 Profile"]] : []), ...(predictions ? [["predictions", "🎯 Predictions"]] : []), ["realm", "⚔️ Realm"],
     ...(roles.includes("WORKER") ? [["worker", "👷 Worker"]] : []),
     ...(roles.includes("MANAGER") ? [["manager", "🧭 Manager"]] : [])] as [string, string][];
   const shownTab = tabs.some(([k]) => k === tab) ? tab : "passport";
@@ -189,8 +191,9 @@ function Passport() {
           {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={shownTab === k} onClick={() => selectTab(k)}>{l}</button>)}
         </nav>
       )}
-      {shownTab === "predictions" && predictions ? <PredictionsTab data={predictions} reload={reloadPredictions} /> : shownTab === "realm" ? <RealmTab /> : shownTab === "worker" ? <WorkerTab /> : shownTab === "manager" ? <ManagerTab /> : (
+      {shownTab === "profile" && identity ? <ProfileTab data={identity} reload={reloadIdentity} /> : shownTab === "predictions" && predictions ? <PredictionsTab data={predictions} reload={reloadPredictions} /> : shownTab === "realm" ? <RealmTab /> : shownTab === "worker" ? <WorkerTab /> : shownTab === "manager" ? <ManagerTab /> : (
       <div className="pp-flow">
+        {identity && <PassportInvite data={identity} onAnswered={(d) => { void reloadIdentity(d); if (d.public_profile) selectTab("profile"); }} />}
         {roles.length > 0 && <div className="pub-roles">{roles.includes("WORKER") && <WorkerBadge />}{roles.includes("MANAGER") && <ManagerBadge />}</div>}
         {/* 0. Your name: picked right here on day one, then changed from the pencil next to it in the card below */}
         {(editName || !member.username_chosen) && (
@@ -651,6 +654,7 @@ function Settings({ p, act }: { p: Passport; act: (fn: () => Promise<unknown>, o
 // --- public profile ---------------------------------------------------------------------------------------------
 
 interface PublicProfile {
+  v?: number;  // 2: Kiwi Passport 2.0 (identity.tsx PublicV2)
   roles?: string[];
   username: string;
   joined_at: string;
@@ -691,6 +695,11 @@ export function PublicProfilePage() {
         </div>
       ) : (
         <>
+          {"v" in p && p.v === 2 ? (
+            <PassportCard p={p as unknown as PublicV2} onShare={() => void share()}
+                          actions={<>{shared && <span className="pc2-ok" role="status">Link copied ✓</span>}
+                            {isMe && <a className="site-textbutton" href="/passport#profile">Edit my Passport →</a>}</>} />
+          ) : (
           <section className={`site-passport pub-card rkd-tint-${p.rank.key} site-reveal`} aria-label={`${p.username}'s Kiwi Passport`}>
             <div className="site-passport-art"><RankKiwi art={p.rank.art} rankKey={p.rank.key} size={220} label={`${p.rank.name} Kiwi`}
                                                          worker={(p.roles ?? []).includes("WORKER")} /></div>
@@ -712,6 +721,7 @@ export function PublicProfilePage() {
               </div>
             </div>
           </section>
+          )}
 
           {ranks.length > 0 && (
             <section className="pp-section pub-journey site-reveal" aria-labelledby="pub-journey-title">

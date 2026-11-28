@@ -1200,6 +1200,16 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                              "Bitcoin calls and posts them, keeps the vote count current, locks them, settles them from two matching reads of the "
                              "Hyperliquid daily close and writes Predictor XP (never rank or money XP). PREDICTIONS_MODE preview posts to the test chat only",
                              60, predictions_tick, initial_delay_seconds=90, timeout_seconds=240))
+    if s.passport2_mode != "off":  # Kiwi Passport 2.0 (app/passport): not even registered while the feature flag is off
+        async def passport_badges(ctx: JobContext) -> dict[str, Any]:
+            from app.passport import service as passport
+
+            return passport.tick(ctx.db, ctx.now)
+
+        specs.append(JobSpec("passport.badges", "Kiwi Passport badges", "Every 15 minutes: numbers new Founding Kiwis (first 100, until "
+                             "1 Jan 2027), gives the collectible badges members now meet (never removes one) and refreshes rarity. Never "
+                             "changes XP, ranks or rewards. PASSPORT2_MODE preview: only the preview members",
+                             900, passport_badges, initial_delay_seconds=240, timeout_seconds=300))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs

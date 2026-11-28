@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.members.notify import notify
 from app.models.members import Badge, Member, MemberBadge, ReputationEvent
+from app.passport.rules import NEW_KEYS as _NEW_KEYS
 
 
 def _meets(db: Session, member: Member, criteria: dict) -> bool:
@@ -21,7 +22,34 @@ def _meets(db: Session, member: Member, criteria: dict) -> bool:
             ReputationEvent.member_id == member.id, ReputationEvent.event_type == criteria["event_type"],
             ReputationEvent.reversed_at.is_(None), ReputationEvent.reverses_id.is_(None))) or 0
         return n >= int(criteria.get("count", 1))
-    return False
+    # Kiwi Passport 2.0 criteria (app/passport/rules.py): verified data only
+    if "best_streak" in criteria:
+        from app.models.members import MemberStreak
+
+        return (db.scalar(select(MemberStreak.best).where(MemberStreak.member_id == member.id)) or 0) >= int(criteria["best_streak"])
+    if "packs_opened" in criteria:
+        from app.models.members import MemberPackOpen
+
+        n = db.scalar(select(func.count()).select_from(MemberPackOpen).where(MemberPackOpen.member_id == member.id)) or 0
+        return n >= int(criteria["packs_opened"])
+    if "binder_cards" in criteria:
+        from app.models.members import MemberBinderCard
+
+        n = db.scalar(select(func.count()).select_from(MemberBinderCard).where(MemberBinderCard.member_id == member.id)) or 0
+        return n >= int(criteria["binder_cards"])
+    if "linked" in criteria:
+        from app.models.members import LinkedIdentity
+
+        return db.scalar(select(LinkedIdentity.id).where(LinkedIdentity.member_id == member.id,
+                                                         LinkedIdentity.platform == criteria["linked"]).limit(1)) is not None
+    if "predictor" in criteria:
+        from app.passport.service import predictor_summary
+
+        st = predictor_summary(db, member)
+        if criteria["predictor"] == "accuracy":
+            return st["decided"] >= int(criteria.get("decided", 30)) and st["right"] / st["decided"] >= float(criteria["min"])
+        return st.get(criteria["predictor"], 0) >= int(criteria["min"])
+    return False  # unknown kinds, and Founding Kiwi (numbered: app/passport/service.award_founding)
 
 
 def auto_badges(db: Session) -> list[Badge]:
@@ -37,8 +65,17 @@ def evaluate_auto_badges(db: Session, member: Member, badges: list[Badge] | None
     badge ids (read once, and updated here)."""
     owned = owned_badge_ids(db, member) if owned is None else owned
     new = []
+    from app.passport.service import may_earn_new_badges
+
+    new_ok: bool | None = None
     for badge in auto_badges(db) if badges is None else badges:
-        if badge.id not in owned and _meets(db, member, badge.criteria or {}):
+        if badge.id in owned:
+            continue
+        if badge.key in _NEW_KEYS:  # Passport 2.0 badges: only where PASSPORT2_MODE allows it
+            new_ok = may_earn_new_badges(db, member) if new_ok is None else new_ok
+            if not new_ok:
+                continue
+        if _meets(db, member, badge.criteria or {}):
             db.add(MemberBadge(member_id=member.id, badge_id=badge.id, awarded_by="system", reason=badge.description))
             notify(db, member.id, "badge", f"Badge earned: {badge.name}", badge.description, {"badge": badge.key})
             owned.add(badge.id)

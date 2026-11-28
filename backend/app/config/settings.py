@@ -335,6 +335,10 @@ class Settings(BaseSettings):
     predictions_preview_chat: str = ""  # chat id of the private test group or the owner's own chat with the bot
     predictions_preview_members: str = ""  # comma-separated Passport usernames who see the tab in preview
     predictions_site_url: str = "https://pricechat.live"
+    # Kiwi Passport 2.0 (app/passport): public identity, collectible badges, share cards, /passport, community score. off: nothing changes
+    # (public pages, badges and the bot behave as before); preview: only passport2_preview_members see and earn any of it; live: everyone.
+    passport2_mode: str = Field("off", pattern="^(off|preview|live)$")
+    passport2_preview_members: str = ""  # comma-separated Passport usernames
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

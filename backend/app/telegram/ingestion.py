@@ -590,7 +590,16 @@ class TelegramIngestor:
         from app.predictions import telegram as predictions
 
         psettings = get_settings()
+        from app.passport import telegram as passport
+
         for chat_id, user_id, text, group, msg_id, chat_username, author in pending:
+            try:  # Kiwi Passport 2.0: /passport, the personal share card (inert while PASSPORT2_MODE is off)
+                if passport.is_ours(text) and await passport.handle_command(self.db, self.client, psettings, chat_id, user_id, text, group, msg_id):
+                    continue
+            except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
+                logger.warning("Passport command not answered (%s)", type(exc).__name__)
+                continue
             try:  # Price Chat Predictions: /predict /rank /stats /leaderboard /remind (inert while PREDICTIONS_MODE is off)
                 if predictions.mode(psettings) != "off" and predictions.is_ours(text):
                     if await predictions.handle_command(self.db, self.client, psettings, chat_id, user_id, text, group, msg_id, author):
