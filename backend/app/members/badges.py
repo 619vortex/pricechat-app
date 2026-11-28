@@ -49,7 +49,11 @@ def _meets(db: Session, member: Member, criteria: dict) -> bool:
         if criteria["predictor"] == "accuracy":
             return st["decided"] >= int(criteria.get("decided", 30)) and st["right"] / st["decided"] >= float(criteria["min"])
         return st.get(criteria["predictor"], 0) >= int(criteria["min"])
-    return False  # unknown kinds, and Founding Kiwi (numbered: app/passport/service.award_founding)
+    if "ci" in criteria:  # Researcher badges (Community Intelligence): accepted, verified tips only
+        from app.community_intel.service import metric
+
+        return metric(db, member, str(criteria["ci"])) >= int(criteria.get("min", 1))
+    return False  # unknown kinds, Founding Kiwi (app/passport/service.award_founding), Researcher of the Month (community_intel.award_month)
 
 
 def auto_badges(db: Session) -> list[Badge]:

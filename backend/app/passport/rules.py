@@ -16,7 +16,8 @@ FAMILIES: dict[str, dict[str, Any]] = {
     "collector": {"name": "Collector", "color": "#e05ad6", "sort": 5},
     "recruiter": {"name": "Recruiter", "color": "#7fd6ff", "sort": 6},
     "verified": {"name": "Verified", "color": "#9aa7a0", "sort": 7},
-    "honours": {"name": "Honours", "color": "#c7d0d6", "sort": 8},
+    "researcher": {"name": "Researcher", "color": "#6ab3f3", "sort": 8},  # Community Intelligence (COMMUNITY_INTEL_MODE)
+    "honours": {"name": "Honours", "color": "#c7d0d6", "sort": 9},
 }
 TIERS = ("bronze", "silver", "gold", "mythic")
 
@@ -84,7 +85,9 @@ NEW: list[dict[str, Any]] = [
     dict(key="wallet_verified", name="Wallet Verified", kind="auto", family="verified", tier="silver", title=None, sort=72,
          description="Proved a wallet with a signed message.", criteria={"event_type": "wallet.verified", "count": 1}),
 ]
-NEW_KEYS = {b["key"] for b in NEW}
+from app.community_intel.rules import BADGE_KEYS as CI_BADGE_KEYS  # noqa: E402 - Researcher badges: the same flag guard
+
+NEW_KEYS = {b["key"] for b in NEW} | CI_BADGE_KEYS
 
 
 def rarity(holders: int, members: int, serial: int | None = None) -> dict[str, Any]:
@@ -132,7 +135,7 @@ def level_for(score: int) -> dict[str, Any]:
 
 
 # --- the public page ----------------------------------------------------------------------------------------------------------------
-SECTIONS = ("community", "predictions", "streak", "platforms", "badges")
+SECTIONS = ("community", "research", "predictions", "streak", "platforms", "badges")
 DEFAULT_SECTIONS = {k: True for k in SECTIONS}
 FEATURED_SLOTS = 3
 BIO_MAX = 80

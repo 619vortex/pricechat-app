@@ -54,6 +54,7 @@ from app.api.routes import (
     kalshi,
     predictions,
     passport,
+    community_intel,
     short_market,
     tradingbot,
     tradingos,
@@ -402,7 +403,7 @@ def create_app(
     for module in (
         health, overview, agent, brand, model, knowledge, content, connectors, activity, settings, api_keys,
         telegram, telegram_account, community, opportunities, jobs, x, social, growth, analytics, youtube, website,
-        members, members_admin, admin, pokemon, portfolio, market, exchange, vault, brand_manager, newsdesk, newsdesk_worker, intel, intel_worker, originals, trending, terminal, desktop, short_market, invites, system, tradingbot, tradingos, trading, kiwibrain, arbitrage, burner, workers, rewards, home, seo, vpn, vortex, committee, webhooks, kalshi, predictions, passport,
+        members, members_admin, admin, pokemon, portfolio, market, exchange, vault, brand_manager, newsdesk, newsdesk_worker, intel, intel_worker, originals, trending, terminal, desktop, short_market, invites, system, tradingbot, tradingos, trading, kiwibrain, arbitrage, burner, workers, rewards, home, seo, vpn, vortex, committee, webhooks, kalshi, predictions, passport, community_intel,
     ):
         app.include_router(module.router, prefix="/api")
 

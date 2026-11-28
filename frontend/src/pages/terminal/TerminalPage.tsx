@@ -17,6 +17,7 @@ const NewsDesk = lazy(() => import("../x/NewsDesk").then((m) => ({ default: m.Ne
 const Trending = lazy(() => import("../x/TrendingTopics").then((m) => ({ default: m.TrendingTopics })));
 const Validation = lazy(() => import("./ValidationTab").then((m) => ({ default: m.ValidationTab })));
 const WorldMonitor = lazy(() => import("../WorldMonitorPage").then((m) => ({ default: m.WorldMonitorPage })));
+const Community = lazy(() => import("./CommunityLane").then((m) => ({ default: m.CommunityLane })));  // members' tips (COMMUNITY_INTEL_MODE)
 
 type DeskInfo = { id: number; status: string; headline: string; why: string; x_status: string; tg_status: string; released_at: string | null; x_note?: string; tg_note?: string };
 export type T2Story = Story & { desk?: DeskInfo; merged?: number[]; telegram?: { at: string; message_id: number; chat: string } | null; sensitive?: unknown };
@@ -154,6 +155,7 @@ export function TerminalPage() {
             <Featured s={featured} onOpen={() => setOpen({ ...feedOf({ ...data, stories: [featured], desk_only: [] })[0] })} onPublish={() => setQuick(featured)}
               onSkip={() => void run(() => post(`/terminal/stories/${featured.id}/reject`, { reason: "Skipped from the Terminal" }), "Skipped.")} />
           ) : <div className="t2-featured empty"><span className="t2-dot" /> Quiet right now. New stories appear here the moment they break.</div>}
+          <Suspense fallback={null}><Community /></Suspense>
           <section className="t2-feed" aria-label="Live feed">
             <div className="t2-feed-head">
               <h2>Live feed</h2>

@@ -619,6 +619,13 @@ async def publish_telegram(db: Session, settings: Settings, t: TtTopic, text: st
     srcs = [{"name": str(x.get("name") or x.get("outlet") or ""), "url": str(x.get("url") or "")} for x in (post.sources or [])][:4]
     message = {"link": link, "title": t.title, "headline": post.text.split("\n")[0][:200], "plain": post.text, "source": (srcs[0]["name"] if srcs else "Price Chat") or "Price Chat",
                "sources": srcs, "fingerprint": checks.fingerprint(t.title), "writer": "owner", "html": _tg_text(post.text, srcs)}
+    from app.community_intel import service as community_intel
+
+    if (spotted := community_intel.credit_line(db, t.key)):  # a member's accepted, verified tip, credited with their consent
+        import html as _html
+
+        message["plain"] = message["plain"] + "\n\n🔎 " + spotted
+        message["html"] = message["html"] + "\n\n🔎 " + _html.escape(spotted, quote=False)
     # owner, 2026-11-23: the Terminal's button carries a picture like every desk post: a licensed picture through the Visual Editor, else the
     # source article's own preview; with neither it is not sent unless the owner chose to send the words alone (text_ok)
     from app.newsdesk import clean

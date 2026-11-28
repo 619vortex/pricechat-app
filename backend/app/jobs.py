@@ -1210,6 +1210,25 @@ def build_jobs(runtime: AppRuntime) -> list[JobSpec]:
                              "1 Jan 2027), gives the collectible badges members now meet (never removes one) and refreshes rarity. Never "
                              "changes XP, ranks or rewards. PASSPORT2_MODE preview: only the preview members",
                              900, passport_badges, initial_delay_seconds=240, timeout_seconds=300))
+    if s.community_intel_mode != "off":  # Community Intelligence (app/community_intel): not even registered while the flag is off
+        async def community_intel_tick(ctx: JobContext) -> dict[str, Any]:
+            from app.community_intel import service as ci
+            from app.community_intel import telegram as ci_tg
+
+            out: dict[str, Any] = {"stories": ci.follow_stories(ctx.db, ctx.now), "month": ci.award_month(ctx.db, ctx.now)}
+            if s.telegram_configured:
+                client = make_client(s, runtime.telegram.transport)
+                try:
+                    out["notices"] = await ci_tg.deliver_notices(ctx.db, client)
+                finally:
+                    await client.aclose()
+            return out
+
+        specs.append(JobSpec("community_intel.tick", "Community Intelligence", "Every 5 minutes: re-checks recent tips for independent "
+                             "confirmation, joins accepted tips to the Terminal story about the same event, notes when such a story is published "
+                             "(and whether the tip came first), names the Researcher of the Month on the 1st and sends the desk's decisions to "
+                             "members in Telegram. Never publishes anything",
+                             300, community_intel_tick, initial_delay_seconds=300, timeout_seconds=240))
     for spec in specs:
         spec.describe = JOB_SUMMARIES.get(spec.name)
     return specs

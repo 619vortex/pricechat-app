@@ -16,12 +16,13 @@ export type PredSummary = { calls: number; decided: number; right: number; strea
 export type PublicV2 = {
   v: 2; username: string; joined_at: string; rank: Rank; roles?: string[]; display_name: string | null; accent: string; title: string | null; bio: string | null;
   featured: PBadge[]; badge_count: number; sections: Record<string, boolean>; card: string; collection?: PBadge[];
-  community?: { score: number; level: string }; predictions?: PredSummary; streak?: { current: number; best: number }; platforms?: string[]; invite?: string;
+  community?: { score: number; level: string }; research?: { sent: number; accepted: number; published: number; first_spotted: number; acceptance: number | null; points: number };
+  predictions?: PredSummary; streak?: { current: number; best: number }; platforms?: string[]; invite?: string;
 };
 export type CommunityScore = { score: number; level: { name: string; floor: number; next_at: number | null; next_name: string | null }; window_days: number;
   parts: { key: string; label: string; count: number; points: number }[]; penalty: number };
 export type Identity = {
-  public_profile: boolean; invited: boolean; title_badge: string | null; bio: string; accent: string; accents: string[]; accent_unlocked: boolean;
+  public_profile: boolean; invited: boolean; research_on?: boolean; title_badge: string | null; bio: string; accent: string; accents: string[]; accent_unlocked: boolean;
   featured: string[]; sections: Record<string, boolean>; ref_link: boolean; titles: { badge: string; title: string }[]; collection: PBadge[];
   community: CommunityScore; preview: PublicV2; share_url: string; invite: string | null;
   rules: { bio_max: number; featured_slots: number; score_window_days: number };
@@ -29,7 +30,7 @@ export type Identity = {
 
 export const ACCENT: Record<string, string> = { green: "#00e58f", gold: "#f5c542", ice: "#7fd6ff", ember: "#ff7a45", violet: "#b98cff" };
 const ACCENT_NAME: Record<string, string> = { green: "Kiwi green", gold: "Gold", ice: "Ice", ember: "Ember", violet: "Violet" };
-const SECTION_LABEL: Record<string, string> = { community: "Community score", predictions: "Predictions record", streak: "Daily streak",
+const SECTION_LABEL: Record<string, string> = { community: "Community score", research: "Researcher record", predictions: "Predictions record", streak: "Daily streak",
   platforms: "Verified platforms", badges: "Badge case" };
 const PLATFORM_LABEL: Record<string, string> = { telegram: "Telegram", x: "X", google: "Google", youtube: "YouTube", wallet: "Wallet" };
 const FAMILY_GLYPH: Record<string, string> = { founders: "★", community: "💬", predictor: "🎯", streak: "🔥", collector: "🃏", recruiter: "🤝", verified: "✓", honours: "♛" };
@@ -64,6 +65,8 @@ export function PassportCard({ p, onShare, actions }: { p: PublicV2; onShare?: (
   const name = p.display_name || p.username;
   const stats: [string, string][] = [];
   if (sec.community && p.community) stats.push([p.community.score.toLocaleString("en-US"), `Community · ${p.community.level}`]);
+  if (sec.research && p.research && p.research.accepted > 0) stats.push([String(p.research.accepted),
+    `Tips accepted · ${p.research.published} published${p.research.first_spotted ? ` · ${p.research.first_spotted} first` : ""}`]);
   if (sec.predictions && p.predictions) stats.push([p.predictions.accuracy != null ? `${Math.round(p.predictions.accuracy * 100)}%` : String(p.predictions.calls),
     p.predictions.accuracy != null ? `Calls right · ${p.predictions.decided}` : "Predictions calls"]);
   if (sec.streak && p.streak) stats.push([String(p.streak.current), `Day streak · best ${p.streak.best}`]);
@@ -247,7 +250,7 @@ export function ProfileTab({ data, reload }: { data: Identity; reload: (d?: Iden
 
         <fieldset className="pc2-field">
           <legend>Show on my public page</legend>
-          {Object.keys(SECTION_LABEL).map((k) => (
+          {Object.keys(SECTION_LABEL).filter((k) => k !== "research" || data.research_on).map((k) => (
             <label key={k} className="pc2-toggle"><span>{SECTION_LABEL[k]}</span>
               <input type="checkbox" checked={!!draft.sections[k]} onChange={(e) => set({ sections: { ...draft.sections, [k]: e.target.checked } })} /></label>
           ))}

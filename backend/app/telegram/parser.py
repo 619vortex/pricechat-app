@@ -61,6 +61,10 @@ class ParsedMessage:
     as_channel: bool = False
     # the text of the message this one replies to (its caption for a photo): "/enter" reads the signal card being replied to
     reply_text: str = ""
+    # a post forwarded from a public channel: "<channel username>/<message id>" (Community Intelligence tips; duplicates)
+    forward_key: str | None = None
+    # addresses behind formatted links (text_link entities), which the visible text doesn't show
+    links: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +117,23 @@ def _forward(msg: dict[str, Any]) -> tuple[str | None, datetime | None]:
         )
         return (str(name)[:256] if name else "unknown"), _ts(msg.get("forward_date"))
     return None, None
+
+
+def _forward_key(msg: dict[str, Any]) -> str | None:
+    origin = msg.get("forward_origin")
+    if isinstance(origin, dict) and origin.get("type") == "channel":
+        user, mid = (origin.get("chat") or {}).get("username"), origin.get("message_id")
+        return f"{user}/{mid}"[:120] if user and isinstance(mid, int) else None
+    chat, mid = msg.get("forward_from_chat") or {}, msg.get("forward_from_message_id")
+    return f"{chat['username']}/{mid}"[:120] if chat.get("username") and isinstance(mid, int) else None
+
+
+def _links(msg: dict[str, Any]) -> tuple[str, ...]:
+    out = []
+    for e in (msg.get("entities") or []) + (msg.get("caption_entities") or []):
+        if isinstance(e, dict) and e.get("type") == "text_link" and isinstance(e.get("url"), str):
+            out.append(e["url"][:500])
+    return tuple(out[:5])
 
 
 def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | None:
@@ -175,4 +196,6 @@ def parse_update(update: dict[str, Any]) -> ParsedMessage | MembershipChange | N
         as_group=bool(sender_chat.get("id")) and sender_chat.get("id") == chat_id,
         as_channel=bool(sender_chat.get("id")) and sender_chat.get("id") != chat_id and not auto,
         reply_text=str(reply.get("text") or reply.get("caption") or "")[:2000],
+        forward_key=_forward_key(msg),
+        links=_links(msg),
     )
