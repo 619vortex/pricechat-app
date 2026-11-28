@@ -250,6 +250,8 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
   const onGive = typeof location !== "undefined" && location.pathname.startsWith("/giveaway");
   const onBot = typeof location !== "undefined" && (location.pathname.startsWith("/earn") || location.pathname.startsWith("/trading-bot"));
   const showBot = !!home?.trading_bot || onBot;  // the tab appears once the owner opens the funnel
+  const onPred = typeof location !== "undefined" && location.pathname.startsWith("/predictions");
+  const showPred = !!home?.predictions || onPred;  // the link appears once the owner turns Predictions live
   const onVpn = typeof location !== "undefined" && location.pathname.startsWith("/vpn");
   const member = useSession();
   const showVpn = !!member || onVpn;  // Kiwi VPN is a member perk: signed-in members only
@@ -266,6 +268,11 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
               {l.label}
             </a>
           ))}
+          {showPred && (
+            <a href="/predictions" className={`site-link${onPred ? " is-current" : ""}`} aria-current={onPred ? "page" : undefined}>
+              Predictions
+            </a>
+          )}
           <a href="/giveaway" className={`site-link site-link-give${onGive ? " is-current" : ""}`} aria-current={onGive ? "page" : undefined}>
             Open Packs
           </a>
@@ -300,6 +307,11 @@ export function SiteHeader({ home, base, solid = false }: { home: HomeData | nul
               {l.label}
             </a>
           ))}
+          {showPred && (
+            <a href="/predictions" onClick={() => setOpen(false)}>
+              🎯 Predictions
+            </a>
+          )}
           {showBot && (
             <a href="/earn" onClick={() => setOpen(false)}>
               💰 Earn

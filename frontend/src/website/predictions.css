@@ -61,3 +61,6 @@
   .pd-options.is-four { grid-template-columns: repeat(4, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .pd-opt { transition: none; } }
+
+.pd-guest { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 14px 0 6px; }
+.pd-guest .pd-small { flex-basis: 100%; margin: 0; }

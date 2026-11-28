@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { SitePage } from "./community";
 import { memberApi } from "./members";
 import "./predictions.css";
 
@@ -48,7 +49,9 @@ function Countdown({ to }: { to: string }) {
   return <span className="pd-count" aria-label={`${h} hours ${m} minutes left`}><b>{pad(h)}</b>h <b>{pad(m)}</b>m <b>{pad(s)}</b>s</span>;
 }
 
-function CallCard({ q, onVoted }: { q: PredQuestion; onVoted: (q: PredQuestion) => void }) {
+export const TELEGRAM_GROUP = "https://t.me/cryptopricechat";
+
+function CallCard({ q, signedIn, onVoted }: { q: PredQuestion; signedIn: boolean; onVoted: (q: PredQuestion) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState("");
   async function vote(option: string) {
@@ -64,6 +67,13 @@ function CallCard({ q, onVoted }: { q: PredQuestion; onVoted: (q: PredQuestion) 
       <div className="pd-eyebrow">{q.kind === "daily" ? "Daily call" : "Weekly call"} · locks in <Countdown to={q.locks_at} /></div>
       <h3 className="pd-q">{q.title}</h3>
       <p className="pd-ref">vs {usd(q.ref_price)} · {q.source}</p>
+      {!signedIn ? (
+        <div className="pd-guest">
+          <a className="site-button" href={TELEGRAM_GROUP} target="_blank" rel="noopener noreferrer">Play in Telegram</a>
+          <a className="site-textbutton" href="/join">or sign in to play here</a>
+          <p className="pd-small">No sign-up needed: tap {q.options.map((o) => o.label).join(" or ")} under today's post in @cryptopricechat.</p>
+        </div>
+      ) : (
       <div className={`pd-options ${direction ? "is-two" : "is-four"}`}>
         {q.options.map((o) => (
           <button key={o.key} type="button" className={`pd-opt pd-${o.key}${q.my_call === o.key ? " is-mine" : ""}`} disabled={!!busy}
@@ -72,6 +82,7 @@ function CallCard({ q, onVoted }: { q: PredQuestion; onVoted: (q: PredQuestion) 
           </button>
         ))}
       </div>
+      )}
       <p className="pd-small">{q.my_call ? `Your call is in. Change it until the lock. ` : ""}+{q.xp.play} XP for calling it, +{q.xp.right} more if right ·
         {" "}{q.calls.toLocaleString()} call{q.calls === 1 ? "" : "s"} so far · split shown at the lock</p>
       {err && <p className="site-error" role="alert">{err}</p>}
@@ -141,7 +152,7 @@ export function PredictionsTab({ data, reload }: { data: PredOverview; reload: (
       </header>
 
       {open.length === 0 ? <p className="pd-empty">No call is open right now. The daily call opens at 13:30 UTC (17:30 Dubai).</p> :
-        open.map((q) => <CallCard key={q.id} q={q} onVoted={(nq) => { setOpen((cur) => cur.map((x) => (x.id === nq.id ? nq : x))); void reload(); }} />)}
+        open.map((q) => <CallCard key={q.id} q={q} signedIn={data.signed_in} onVoted={(nq) => { setOpen((cur) => cur.map((x) => (x.id === nq.id ? nq : x))); void reload(); }} />)}
 
       {st && (
         <div className="pd-stats">
@@ -176,5 +187,17 @@ export function PredictionsTab({ data, reload }: { data: PredOverview; reload: (
       <details className="pd-rules"><summary>Rules</summary>
         <ul>{Object.entries(data.rules).map(([k, v]) => <li key={k}>{v}</li>)}</ul></details>
     </div>
+  );
+}
+
+/** /predictions: the public entry point. Anyone can see today's call; playing needs no Passport (Telegram), a Passport adds the site. */
+export function PredictionsPage() {
+  const [data, reload] = usePredictions();
+  return (
+    <SitePage title="Predictions" description="One free Bitcoin call a day: will it close higher or lower? Play for XP in Telegram or on the site." path="/predictions">
+      {data === null ? <p className="site-empty">Loading…</p>
+        : data === false ? <p className="site-empty">Predictions aren't open right now.</p>
+        : <PredictionsTab data={data} reload={reload} />}
+    </SitePage>
   );
 }

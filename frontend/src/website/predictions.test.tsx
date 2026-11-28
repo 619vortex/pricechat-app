@@ -64,4 +64,14 @@ describe("Passport › Predictions", () => {
     expect(screen.getByText(/daily call opens at 13:30 UTC/)).toBeTruthy();
     expect(screen.getByText(/46 XP pending/)).toBeTruthy();
   });
+
+  it("a visitor without a Passport is sent to the Telegram group to play, with no vote buttons", async () => {
+    serve();
+    render(<PredictionsTab data={data({ signed_in: false, stats: undefined, history: undefined })} reload={async () => {}} />);
+    await settle();
+    const card = screen.getByTestId("call-daily");
+    expect(card.querySelector("button")).toBeNull();
+    expect(screen.getByRole("link", { name: "Play in Telegram" }).getAttribute("href")).toBe("https://t.me/cryptopricechat");
+    expect(card.textContent).toContain("No sign-up needed");
+  });
 });
