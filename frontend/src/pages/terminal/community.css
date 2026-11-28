@@ -1,0 +1,47 @@
+/* Terminal › Community: the Terminal 2.0 tokens (t2.css: --t2-card, --t2-line, --t2-green, --t2-amber, --t2-red, --t2-blue, --t2-muted). */
+.ci { margin: 0 0 18px; padding: 16px; border-radius: var(--t2-r, 14px); border: 1px solid var(--t2-line); background: var(--t2-card); display: grid; gap: 14px; min-width: 0; }
+.ci-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.ci-head h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.ci-count { min-width: 26px; height: 22px; padding: 0 7px; border-radius: 999px; background: var(--t2-amber-soft); color: var(--t2-amber); font-size: 12.5px; display: inline-grid; place-items: center; font-variant-numeric: tabular-nums; }
+.ci-body { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.ci-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 720px; overflow: auto; }
+.ci-item { width: 100%; text-align: left; display: grid; gap: 6px; padding: 12px; border-radius: 12px; border: 1px solid var(--t2-line); background: var(--t2-card-2); color: var(--t2-text); cursor: pointer; }
+.ci-item[aria-selected="true"] { border-color: var(--t2-green); box-shadow: inset 3px 0 0 var(--t2-green); }
+.ci-item b { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.ci-k { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t2-muted); font-weight: 600; }
+.ci-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.ci-chip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--t2-line-2); color: var(--t2-muted); white-space: nowrap; }
+.ci-chip.ok { color: var(--t2-green); border-color: rgba(46, 224, 122, 0.35); }
+.ci-chip.warn { color: var(--t2-amber); border-color: rgba(246, 180, 69, 0.35); }
+.ci-chip.bad { color: var(--t2-red); border-color: rgba(255, 90, 78, 0.35); }
+.ci-chip.info { color: var(--t2-blue); border-color: rgba(95, 178, 255, 0.35); }
+.ci-detail { display: grid; gap: 12px; padding: 16px; border-radius: 12px; border: 1px solid var(--t2-line); background: var(--t2-bg); min-width: 0; }
+.ci-d-head { display: grid; gap: 6px; }
+.ci-d-head h3 { margin: 0; font-size: 21px; line-height: 1.2; overflow-wrap: anywhere; }
+.ci-quote { margin: 0; padding: 4px 0 4px 12px; border-left: 3px solid var(--t2-line-2); color: var(--t2-text); white-space: pre-line; overflow-wrap: anywhere; }
+.ci-url { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.ci-url a { color: var(--t2-blue) !important; }
+.ci-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.ci-panel { display: grid; gap: 8px; align-content: start; padding: 12px; border-radius: 12px; border: 1px solid var(--t2-line); background: var(--t2-card); min-width: 0; }
+.ci-panel h4 { margin: 0; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--t2-muted); }
+.ci-line { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; }
+.ci-line b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.ci-line span { color: var(--t2-muted); font-size: 12px; overflow-wrap: anywhere; }
+.ci-ic { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; }
+.ci-ic.ok { background: var(--t2-green-soft); color: var(--t2-green); }
+.ci-ic.warn { background: var(--t2-amber-soft); color: var(--t2-amber); }
+.ci-ic.bad { background: var(--t2-red-soft); color: var(--t2-red); }
+.ci-ic.info { background: var(--t2-blue-soft); color: var(--t2-blue); }
+.ci-appeal { padding: 12px; border-radius: 12px; border: 1px solid rgba(246, 180, 69, 0.35); background: var(--t2-amber-soft); }
+.ci-appeal p { margin: 4px 0 0; }
+.ci-state { margin: 0; color: var(--t2-muted); font-size: 13px; }
+.ci-decide { display: grid; gap: 8px; border-top: 1px solid var(--t2-line); padding-top: 12px; }
+.ci-note { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t2-muted); font-weight: 600; }
+.ci-decide textarea { min-height: 64px; resize: vertical; padding: 10px; border-radius: 10px; border: 1px solid var(--t2-line-2); background: var(--t2-card); color: var(--t2-text); font: inherit; font-size: 14px; }
+.ci-tick { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--t2-muted); }
+.ci-tick input { margin-top: 3px; accent-color: var(--t2-green); }
+.ci-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+.ci-spam { border-color: rgba(255, 90, 78, 0.45) !important; color: var(--t2-red) !important; }
+.ci-ok { margin: 0; color: var(--t2-green); font-weight: 600; }
+.ci-bad { margin: 0; color: var(--t2-red); font-weight: 600; }
+@media (max-width: 860px) { .ci-body, .ci-grid { grid-template-columns: minmax(0, 1fr); } .ci-list { max-height: 320px; } }

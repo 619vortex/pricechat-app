@@ -82,6 +82,14 @@ def ensure_catalog(db: Session) -> None:
         if spec["key"] not in have:
             db.add(Badge(**spec))
             changed = True
+    from app.community_intel import rules as ci_rules
+    from app.community_intel import service as ci
+
+    if ci.mode() != "off":  # the Researcher family exists only once Community Intelligence is on
+        for spec in ci_rules.BADGES:
+            if spec["key"] not in have:
+                db.add(Badge(**spec))
+                changed = True
     if changed:
         db.commit()
 
@@ -182,10 +190,15 @@ def collection(db: Session, member: Member) -> list[dict[str, Any]]:
     """Every enabled badge with the member's copy (or locked), in collection order."""
     counts, total = holders(db)
     mine = {mb.badge_id: mb for mb in db.scalars(select(MemberBadge).where(MemberBadge.member_id == member.id))}
+    from app.community_intel import service as ci
+
+    research_on = ci.mode() != "off"
     out = []
     for b in sorted(db.scalars(select(Badge).where(Badge.enabled.is_(True))), key=_sort_key):
         mb = mine.get(b.id)
         if b.kind == "manual" and mb is None:  # staff honours are shown only to those who have them
+            continue
+        if b.family == "researcher" and mb is None and not research_on:  # Community Intelligence is off
             continue
         out.append(_badge_out(b, mb, counts, total))
     return out
@@ -232,11 +245,17 @@ def community_score(db: Session, member: Member, now: datetime | None = None) ->
     days = _prediction_days(db, member, since)
     s = next(x for x in rules.SCORE if x["key"] == "predictions")
     per["predictions"] = {"count": days, "points": days * s["points"]}
+    from app.community_intel import service as ci
+
+    for part in ci.score_parts(db, member, since):  # Community Intelligence: accepted tips, published stories, upheld spam
+        per[part["key"]] = {"count": part["count"], "points": part["points"]}
     flags = int(db.scalar(select(func.count()).select_from(ModerationFlag).where(
         ModerationFlag.member_id == member.id, ModerationFlag.status == "resolved", ModerationFlag.created_at >= since)) or 0)
     gross = sum(v["points"] for v in per.values())
     score = max(0, gross - flags * rules.FLAG_PENALTY)
     parts = [{"key": x["key"], "label": x["label"], "count": per[x["key"]]["count"], "points": per[x["key"]]["points"]} for x in rules.SCORE]
+    parts += [{"key": p["key"], "label": p["label"], "count": p["count"], "points": p["points"]} for p in ci.score_parts(db, member, since)
+              if p["key"] != "tips_penalty" or p["count"]]
     return {"score": score, "level": rules.level_for(score), "window_days": rules.WINDOW_DAYS, "parts": parts,
             "penalty": flags * rules.FLAG_PENALTY}
 
@@ -285,6 +304,12 @@ def public_v2(db: Session, member: Member, now: datetime | None = None, everythi
                            "card": f"/api/members/public/{member.username}/card.png"}
     if sec["badges"]:
         out["collection"] = mine
+    from app.community_intel import service as ci
+
+    if sec.get("research") and ci.visible(member):
+        rec = ci.record(db, member)
+        if rec["sent"]:
+            out["research"] = {k: rec[k] for k in ("sent", "accepted", "published", "first_spotted", "acceptance", "points")}
     if sec["community"]:
         cs = community_score(db, member, now)
         out["community"] = {"score": cs["score"], "level": cs["level"]["name"]}
@@ -331,7 +356,9 @@ def identity(db: Session, member: Member) -> dict[str, Any]:
     rank = ledger.rank_for(db, member.rank_score)
     preview = {"username": member.username, "joined_at": member.created_at.isoformat(), "rank": rank_out(rank),
                **public_v2(db, member, everything=True)}
-    return {"public_profile": member.public_profile, "invited": member.profile_invited_at is not None,
+    from app.community_intel import service as ci
+
+    return {"public_profile": member.public_profile, "invited": member.profile_invited_at is not None, "research_on": ci.visible(member),
             "title_badge": member.title_badge, "bio": member.bio or "", "accent": member.passport_accent or "green",
             "accents": list(rewards.ACCENTS), "accent_unlocked": rewards.unlocked(db, member, "kiwi"),
             "featured": [b["key"] for b in sorted((b for b in mine if b["featured_slot"]), key=lambda b: b["featured_slot"])],

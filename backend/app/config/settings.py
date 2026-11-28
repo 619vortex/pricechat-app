@@ -339,6 +339,11 @@ class Settings(BaseSettings):
     # (public pages, badges and the bot behave as before); preview: only passport2_preview_members see and earn any of it; live: everyone.
     passport2_mode: str = Field("off", pattern="^(off|preview|live)$")
     passport2_preview_members: str = ""  # comma-separated Passport usernames
+    # Community Intelligence (app/community_intel): members' tips from Telegram and the Passport, checked automatically and decided by an
+    # editor in the Terminal; never published automatically. off: the bot and the site behave as before; preview: only
+    # community_intel_preview_members can send tips (the Terminal lane shows them); live: every Passport member.
+    community_intel_mode: str = Field("off", pattern="^(off|preview|live)$")
+    community_intel_preview_members: str = ""  # comma-separated Passport usernames
     job_newsdesk_seconds: int = Field(300, ge=60)
     job_newsdesk_telegram_seconds: int = Field(180, ge=60)
     # Trending Topics (app/trending): scan + publish tick, and Reddit's app-only OAuth (optional; without it Reddit is off unless the

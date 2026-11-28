@@ -97,6 +97,7 @@ class TelegramIngestor:
         self._wk_starts: list[tuple[int, int, str, str | None, bool]] = []  # Worker System: (chat, user, code, username, is_bot)
         self._welcome: dict[int, list[str]] = {}  # signal group chat id -> names of people who just joined it
         self._moderation: list[tuple] = []  # group rules (app/telegram/moderation.py): admin commands and messages with links
+        self._tips: list[tuple[int, int, str, str | None, str | None, tuple[str, ...]]] = []  # Community Intelligence: (chat, user, text, forward, key, links)
         self._commands: list[tuple[int, int, str, bool, int | None]] = []  # Trading OS: (chat, user, "/cmd args", in a group?, message id)
         self._followups: list[tuple[int, int, str, int, int]] = []  # Vortex trade checks: (chat, user, text, message id, replied-to id)
         self.runtime = runtime
@@ -170,6 +171,7 @@ class TelegramIngestor:
             await self._link_owner()
             await self._workers()
             await self._welcomes()
+            await self._intel_tips()
             await self._private_group([u for u in access_updates if "callback_query" not in u])
             from app.members.auth import TELEGRAM_CONFIRM_PREFIX
 
@@ -313,6 +315,15 @@ class TelegramIngestor:
                 self._commands.append((parsed.chat.chat_id, parsed.author_id, said, group,
                                        getattr(parsed, "message_id", None), parsed.chat.username, parsed.author_name))  # answered after the commit
                 report.ignored_other += 1  # a command to the bot; never stored as a message
+                return
+        # Community Intelligence: a link or a forwarded post sent privately to the bot is a tip (answered after the commit; inert while off)
+        if (person and parsed.chat.chat_type == "private" and not parsed.edited and not parsed.text.strip().startswith("/")):
+            from app.community_intel import service as ci_service
+            from app.community_intel import telegram as ci_tg
+
+            if ci_service.mode() != "off" and ci_tg.looks_like_tip(parsed.text, parsed.forward_from, parsed.links):
+                self._tips.append((parsed.chat.chat_id, parsed.author_id, parsed.text[:2000], parsed.forward_from, parsed.forward_key, parsed.links))
+                report.ignored_other += 1  # a tip; never stored as a chat message
                 return
         if (isinstance(parsed, ParsedMessage) and not parsed.author_is_bot and parsed.author_id and parsed.reply_to_message_id
                 and not parsed.edited and parsed.text.strip()):
@@ -581,6 +592,22 @@ class TelegramIngestor:
                 self.db.rollback()
                 logger.warning("Crew invite not handled (%s)", type(exc).__name__)
 
+    async def _intel_tips(self) -> None:
+        """Community Intelligence: the tips sent privately this batch (after its commit). Never published: they go to the editor."""
+        pending, self._tips = self._tips, []
+        if not pending:
+            return
+        from app.community_intel import telegram as ci_tg
+        from app.config.settings import get_settings
+
+        s = get_settings()
+        for chat_id, user_id, text, fwd, key, links in pending:
+            try:
+                await ci_tg.handle_message(self.db, self.client, s, chat_id, user_id, text, forward_from=fwd, forward_key=key, links=links)
+            except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
+                logger.warning("Tip not handled (%s)", type(exc).__name__)
+
     async def _trading_os(self, callbacks: list[dict]) -> None:
         """Trading OS: answer the private-chat commands and signal-card buttons seen in this batch (after its commit)."""
         from app.tradingos import bot
@@ -590,9 +617,17 @@ class TelegramIngestor:
         from app.predictions import telegram as predictions
 
         psettings = get_settings()
+        from app.community_intel import telegram as ci_tg
         from app.passport import telegram as passport
 
         for chat_id, user_id, text, group, msg_id, chat_username, author in pending:
+            try:  # Community Intelligence: /tip (inert while COMMUNITY_INTEL_MODE is off)
+                if ci_tg.is_command(text) and await ci_tg.handle_command(self.db, self.client, psettings, chat_id, user_id, text, group, msg_id):
+                    continue
+            except Exception as exc:  # noqa: BLE001
+                self.db.rollback()
+                logger.warning("Tip command not answered (%s)", type(exc).__name__)
+                continue
             try:  # Kiwi Passport 2.0: /passport, the personal share card (inert while PASSPORT2_MODE is off)
                 if passport.is_ours(text) and await passport.handle_command(self.db, self.client, psettings, chat_id, user_id, text, group, msg_id):
                     continue
@@ -627,6 +662,15 @@ class TelegramIngestor:
                     self.db.rollback()
                     logger.warning("Trade check follow-up not handled (%s)", type(exc).__name__)
         for cq in callbacks:
+            if str(cq.get("data") or "").startswith("ci:"):  # Community Intelligence receipt buttons
+                from app.community_intel import telegram as ci_tg
+
+                try:
+                    await ci_tg.handle_callback(self.db, self.client, psettings, cq)
+                except Exception as exc:  # noqa: BLE001
+                    self.db.rollback()
+                    logger.warning("Tip button not handled (%s)", type(exc).__name__)
+                continue
             if str(cq.get("data") or "").startswith(predictions.PREFIX):  # Price Chat Predictions buttons
                 try:
                     await predictions.handle_callback(self.db, self.client, psettings, cq)
