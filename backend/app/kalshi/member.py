@@ -33,6 +33,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.db.base import utcnow
 from app.models.kalshi import KalshiBot, KalshiLink
 from app.models.members import Member
@@ -158,10 +159,7 @@ def is_open(db: Session) -> bool:
 
 
 def set_open(db: Session, open_: bool) -> bool:
-    row = db.get(KalshiBot, 1)
-    if row is None:
-        row = KalshiBot(id=1)
-        db.add(row)
+    row = get_or_create(db, KalshiBot, lambda: KalshiBot(id=1))
     row.members_open = open_
     db.commit()
     return open_

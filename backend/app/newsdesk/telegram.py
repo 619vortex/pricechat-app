@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.newsdesk import NdEvent, NdStory, NdTelegramPost, NdTelegramSettings
@@ -52,12 +53,7 @@ PROMPT = ("You write for a market news channel on Telegram. From the story below
 
 
 def settings_row(db: Session) -> NdTelegramSettings:
-    row = db.get(NdTelegramSettings, 1)
-    if row is None:
-        row = NdTelegramSettings(id=1, state={})
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, NdTelegramSettings, lambda: NdTelegramSettings(id=1, state={}))
 
 
 def _aware(at: datetime | None, now: datetime) -> datetime | None:

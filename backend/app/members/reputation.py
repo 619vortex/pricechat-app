@@ -13,16 +13,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.models.members import CombotRecord, LinkedIdentity, Member, ReputationSettings
 
 
 def settings(db: Session) -> ReputationSettings:
-    row = db.get(ReputationSettings, 1)
-    if row is None:
-        row = ReputationSettings(id=1)
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, ReputationSettings, lambda: ReputationSettings(id=1))
 
 
 def combot_record_for(db: Session, member: Member) -> CombotRecord | None:

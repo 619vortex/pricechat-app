@@ -14,6 +14,7 @@ import httpx
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.config.settings import Settings
 from app.db.base import utcnow
 from app.models.trending import TtPost, TtSettings, TtSignal, TtTopic
@@ -43,15 +44,10 @@ def _aware(d: datetime | None) -> datetime | None:
 
 
 def settings_row(db: Session) -> TtSettings:
-    row = db.get(TtSettings, 1)
-    if row is None:
-        # owner, 2026-11-14: automatic on, at most 3 a day, 3 hours apart, posting live only while the News Desk is live
-        row = TtSettings(id=1, enabled=True, mode="automatic", auto_confirmed_at=utcnow(), live=True, kill_switch=False, max_per_day=3, gap_minutes=180,
-                         categories={c: True for c in rank.CATEGORIES},
-                         sources={k: dict(v) for k, v in sources.DEFAULT_SOURCES.items()}, state={})
-        db.add(row)
-        db.flush()
-    return row
+    # owner, 2026-11-14: automatic on, at most 3 a day, 3 hours apart, posting live only while the News Desk is live
+    return get_or_create(db, TtSettings, lambda: TtSettings(id=1, enabled=True, mode="automatic", auto_confirmed_at=utcnow(), live=True, kill_switch=False,
+                                                            max_per_day=3, gap_minutes=180, categories={c: True for c in rank.CATEGORIES},
+                                                            sources={k: dict(v) for k, v in sources.DEFAULT_SOURCES.items()}, state={}))
 
 
 def automatic(s: TtSettings) -> bool:

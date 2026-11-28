@@ -24,6 +24,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.config.settings import get_settings
 from app.db.base import utcnow
 from app.members import notify
@@ -89,12 +90,7 @@ def agent_token(server: VpnServer) -> str:
 
 
 def settings(db: Session) -> VpnSettings:
-    row = db.get(VpnSettings, 1)
-    if row is None:
-        row = VpnSettings(id=1, **SETTINGS_DEFAULTS)
-        db.add(row)
-        db.flush()
-    return row
+    return get_or_create(db, VpnSettings, lambda: VpnSettings(id=1, **SETTINGS_DEFAULTS))
 
 
 def settings_out(s: VpnSettings) -> dict[str, Any]:

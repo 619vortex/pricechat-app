@@ -32,6 +32,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.singleton import get_or_create
 from app.db.base import utcnow
 from app.models.members import LinkedIdentity, Member
 from app.models.telegram import TelegramMessage, TelegramSource
@@ -63,12 +64,7 @@ def _iso(d: datetime | None) -> str | None:
 
 # ---------------------------------------------------------------- settings, days
 def settings(db: Session) -> WkSettings:
-    s = db.get(WkSettings, 1)
-    if s is None:
-        s = WkSettings(id=1)
-        db.add(s)
-        db.flush()
-    return s
+    return get_or_create(db, WkSettings, lambda: WkSettings(id=1))
 
 
 def tz(db: Session) -> ZoneInfo:
